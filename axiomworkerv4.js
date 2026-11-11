@@ -1761,6 +1761,8 @@ async function metaAdLibrary(env) {
   if (!env.META_USER_TOKEN) return { ok: false, error: 'meta_user_token_missing' };
   const terms = {};
   CLIENT_ISSUES.forEach(ci => { terms[ci.label] = ci.ns; });
+  // the desks' own approved terms are searched too: an ad on "gas export tax" is not found by the label "Gas taxation"
+  try { if (await ensureDen(env)) (((await env.MIND_DB.prepare("SELECT ns, value FROM den_watch WHERE kind='term' AND status='active' ORDER BY score DESC LIMIT 60").all()).results) || []).forEach(r => { if (!terms[r.value]) terms[r.value] = r.ns; }); } catch (e) {}
   const out = { ok: true, terms: 0, rows: 0, errors: [] };
   for (const [label, ns] of Object.entries(terms)) {
     try {
@@ -2316,7 +2318,7 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
 const BRIDGE_DESKTOP_ONLY = ['x'];      // no server-side path exists for these
 const BRIDGE_LOG_KEEP = 400;            // lines kept per job
 async function ensureBridge(env) {
@@ -2470,6 +2472,8 @@ async function agentsSeen(env) {
 
 // -- Signal rows: one shape for every platform, so the view and the Mind do not
 //    care where a comment came from. Author names are never stored. ----------
+/** A JSON column read back out of meta: the object, or null. */
+function sigJson(v) { if (v == null || v === '') return null; if (typeof v === 'object') return v; try { return JSON.parse(v); } catch (e) { return null; } }
 function sigThreadRow(p) {
   const text = (p.title || '') + ' ' + (p.body || '');
   const issues = issueTag(text);
@@ -5655,7 +5659,7 @@ async function renderJob(env, job, log) {
 // their own posts. What each platform needs, what it can and cannot reach and
 // how it fared last time is one table: socialCoverage().
 // ==============================================================================
-const SOCIAL_PLATFORMS = ['bluesky', 'mastodon', 'youtube', 'petitions'];   // worker-side sweeps the Signals view can start as jobs
+const SOCIAL_PLATFORMS = ['bluesky', 'mastodon', 'youtube', 'petitions', 'instagram', 'facebook'];   // worker-side sweeps the Signals view can start as jobs
 const BSKY_API = 'https://public.api.bsky.app/xrpc/';
 const MASTO_INSTANCES = ['aus.social', 'mastodon.au', 'theblower.au', 'mastodon.social'];
 const MASTO_TAGS = ['auspol', 'springst', 'nswpol', 'qldpol', 'wapol', 'sapol', 'taspol', 'ntpol', 'actpol', 'ausvotes', 'insiders', 'qanda'];
@@ -6236,7 +6240,8 @@ async function socialCoverage(env, probe) {
     { id: 'linkedin', label: 'LinkedIn', method: 'the clients\' own pages through the Marketing API', keys: 'LINKEDIN_TOKEN + LINKEDIN_ORGS', configured: !!(env.LINKEDIN_TOKEN && liOrgs(env).length), where: 'worker', reach: 'own posts and comments', unreachable: 'other pages, search: no public route and none is wanted' },
     { id: 'meta', label: 'Facebook and Instagram, own pages', method: 'Graph API', keys: 'META_TOKEN (pages_read_engagement, pages_read_user_content) + META_PAGES', configured: !!(env.META_TOKEN && metaPages(env).length), where: 'worker', reach: 'own posts, comments and reaction mix', unreachable: '' },
     { id: 'adlibrary', label: 'Meta Ad Library', method: 'Graph API ads_archive', keys: 'META_USER_TOKEN (ID-verified user, ~60-day expiry)', configured: !!env.META_USER_TOKEN, where: 'worker', reach: 'political and issue ads by funder, spend band and creative', unreachable: '' },
-    { id: 'facebook_public', label: 'Facebook public pages and groups (others\')', method: 'none available', keys: 'Page Public Content Access (Meta app review) or Meta Content Library (research application)', configured: false, where: 'none', reach: '', unreachable: 'the Graph API refuses other pages without PPCA; the web is login-walled from any server. Ask for PPCA on the Meta app, or apply for the Content Library.' },
+    { id: 'facebook', label: 'Facebook public pages and groups (others\')', method: 'layer 1: the Graph API with Page Public Content Access, or the Supermetrics Facebook Public Data connector in a session; layer 2: a signed-in collector on a Mac', keys: 'META_TOKEN + Page Public Content Access (Meta app review) with META_PUBLIC_PAGES=1; or the Facebook Public Data source on the Supermetrics licence', configured: !!(env.META_TOKEN && String(env.META_PUBLIC_PAGES || '') === '1') || agents.some(a => a.live && (a.sources || []).indexOf('facebook') >= 0), where: (env.META_TOKEN && String(env.META_PUBLIC_PAGES || '') === '1') ? 'worker' : 'mac', reach: 'registered pages\' posts with reactions, comment and share counts; how far a news story travelled (reactions, comments, shares on its address)', unreachable: 'comment text on other organisations\' posts, private and closed groups, personal profiles, keyword search across Facebook through any official route' },
+    { id: 'instagram', label: 'Instagram public accounts and hashtags', method: 'layer 1: Business Discovery and hashtag search through the Graph API, or the Supermetrics Instagram Public Data connector in a session; layer 2: a signed-in collector on a Mac', keys: 'META_TOKEN + META_IG_USER (the agency\'s Instagram business account id); hashtag search also needs Instagram Public Content Access (Meta app review)', configured: igConfigured(env) || agents.some(a => a.live && (a.sources || []).indexOf('instagram') >= 0), where: igConfigured(env) ? 'worker' : 'mac', reach: 'registered business and creator accounts\' posts with likes and comment counts; recent posts on up to ' + IG_HASHTAG_LIMIT + ' hashtags a week', unreachable: 'comment text, personal accounts, stories, keyword search beyond hashtags' },
     { id: 'threads', label: 'Threads', method: 'none available', keys: 'Threads API is for the account\'s own posts; keyword search needs the threads_keyword_search permission (app review)', configured: false, where: 'none', reach: '', unreachable: 'no public route to others\' posts; the web pages are built client-side behind a login prompt' },
     { id: 'tiktok', label: 'TikTok', method: 'oEmbed for a single post url', keys: 'none; the Research API needs approval', configured: true, where: 'worker', reach: 'title and thumbnail of a given post', unreachable: 'profiles, search and comments: signed requests from a browser session (a Mac render job could read a profile; the Research API is approval-gated)' },
     { id: 'forums', label: 'Forums', method: 'RSS, Discourse JSON and listing pages (AU_FORUMS)', keys: 'none', configured: true, where: 'worker', reach: 'new threads on Whirlpool, OzBargain, BigFooty, HotCopper, PropertyChat and Discourse boards', unreachable: 'reply text on most boards' },
@@ -6266,7 +6271,9 @@ async function socialSweep(env, params, log) {
     case 'youtube': return youtubeEnrich(env, p);
     case 'petitions': return petitionsSweep(env, p);
     case 'x': return xSyndSweep(env, p);
-    default: return { ok: false, error: 'unknown_platform', detail: 'platform must be one of bluesky, mastodon, youtube, petitions, x.' };
+    case 'instagram': return instagramSweep(env, p);
+    case 'facebook': return fbPublicSweep(env, p);
+    default: return { ok: false, error: 'unknown_platform', detail: 'platform must be one of bluesky, mastodon, youtube, petitions, x, instagram, facebook.' };
   }
 }
 function socialSummary(r) {
@@ -6296,10 +6303,469 @@ async function socialCron(env) {
   await run('mastodon', () => mastodonSweep(env, { threads: 15, days: 3 }));
   await run('x', () => xSyndSweep(env, { max: 30, days: 3 }));
   await run('youtube', () => youtubeEnrich(env, { max: 6 }));
+  // the Graph routes run only when what they need is in place: a refusal every two hours tells nobody anything
+  if (igConfigured(env)) await run('instagram', () => instagramSweep(env, { max: 15 }));
+  if (env.META_TOKEN && String(env.META_PUBLIC_PAGES || '') === '1') await run('facebook', () => fbPublicSweep(env, { max: 15 }));
   const pl = Number(await kvGet(env.AXIOM_KV, 'petitions_last') || 0);
   if (now - pl > 20 * 3600000) { await kvPut(env.AXIOM_KV, 'petitions_last', String(now), 7 * 86400); await run('petitions', () => petitionsSweep(env, { detail: 10 })); }
   await kvPut(env.AXIOM_KV, 'social_last', jsonFit(res, 8000), 7 * 86400);
   return res;
+}
+
+// ==============================================================================
+// THE MONITORING DESK - the watch register and one way in for collected posts.
+// A desk is a client namespace. Its register (D1 den_watch) names what is read
+// for it: accounts, hashtags, terms, outlets and public groups, each proposed
+// or active, with who decided and why. Every collector on every layer - an
+// official API (1), the signed-in Mac (2), a keyless read (3) - hands its posts
+// to signalsIngest(), which is where the rules live so no collector can skip
+// them: one canonical address per post, relevance to the desk, the Australian
+// gate for anything found by search, and names only for a registered public
+// actor on its own post (an organisation, an official, a masthead). A commenter,
+// a replier and an account nobody registered are never named.
+// ==============================================================================
+const DEN_KINDS = ['account', 'hashtag', 'term', 'source', 'group'];
+const DEN_PLATFORMS = ['x', 'facebook', 'instagram', 'youtube', 'tiktok', 'threads', 'linkedin', 'reddit', 'bluesky', 'web', 'any'];
+const DEN_STATUS = ['proposed', 'active', 'off', 'dismissed'];
+const DEN_ACTOR_KINDS = ['org', 'official', 'media'];
+const DEN_SOURCES = ['operator', 'reports', 'discovery', 'seed'];
+const DEN_INGEST_PLATFORMS = ['facebook', 'instagram', 'x', 'youtube', 'tiktok', 'threads'];
+const DEN_INGEST_MAX = 500;
+const DEN_CAPS = { facebook: 40, instagram: 40, x: 60, youtube: 30, hashtags: 10, urls: 25 };
+const IG_HASHTAG_LIMIT = 30, IG_HASHTAG_WINDOW_MS = 7 * 86400000;
+let DEN_READY = false;
+async function ensureDen(env) {
+  if (!env.MIND_DB) return false;
+  if (DEN_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare("CREATE TABLE IF NOT EXISTS den_watch(id TEXT PRIMARY KEY, ns TEXT NOT NULL, kind TEXT NOT NULL, platform TEXT NOT NULL DEFAULT 'any', value TEXT NOT NULL, name TEXT DEFAULT '', actor_kind TEXT DEFAULT '', issue TEXT DEFAULT '', status TEXT NOT NULL DEFAULT 'active', source TEXT DEFAULT 'operator', evidence TEXT DEFAULT '', score REAL DEFAULT 0, added_by TEXT DEFAULT '', decided_by TEXT DEFAULT '', decided_at INTEGER DEFAULT 0, reason TEXT DEFAULT '', last_ok INTEGER DEFAULT 0, last_error TEXT DEFAULT '', last_layer INTEGER DEFAULT 0, created INTEGER, updated INTEGER)"),
+    env.MIND_DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS den_watch_key ON den_watch(ns, kind, platform, value)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS den_watch_ns ON den_watch(ns, status)'),
+  ]);
+  DEN_READY = true;
+  return true;
+}
+function denNsKnown(env, ns) { ns = String(ns || '').toLowerCase(); return !!ns && (CLIENT_ISSUES.some(ci => ci.ns === ns) || stTestNs(env, ns)); }
+function denNsIssues(ns) { return CLIENT_ISSUES.filter(ci => ci.ns === ns).map(ci => ci.id); }
+function denId() { const a = new Uint8Array(8); crypto.getRandomValues(a); return 'w' + Array.from(a).map(b => b.toString(16).padStart(2, '0')).join(''); }
+function denUrl(u) { try { const x = new URL(String(u || '').trim()); return /^https?:$/.test(x.protocol) ? x : null; } catch (e) { return null; } }
+/** What a person typed, as the register keeps it: a handle without its @, a page alias out of its address, a hashtag
+ *  without its #, a host without its www. '' when it cannot be one. */
+function denValue(kind, platform, value) {
+  let v = String(value == null ? '' : value).trim();
+  if (!v) return '';
+  const u = /^https?:\/\//i.test(v) ? denUrl(v) : null;
+  const seg = u ? u.pathname.split('/').filter(Boolean) : [];
+  if (kind === 'hashtag') { v = v.replace(/^#/, '').toLowerCase(); return /^[a-z0-9_]{2,60}$/.test(v) ? v : ''; }
+  if (kind === 'term') { v = v.replace(/\s+/g, ' ').toLowerCase(); return v.length >= 2 && v.length <= 80 && !/[<>{}\\]/.test(v) ? v : ''; }
+  if (kind === 'source') { v = (u ? u.hostname : v.replace(/^https?:\/\//i, '').split('/')[0]).toLowerCase().replace(/^www\./, ''); return /^[a-z0-9.-]{3,120}$/.test(v) && v.indexOf('.') > 0 ? v : ''; }
+  if (kind === 'group') { if (u) v = seg[0] === 'groups' ? (seg[1] || '') : ''; v = v.toLowerCase(); return /^[a-z0-9._-]{2,80}$/.test(v) ? v : ''; }
+  if (kind !== 'account') return '';
+  if (u) {
+    if (platform === 'facebook' && /^(profile|people)(\.php)?$/.test(seg[0] || '')) v = u.searchParams.get('id') || seg[2] || '';
+    else if (platform === 'youtube') v = (seg[0] === 'channel' ? seg[1] : seg[0]) || '';
+    else v = seg[0] || '';
+  }
+  v = v.replace(/^@/, '');
+  if (platform === 'youtube') return /^UC[A-Za-z0-9_-]{20,24}$/.test(v) ? v : (/^[A-Za-z0-9._-]{2,60}$/.test(v) ? '@' + v.toLowerCase() : '');
+  v = v.toLowerCase();
+  if (platform === 'x') return /^[a-z0-9_]{1,15}$/.test(v) ? v : '';
+  if (platform === 'instagram') return /^[a-z0-9._]{1,30}$/.test(v) ? v : '';
+  if (platform === 'facebook') return /^[a-z0-9.-]{2,80}$/.test(v) ? v : '';
+  return /^[a-z0-9._-]{2,80}$/.test(v) ? v : '';
+}
+/** One post, one address, whatever form it was found under. '' when the address is not a post on that platform, so an
+ *  account page or a script address is never filed as one. tools/den_permalink.py mirrors this; both are held to
+ *  tests/fixtures/den/permalinks.json. Facebook's opaque pfbid form cannot be matched to the numeric one: such a post may
+ *  be held under both. */
+function canonPermalink(platform, url) {
+  const u = denUrl(url); if (!u) return '';
+  const host = u.hostname.toLowerCase().replace(/^(www|m|mobile|web|mbasic|touch)\./, '');
+  const seg = u.pathname.split('/').filter(Boolean);
+  const q = k => u.searchParams.get(k) || '';
+  const num = s => /^\d{5,}$/.test(String(s || ''));
+  if (platform === 'x') {
+    if (host !== 'x.com' && host !== 'twitter.com') return '';
+    const i = seg.indexOf('status'); const id = i >= 0 ? seg[i + 1] : '';
+    return num(id) ? 'https://x.com/i/web/status/' + id : '';
+  }
+  if (platform === 'instagram') {
+    if (host !== 'instagram.com') return '';
+    const i = seg.findIndex(s => /^(p|reel|reels|tv)$/.test(s)); const code = i >= 0 ? seg[i + 1] : '';
+    return /^[A-Za-z0-9_-]{5,40}$/.test(code || '') ? 'https://www.instagram.com/p/' + code + '/' : '';
+  }
+  if (platform === 'youtube') {
+    let id = '';
+    if (host === 'youtu.be') id = seg[0] || '';
+    else if (host === 'youtube.com' || host === 'music.youtube.com') id = seg[0] === 'watch' ? q('v') : (/^(shorts|live|embed|v)$/.test(seg[0] || '') ? seg[1] : '');
+    return /^[A-Za-z0-9_-]{11}$/.test(id || '') ? 'https://www.youtube.com/watch?v=' + id : '';
+  }
+  if (platform === 'facebook') {
+    if (host !== 'facebook.com' && host !== 'fb.com') return '';
+    const F = 'https://www.facebook.com/';
+    const tok = s => /^[A-Za-z0-9._-]{2,120}$/.test(String(s || ''));
+    if (seg.length === 1 && /^\d{5,}_\d{5,}$/.test(seg[0])) { const p = seg[0].split('_'); return F + p[0] + '/posts/' + p[1]; }
+    if (/^(story|permalink)\.php$/.test(seg[0] || '')) return num(q('story_fbid')) && num(q('id')) ? F + q('id') + '/posts/' + q('story_fbid') : (tok(q('story_fbid')) && num(q('id')) ? F + q('id') + '/posts/' + q('story_fbid') : '');
+    if (seg[0] === 'photo.php' || seg[0] === 'photo') return num(q('fbid')) ? F + 'photo/?fbid=' + q('fbid') : '';
+    if (seg[0] === 'watch') return num(q('v')) ? F + 'watch/?v=' + q('v') : '';
+    if (seg[0] === 'reel') return num(seg[1]) ? F + 'reel/' + seg[1] : '';
+    if (seg[0] === 'share') return /^[prv]$/.test(seg[1] || '') && tok(seg[2]) ? F + 'share/' + seg[1] + '/' + seg[2] : '';
+    if (seg[0] === 'groups') return tok(seg[1]) && /^(posts|permalink)$/.test(seg[2] || '') && tok(seg[3]) ? F + 'groups/' + seg[1].toLowerCase() + '/posts/' + seg[3] : '';
+    if (seg.length >= 3 && /^(posts|videos|photos)$/.test(seg[1]) && tok(seg[0])) { const id = seg[1] === 'photos' ? seg[seg.length - 1] : seg[2]; return tok(id) ? F + seg[0].toLowerCase() + '/' + seg[1] + '/' + id : ''; }
+    return '';
+  }
+  // anything else: the address without its tracking and its fragment
+  const keep = []; u.searchParams.forEach((v, k) => { if (!/^(utm_[a-z_]+|fbclid|gclid|igsh|igshid|mibextid|ref|ref_src|s|si|t)$/i.test(k)) keep.push(encodeURIComponent(k) + '=' + encodeURIComponent(v)); });
+  const path = u.pathname.replace(/\/+$/, '');
+  return u.protocol + '//' + u.hostname.toLowerCase() + path + (keep.length ? '?' + keep.join('&') : '');
+}
+function denWatchView(r) { let ev = []; try { ev = JSON.parse(r.evidence || '[]'); } catch (e) { ev = []; } return Object.assign({}, r, { evidence: Array.isArray(ev) ? ev : [] }); }
+async function denWatchList(env, f) {
+  await ensureDen(env); f = f || {};
+  const ns = String(f.ns || '').toLowerCase();
+  if (!denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'Name the client this register belongs to (ns). A register is one client\'s and is never read across clients.' };
+  const w = ['ns=?'], b = [ns];
+  if (f.kind && DEN_KINDS.indexOf(f.kind) >= 0) { w.push('kind=?'); b.push(f.kind); }
+  if (f.platform && DEN_PLATFORMS.indexOf(f.platform) >= 0) { w.push('platform=?'); b.push(f.platform); }
+  if (f.status && DEN_STATUS.indexOf(f.status) >= 0) { w.push('status=?'); b.push(f.status); }
+  const rows = ((await env.MIND_DB.prepare('SELECT * FROM den_watch WHERE ' + w.join(' AND ') + ' ORDER BY status, kind, platform, score DESC, value LIMIT 1000').bind(...b).all()).results || []).map(denWatchView);
+  const counts = {}; ((await env.MIND_DB.prepare('SELECT kind, status, COUNT(*) n FROM den_watch WHERE ns=? GROUP BY kind, status').bind(ns).all()).results || []).forEach(r => { (counts[r.kind] = counts[r.kind] || {})[r.status] = r.n; });
+  return { ok: true, ns, watch: rows, counts, kinds: DEN_KINDS, platforms: DEN_PLATFORMS };
+}
+/** One register row from what a person or a proposer sent. Returns { row } or { error, detail }. */
+function denWatchShape(env, ns, it, status, source, who) {
+  const kind = String(it.kind || '').toLowerCase(); let platform = String(it.platform || '').toLowerCase() || 'any';
+  if (DEN_KINDS.indexOf(kind) < 0) return { error: 'bad_kind', detail: 'kind must be one of ' + DEN_KINDS.join(', ') + '.' };
+  if (kind === 'term' || kind === 'source') platform = kind === 'source' ? 'web' : 'any';
+  if (kind === 'group') platform = 'facebook';
+  if (DEN_PLATFORMS.indexOf(platform) < 0) return { error: 'bad_platform', detail: 'platform must be one of ' + DEN_PLATFORMS.join(', ') + '.' };
+  if (kind === 'account' && (platform === 'any' || platform === 'web')) return { error: 'bad_platform', detail: 'An account is on one platform: say which (x, facebook, instagram, youtube ...).' };
+  const value = denValue(kind, platform, it.value);
+  if (!value) return { error: 'bad_value', detail: 'That is not a ' + kind + (kind === 'account' ? ' on ' + platform : '') + ' the register can hold. Give a handle, a page address, a hashtag, a phrase or a site.' };
+  const actor = String(it.actor_kind || '').toLowerCase();
+  if (actor && DEN_ACTOR_KINDS.indexOf(actor) < 0) return { error: 'bad_actor_kind', detail: 'actor_kind is org, official or media - a public actor that may be named on its own posts - or empty.' };
+  if (actor && kind !== 'account') return { error: 'bad_actor_kind', detail: 'Only an account can be a named public actor.' };
+  const issue = String(it.issue || '').toLowerCase(); const now = Date.now();
+  return { row: { id: denId(), ns, kind, platform, value, name: String(it.name || '').replace(/\s+/g, ' ').trim().slice(0, 120), actor_kind: actor,
+    issue: denNsIssues(ns).indexOf(issue) >= 0 ? issue : '', status, source: DEN_SOURCES.indexOf(source) >= 0 ? source : 'operator',
+    evidence: jsonFit(Array.isArray(it.evidence) ? it.evidence.slice(0, 5) : [], 3000), score: Math.max(0, Math.min(1000, Number(it.score) || 0)), added_by: String(who || '').slice(0, 60),
+    decided_by: status === 'active' ? String(who || '').slice(0, 60) : '', decided_at: status === 'active' ? now : 0, reason: String(it.reason || '').slice(0, 300), created: now, updated: now } };
+}
+const DEN_INSERT = 'INSERT INTO den_watch(id,ns,kind,platform,value,name,actor_kind,issue,status,source,evidence,score,added_by,decided_by,decided_at,reason,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ns,kind,platform,value) DO NOTHING';
+const denBind = r => [r.id, r.ns, r.kind, r.platform, r.value, r.name, r.actor_kind, r.issue, r.status, r.source, r.evidence, r.score, r.added_by, r.decided_by, r.decided_at, r.reason, r.created, r.updated];
+async function denWatchAdd(env, b, who) {
+  await ensureDen(env); b = b || {};
+  const ns = String(b.ns || '').toLowerCase();
+  if (!denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'Name the client this is watched for (ns).' };
+  const s = denWatchShape(env, ns, b, 'active', 'operator', who);
+  if (s.error) return { ok: false, status: 400, error: s.error, detail: s.detail };
+  const res = await env.MIND_DB.prepare(DEN_INSERT).bind(...denBind(s.row)).run();
+  if (!((res && res.meta && res.meta.changes) || 0)) {
+    const old = await env.MIND_DB.prepare('SELECT id, status FROM den_watch WHERE ns=? AND kind=? AND platform=? AND value=?').bind(ns, s.row.kind, s.row.platform, s.row.value).first();
+    return { ok: false, status: 409, error: 'watch_exists', id: old && old.id, state: old && old.status, detail: 'That ' + s.row.kind + ' is already in this register' + (old ? ' (' + old.status + ').' : '.') + ' Change its state there instead of adding it again.' };
+  }
+  return { ok: true, watch: denWatchView(s.row) };
+}
+/** Proposals from a proposer (the report miner, discovery). Nothing proposed here is read until a person approves it,
+ *  and a thing a person dismissed is never proposed again. */
+async function denWatchPropose(env, b, who) {
+  await ensureDen(env); b = b || {};
+  const ns = String(b.ns || '').toLowerCase();
+  if (!denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'Name the client these are proposed for (ns).' };
+  const items = Array.isArray(b.items) ? b.items : [];
+  if (!items.length) return { ok: false, status: 400, error: 'no_items', detail: 'Send items: [{kind, platform, value, name, evidence}].' };
+  if (items.length > 300) return { ok: false, status: 413, error: 'too_many_items', detail: 'At most 300 proposals a request.' };
+  const source = DEN_SOURCES.indexOf(String(b.source || '')) >= 0 && b.source !== 'operator' ? String(b.source) : 'discovery';
+  const out = { ok: true, ns, proposed: 0, known: 0, refused: [] }; const stmts = [];
+  for (const it of items) { const s = denWatchShape(env, ns, it || {}, 'proposed', source, who); if (s.error) { out.refused.push({ value: String((it || {}).value || '').slice(0, 80), error: s.error }); continue; } stmts.push(env.MIND_DB.prepare(DEN_INSERT).bind(...denBind(s.row))); }
+  for (let i = 0; i < stmts.length; i += 50) { const res = await env.MIND_DB.batch(stmts.slice(i, i + 50)); res.forEach(r => { if ((r && r.meta && r.meta.changes) || 0) out.proposed++; else out.known++; }); }
+  return out;
+}
+async function denWatchDecide(env, b, who) {
+  await ensureDen(env); b = b || {};
+  const row = await env.MIND_DB.prepare('SELECT * FROM den_watch WHERE id=?').bind(String(b.id || '')).first();
+  if (!row) return { ok: false, status: 404, error: 'unknown_watch', detail: 'No register row has that id.' };
+  const d = String(b.decision || '').toLowerCase(); const to = { approve: 'active', on: 'active', off: 'off', dismiss: 'dismissed' }[d];
+  if (!to) return { ok: false, status: 400, error: 'bad_decision', detail: 'decision is approve, dismiss, off or on.' };
+  const reason = String(b.reason || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (to === 'dismissed' && reason.length < 3) return { ok: false, status: 400, error: 'reason_required', detail: 'Say why it is dismissed: the reason is what stops it being proposed again without explanation.' };
+  const now = Date.now();
+  await env.MIND_DB.prepare('UPDATE den_watch SET status=?, decided_by=?, decided_at=?, reason=?, updated=? WHERE id=?').bind(to, String(who || '').slice(0, 60), now, reason || row.reason || '', now, row.id).run();
+  return { ok: true, watch: denWatchView(Object.assign(row, { status: to, decided_by: who, decided_at: now, reason: reason || row.reason || '', updated: now })) };
+}
+async function denWatchUpdate(env, b) {
+  await ensureDen(env); b = b || {};
+  const row = await env.MIND_DB.prepare('SELECT * FROM den_watch WHERE id=?').bind(String(b.id || '')).first();
+  if (!row) return { ok: false, status: 404, error: 'unknown_watch', detail: 'No register row has that id.' };
+  const actor = b.actor_kind == null ? row.actor_kind : String(b.actor_kind).toLowerCase();
+  if (actor && (DEN_ACTOR_KINDS.indexOf(actor) < 0 || row.kind !== 'account')) return { ok: false, status: 400, error: 'bad_actor_kind', detail: 'actor_kind is org, official or media, on an account only.' };
+  const name = b.name == null ? row.name : String(b.name).replace(/\s+/g, ' ').trim().slice(0, 120);
+  const issue = b.issue == null ? row.issue : (denNsIssues(row.ns).indexOf(String(b.issue).toLowerCase()) >= 0 ? String(b.issue).toLowerCase() : '');
+  const score = b.score == null ? row.score : Math.max(0, Math.min(1000, Number(b.score) || 0));
+  await env.MIND_DB.prepare('UPDATE den_watch SET name=?, actor_kind=?, issue=?, score=?, updated=? WHERE id=?').bind(name, actor, issue, score, Date.now(), row.id).run();
+  return { ok: true, watch: denWatchView(Object.assign(row, { name, actor_kind: actor, issue, score })) };
+}
+async function denWatchDelete(env, b) {
+  await ensureDen(env);
+  const res = await env.MIND_DB.prepare('DELETE FROM den_watch WHERE id=?').bind(String((b || {}).id || '')).run();
+  return ((res && res.meta && res.meta.changes) || 0) ? { ok: true, deleted: 1 } : { ok: false, status: 404, error: 'unknown_watch', detail: 'No register row has that id.' };
+}
+async function denActive(env, ns) {
+  await ensureDen(env);
+  return ((await env.MIND_DB.prepare("SELECT * FROM den_watch WHERE ns=? AND status='active' ORDER BY score DESC, last_ok ASC, value LIMIT 1000").bind(ns).all()).results) || [];
+}
+function denTermRx(v) { try { return new RegExp('(?<![A-Za-z0-9])' + String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+') + '(?![A-Za-z0-9])', 'i'); } catch (e) { return null; } }
+/** The Instagram hashtag allowance: thirty unique hashtags in any seven days, per Instagram account. KV keeps the ledger
+ *  ({tag: firstSearchedAt}); a tag already inside the window costs nothing to read again. */
+async function igHashtagLedger(env) {
+  let led = {}; try { led = JSON.parse((await kvGet(env.AXIOM_KV, 'ig_hashtags')) || '{}') || {}; } catch (e) { led = {}; }
+  const now = Date.now(); const live = {}; Object.keys(led).forEach(t => { if (now - Number(led[t]) < IG_HASHTAG_WINDOW_MS) live[t] = Number(led[t]); });
+  return { tags: live, used: Object.keys(live).length, left: Math.max(0, IG_HASHTAG_LIMIT - Object.keys(live).length), limit: IG_HASHTAG_LIMIT, windowDays: 7 };
+}
+/** What to read today for a desk: the active accounts per platform (stalest first inside the caps), the hashtags and
+ *  the newest issue-tagged news addresses whose Facebook reach is worth asking for. Both layers read this. */
+async function denPlan(env, ns, platform) {
+  ns = String(ns || '').toLowerCase();
+  if (!denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'Name the client (ns).' };
+  const act = await denActive(env, ns); const plan = {};
+  const pick = (p, cap) => act.filter(r => r.kind === 'account' && r.platform === p).sort((a, b) => (a.last_ok || 0) - (b.last_ok || 0)).slice(0, cap).map(r => ({ id: r.id, value: r.value, name: r.name, actor_kind: r.actor_kind }));
+  ['facebook', 'instagram', 'x', 'youtube'].forEach(p => { if (!platform || platform === p) plan[p] = { accounts: pick(p, DEN_CAPS[p]) }; });
+  const tags = act.filter(r => r.kind === 'hashtag').slice(0, 60).map(r => ({ id: r.id, value: r.value, platform: r.platform }));
+  if (plan.instagram) { const led = await igHashtagLedger(env); plan.instagram.hashtags = tags.filter(t => t.platform === 'instagram' || t.platform === 'any').slice(0, DEN_CAPS.hashtags); plan.instagram.hashtagAllowance = { used: led.used, left: led.left, limit: led.limit, windowDays: led.windowDays }; }
+  if (plan.facebook) plan.facebook.groups = act.filter(r => r.kind === 'group').slice(0, 20).map(r => ({ id: r.id, value: r.value, name: r.name }));
+  const terms = act.filter(r => r.kind === 'term').map(r => r.value);
+  let urls = [];
+  if (!platform || platform === 'facebook') {
+    try {
+      await ensureArchive(env); const mine = denNsIssues(ns);
+      const rows = ((await env.MIND_DB.prepare("SELECT url, title FROM arc_items WHERE kind='news' AND ts>? AND url LIKE 'http%' ORDER BY ts DESC LIMIT 400").bind(Date.now() - 86400000).all()).results) || [];
+      urls = rows.filter(r => issueTag(r.title).some(i => mine.indexOf(i) >= 0)).slice(0, DEN_CAPS.urls).map(r => r.url);
+    } catch (e) { urls = []; }
+  }
+  // a client with no lexicon issues has only its own terms: issueQueries() with an empty list would mean every client's
+  const own = denNsIssues(ns).length ? issueQueries(denNsIssues(ns)) : [];
+  return { ok: true, ns, plan, terms, queries: own.concat(terms.filter(t => own.indexOf(t) < 0)), urls, caps: DEN_CAPS };
+}
+function denEng(e) {
+  e = (e && typeof e === 'object') ? e : {}; const n = v => Math.max(0, Math.round(Number(v) || 0)); const rx = (e.reactions && typeof e.reactions === 'object') ? e.reactions : null;
+  const out = { likes: n(e.likes), comments: n(e.comments), shares: n(e.shares), reposts: n(e.reposts), replies: n(e.replies), quotes: n(e.quotes), views: n(e.views) };
+  if (rx) { out.reactions = {}; ['like', 'love', 'care', 'wow', 'haha', 'sad', 'angry'].forEach(k => { if (rx[k] != null) out.reactions[k] = n(rx[k]); }); }
+  return out;
+}
+/** The one way in. body: { ns, layer 1|2|3, via, rows: [{platform, url, text, ts, eng, eng_at, watch, q, hashtag, link}],
+ *  comments: [{platform, thread_url, id, text, ts, likes, depth}], fb: [{url, reactions, comments, shares}] }.
+ *  Nothing in a row that names a person is read: not author, not username, not from_name. */
+async function signalsIngest(env, body, who) {
+  body = body || {};
+  if (!(await ensureDen(env)) || !(await ensureArchive(env))) return { ok: false, status: 501, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  const ns = String(body.ns || '').toLowerCase();
+  if (!denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'Say which client these posts were collected for (ns).' };
+  const layer = [1, 2, 3].indexOf(Number(body.layer)) >= 0 ? Number(body.layer) : 0;
+  if (!layer) return { ok: false, status: 400, error: 'layer_required', detail: 'Say which layer collected these: 1 an official route, 2 a signed-in collector, 3 a keyless read.' };
+  const via = String(body.via || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'unknown';
+  const rows = Array.isArray(body.rows) ? body.rows : []; const cms = Array.isArray(body.comments) ? body.comments : []; const fb = Array.isArray(body.fb) ? body.fb : [];
+  if (rows.length + cms.length + fb.length > DEN_INGEST_MAX) return { ok: false, status: 413, error: 'too_many_rows', detail: 'At most ' + DEN_INGEST_MAX + ' rows, comments and reach figures a request. Send the rest in another.' };
+  const now = Date.now(); const mine = denNsIssues(ns);
+  const act = await denActive(env, ns); const byId = Object.fromEntries(act.map(r => [r.id, r]));
+  const terms = act.filter(r => r.kind === 'term').map(r => ({ value: r.value, rx: denTermRx(r.value) })).filter(t => t.rx);
+  const out = { ok: true, ns, layer, via, received: rows.length, kept: 0, inserted: 0, updated: 0, snapshots: 0, comments: 0, commentRows: 0, fbUpdated: 0,
+    skipped: { off_topic: 0, foreign: 0, bad_url: 0, unknown_platform: 0, empty: 0, no_thread: 0, unknown_url: 0 } };
+  const kept = new Map(); const delivered = new Set();
+  for (const r0 of rows) {
+    const r = (r0 && typeof r0 === 'object') ? r0 : {};
+    const platform = String(r.platform || '').toLowerCase();
+    if (DEN_INGEST_PLATFORMS.indexOf(platform) < 0) { out.skipped.unknown_platform++; continue; }
+    const url = canonPermalink(platform, r.url);
+    if (!url) { out.skipped.bad_url++; continue; }
+    const text = String(r.text || '').replace(/\u0000/g, '').slice(0, 6000).trim();
+    if (text.length < 3) { out.skipped.empty++; continue; }
+    const w0 = byId[String(r.watch || '')]; const w = (w0 && (w0.kind === 'account' || w0.kind === 'group') && w0.platform === platform) ? w0 : null;
+    const tags = issueTag(text); const own = tags.filter(i => mine.indexOf(i) >= 0); const term = terms.find(t => t.rx.test(text));
+    const tag = String(r.hashtag || '').replace(/^#/, '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 60); const q = String(r.q || '').slice(0, 120);
+    if (!w) {
+      // found by a search or a hashtag: the term that found it is struck out before anything vouches for Australia
+      let t = text; if (tag) { try { t = t.replace(new RegExp('#?' + tag, 'gi'), ' '); } catch (e) {} }
+      if (!auRelevant('', t, q || (tag ? '#' + tag : ''))) { out.skipped.foreign++; continue; }
+    }
+    if (!own.length && !term) { out.skipped.off_topic++; continue; }
+    const eng = denEng(r.eng); const engAt = Math.min(Number(r.eng_at) || now, now + 3600000);
+    const ts = Number(r.ts) > 1e11 ? Number(r.ts) : (Date.parse(String(r.ts || '')) || now);
+    const meta = { platform, id: 'p' + arcHash(url), page: w ? w.value : '', page_name: '', score: eng.likes + eng.reposts + eng.shares, comments: eng.comments || eng.replies,
+      link: String(r.link || '').slice(0, 300), issues: tags, issue: own[0] || tags[0] || '', q, ns, via, layer, layers: [layer], eng, eng_at: engAt };
+    if (tag) meta.hashtag = tag;
+    if (term) meta.term = term.value;
+    if (w) { meta.watch = w.id; delivered.add(w.id); if (w.actor_kind) meta.actor = { id: w.id, name: w.name || w.value, kind: w.actor_kind }; }
+    const prev = kept.get(url);
+    if (!prev || engAt >= prev.meta.eng_at) kept.set(url, { src: platform, title: text.split('\n')[0].slice(0, 200) || (platform + ' post'), body: text, url, author: '', tone: commentTone(text), ts, meta });
+  }
+  out.kept = kept.size;
+  const urls = Array.from(kept.keys()); const have = new Map();
+  for (let i = 0; i < urls.length; i += 80) {
+    const part = urls.slice(i, i + 80);
+    (((await env.MIND_DB.prepare("SELECT id, url, meta FROM arc_items WHERE kind='sig_thread' AND url IN (" + part.map(() => '?').join(',') + ')').bind(...part).all()).results) || []).forEach(x => have.set(x.url, x));
+  }
+  const fresh = [], ups = [], snaps = [];
+  for (const [url, row] of kept) {
+    const old = have.get(url);
+    if (old) {
+      let m = {}; try { m = JSON.parse(old.meta || '{}') || {}; } catch (e) { m = {}; }
+      if (row.meta.eng_at >= (Number(m.eng_at) || 0)) { m.eng = row.meta.eng; m.eng_at = row.meta.eng_at; m.score = row.meta.score; m.comments = row.meta.comments; }
+      m.layers = Array.from(new Set([].concat(m.layers || (m.layer ? [m.layer] : []), [layer]))).sort();
+      if (row.meta.watch && !m.watch) { m.watch = row.meta.watch; if (row.meta.actor) m.actor = row.meta.actor; m.page = row.meta.page; }
+      ups.push(env.MIND_DB.prepare('UPDATE arc_items SET meta=?, seen=? WHERE id=?').bind(jsonFit(m, 1500), now, old.id));
+      row.meta = m;
+    } else fresh.push(row);
+    snaps.push(env.MIND_DB.prepare("INSERT INTO arc_items(kind,src,title,body,url,author,tone,meta,ts,seen) VALUES('sig_eng',?,'','',?,'',NULL,?,?,?) ON CONFLICT(kind,url) DO UPDATE SET meta=excluded.meta, ts=excluded.ts, seen=excluded.seen WHERE excluded.ts >= arc_items.ts")
+      .bind(row.src, 'x:eng:' + arcHash(url) + ':' + auDayKey(row.meta.eng_at), JSON.stringify({ u: url, platform: row.src, ns, eng: row.meta.eng, eng_at: row.meta.eng_at }), row.meta.eng_at, now));
+  }
+  for (let i = 0; i < fresh.length; i += 150) out.inserted += await archiveItems(env, 'sig_thread', fresh.slice(i, i + 150));
+  for (let i = 0; i < ups.length; i += 50) { await env.MIND_DB.batch(ups.slice(i, i + 50)); out.updated += Math.min(50, ups.length - i); }
+  for (let i = 0; i < snaps.length; i += 50) { await env.MIND_DB.batch(snaps.slice(i, i + 50)); out.snapshots += Math.min(50, snaps.length - i); }
+  // comments: the words and the tone, under the thread they answer; never who wrote them
+  if (cms.length) {
+    const tmeta = new Map(); kept.forEach((row, url) => tmeta.set(url, row));
+    const need = Array.from(new Set(cms.map(c => canonPermalink(String((c || {}).platform || '').toLowerCase(), (c || {}).thread_url)).filter(u => u && !tmeta.has(u))));
+    for (let i = 0; i < need.length; i += 80) {
+      const part = need.slice(i, i + 80);
+      (((await env.MIND_DB.prepare("SELECT url, title, meta FROM arc_items WHERE kind='sig_thread' AND url IN (" + part.map(() => '?').join(',') + ')').bind(...part).all()).results) || []).forEach(x => { let m = {}; try { m = JSON.parse(x.meta || '{}') || {}; } catch (e) {} tmeta.set(x.url, { title: x.title, url: x.url, meta: m }); });
+    }
+    const crows = [];
+    for (const c0 of cms) {
+      const c = (c0 && typeof c0 === 'object') ? c0 : {}; const platform = String(c.platform || '').toLowerCase();
+      const tu = canonPermalink(platform, c.thread_url); const th = tu && tmeta.get(tu); const text = String(c.text || '').replace(/\u0000/g, '').slice(0, 3000).trim();
+      if (!th) { out.skipped.no_thread++; continue; }
+      if (text.length < 2 || !c.id) { out.skipped.empty++; continue; }
+      out.comments++;
+      const row = sigCommentRow({ platform, id: arcHash(platform + ':' + String(c.id)), body: text, score: Math.max(0, Math.round(Number(c.likes) || 0)), depth: Math.max(0, Math.min(9, Number(c.depth) || 0)),
+        ts: Number(c.ts) > 1e11 ? Number(c.ts) : (Date.parse(String(c.ts || '')) || now), ns, via }, { id: th.meta.id, title: th.title, url: tu, issues: th.meta.issues || [], ns });
+      row.meta.layer = layer; crows.push(row);
+    }
+    for (let i = 0; i < crows.length; i += 150) out.commentRows += await archiveItems(env, 'sig_comment', crows.slice(i, i + 150));
+  }
+  // how far a news story travelled on Facebook, written on the news row itself
+  for (const f0 of fb) {
+    const f = (f0 && typeof f0 === 'object') ? f0 : {}; const raw = String(f.url || '').trim(); const c = canonPermalink('news', raw);
+    if (!c) { out.skipped.bad_url++; continue; }
+    const cand = Array.from(new Set([raw, c, c + '/']));
+    const hit = await env.MIND_DB.prepare("SELECT id FROM arc_items WHERE kind='news' AND url IN (" + cand.map(() => '?').join(',') + ') LIMIT 1').bind(...cand).first();
+    if (!hit) { out.skipped.unknown_url++; continue; }
+    const n = v => Math.max(0, Math.round(Number(v) || 0));
+    await env.MIND_DB.prepare("UPDATE arc_items SET meta=json_set(COALESCE(meta,'{}'), '$.fb', json(?)) WHERE id=?").bind(JSON.stringify({ reactions: n(f.reactions), comments: n(f.comments), shares: n(f.shares), at: now }), hit.id).run();
+    out.fbUpdated++;
+  }
+  const ids = Array.from(delivered);
+  for (let i = 0; i < ids.length; i += 80) { const part = ids.slice(i, i + 80); await env.MIND_DB.prepare("UPDATE den_watch SET last_ok=?, last_layer=?, last_error='' WHERE id IN (" + part.map(() => '?').join(',') + ')').bind(now, layer, ...part).run(); }
+  void who;
+  return out;
+}
+
+// -- layer 1 from the worker: the Graph API, when Meta has granted what each read needs -------------------------------
+function igConfigured(env) { return !!(env.META_TOKEN && /^\d{5,}$/.test(String(env.META_IG_USER || ''))); }
+const IG_NOT_CONFIGURED = { ok: false, error: 'ig_not_configured', detail: 'Set the secret META_TOKEN (with instagram_basic and pages_read_engagement) and the text var META_IG_USER to the agency\'s Instagram business account id. GET /meta/status?probe=1 says which step is missing.' };
+function denGraphFix(msg, what) {
+  const m = String(msg || ''); const refused = /\(#10\)|\(#200\)|permission|must be reviewed|not (granted|available|authorized)/i.test(m);
+  if (what === 'hashtag' ? (refused || /Instagram Public Content Access/i.test(m)) : /Instagram Public Content Access/i.test(m)) return { error: 'ig_hashtag_access_missing', detail: 'Meta refused the hashtag search: it needs the Instagram Public Content Access feature on the agency\'s app (an app review). Meta said: ' + m.slice(0, 140) };
+  if (what === 'page' ? (refused || /Page Public Content Access/i.test(m)) : /Page Public Content Access/i.test(m)) return { error: 'ppca_missing', detail: 'Meta refused the page: reading another organisation\'s Facebook page needs Page Public Content Access on the agency\'s app (an app review). Until it is granted, Facebook pages arrive through the signed-in collector. Meta said: ' + m.slice(0, 140) };
+  if (what === 'discovery' && refused) return { error: 'ig_discovery_access_missing', detail: 'Meta refused Business Discovery: the token needs instagram_basic and pages_read_engagement on the page linked to the agency\'s Instagram business account. Meta said: ' + m.slice(0, 140) };
+  return { error: 'graph_error', detail: m.slice(0, 200) };
+}
+async function denNsWith(env, ns, where, binds) {
+  await ensureDen(env);
+  return ((await env.MIND_DB.prepare("SELECT * FROM den_watch WHERE status='active' AND " + where + (ns ? ' AND ns=?' : '') + ' ORDER BY last_ok ASC, score DESC LIMIT 200').bind(...binds.concat(ns ? [ns] : [])).all()).results) || [];
+}
+/** A registered Instagram business or creator account's recent posts, through Business Discovery. */
+async function igDiscoverySweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!igConfigured(env)) return IG_NOT_CONFIGURED;
+  const accts = (await denNsWith(env, String(opts.ns || '').toLowerCase(), "kind='account' AND platform='instagram'", [])).slice(0, Math.min(Math.max(parseInt(opts.max, 10) || 25, 1), 60));
+  const out = { ok: true, platform: 'instagram', accounts: accts.length, threads: 0, threadRows: 0, updated: 0, skipped: 0, errors: [] };
+  const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN); const per = Math.min(Math.max(parseInt(opts.posts, 10) || 25, 1), 50);
+  const byNs = {};
+  for (const a of accts) {
+    await log('cmd', 'GET graph.facebook.com/' + env.META_IG_USER + '?fields=business_discovery.username(' + a.value + '){media.limit(' + per + '){...}}');
+    try {
+      const d = await metaGet(META_API + '/' + env.META_IG_USER + '?fields=' + encodeURIComponent('business_discovery.username(' + a.value + '){username,followers_count,media.limit(' + per + '){id,caption,like_count,comments_count,media_type,permalink,timestamp}}') + tok);
+      const media = (((d.business_discovery || {}).media || {}).data) || [];
+      await log('out', a.value + ': ' + media.length + ' posts');
+      media.forEach(m => (byNs[a.ns] = byNs[a.ns] || []).push({ platform: 'instagram', url: m.permalink, text: m.caption || '', ts: m.timestamp, eng: { likes: m.like_count, comments: m.comments_count }, watch: a.id }));
+    } catch (e) {
+      const fix = denGraphFix(e && e.message, 'discovery'); out.errors.push(a.value + ': ' + fix.detail); await log('err', fix.detail);
+      if (fix.error === 'ig_discovery_access_missing') { out.ok = false; out.error = fix.error; out.detail = fix.detail; break; }
+      try { await env.MIND_DB.prepare('UPDATE den_watch SET last_error=?, updated=? WHERE id=?').bind(fix.detail.slice(0, 200), Date.now(), a.id).run(); } catch (e2) {}
+    }
+    await rdSleep(opts.pace == null ? SOCIAL_PACE : opts.pace);
+  }
+  for (const ns of Object.keys(byNs)) for (let i = 0; i < byNs[ns].length; i += 400) {
+    const r = await signalsIngest(env, { ns, layer: 1, via: 'graph', rows: byNs[ns].slice(i, i + 400) }, 'worker');
+    out.threads += r.kept || 0; out.threadRows += r.inserted || 0; out.updated += r.updated || 0; out.skipped += ((r.skipped || {}).off_topic || 0);
+  }
+  await log('info', 'filed ' + out.threadRows + ' new posts, refreshed ' + out.updated + ', ' + out.skipped + ' off the desk\'s topics');
+  if (out.ok && !out.threads && out.errors.length) { out.ok = false; out.detail = 'Nothing was collected. ' + out.errors[0]; }
+  return out;
+}
+/** Recent public posts on the desk's hashtags, inside Meta's allowance of thirty unique hashtags a week. A hashtag
+ *  already inside the window is free; a new one is refused once the allowance is spent, and named. */
+async function igHashtagSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!igConfigured(env)) return IG_NOT_CONFIGURED;
+  const tags = (await denNsWith(env, String(opts.ns || '').toLowerCase(), "kind='hashtag' AND platform IN ('instagram','any')", [])).sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, Math.min(Math.max(parseInt(opts.max, 10) || DEN_CAPS.hashtags, 1), 30));
+  const led = await igHashtagLedger(env); const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN);
+  const out = { ok: true, platform: 'instagram', hashtags: tags.length, read: 0, refused: [], threads: 0, threadRows: 0, updated: 0, errors: [], allowance: { used: led.used, left: led.left, limit: led.limit } };
+  const byNs = {};
+  for (const t of tags) {
+    if (!led.tags[t.value] && Object.keys(led.tags).length >= IG_HASHTAG_LIMIT) { out.refused.push(t.value); await log('err', '#' + t.value + ': the week\'s allowance of ' + IG_HASHTAG_LIMIT + ' hashtags is spent'); continue; }
+    try {
+      let id = await kvGet(env.AXIOM_KV, 'ig_tag_' + t.value);
+      if (!id) {
+        await log('cmd', 'GET graph.facebook.com/ig_hashtag_search?q=' + t.value);
+        const s = await metaGet(META_API + '/ig_hashtag_search?user_id=' + env.META_IG_USER + '&q=' + encodeURIComponent(t.value) + tok);
+        id = String((((s.data || [])[0]) || {}).id || '');
+        if (!id) throw new Error('Instagram knows no hashtag #' + t.value);
+        await kvPut(env.AXIOM_KV, 'ig_tag_' + t.value, id, 30 * 86400);
+      }
+      if (!led.tags[t.value]) { led.tags[t.value] = Date.now(); await kvPut(env.AXIOM_KV, 'ig_hashtags', JSON.stringify(led.tags), 8 * 86400); }
+      await log('cmd', 'GET graph.facebook.com/' + id + '/recent_media');
+      const d = await metaGet(META_API + '/' + id + '/recent_media?user_id=' + env.META_IG_USER + '&fields=id,caption,like_count,comments_count,media_type,permalink,timestamp&limit=50' + tok);
+      const media = d.data || []; out.read++; await log('out', '#' + t.value + ': ' + media.length + ' posts');
+      media.forEach(m => (byNs[t.ns] = byNs[t.ns] || []).push({ platform: 'instagram', url: m.permalink, text: m.caption || '', ts: m.timestamp, eng: { likes: m.like_count, comments: m.comments_count }, hashtag: t.value }));
+    } catch (e) { const fix = denGraphFix(e && e.message, 'hashtag'); out.errors.push('#' + t.value + ': ' + fix.detail); await log('err', fix.detail); if (fix.error === 'ig_hashtag_access_missing') { out.ok = false; out.error = fix.error; out.detail = fix.detail; break; } }
+    await rdSleep(opts.pace == null ? SOCIAL_PACE : opts.pace);
+  }
+  for (const ns of Object.keys(byNs)) for (let i = 0; i < byNs[ns].length; i += 400) { const r = await signalsIngest(env, { ns, layer: 1, via: 'graph', rows: byNs[ns].slice(i, i + 400) }, 'worker'); out.threads += r.kept || 0; out.threadRows += r.inserted || 0; out.updated += r.updated || 0; }
+  out.allowance = { used: Object.keys(led.tags).length, left: Math.max(0, IG_HASHTAG_LIMIT - Object.keys(led.tags).length), limit: IG_HASHTAG_LIMIT };
+  if (out.refused.length && !out.detail) out.detail = out.refused.length + ' hashtag' + (out.refused.length === 1 ? '' : 's') + ' not read: the week\'s allowance of ' + IG_HASHTAG_LIMIT + ' is spent (' + out.refused.slice(0, 5).map(x => '#' + x).join(', ') + ').';
+  return out;
+}
+/** Another organisation's Facebook page through the Graph API. Meta refuses this without Page Public Content Access;
+ *  the refusal is named, never returned as an empty success. */
+async function fbPublicSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!env.META_TOKEN) return { ok: false, error: 'meta_not_configured', detail: 'Set the secret META_TOKEN. Reading other organisations\' pages also needs Page Public Content Access on the agency\'s app.' };
+  const pages = (await denNsWith(env, String(opts.ns || '').toLowerCase(), "kind='account' AND platform='facebook'", [])).slice(0, Math.min(Math.max(parseInt(opts.max, 10) || 20, 1), 40));
+  const out = { ok: true, platform: 'facebook', accounts: pages.length, threads: 0, threadRows: 0, updated: 0, skipped: 0, errors: [] };
+  const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN); const byNs = {};
+  for (const p of pages) {
+    await log('cmd', 'GET graph.facebook.com/' + p.value + '/posts?fields=message,reactions,comments,shares&limit=25');
+    try {
+      const d = await metaGet(META_API + '/' + encodeURIComponent(p.value) + '/posts?fields=' + encodeURIComponent('id,message,created_time,permalink_url,shares,reactions.summary(true).limit(0),comments.summary(true).limit(0)') + '&limit=25' + tok);
+      const posts = d.data || []; await log('out', p.value + ': ' + posts.length + ' posts');
+      posts.forEach(x => (byNs[p.ns] = byNs[p.ns] || []).push({ platform: 'facebook', url: /^\d+_\d+$/.test(String(x.id || '')) ? 'https://www.facebook.com/' + x.id : x.permalink_url, text: x.message || '', ts: x.created_time,
+        eng: { likes: ((x.reactions || {}).summary || {}).total_count, comments: ((x.comments || {}).summary || {}).total_count, shares: (x.shares || {}).count }, watch: p.id }));
+    } catch (e) {
+      const fix = denGraphFix(e && e.message, 'page'); out.errors.push(p.value + ': ' + fix.detail); await log('err', fix.detail);
+      if (fix.error === 'ppca_missing') { out.ok = false; out.error = fix.error; out.detail = fix.detail; break; }
+    }
+    await rdSleep(opts.pace == null ? SOCIAL_PACE : opts.pace);
+  }
+  for (const ns of Object.keys(byNs)) for (let i = 0; i < byNs[ns].length; i += 400) { const r = await signalsIngest(env, { ns, layer: 1, via: 'graph', rows: byNs[ns].slice(i, i + 400) }, 'worker'); out.threads += r.kept || 0; out.threadRows += r.inserted || 0; out.updated += r.updated || 0; out.skipped += ((r.skipped || {}).off_topic || 0); }
+  if (out.ok && !out.threads && out.errors.length) { out.ok = false; out.detail = 'Nothing was collected. ' + out.errors[0]; }
+  return out;
+}
+async function instagramSweep(env, opts) {
+  const a = await igDiscoverySweep(env, opts); if (a.error === 'ig_not_configured') return a;
+  const b = await igHashtagSweep(env, opts);
+  return { ok: !!(a.ok || b.ok), platform: 'instagram', accounts: a.accounts || 0, hashtags: b.hashtags || 0, threads: (a.threads || 0) + (b.threads || 0), threadRows: (a.threadRows || 0) + (b.threadRows || 0), updated: (a.updated || 0) + (b.updated || 0),
+    refused: b.refused || [], allowance: b.allowance, errors: (a.errors || []).concat(b.errors || []), detail: a.detail || b.detail || '' };
 }
 
 // ==============================================================================
@@ -7583,7 +8049,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-11.studio-p53';
+const AXIOM_BUILD = '2026-11-11.studio-p54';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -15564,7 +16030,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { issueTag, auRelevant, CLIENT_ISSUES, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { issueTag, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -17981,6 +18447,29 @@ const AXIOM_WORKER = {
     //    GET  /social/youtube/transcript?v=   captions of one video, on demand (read; not filed)
     //    GET  /social/x/watch  POST /social/x/watch {handles:[{handle,ns,name}]}   the X accounts read beside the MP register
     //    POST /social/sweep {platform, params}   a worker-side sweep as a job the console tails (full)
+    // The monitoring desk (DEN.md): the watch register, the day's collection plan, and the one way in for collected posts.
+    //    GET  /den/watch?ns=&kind=&platform=&status=     one client's register (read)
+    //    GET  /den/plan?ns=&platform=                    what to read today, inside each platform's caps (read)
+    //    POST /den/watch/add|propose|decide|update|delete    (full)
+    //    POST /signals/ingest {ns, layer, via, rows, comments, fb}   posts from any collector on any layer (full)
+    if (path.startsWith('/den/') || path === '/signals/ingest') {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let ob = {}; if (req.method === 'POST') { try { ob = await req.json(); } catch (e) { ob = {}; } }
+      const sp = reqUrl.searchParams; const send = r => { const st = r && r.ok === false ? (r.status || 400) : 200; if (r && r.status) delete r.status; return jsonResp(r, st); };
+      try {
+        if (path === '/den/watch' && req.method === 'GET') return send(await denWatchList(env, { ns: sp.get('ns'), kind: sp.get('kind'), platform: sp.get('platform'), status: sp.get('status') }));
+        if (path === '/den/plan' && req.method === 'GET') return send(await denPlan(env, sp.get('ns'), String(sp.get('platform') || '').toLowerCase()));
+        if (req.method === 'POST') {
+          if (path === '/den/watch/add') return send(await denWatchAdd(env, ob, auth.name));
+          if (path === '/den/watch/propose') return send(await denWatchPropose(env, ob, auth.name));
+          if (path === '/den/watch/decide') return send(await denWatchDecide(env, ob, auth.name));
+          if (path === '/den/watch/update') return send(await denWatchUpdate(env, ob));
+          if (path === '/den/watch/delete') return send(await denWatchDelete(env, ob));
+          if (path === '/signals/ingest') return send(await signalsIngest(env, ob, auth.name));
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) { return jsonResp({ ok: false, error: 'den_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
+    }
     if (path.startsWith('/social/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let ob = {}; if (req.method === 'POST') { try { ob = await req.json(); } catch (e) { ob = {}; } }
@@ -18402,7 +18891,7 @@ const AXIOM_WORKER = {
           const w = ["kind='" + tKind + "'", 'ts>?'].concat(extraW || []); const b = [since].concat(extraB || []);
           if (!isReddit && plat) { w.push("json_extract(meta,'$.platform')=?"); b.push(plat); }
           if (issue) { w.push('meta LIKE ?'); b.push('%"' + issue + '"%'); }
-          return (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, " + chan + " channel, " + platCol + " platform, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.q') q, json_extract(meta,'$.issues') issues FROM arc_items WHERE " + w.join(' AND ') + ' ORDER BY ts DESC LIMIT ' + lim).bind(...b).all()).results || [];
+          return (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, " + chan + " channel, " + platCol + " platform, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.q') q, json_extract(meta,'$.issues') issues, json_extract(meta,'$.eng') eng, json_extract(meta,'$.eng_at') eng_at, json_extract(meta,'$.layers') layers, json_extract(meta,'$.actor') actor, json_extract(meta,'$.hashtag') hashtag FROM arc_items WHERE " + w.join(' AND ') + ' ORDER BY ts DESC LIMIT ' + lim).bind(...b).all()).results || [];
         };
         // comment tone held per thread, in chunks D1 accepts
         const heldFor = async (ids) => {
@@ -18441,7 +18930,8 @@ const AXIOM_WORKER = {
           const chans = Object.keys(cm).map(c => ({ channel: c, n: cm[c] })).sort((a, b) => b.n - a.n).slice(0, 20);
           const have = (await db.prepare("SELECT COUNT(*) total, MAX(ts) newest FROM arc_items WHERE kind='" + tKind + "'" + (!isReddit && plat ? " AND json_extract(meta,'$.platform')='" + plat + "'" : '')).first()) || { total: 0 };
           return jsonResp({ ok: true, platform: plat || 'all', days, issue, q: qs, sort, all: showAll, noise, channels: chans,
-            threads: rows.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, channel: r.channel || '', platform: r.platform || plat, id: r.id, score: r.score, comments: r.comments, q: r.q || '', issues: r.issuesArr, relevant: r.rel, excerpt: String(r.body || '').split('\n')[0].slice(0, 500), held: r.held })),
+            threads: rows.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, channel: r.channel || '', platform: r.platform || plat, id: r.id, score: r.score, comments: r.comments, q: r.q || '', issues: r.issuesArr, relevant: r.rel, excerpt: String(r.body || '').split('\n')[0].slice(0, 500), held: r.held,
+              eng: sigJson(r.eng), eng_at: Number(r.eng_at) || 0, layers: sigJson(r.layers) || [], actor: sigJson(r.actor), hashtag: r.hashtag || '' })),
             have });
         }
         if (path === '/signals/comments') {
@@ -18991,7 +19481,7 @@ const AXIOM_WORKER = {
         st.probe = { steps: [] };
         const step = async (name, fn) => {
           try { st.probe.steps.push({ step: name, ok: true, detail: await fn() }); return true; }
-          catch (e) { st.probe.steps.push({ step: name, ok: false, detail: String((e && e.message) || e).slice(0, 200) }); return false; }
+          catch (e) { st.probe.steps.push({ step: name, ok: false, detail: String((e && e.message) || e).slice(0, 360) }); return false; }
         };
         const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN);
         const a = metaAccounts(env)[0];
@@ -19016,7 +19506,18 @@ const AXIOM_WORKER = {
             });
           }
         }
-        const bad = st.probe.steps.filter(s => !s.ok);
+        // what the public-page routes need, each named so the first refusal says what to ask Meta for
+        if (!/^\d{5,}$/.test(String(env.META_IG_USER || ''))) st.probe.steps.push({ step: 'Instagram business account (META_IG_USER)', ok: false, optional: true, detail: 'Set the text var META_IG_USER to the id of the agency\'s Instagram business account. Business Discovery and hashtag search read through it.' });
+        else if (await step('Instagram business account (META_IG_USER)', async () => { const d = await metaGet(META_API + '/' + env.META_IG_USER + '?fields=username,followers_count' + tok); return '@' + (d.username || env.META_IG_USER); })) {
+          await step('Instagram Business Discovery (reads another account\'s public posts)', async () => { const d = await metaGet(META_API + '/' + env.META_IG_USER + '?fields=' + encodeURIComponent('business_discovery.username(instagram){username,media_count}') + tok); return 'reads @' + (((d.business_discovery || {}).username) || 'instagram'); });
+          await step('Instagram hashtag search (Instagram Public Content Access)', async () => { const d = await metaGet(META_API + '/' + env.META_IG_USER + '/recently_searched_hashtags?limit=30' + tok); return (d.data || []).length + ' of ' + IG_HASHTAG_LIMIT + ' hashtags used in the last seven days'; });
+        }
+        { const pg = (await denNsWith(env, '', "kind='account' AND platform='facebook'", []))[0];
+          if (!pg) st.probe.steps.push({ step: 'Facebook public pages (Page Public Content Access)', ok: false, optional: true, detail: 'No Facebook page is in a watch register yet, so there is nothing to try the permission on.' });
+          else await step('Facebook public pages (Page Public Content Access)', async () => { try { const d = await metaGet(META_API + '/' + encodeURIComponent(pg.value) + '/posts?fields=id&limit=1' + tok); return (d.data || []).length + ' post read from ' + pg.value; } catch (e) { throw new Error(denGraphFix(e && e.message, 'page').detail); } }); }
+        st.probe.steps.forEach(x => { if (/^(Instagram|Facebook public)/.test(x.step)) x.optional = true; });
+        const bad = st.probe.steps.filter(s => !s.ok && !s.optional);
+        st.probe.public = st.probe.steps.filter(s => s.optional).map(s => ({ step: s.step, ok: s.ok, detail: s.detail }));
         st.probe.ready = !bad.length;
         st.probe.summary = bad.length ? 'Blocked at: ' + bad[0].step : 'Every permission the comment and reaction sweeps need is in place.';
       }

@@ -49,6 +49,10 @@
       about: 'The clients\' own LinkedIn pages: posts and the comments underneath, through LinkedIn\'s API.' },
     { id: 'meta', label: 'Meta', unit: 'post', channel: 'page', prefix: '', colour: '#5A8DEE', desktop: false,
       about: 'The clients\' own Facebook and Instagram pages: organic posts and their comments, through the Graph API. Ad comments stay in Audience.' },
+    { id: 'facebook', label: 'Facebook', unit: 'post', channel: 'page', prefix: '', colour: '#6E9BF5', desktop: false,
+      about: 'Public posts by the organisations and officials in a client\'s watch register, and public posts found on its terms, with reactions, comments and shares at the time they were read. Other organisations\' comment text is not collected.' },
+    { id: 'instagram', label: 'Instagram', unit: 'post', channel: 'account', prefix: '', colour: '#E06AA8', desktop: false,
+      about: 'Public posts by registered business and creator accounts and on a client\'s hashtags, with likes and comments at the time they were read. Meta allows thirty hashtags a week.' },
     { id: 'bluesky', label: 'Bluesky', unit: 'post', channel: '', prefix: '', colour: '#3B82F6', desktop: false,
       about: 'The client keywords searched on Bluesky\'s public AppView, with the reply threads under the posts that draw argument. The Australian gate applies.' },
     { id: 'mastodon', label: 'Mastodon', unit: 'post', channel: 'instance', prefix: '', colour: '#8C8DFF', desktop: false,
@@ -92,8 +96,13 @@
         <div class="t"><a href=${t.url} target="_blank" rel="noopener" onClick=${e => e.stopPropagation()}>${t.title}</a></div>
         <div class="m">
           ${t.channel ? html`<span class="rd-sub" style=${{ color: plat.colour }}>${plat.prefix}${t.channel}</span>` : html`<span class="rd-sub" style=${{ color: plat.colour }}>${plat.label}</span>`}
+          ${t.actor && t.actor.name ? html`<span class="rd-chip sig-actor" title=${'A registered public ' + (t.actor.kind === 'official' ? 'official' : t.actor.kind === 'media' ? 'masthead' : 'organisation') + ', named on its own post'}>${t.actor.name}</span>` : null}
           <span>${fmtN(t.score)} reactions</span>
           <span>${fmtN(t.comments)} comments</span>
+          ${t.eng && t.eng.shares ? html`<span>${fmtN(t.eng.shares)} shares</span>` : null}
+          ${t.eng && t.eng.views ? html`<span>${fmtN(t.eng.views)} views</span>` : null}
+          ${t.eng_at ? html`<span class="sig-read" title=${'Counts as read ' + new Date(t.eng_at).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' }) + ' (Sydney)'}>read ${ago(t.eng_at)} ago</span>` : null}
+          ${(t.layers || []).length ? html`<span class="sig-layer" title=${'Collected by ' + t.layers.map(l => l === 1 ? 'an official route (layer 1)' : l === 2 ? 'a signed-in collector (layer 2)' : 'a keyless read (layer 3)').join(' and ')}>${t.layers.map(l => 'L' + l).join(' ')}</span>` : null}
           <span>${ago(t.ts)} ago</span>
           ${t.q ? html`<span class="rd-chip" title="Found by this client keyword">${t.q}</span>` : null}
           <${IssueChips} ids=${t.issues} />
@@ -438,7 +447,7 @@
       <div class="sig-tabs" role="tablist">
         ${PLATFORMS.concat(EXTRA_TABS).map(p => {
           const s = byPlat[p.id] || {};
-          return html`<button key=${p.id} role="tab" aria-selected=${tab === p.id} class=${'sig-tab' + (tab === p.id ? ' on' : '')} onClick=${() => setTab(p.id)}>
+          return html`<button key=${p.id} role="tab" aria-selected=${tab === p.id} class=${'sig-tab' + (tab === p.id ? ' on' : '')} title=${p.about || ''} onClick=${() => setTab(p.id)}>
             <span class="dot" style=${{ background: p.colour }}></span>${p.label}
             ${p.special ? null : html`<span class="n">${fmtN(s.threads || 0)}</span>`}
             ${p.desktop ? html`<span class="rd-chip" title="Collected from a logged-in machine">desktop</span>` : null}

@@ -199,3 +199,77 @@ Not verifiable here, for the owner's first run after deploying:
   fourteen days; an alert before then is measured against a thin baseline.
 - **The X keyword pass with the new terms**, on the Mac: `python3 tools/reach-x.py --key $AXIOM_KEY --issue aep`.
 - **The entity seed** refreshes rows nobody has edited; an edited row keeps the operator's aliases.
+
+## 2. Release 2 - the ground every collector stands on (build `2026-11-11.studio-p54`, page `?v=r41`)
+
+Phase 0 found that no official route to Facebook or Instagram works today (0.5). So this release builds what both
+layers share, and builds the official routes behind a probe that says what each still needs.
+
+**The watch register** (D1 `den_watch`). One client's list of what is read for it: accounts, hashtags, terms, outlets
+and public Facebook groups, each `proposed`, `active`, `off` or `dismissed`, with who added it, who decided and why.
+What a person types is normalised (a handle loses its @, a page comes out of its address, a hashtag loses its #).
+`actor_kind` (org, official, media) marks an account as a public actor that may be named on its own posts; an account
+without it is read and never named. A proposal is not read until a person approves it; a dismissal needs a reason
+and is never proposed again. Routes: `GET /den/watch?ns=&kind=&platform=&status=`, `GET /den/plan?ns=&platform=`
+(read); `POST /den/watch/add|propose|decide|update|delete` (full). A register is never read without naming its client.
+
+**One way in** (`POST /signals/ingest {ns, layer, via, rows, comments, fb}`, full; `signalsIngest()`). Every collector
+on every layer hands its posts here, and the rules are enforced here so no collector can skip them:
+
+| Rule | How |
+|---|---|
+| One post, one address | `canonPermalink(platform, url)`; an account page or a script address is not a post and is refused |
+| Relevance | a post is kept only when `issueTag()` finds one of the client's issues or one of its active terms matches; the rest are counted |
+| The Australian gate | a post that came from a search or a hashtag passes `auRelevant()` with the term struck out first |
+| Names (D1) | `meta.actor {id, name, kind}` is written from the register row only, and only for an account with an `actor_kind`. Nothing a collector sends about a person is read |
+| One row across layers | a post already held is updated: the newer count wins, an older read never overwrites it, `meta.layers` records every layer that found it |
+| Counts move | one snapshot row a Sydney day (kind `sig_eng`), the later read of a day replacing the earlier |
+| Comments | the words and the tone under their thread; never the author |
+| Facebook reach of news | `fb: [{url, reactions, comments, shares}]` is written as `meta.fb` on the news row |
+| Walls | a register row of another client ties nothing and names nobody |
+
+At most 500 rows a request. A guest link cannot collect.
+
+**The official routes, behind the probe** (`GET /meta/status?probe=1` now lists four more steps, each optional and
+named): `igDiscoverySweep()` (Business Discovery, needs `META_TOKEN` and the new var `META_IG_USER`),
+`igHashtagSweep()` (hashtag search; the allowance of thirty unique hashtags in seven days is kept in KV `ig_hashtags`,
+a hashtag inside the window is free, the thirty-first is refused and named and reaches no provider),
+`fbPublicSweep()` (other organisations' pages; Meta's refusal is returned as `ppca_missing`, in words, never as an
+empty success). The cron runs the Instagram routes only when `META_IG_USER` is set and the Facebook route only with
+`META_PUBLIC_PAGES=1`, so nothing is asked of Meta every two hours just to be refused. `metaAdLibrary()` searches each
+desk's approved terms beside the issue labels.
+
+**The Supermetrics route** (`tools/den-pull-plan.py`, `tools/supermetrics2signals.py`). The plan tool prints the
+day's queries from `GET /den/plan`; the converter turns the saved answers into one ingest payload and can push it.
+Neither can be proven until the two public-data sources are on the licence: the field ids come from the connector's
+field discovery, not from a live answer.
+
+**In the app.** Signals has Facebook and Instagram tabs. A post shows the registered actor's name where there is one,
+shares and views, when its counts were read, and which layer read it (L1, L2). The Coverage tab's Facebook and
+Instagram rows say how each is read, what is set and what cannot be reached.
+
+One post cannot always be matched across layers: Facebook's opaque `pfbid` address has no numeric equivalent a
+collector can compute. A post found once by its numeric id and once by `pfbid` may be held twice.
+
+**Not verified against Meta's documentation.** The prompt asked for the hashtag limit to be checked and cited.
+`developers.facebook.com` cannot be reached from the session's sandbox, so these are written from knowledge of the
+Graph API and are unconfirmed: the allowance of thirty unique hashtags in a rolling seven days per Instagram account;
+that hashtag search needs the Instagram Public Content Access feature; the `recently_searched_hashtags` edge the
+probe reads; the permissions Business Discovery needs; that other organisations' Facebook pages need Page Public
+Content Access. The pages to read are Meta's "Hashtag Search", "Business Discovery" and "Page Public Content Access".
+What settles each in practice is the probe on the deployed worker, which reports Meta's own answer step by step. If
+the limit differs, it is one constant (`IG_HASHTAG_LIMIT`).
+
+Harnesses: `tests/den-collect-worker.mjs` (18), `tests/den-tools-test.py` (23), one case in
+`tests/signals-browser.mjs` (8), shared cases `tests/fixtures/den/permalinks.json` (29).
+
+For the owner, to switch a route on:
+- **Supermetrics**: add Facebook Public Data and Instagram Public Data to the subscription. Then, in a Claude Code
+  session with the connector: `python3 tools/den-pull-plan.py --ns aep --key $AXIOM_KEY`, run the printed queries,
+  save each answer under the printed name, and
+  `python3 tools/supermetrics2signals.py out.json --ns aep --key $AXIOM_KEY fbposts=fbposts.json ... --push`.
+- **Instagram from the worker**: set the var `META_IG_USER` to the agency's Instagram business account id, then
+  open `/meta/status?probe=1`. Hashtag search also needs Instagram Public Content Access (an app review).
+- **Facebook from the worker**: Page Public Content Access (an app review), then the var `META_PUBLIC_PAGES=1`.
+- A register is empty until someone adds to it: `POST /den/watch/add {ns, kind, platform, value, name, actor_kind}`
+  for now; the Den's Watch tab (release 6) is the place for it.

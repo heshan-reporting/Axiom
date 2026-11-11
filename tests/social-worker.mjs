@@ -110,8 +110,8 @@ console.log('social-worker harness');
 await t('GET /social/coverage lists every platform with method, keys and what it cannot reach', async () => {
   const r = await req('GET', '/social/coverage', null, 'read-key');
   eq(r.status, 200); const ids = r.d.platforms.map(p => p.id);
-  ok(['reddit', 'bluesky', 'mastodon', 'x', 'youtube', 'linkedin', 'meta', 'adlibrary', 'facebook_public', 'threads', 'tiktok', 'forums', 'petitions', 'substack'].every(i => ids.indexOf(i) >= 0), ids.join(','));
-  const fb = r.d.platforms.find(p => p.id === 'facebook_public'); eq(fb.configured, false); ok(/Page Public Content Access/.test(fb.keys) && /refuses other pages/.test(fb.unreachable));
+  ok(['reddit', 'bluesky', 'mastodon', 'x', 'youtube', 'linkedin', 'meta', 'adlibrary', 'facebook', 'instagram', 'threads', 'tiktok', 'forums', 'petitions', 'substack'].every(i => ids.indexOf(i) >= 0), ids.join(','));
+  const fb = r.d.platforms.find(p => p.id === 'facebook'); eq(fb.configured, false); ok(/Page Public Content Access/.test(fb.keys) && /comment text/.test(fb.unreachable));
   const yt = r.d.platforms.find(p => p.id === 'youtube'); eq(yt.apiKey, false); ok(/YOUTUBE_KEY optional/.test(yt.keys));
   ok(r.d.platforms.every(p => p.counts && typeof p.counts.threads24 === 'number'));
 });

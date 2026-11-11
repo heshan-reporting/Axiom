@@ -99,6 +99,33 @@ repo), the gap list, which collection layer can reach what, and the decisions in
   the reports cite, and official sources (Senate committees, NOPSEMA, the WA EPA, the Victorian energy minister, NSW
   Parliament inquiries). Seed addresses are unverified until a sweep proves them.
 - Harness: `tests/den-lexicon-worker.mjs` (12).
+- **Release 2, the ground every collector stands on (build `2026-11-11.studio-p54`, page `?v=r41`).** No official
+  route to Facebook or Instagram works today (the Supermetrics public-data sources are not on the licence, and the
+  Graph routes need permissions Meta has not granted), so this release is what both collection layers share.
+  - **The watch register**, D1 `den_watch(id, ns, kind account|hashtag|term|source|group, platform, value, name,
+    actor_kind org|official|media, issue, status proposed|active|off|dismissed, source, evidence, score, added_by,
+    decided_by, decided_at, reason, last_ok, last_error, last_layer)`, unique on `(ns, kind, platform, value)`.
+    `GET /den/watch?ns=`, `GET /den/plan?ns=&platform=` (read); `POST /den/watch/add|propose|decide|update|delete`
+    (full). A proposal is read by nothing until a person approves it; a dismissal needs a reason and is never proposed
+    again; a register is one client's and is never listed without `ns`.
+  - **One way in: `POST /signals/ingest {ns, layer 1|2|3, via, rows, comments, fb}`** (full; `signalsIngest()`).
+    Every collector on every layer files through it, and it is where the rules live: `canonPermalink()` (one post, one
+    address; mirrored in `tools/den_permalink.py`, both held to `tests/fixtures/den/permalinks.json`), relevance to
+    the client (an issue or an active term), the Australian gate for anything found by search with the term struck out,
+    one row across layers (the newer count wins, `meta.layers`), a daily count snapshot (kind `sig_eng`), comments
+    without authors, and Facebook reach written as `meta.fb` on a news row. **Names (decision D1, 11 November 2026):
+    a social row carries `meta.actor {id, name, kind}` only for a register account marked as a public actor
+    (`actor_kind`), on its own post, written from the register and never from what a collector sent. Commenters,
+    repliers and unregistered accounts are never named. This widens the earlier MPs-only rule and nothing else.**
+  - **Graph routes behind the probe**: `igDiscoverySweep`, `igHashtagSweep` (thirty unique hashtags in seven days, KV
+    `ig_hashtags`; the thirty-first is refused before any request) and `fbPublicSweep` (`ppca_missing` in words).
+    Vars: `META_IG_USER` (the agency's Instagram business account id), `META_PUBLIC_PAGES=1` once Page Public Content
+    Access is granted. `GET /meta/status?probe=1` lists each as an optional step with what it needs. `socialCron`
+    runs them only when set. `metaAdLibrary()` also searches each desk's approved terms.
+  - **Supermetrics route**: `tools/den-pull-plan.py` (the day's queries) and `tools/supermetrics2signals.py`
+    (saved answers to an ingest payload, `--push`). Unproven until the licence has the two sources.
+  - Signals has Facebook and Instagram tabs; the coverage rows are `facebook` and `instagram` (the old
+    `facebook_public` row is gone). Harnesses: `tests/den-collect-worker.mjs` (18), `tests/den-tools-test.py` (23).
 
 ## The research agent
 

@@ -17,6 +17,9 @@ const threads = {
   youtube: [thread('vid1', 'youtube', 'Fuel tax credit fight heats up as miners launch campaign', { channel: 'ABC News (Australia)', score: 12345, comments: 41, q: '' })],
   substack: [thread('s1', 'substack', 'Why the fuel tax credit matters', { channel: 'example.substack.com', q: '' })],
   x: [thread('1001', 'x', 'Today we announced a $1 billion critical minerals reserve.', { channel: 'AlboMP', issues: ['cm'], q: '', score: 1100, comments: 340 })],
+  facebook: [thread('f1', 'facebook', 'Harbour Watch: the fuel tax credit petition has passed 40,000 signatures', { channel: 'harbourwatch', q: '', score: 420, comments: 61, eng: { likes: 420, comments: 61, shares: 88 }, eng_at: NOW - 30 * 60e3, layers: [1, 2], actor: { id: 'w1', name: 'Harbour Watch', kind: 'org' } }),
+    thread('f2', 'facebook', 'Someone in Sydney on the diesel rebate', { q: 'diesel rebate', score: 12, comments: 2, eng: { likes: 12, comments: 2, shares: 0 }, eng_at: NOW - 3 * H, layers: [2], actor: null })],
+  instagram: [thread('i1', 'instagram', 'Hands off our fuel, say the truckies', { q: '', hashtag: 'auspol', score: 900, comments: 40, eng: { likes: 900, comments: 40, views: 15000 }, eng_at: NOW - H, layers: [1], actor: null })],
   reddit: [],
 };
 const calls = [];
@@ -29,7 +32,7 @@ const stub = (url, method, body) => {
   if (p === '/social/coverage') { const probe = q.get('probe') === '1'; return { ok: true, lastRun: NOW - 40 * 60e3, mac: false, platforms: [
     { id: 'bluesky', label: 'Bluesky', method: 'public AppView API', keys: 'none', configured: true, where: 'worker', reach: 'keyword search, threads, replies', unreachable: '', counts: { threads24: 14, threads7: 80, comments24: 30, comments7: 200, newest: NOW }, last: { at: NOW - 40 * 60e3, ok: true, threads: 14, comments: 30 }, probe: probe ? { ok: true, ms: 210, detail: '3 posts for auspol' } : undefined },
     { id: 'x', label: 'X', method: 'embed service from the worker; twitter-cli on the Mac', keys: 'none for timelines; a signed-in Mac for search', configured: true, where: 'both', reach: 'MP and watch-list timelines', unreachable: 'keyword search from the cloud', counts: { threads24: 9, threads7: 60, comments24: 0, comments7: 0, newest: NOW }, last: { at: NOW - 40 * 60e3, ok: false, detail: 'Nothing was read. gone_account: HTTP 404' }, probe: probe ? { ok: false, ms: 900, detail: 'the embed page carried no timeline' } : undefined },
-    { id: 'facebook_public', label: 'Facebook public pages and groups', method: 'none available', keys: 'Page Public Content Access (Meta app review)', configured: false, where: 'none', reach: '', unreachable: 'the Graph API refuses other pages without PPCA', counts: { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 }, last: null },
+    { id: 'facebook', label: 'Facebook public pages and groups (others\')', method: 'layer 1: the Graph API with Page Public Content Access; layer 2: a signed-in collector on a Mac', keys: 'META_TOKEN + Page Public Content Access (Meta app review)', configured: false, where: 'mac', reach: 'registered pages\' posts with reactions', unreachable: 'comment text on other organisations\' posts', counts: { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 }, last: null },
     { id: 'youtube', label: 'YouTube', method: 'channel feeds; comments; captions', keys: 'YOUTUBE_KEY optional', configured: true, apiKey: false, where: 'worker', reach: 'videos, comments, captions', unreachable: 'keyword search without a key', counts: { threads24: 3, threads7: 20, comments24: 40, comments7: 300, newest: NOW }, last: { at: NOW - 40 * 60e3, ok: true, threads: 3, comments: 40 } },
   ], agents: [] }; }
   if (p === '/social/petitions') return { ok: true, days: 30, sites: [{ id: 'aph', name: 'Parliament of Australia e-petitions' }, { id: 'vic', name: 'Parliament of Victoria e-petitions' }], petitions: q.get('issue') === 'regional' ? [] : [
@@ -96,6 +99,22 @@ await t('the X tab offers Read account timelines, which runs in the worker and i
   ok(/4 new posts/.test(await page.textContent('.rd-res.ok')), await page.textContent('.rd-res.ok'));
   const c = calls.find(x => x.p === '/social/sweep'); eq(c.body.platform, 'x'); eq(c.body.params.days, 7);
 });
+await t('Facebook and Instagram tabs: a registered public actor is named, nobody else; counts say when they were read and which layer read them', async () => {
+  const page = await open('full');
+  await page.click('.sig-tab:has-text("Facebook")'); await page.waitForSelector('.rd-th');
+  const rowsT = await texts(page, '.rd-th'); eq(rowsT.length, 2);
+  ok(/Harbour Watch/.test(await page.textContent('.rd-th:nth-of-type(1) .sig-actor')), 'the registered organisation is named on its own post');
+  ok(/88 shares/.test(rowsT[0]) && /read 30m ago/.test(rowsT[0]) && /L1 L2/.test(rowsT[0]), rowsT[0]);
+  ok(/layer 1/.test(await page.getAttribute('.rd-th:nth-of-type(1) .sig-layer', 'title')) && /layer 2/.test(await page.getAttribute('.rd-th:nth-of-type(1) .sig-layer', 'title')));
+  eq(await page.locator('.rd-th').nth(1).locator('.sig-actor').count(), 0, 'a post found by search names nobody');
+  ok(/diesel rebate/.test(rowsT[1]) && /L2/.test(rowsT[1]));
+  ok(calls.some(c => c.p === '/signals/threads' && c.q.platform === 'facebook'));
+  ok(/comment text is not collected/.test(await page.getAttribute('.sig-tab:has-text("Facebook")', 'title')), 'the tab says what it cannot collect');
+  ok(/thirty hashtags a week/.test(await page.getAttribute('.sig-tab:has-text("Instagram")', 'title')));
+  await page.click('.sig-tab:has-text("Instagram")'); await page.waitForFunction(() => /Hands off our fuel/.test((document.querySelector('.rd-th') || {}).textContent || ''));
+  const ig = await texts(page, '.rd-th'); eq(ig.length, 1); ok(/15K views/.test(ig[0]) && /L1/.test(ig[0]), ig[0]);
+  await page.close();
+});
 await t('the Petitions tab ranks by growth, filters by issue, and reads the pages on demand', async () => {
   await page.click('.sig-tab:has-text("Petitions")');
   await page.waitForSelector('.pet-table');
@@ -117,7 +136,7 @@ await t('the Coverage tab shows every platform with method, needs, state, counts
   const rowsT = await texts(page, '.cov-table tbody tr');
   eq(rowsT.length, 4);
   ok(/Bluesky/.test(rowsT[0]) && /public AppView/.test(rowsT[0]) && /14 \/ 30/.test(rowsT[0]) && /ok/.test(rowsT[0]), rowsT[0]);
-  ok(/Facebook public/.test(rowsT[2]) && /not set up/.test(rowsT[2]) && /Cannot: the Graph API refuses/.test(rowsT[2]), rowsT[2]);
+  ok(/Facebook public/.test(rowsT[2]) && /not set up/.test(rowsT[2]) && /layer 2: a signed-in collector/.test(rowsT[2]) && /Cannot: comment text on other organisations/.test(rowsT[2]), rowsT[2]);
   ok(/on, no key/.test(rowsT[3]), 'YouTube says it runs without a key');
   ok(/Nothing was read\. gone_account/.test(rowsT[1]), 'the last failure is quoted');
   await page.waitForFunction(() => /No Mac collector connected/.test((document.querySelector('.rd-ctl') || {}).textContent || ''), null, { timeout: 15000 });   // the collector status is its own request
