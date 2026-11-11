@@ -480,3 +480,219 @@ Harnesses: `tests/den-discover-worker.mjs` (12), `tests/den-tools-test.py` (41).
 rows. The first real run is the test: `POST /den/discover {ns: 'aep', dry: true}` after deploy shows what it would
 propose without filing anything.
 
+## 6. Release 6 - Anne's Den (build `2026-11-11.studio-p58`, page `?v=r44`)
+
+The page itself: **Anne's Den** in the Today group of the navigation. One desk at a time - a client, a region and a
+report format. Five desks are seeded from what Phase 0 found: AEP national, AEP Victoria, Firearms, MCA national, MCA
+Victoria. The two MCA desks use AEP's section list because MCA's reports could not be read (0.1); change it in Options.
+
+**Today** sorts the reporting window's rows into the report's own sections - Key narratives, Traditional media
+(syndicated copies folded into one row with the outlets that carried it, Facebook reach where held, a mark on
+subscriber rows), Social (interactions, growth since yesterday's read, the tone of the comments held, the layer that
+collected it), Influencer and political (registered organisations, officials and MPs on their own posts), and
+Upcoming (a date written beside an action, not yet passed; never a guess). A row can be pinned to the report, set
+aside with a reason, or opened at its source. After three set-asides of the same account, site or term the page
+offers a mute, which a person confirms and can remove in Options.
+
+**Nothing critical missed** sits above every tab. It is computed, with no model: Sentinel spikes, narratives that
+became emerging, registered accounts and known actors seen for the first time in a fortnight, an issue running well
+above its own baseline, a registered account's post drawing several times its usual, and - first in the list -
+**any channel the desk relies on that delivered nothing in the window, with the reason**. An empty table must never
+be read as a quiet day.
+
+**Brief** is the report. One button drafts it from the evidence on Today, and says what it costs before it is pressed:
+one model call, counted against twenty a day. The draft comes back checked against the rows it cites:
+
+- a citation the evidence never gave is removed, and the sentence that rested on it is marked "No evidence behind";
+- a figure that is not in the row it cites is flagged;
+- a quotation from a subscriber outlet is cut at thirty words;
+- a rating that is not one of the desk's own words is left blank for a person;
+- the Source List is built from the rows the brief cites. A model never writes it.
+
+These are checks on where a sentence came from, not on whether it is true or well judged: **the analyst's reading of
+the draft is the quality control, and filing is her act.** A brief can also be written entirely by hand.
+
+Editing: each section is a text box; what is typed is kept on the computer at once and saved on leaving the field (or
+Ctrl/Cmd+S); a section a person has edited is never written over by a model unless she asks; if someone else saved
+first, nothing is overwritten and the page asks Keep mine or Take theirs; unsaved words survive a reload. **Mark as
+filed** first lists anything on the strip that the brief neither cites nor names, once. A filed brief is read-only
+until reopened. History lists every save; Compare shows the words added and removed against the last filed brief.
+
+**Getting it out** (decision D5): Copy for the document puts the brief on the clipboard with its headings and links, to
+paste into the Google Doc; Download .md and .html; Copy the Slack summary. Writing to Google Docs is not built.
+
+**Watch** is the register and the proposals of release 5: Preview, Approve under an issue, Dismiss with a reason.
+**Collection** says, channel by channel, how it is read, whether a collector is connected, what it delivered for this
+desk, and what cannot be reached; Collect now starts one job with its console; the signed-in platforms can be switched
+off at once. **Options** are the desk's own: window, cadence, region, the sections and their order, the rating words,
+the least interactions a post needs to show, mutes, table density, and the morning draft (off). A full key can add another desk for the same client there (a second region, or a second analyst's own desk).
+
+**The measure of the work.** `python3 tools/den-backtest.py <folder of exported reports> --desk aep_au --key
+$AXIOM_KEY --save` answers the question the whole project turns on: of the links her filed reports cite, what share
+did AXIOM hold by the end of the day after each report, by channel and by layer, and which did it miss. It reads only;
+`--save` keeps the summary for the Collection tab. **It has not been run: only the owner can run it, on the Mac, after
+deploying, against real reports.**
+
+**Differences from the prompt, and why.**
+- The prompt's `posture` vocabulary is, in her reports, prose; the fixed words are the ratings (level and trend). The
+  check is on the ratings.
+- "Terms bursting against their own baseline" is measured per issue, not per term: the archive tags rows by issue.
+- "Full text on demand" from a board row is not built: the row opens at its source, and subscriber text is read in
+  the Sources view.
+- The accessibility gate for the Den runs in its own harness (`tests/den-browser.mjs`, axe, three widths, both roles)
+  rather than inside `tests/studio-a11y-browser.mjs`, which is built on the Studio's fixture.
+- The scope bar does not drive the Den: a desk is the scope.
+- Today's reads against each platform's cap are counted on the Mac and are not shown.
+
+**Found by the tests and fixed before release** (each has its test): the board blanked on every pin; "Keep mine"
+looped back into the same conflict; a draft could be started twice from another tab or by a second person (now one
+draft at a time a desk a day); a brief started by hand was marked as edited; words typed in a second section while the first was still saving were dropped when the save returned; small labels and table headers failed
+contrast (also the shell's "About this view" link, on every view); links were told apart by colour alone.
+
+**Every route failing, one at a time** (`tests/den-inject-browser.mjs`, 60 cases): each of the page's eight reads was
+made to fail, to answer with a gateway's page, to answer with the wrong shape, to hang and to drop; each of its ten
+writes to fail and to drop. The first run found that a route answering 200 with the wrong shape made the strip say
+"nothing found" and the desk list say "no desk is set up", and that two secondary reads failed silently. All are
+fixed: a malformed answer is always said as a failure, with one press to try again, and nothing typed is lost.
+
+Harnesses: `tests/den-worker.mjs` (17), `tests/den-browser.mjs` (24), `tests/den-inject-browser.mjs` (60),
+`tests/den-tools-test.py` (54). Screenshots of each tab at 1366 x 768 and 1920 x 1080: `node --experimental-sqlite
+tests/den-shots.mjs` (into the ignored `tests/shots/den/`); they were looked at.
+
+**Not verifiable here.** No draft has been written by a real model: the stub writes from the evidence it is sent, so
+the quality of a real draft - whether it reads like her reports - is unknown until the first one on the live worker
+(one call). No live archive was read, so the board has only been seen on invented rows. Clipboard paste into a real
+Google Doc was not tried (the clipboard holds HTML and plain text; what Docs makes of it is Docs').
+
+## 7. Hand-over (11 November 2026)
+
+### 7.1 What exists
+
+| Release | Build | What it is |
+|---|---|---|
+| 1 | p53, page r40 | Her topics, outlets and actors in the lexicon, the source list and the entity register |
+| 2 | p54, r41 | The watch register; one route every collector files through; official Facebook and Instagram routes behind a probe |
+| 3 | p55, r42 | Signed-in collection on the Mac for Facebook, Instagram and YouTube search (switched on by nobody yet) |
+| 4 | p56, r43 | Subscriber outlets through the agency's own subscription, once cleared; newsletters; monitoring exports |
+| 5 | p57 | Keyword discovery: proposed with evidence, approved by a person |
+| 6 | p58, r44 | Anne's Den: the page |
+
+### 7.2 The three layers, in one table
+
+| Layer | What it is | Where it runs | Works today? |
+|---|---|---|---|
+| 1 Official | The platforms' own programmes: the Graph API, the Supermetrics public-data connectors | The worker; a Claude Code session for Supermetrics | **No.** The two Supermetrics sources are not on the licence; the Meta permissions are not granted |
+| 2 Signed in | A person's own signed-in session on the agency's Mac: X and Reddit (existing), Facebook, Instagram, YouTube search, subscriber outlets | The Mac (`tools/reach-agent.py`) | X and Reddit as before. The rest: built, tested against stand-ins, **switched on by nobody** |
+| 3 Keyless | Public routes that need no login: news feeds, X timelines, YouTube feeds, Bluesky, petitions | The worker | Yes, as before, now with her terms and actors |
+
+The rules layer 2 keeps, in code: public content only; a person signs in by hand; a verification stops the sweep and
+pauses the platform for a day; never a captcha solved, a proxy, a second account or a retry past a refusal; credentials
+and sessions stay on the Mac; an unreadable answer is a named failure; no author is read. For news: only a subscription
+the agency holds, only a source a person has cleared, never a paywall worked around.
+
+### 7.3 The decisions, as taken (each is the prompt's default unless the owner changes it)
+
+- **D1 Names.** A social row names only a register account marked as a public actor, on its own post. Done, in
+  `signalsIngest()`. Commenters, repliers and unregistered accounts are never named, on any layer.
+- **D2 Live Supermetrics reads.** Two of eight made, both refused by the licence (0.5). No client account data read.
+- **D3 Layer 1 from the worker.** Built behind configuration that is absent; `/meta/status?probe=1` says what to set.
+- **D4 Model spend.** A draft or one section written again is one call a person starts; `DEN_DAILY_CALLS` 20; the
+  morning draft is off for every desk. Discovery, the strip, the board and Preview make no model call.
+- **D5 Getting the report out.** Copy for the document, `.md`, `.html`, the Slack summary. No write to Google Docs.
+- **D6 Who can use it.** Reading is read role; every write is full. Open access never reads a desk.
+- **D7 Signed-in collection.** Every channel built, none switched on. **Automated reading with a signed-in account is
+  against the terms of Facebook, Instagram, X and (for search) YouTube, and the account used can be challenged,
+  restricted or closed. Never sign in with a profile that administers a client's ad account, Page or Business asset:
+  a restriction on it would lock the agency out of client work.** The tool asks that question before a Facebook or
+  Instagram sign-in and will not continue without an answer. Which platforms to switch on is the owner's decision,
+  made per platform, and should be written into `CLAUDE.md` with who and when.
+- **D8 Subscriber news.** Only through the agency's own subscription, only after a person records on the source what
+  covers reading it for monitoring. Whether a subscription's terms or the agency's copyright licence do cover that is
+  for that person to know: the software records the answer.
+- **D9 Monitoring exports.** The importer is built; using it is the analyst's call.
+
+### 7.4 The owner's steps, in order
+
+**Deploy** (the worker ships from the laptop; the page from `main`):
+
+```
+git checkout main && git merge --ff-only claude/peaceful-gates-g1t4ss && git push origin main
+tools/deploy-worker.sh
+```
+
+**Her key.** A roster entry of her own, full role (she drafts, approves and files): add `"<a key of her own>":
+{"n":"Anne","r":"full"}` to the `AXIOM_KEYS` secret (`npx wrangler secret put AXIOM_KEYS --name newsaus`), and send
+her the sign-in link privately: `docs/index.html#k=<her key>&v=den`.
+
+**The first source sweep.** In Sources, filter to Untried and press Sweep on the 28 outlets added in release 1 (The
+Point, National Tribune, the regional and sector outlets, the campaign sites, the official sources). Their addresses
+are unverified until that sweep: a source that fails needs its address corrected in its drawer.
+
+**Layer 1, when it can work** (not today):
+
+```
+# after "Facebook Public Data" and "Instagram Public Data" are added to the Supermetrics licence, in a Claude Code session:
+python3 tools/den-pull-plan.py --ns aep --key $AXIOM_KEY          # prints the day's queries; run each with the connector, save the answers
+python3 tools/supermetrics2signals.py out.json --ns aep --key $AXIOM_KEY fbposts=fbposts.json igposts=igposts.json ighash=ighash.json urlshares=urlshares.json --push
+# or, for the worker's own route, once Meta grants the permissions (Business Discovery on the agency's Instagram business
+# account; Instagram Public Content Access for hashtags; Page Public Content Access for other organisations' pages):
+#   set the var META_IG_USER to the Instagram business account id, and META_PUBLIC_PAGES=1; then open /meta/status?probe=1
+```
+
+**Layer 2 on the Mac** (read D7 above first; start with YouTube, the lowest risk):
+
+```
+uv tool install https://github.com/Panniantong/Agent-Reach/releases/latest/download/agent-reach.zip && agent-reach setup
+python3 tools/reach-agent.py --channels                  # what this Mac can collect now, and why not
+python3 tools/reach-agent.py --login youtube             # then facebook, instagram: each shows the warning and asks the question
+python3 tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out /tmp/yt.json    # read it: an address, words and counts on every row
+python3 tools/reach-agent.py --key $AXIOM_KEY --install-launchd                                  # keeps the collector connected
+```
+
+**Subscriber outlets.** In Sources, open the outlet, choose how it is read, write what covers reading it for
+monitoring, press Record. Then on the Mac:
+
+```
+pip install playwright && playwright install chromium
+python3 tools/reach-agent.py --login news:afr --url https://www.afr.com/login      # a person signs in; one profile per publisher
+```
+
+**Her past reports** (a folder outside the repository):
+
+```
+python3 tools/den-mine-reports.py ~/Documents/briefs-aep --ns aep                              # what it would propose; nothing sent
+python3 tools/den-mine-reports.py ~/Documents/briefs-aep --ns aep --key $AXIOM_KEY --apply      # proposals; she approves each in Watch
+python3 tools/den-backtest.py ~/Documents/briefs-aep --desk aep_au --key $AXIOM_KEY --save      # the measure of the work
+```
+
+**The first draft.** In Anne's Den, on a desk with a day collected: Brief, Draft the brief (one model call). Read it
+against her own report for the same day. That comparison is the acceptance test no harness can run.
+
+### 7.5 Not verified here, and what verifies each
+
+| Not verified | Why | What verifies it |
+|---|---|---|
+| The live archive: what the board, the strip and discovery show on real rows | The sandbox contacts no live worker | Open the Den after deploy; `POST /den/discover {ns:'aep', dry:true}` |
+| A real draft: whether it reads like her reports | No paid model call is made here; the stub writes from the evidence | One draft on the live worker, read against her report |
+| The 28 seed source addresses | No egress | The first sweep in Sources |
+| The Meta permissions and limits (thirty hashtags a week, Business Discovery, Page Public Content Access) | Meta's documentation was unreachable from the sandbox; written as recalled | `/meta/status?probe=1` once a permission is granted |
+| The Supermetrics public-data field ids | The licence refused both reads | `tools/den-pull-plan.py` and one real answer, once licensed |
+| Every layer 2 channel against its live site, above all which fields carry the counts | No platform was contacted and nothing was signed in to | `reach_social.py <channel> --dry-run --out` on the Mac |
+| Every subscriber read: the sign-in, the page shape, the wall detection | No publisher was contacted | `--login news:<id>`, then Read on one article and the job log |
+| Recall against her reports | Her reports stay outside the repository and the worker is not contacted | `tools/den-backtest.py ... --save` |
+| Pasting the copied brief into a real Google Doc | No Google Doc is written from here | Copy for the document, paste, look |
+| Firefox and WebKit | Not installed in the sandbox (two cross-browser suites skip them, said as skipped) | CI, which installs them |
+
+### 7.6 Asked for and not built, with the reason
+
+- **TikTok, Threads, LinkedIn collection.** No usable route: no agent-reach channel for the first two, a jobs-only one
+  for LinkedIn, and none of her 1,061 links goes to TikTok or Threads (five to LinkedIn). An account on them can be
+  kept in the register as a note; it collects nothing, and the page says so.
+- **Comment text on Facebook and Instagram.** No layer reaches it. Only interaction counts are held.
+- **A Facebook page's own timeline** without Page Public Content Access. Only posts a keyword search finds.
+- **Accounts that recur in search results** as proposals: an unregistered account is never recorded (D1).
+- **Following the links inside a newsletter**, **full text on demand from a board row**, **today's reads against
+  each platform's cap in the page**, **writing to Google Docs**, and **the scope bar driving the Den**: left out as
+  small and separable; each is named where it would have been.
+- **Re-tagging rows collected before a term was approved.** A term tags from its approval onwards.
+

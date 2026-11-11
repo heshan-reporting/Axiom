@@ -152,5 +152,43 @@ except SystemExit as e:
     refused = 'inside the AXIOM repository' in str(e)
 t('a folder inside the repository is refused', refused)
 
+
+# ---- recall against the reports ----
+import datetime, urllib.parse
+bk = load('den_backtest', 'den-backtest.py')
+D = datetime.date
+t('a report\'s day is read from its file name in the forms people use', [bk.report_date(n, '') for n in ('AEP daily 2026-11-10.docx', 'brief_10-11-2026.txt', 'AEP 9 Nov 2026 (final).md', 'weekly 3rd-9th November 2026.pdf', 'untitled.txt')] == [D(2026, 11, 10), D(2026, 11, 10), D(2026, 11, 9), D(2026, 11, 9), None])
+t('or from its Reporting window line', bk.report_date('untitled.txt', 'AEP\nReporting window: 9-10 November 2026\n...') == D(2026, 11, 10) and bk.report_date('x.txt', 'no date at all') is None)
+t('a date that is not a date is not one', bk.report_date('brief 31-02-2026.txt', '') is None)
+t('the links a report cites, each once, without document plumbing', bk.links_of('See https://a.example.com.au/1, https://a.example.com.au/1 and https://x.com/h/status/1. Not http://schemas.openxmlformats.org/x or https://docs.google.com/d/1') == ['https://a.example.com.au/1', 'https://x.com/h/status/1'])
+bt = tempfile.mkdtemp(); PADB = 'This invented report is padded so that it is long enough to count as a report that was read. ' * 4
+open(os.path.join(bt, 'AEP 2026-11-10.txt'), 'w').write(PADB + '\nhttps://a.example.com.au/held https://a.example.com.au/late https://a.example.com.au/never https://x.com/h/status/11')
+open(os.path.join(bt, 'undated.md'), 'w').write(PADB + '\nhttps://a.example.com.au/held')
+ms = lambda y, m, d, h=0: int((datetime.datetime(y, m, d, h) - datetime.datetime(1970, 1, 1)).total_seconds() * 1000)
+HELD = {'https://a.example.com.au/held': ms(2026, 11, 10, 3), 'https://a.example.com.au/late': ms(2026, 11, 14), 'https://x.com/h/status/11': ms(2026, 11, 11, 13)}
+asked = []
+def held(url, key, body=None):
+    asked.append((url, key, body))
+    if body is not None: return {'ok': True, 'backtest': {'share': 1}}
+    us = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query).get('u', [])
+    return {'ok': True, 'results': [{'url': u, 'channel': 'x' if 'x.com' in u else 'news', 'held': u in HELD, 'seen': HELD.get(u, 0), 'layers': [2] if 'x.com' in u else [3] if u in HELD else []} for u in us]}
+said = []
+r = bk.run(bt, 'aep_au', 'https://worker.test/', 'read-k', send=held, out=said.append)
+t('held in time counts; held too late and never held are misses, and the late one is said', (r['links'], r['held'], r['share']) == (5, 3, 60.0) and r['byChannel'] == {'news': {'links': 4, 'held': 2}, 'x': {'links': 1, 'held': 1}} and sorted((m['url'][-5:], m['late']) for m in r['misses']) == [('/late', True), ('never', False)], r)
+t('held to the end of the day after the report: a post seen at 13:00 UTC the next day is in time', r['byLayer'] == {'2': 1, '3': 2})
+t('an undated report is counted against today and named', '1 report had no date' in said[0] and 'lenient' in said[0] and r['reports'] == 2)
+t('it only reads: GET /den/held with the links, nothing posted, and says nothing was saved', all(b is None and '/den/held?u=' in u and k == 'read-k' for u, k, b in asked) and 'Nothing was saved' in said[-1])
+asked.clear(); r2 = bk.run(bt, 'aep_au', 'https://worker.test', 'full-k', save=True, strict=True, send=held, out=said.append)
+posts = [(u, b) for u, k, b in asked if b is not None]
+t('--strict leaves the undated report out', r2['reports'] == 1 and r2['links'] == 4)
+t('--save keeps the counts and the misses for the desk, and no sentence of a report', len(posts) == 1 and posts[0][0] == 'https://worker.test/den/backtest' and posts[0][1]['desk'] == 'aep_au' and posts[0][1]['result']['links'] == 4 and set(posts[0][1]['result']['misses'][0]) == {'url', 'channel'} and 'padded' not in json.dumps(posts) and 'Saved for the aep_au desk' in said[-1])
+for bad, why in ((os.path.join(TOOLS, '..', 'tests'), 'inside the AXIOM repository'), (os.path.join(bt, 'nope'), 'No such folder')):
+    try: bk.run(bad, 'aep_au', 'https://worker.test', 'k', send=held, out=lambda *_: None); got = ''
+    except SystemExit as e: got = str(e)
+    t('refused: ' + why, why in got, got)
+try: bk.run(bt, 'aep_au', 'https://worker.test', '', send=held, out=lambda *_: None); got = ''
+except SystemExit as e: got = str(e)
+t('no key, no lookup', 'A key is needed' in got)
+
 print('\n%d passed, %d failed' % (passed, failed))
 sys.exit(1 if failed else 0)

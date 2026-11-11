@@ -1,0 +1,89 @@
+/* Anne's Den (docs/den.js). The Phase 5 shell rules: flat 8px panels, tables not cards, one hairline strip of figures,
+   tabular mono numbers, small uppercase mono labels. Colours are the app's semantic tokens only; corners are the two
+   radius tokens declared here. Desktop first (1366 wide and up); it stays usable below that, without a design of its own. */
+#den-root{--den-r:8px;--den-r-pill:999px;--den-pad:9px;--den-gap:14px;display:block;color:var(--t1);font-size:13px;line-height:1.5}
+#den-app[data-density="compact"]{--den-pad:5px}
+#den-app[data-density="roomy"]{--den-pad:13px}
+.den-head{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;margin:0 0 12px}
+.den-head h2{font-family:var(--fd);font-size:20px;font-weight:600;color:var(--t0);margin:0;letter-spacing:-.01em}
+.den-head .den-win{font-family:var(--fm);font-size:11px;color:var(--t2)}
+.den-lab{display:flex;flex-direction:column;gap:3px;font-family:var(--fm);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--t2)}
+.den-lab select,.den-lab input,.den-lab textarea,.den-in{font-family:var(--fb);font-size:12.5px;letter-spacing:0;text-transform:none;color:var(--t0);background:var(--x-bg1);border:1px solid var(--line);border-radius:var(--den-r);padding:6px 8px;min-height:32px}
+.den-lab select:focus-visible,.den-lab input:focus-visible,.den-in:focus-visible,.den-ta:focus-visible,.den-row:focus-visible,.den-tab:focus-visible,.den-link:focus-visible{outline:2px solid var(--x-ac-hi);outline-offset:1px}
+.den-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 14px;flex-wrap:wrap}
+.den-tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--t2);font-family:var(--fb);font-size:13px;padding:8px 12px;cursor:pointer;margin-bottom:-1px}
+.den-tab:hover{color:var(--t0)}
+.den-tab[aria-selected="true"]{color:var(--t0);border-bottom-color:var(--x-ac-hi)}
+.den-tab .n{font-family:var(--fm);font-size:10.5px;color:var(--t2);margin-left:6px;font-variant-numeric:tabular-nums}
+.den-spacer{flex:1}
+.den-chip{display:inline-block;font-family:var(--fm);font-size:10px;letter-spacing:.04em;padding:2px 7px;border-radius:var(--den-r-pill);border:1px solid var(--line);color:var(--t2);white-space:nowrap}
+.den-chip.pos{color:var(--x-pos);border-color:var(--x-pos)}
+.den-chip.neg{color:var(--x-neg);border-color:var(--x-neg)}
+.den-chip.warn{color:var(--x-warn);border-color:var(--x-warn)}
+.den-chip.acc{color:var(--x-ac-hi);border-color:var(--x-ac-hi)}
+.den-panel{border:1px solid var(--line);border-radius:var(--den-r);background:var(--sur);margin:0 0 var(--den-gap)}
+.den-panel>header{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line)}
+.den-panel>header h3{font-family:var(--fm);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t1);margin:0;font-weight:600}
+.den-panel>header .den-note{font-size:12px;color:var(--t2)}
+.den-panel>.den-body{padding:10px 12px}
+.den-panel>.den-body.flush{padding:0}
+.den-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.den-table th{text-align:left;font-family:var(--fm);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t2);font-weight:500;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.den-table td{padding:var(--den-pad) 10px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--t1)}
+.den-table tr:last-child td{border-bottom:0}
+.den-table td.num,.den-table th.num{text-align:right;font-family:var(--fm);font-variant-numeric:tabular-nums;white-space:nowrap}
+.den-table td.act{white-space:nowrap;text-align:right}
+.den-row.pinned td:first-child{box-shadow:inset 2px 0 0 var(--x-ac-hi)}
+.den-row:hover td{background:var(--sur2)}
+.den-t{color:var(--t0)}
+.den-sub{display:block;font-size:11.5px;color:var(--t2);margin-top:2px}
+.den-mono{font-family:var(--fm);font-size:11px;font-variant-numeric:tabular-nums;color:var(--t2)}
+.den-link{color:var(--x-ac-hi);text-decoration:underline;text-underline-offset:2px;background:none;border:0;padding:0;font:inherit;cursor:pointer}
+.den-link:hover{color:var(--t0)}
+.den-mini{font-family:var(--fb);font-size:11.5px;padding:3px 8px;min-height:26px;border-radius:var(--den-r);border:1px solid var(--line);background:var(--sur2);color:var(--t1);cursor:pointer}
+.den-mini:hover:not(:disabled){color:var(--t0);border-color:var(--line2)}
+.den-mini:disabled{opacity:.5;cursor:not-allowed}
+.den-mini.on{color:var(--x-ac-hi);border-color:var(--x-ac-hi)}
+.den-mini.primary{background:var(--x-ac-hi);border-color:var(--x-ac-hi);color:var(--x-bg1);font-weight:600}
+.den-mini.danger{color:var(--x-neg);border-color:var(--x-neg)}
+.den-strip{border:1px solid var(--line);border-radius:var(--den-r);margin:0 0 var(--den-gap);background:var(--sur)}
+.den-strip>header{display:flex;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+.den-strip>header h3{font-family:var(--fm);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;margin:0;color:var(--t1);font-weight:600}
+.den-strip ul{list-style:none;margin:0;padding:0}
+.den-strip li{display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:7px 12px;border-bottom:1px solid var(--line)}
+.den-strip li:last-child{border-bottom:0}
+.den-strip .d{color:var(--t2);font-size:12px;display:block}
+.den-state{padding:18px 14px;color:var(--t2);font-size:12.5px;line-height:1.6}
+.den-state b{color:var(--t0);font-weight:600}
+.den-state.err{color:var(--t1);border-left:2px solid var(--x-neg)}
+.den-state .den-mini{margin-left:8px}
+.den-notice{border:1px solid var(--line2);border-left:2px solid var(--x-warn);border-radius:var(--den-r);padding:9px 12px;margin:0 0 var(--den-gap);font-size:12.5px;color:var(--t1);background:var(--sur)}
+.den-notice.bad{border-left-color:var(--x-neg)}
+.den-notice.good{border-left-color:var(--x-pos)}
+.den-notice .den-mini{margin:6px 6px 0 0}
+.den-sec{border-top:1px solid var(--line);padding:12px}
+.den-sec:first-child{border-top:0}
+.den-sec h4{font-family:var(--fd);font-size:14.5px;font-weight:600;color:var(--t0);margin:0 0 6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.den-ta{width:100%;min-height:120px;resize:vertical;font-family:var(--fb);font-size:13.5px;line-height:1.6;color:var(--t0);background:var(--x-bg1);border:1px solid var(--line);border-radius:var(--den-r);padding:9px 10px;box-sizing:border-box}
+.den-ta[readonly]{color:var(--t1);background:transparent}
+.den-flags{margin:6px 0 0;padding:0;list-style:none;font-size:12px;color:var(--t2)}
+.den-flags li{padding:2px 0}
+.den-flags .w{color:var(--x-warn)}
+.den-cites{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0 0}
+.den-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 12px;border-top:1px solid var(--line)}
+.den-save{font-family:var(--fm);font-size:11px;color:var(--t2)}
+.den-save.dirty{color:var(--x-warn)}
+.den-save.bad{color:var(--x-neg)}
+.den-save.ok{color:var(--x-pos)}
+.den-form{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end}
+.den-ev{margin:6px 0 0;padding:0 0 0 14px;font-size:12px;color:var(--t2)}
+.den-ev li{margin:2px 0}
+.den-diff ins{background:transparent;color:var(--x-pos);text-decoration:underline}
+.den-diff del{color:var(--x-neg)}
+.den-kbd{font-family:var(--fm);font-size:11px;border:1px solid var(--line2);border-radius:var(--den-r);padding:1px 6px;color:var(--t0)}
+.den-dialog{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:60}
+.den-dialog>div{background:var(--x-bg2,var(--bg1));border:1px solid var(--line2);border-radius:var(--den-r);padding:16px 18px;max-width:560px;width:calc(100% - 32px);max-height:80vh;overflow:auto}
+.den-dialog h3{margin:0 0 10px;font-family:var(--fd);font-size:16px;color:var(--t0)}
+.den-grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--den-gap)}
+.den-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media(max-width:1100px){.den-grid2{grid-template-columns:1fr}.den-strip li{grid-template-columns:1fr}}

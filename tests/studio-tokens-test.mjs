@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 const DOCS = new URL('../docs/', import.meta.url);
 const read = f => fs.readFileSync(new URL(f, DOCS), 'utf8');
-const files = fs.readdirSync(DOCS).filter(f => /^studio.*\.css$/.test(f));
+const files = fs.readdirSync(DOCS).filter(f => /^(studio.*|den)\.css$/.test(f));   // the Studio's stylesheets, and Anne's Den's
 const TOKEN_FILES = ['studio-skin.css', 'studio-shell.css'];
 let pass = 0, fail = 0; const t = (name, fn) => { try { fn(); pass++; console.log('  ok   ' + name); } catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + e.message); } };
 const ok = (c, m) => { if (!c) throw new Error(m); };

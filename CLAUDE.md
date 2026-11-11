@@ -77,6 +77,14 @@ The agency's monitoring analyst files daily and weekly activist-activity briefs 
 reports are made of (counts and public names only: the reports themselves are client material and never enter the
 repo), the gap list, which collection layer can reach what, and the decisions in force. Built so far:
 
+Three collection layers, and the difference matters: **layer 1** is the platforms' own programmes (the Graph API,
+the Supermetrics public-data connectors) - built, and working for nobody until a licence or a Meta permission
+exists; **layer 2** is a person's own signed-in session on the agency's Mac (`tools/reach-agent.py`: X and Reddit as
+before, and Facebook, Instagram, YouTube search and subscriber outlets, each switched on only by a person signing in
+there); **layer 3** is the keyless public routes the worker reads itself. Every row says which layer brought it
+(`meta.layers`). `DEN.md` s.7 is the hand-over: the owner's commands, what was not verified in the sandbox and what
+verifies each, and what was asked for and not built.
+
 - **Release 1, coverage (build `2026-11-11.studio-p53`).** `CLIENT_ISSUES` grew three `aep` issues, each with its
   own tight trigger, wide matcher and search terms: `gastax` (windfall tax, gas export tax, PRRT - the trigger wants the
   Australian forms, or a windfall or super-profits tax beside gas with no North Sea in the sentence; PRRT beside the
@@ -209,6 +217,68 @@ repo), the gap list, which collection layer can reach what, and the decisions in
     capitalised names that recur across exported reports, proposed as source `reports` with the count only - no
     sentence of a report leaves the Mac; a folder inside the repository is refused; dry by default.
   - Harnesses: `tests/den-discover-worker.mjs` (12), the report cases in `tests/den-tools-test.py` (41).
+- **Release 6, Anne's Den (build `2026-11-11.studio-p58`, page `?v=r44`).** The analyst's workspace: the `v-den`
+  view (React island `docs/den.js`, styles `docs/den.css` on the app's tokens, nav button in the Today group,
+  `AXUI.goto('den', {desk, tab})`). The page is named for Anne; nothing in the data is hers alone.
+  - **Desks.** D1 `den_desks(id, ns, name, region, cadence, window_h, sections, ratings, options, auto_draft,
+    revision)`, seeded `aep_au`, `aep_vic`, `mca_au`, `mca_vic`, `guns_au` (never overwritten). A desk's `sections`
+    (`DEN_FORMAT_A` for AEP and, unread, MCA; `DEN_FORMAT_B` for firearms) and `ratings` (levels, trends, items) are
+    data, edited in Options. `GET /den/desks`; `POST /den/desk/update {id, revision, patch}` (compare-and-swap, `409
+    conflict` with theirs; no `id` plus `ns`, `name` creates a desk).
+  - **Today.** `GET /den/board?desk=&hours=&to=` (`denBoard`): the window's rows that carry the desk's issues or come
+    from its register, in its region (`regionOf`), minus mutes: narratives; media with syndicated copies folded
+    (`denFoldKey`; outlets, Facebook reach, the subscriber mark); social (interactions, growth against yesterday's
+    `sig_eng` snapshot, tone of held comments, layer); registered public actors and MPs apart; **upcoming**
+    (`denUpcoming`: a day and a month written beside an action word, not yet passed, within 120 days - never a
+    guess). `POST /den/pin`, `/den/aside {reason}` (D1 `den_marks`, one desk's; the third set-aside of one account,
+    site or term answers `offer`), `/den/mute` (in `options.mutes`, confirmed by a person).
+  - **Nothing critical missed.** `GET /den/missed?desk=` (`denMissed`, no model): Sentinel spikes, narratives that
+    became emerging, first-seen registered accounts and register entities (fourteen days), an issue at 2.5 times its
+    baseline, a registered account's post at four times its usual, and **collection gaps** - a channel the desk
+    relies on that delivered nothing, with why (not granted, switched off, paused at a verification, no collector).
+    Gaps lead the list: an empty table is never read as a quiet day.
+  - **The brief.** `POST /den/brief {desk, hours, pins, replace}` (full) is **one model call** (a second only when
+    the first answer was not JSON; none after a budget or account refusal), answered through `denHeartbeat` (the
+    request keeps its connection with a space every fifteen seconds, because a job run after the response would be
+    stopped at about thirty). Scope `den` in the `ai_usage` ledger, `DEN_DAILY_CALLS` (20); model `DEN_MODEL` or the
+    brief's. `denEvidence` gives every row an id (`A:` alert, `N:` narrative, `M:` media, `S:` social, `P:` actor,
+    `U:` upcoming, `T:` tone, `K:` memory - the client's namespace and `cmm` only); a subscriber row gives thirty
+    words. `denClean` / `denCleanText` tie the answer back: an id the evidence never gave is removed and its sentence
+    marked `uncited`; a figure its cited line does not carry is `unverified`; a quotation from a subscriber row is
+    cut at thirty words; a rating outside the desk's words is blank; **the Source List is built from the cited rows,
+    never written by a model**. A model cannot file, name an author (social rows carry none) or reach another desk's
+    rows. One draft at a time a desk a day (KV `den_drafting_*`, `409 draft_in_progress`). D1 `den_briefs` (unique
+    desk and day) and `den_brief_revisions` (the last sixty).
+    `POST /den/brief/save {id|desk, revision, sections, ratings}` (a person's edit: checked the same way, marked
+    `edited`; `409 conflict` with theirs; `{desk}` alone starts an empty brief by hand), `/den/brief/section`
+    (one call; `409 edited_section` unless `force`), `/den/brief/file {acknowledge | reopen}` (`409
+    uncited_signals` lists what the strip holds and the brief neither cites nor names, once; a filed brief is
+    final until reopened). `GET /den/brief?desk=&day=&prev=1&format=md|html|slack`, `/den/briefs`,
+    `/den/brief/history`. The morning draft (`denBriefCron`) is off unless a desk's `auto_draft` is set, and runs
+    inside the `AI_AUTOMATION` window.
+  - **Collection.** `GET /den/collection?desk=`: each channel, how it is read, whether the worker reads it itself,
+    the collector's state, what it delivered for this desk, the paid sources and their clearance, the hashtag
+    allowance, the last recall result. `POST /den/collect {desk, channel}` is one bridge job the console tails.
+    `GET /den/held?u=` (read) and `tools/den-backtest.py <folder> --desk aep_au --key [--save]`: of the links in
+    filed reports, the share AXIOM held by the end of the day after each report, by channel and layer, with the
+    misses; `--save` posts the summary to `POST /den/backtest` for the tab. **This is the measure of the work.**
+  - `/den/` joined `AX_CONFIDENTIAL_RX`: open access never reads a desk. Reading is read role; every POST is full.
+  - In the page: the desk select, the strip (foldable), the tabs Today, Brief, Watch (proposals with Preview,
+    Approve under an issue, Dismiss with a reason; the register by kind; add), Collection (Collect now, the
+    switches) and Options. Every panel has loading, empty-with-why, error-with-retry and read-only states, and an
+    error boundary. The Brief keeps this person's unsaved words in localStorage `ax_den_work_<brief>`, saves on
+    leaving a field or Ctrl/Cmd+S, offers Keep mine / Take theirs on a conflict, and restores unsaved words after a
+    reload. Exports: Copy for the document (HTML and plain text on the clipboard), `.md`, `.html`, the Slack
+    summary. Keyboard: j/k, p, x, o, 1-5, Alt+1-5, ?. A dropped connection mid-draft offers Check for the draft.
+  - A read that answers 200 without what was asked for (a gateway's page, an older worker, the wrong shape) is an
+    error in words (`get(path, need)` in `docs/den.js`), never an empty panel: the strip must not say "nothing
+    found" because a route misbehaved.
+  - Harnesses: `tests/den-worker.mjs` (17), `tests/den-browser.mjs` (24, with axe at 1366, 1440 and 1920 for a
+    full and a read-only key), `tests/den-inject-browser.mjs` (60: every read failing, answering a gateway page,
+    answering the wrong shape, hanging and dropping, and every write failing and dropping, one at a time), the
+    recall cases in `tests/den-tools-test.py` (54); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
+    fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
+    1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
 
 ## The research agent
 
