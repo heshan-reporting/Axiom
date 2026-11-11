@@ -259,10 +259,18 @@ def run_native(channel, action, arg, limit, runner=None, timeout=150):
     if _RX_RATE.search(both): raise RateLimited(channel, 600)
     if _RX_BRIDGE.search(both): raise Unavailable(channel, 'bridge', channel + ': opencli cannot reach Chrome (its browser bridge is not connected). Open Chrome, then run: opencli doctor')
     rows = d if isinstance(d, list) else next((d[k] for k in ('items', 'data', 'rows', 'results') if isinstance(d, dict) and isinstance(d.get(k), list)), None)
+    if action == 'whoami':
+        # the answer holds the person's account: only its shape is ever put into words
+        if rows is None and isinstance(d, dict) and 'logged_in' in d: rows = [d]
+        if rows is None:
+            first = (err or '').strip().split('\n')[0][:120]
+            raise ParseFailed(channel, 'opencli %s whoami did not answer as expected (exit %s, %d characters of output, %s)%s' % (
+                channel, code, len(out or ''), 'JSON %s with keys %s' % (type(d).__name__, ', '.join(sorted(d.keys()))[:80] if isinstance(d, dict) else '-') if d is not None else 'not JSON',
+                (': ' + scrub(re.sub(r'\d{6,}|https?://\S+', '<hidden>', first))) if first else ''))
+        return [r for r in rows if isinstance(r, dict) and r.get('logged_in', True) not in (False, 'false', 'False', 0, '0', None, '')]
     if rows is None:
         raise ParseFailed(channel, 'opencli did not answer in JSON for "%s %s" (exit %s): %s' % (channel, action, code, scrub(both.strip()[:160]) or 'nothing'))
     rows = [r for r in rows if isinstance(r, dict)]
-    if action == 'whoami': return rows
     if channel == 'facebook':
         # columns: index, title, text, url. `title` can be a person's or a page's name, so it is never read. A search
         # also returns people and pages: only an address that is a post is kept.
@@ -284,10 +292,15 @@ def run_native(channel, action, arg, limit, runner=None, timeout=150):
 
 def native_signed_in(channel, runner=None):
     """Ask opencli who is signed in, and keep only the answer yes or no: the account's name is never logged or stored."""
+    return native_who(channel, runner)[0]
+
+
+def native_who(channel, runner=None):
+    """(signed in?, why not - in words that name nobody)."""
     try:
-        return len(run_native(channel, 'whoami', '', 0, runner=runner, timeout=90)) > 0
-    except (Unavailable, ParseFailed, RuntimeError):
-        return False
+        return (True, '') if run_native(channel, 'whoami', '', 0, runner=runner, timeout=90) else (False, 'opencli answered that nobody is signed in')
+    except (Unavailable, ParseFailed, RateLimited, Challenge, RuntimeError) as e:
+        return False, scrub(str(e))
 
 
 def read(channel, action, arg, limit, runner=None):
@@ -684,8 +697,9 @@ def login(channel, ask=input, out=print, call=None, who=None, runner=None):
     rc = (call or subprocess.call)(['opencli', channel, 'login'] if nat else [BIN, 'login', channel])
     if rc != 0:
         out('  %s login did not finish (exit %s). Nothing was switched on.' % ('opencli' if nat else 'agent-reach', rc)); return False
-    if nat and not native_signed_in(channel, runner):
-        out('  opencli still reports nobody signed in to %s. Nothing was switched on. Check Chrome and `opencli doctor`, then try again.' % channel); return False
+    seen = native_who(channel, runner) if nat else (True, '')
+    if not seen[0]:
+        out('  The check after signing in did not confirm it (%s). Nothing was switched on. Check Chrome and `opencli doctor`, then try again.' % seen[1]); return False
     st = state(channel); st['switched_on'] = {'by': who or os.environ.get('USER', ''), 'at': int(time.time())}; st.pop('paused_until', None); st.pop('pause_reason', None); st['parse_fails'] = 0
     save_state(channel, st)
     out('  %s is switched on for collection on this Mac. Tell the owner, so it is recorded: %s, %s.' % (channel, st['switched_on']['by'] or 'someone', datetime.now().strftime('%d %B %Y')))

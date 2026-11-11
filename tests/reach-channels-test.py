@@ -398,6 +398,17 @@ t('nothing is switched on when opencli still reports nobody signed in', ok is Fa
 fresh(); r, calls = nat(); said = []; ran = []
 ok = rs.login('facebook', ask=lambda q: 'yes', out=said.append, call=lambda c: ran.append(c) or 0, runner=r)
 t('a profile that administers a client asset stops the sign-in', ok is False and ran == [], said[-1:])
+WHO = {'logged_in': True, 'site': 'facebook', 'user_id': '100000000000001', 'vanity': 'a.person', 'profile_url': 'https://www.facebook.com/a.person/'}
+fresh(); r, _ = nat({('facebook', 'whoami'): (0, json.dumps(WHO) + '\n\n  Update available: v1 -> v2\n', '')})
+t('whoami answering one object, not a list, still counts as signed in', rs.native_who('facebook', r) == (True, ''), rs.native_who('facebook', r))
+r, _ = nat({('facebook', 'whoami'): (0, json.dumps([dict(WHO, logged_in=False)]), '')})
+t('a row that says logged_in false is nobody signed in', rs.native_who('facebook', r)[0] is False)
+r, _ = nat({('facebook', 'whoami'): (0, 'logged_in: true\nuser_id: 100000000000001\nvanity: a.person\n', 'warn 100000000000001 https://www.facebook.com/a.person/')})
+ok, why = rs.native_who('facebook', r)
+t('an answer in another shape says its shape and names nobody', ok is False and 'not JSON' in why and 'a.person' not in why and '100000000000001' not in why, why)
+answers = iter(['no', 'facebook']); said = []
+rs.login('facebook', ask=lambda q: next(answers), out=said.append, call=lambda c: 0, runner=r)
+t('and signing in then says why it was not confirmed', 'not JSON' in said[-1] and 'Nothing was switched on' in said[-1], said[-1:])
 rs._which = lambda b: None
 
 print('\n%d passed, %d failed' % (passed, failed))
