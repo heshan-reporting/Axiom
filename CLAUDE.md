@@ -136,8 +136,8 @@ verifies each, and what was asked for and not built.
     `facebook_public` row is gone). Harnesses: `tests/den-collect-worker.mjs` (18), `tests/den-tools-test.py` (23).
 - **Release 3, the signed-in layer (build `2026-11-11.studio-p55`, page `?v=r42`). Decision D7, 11 November 2026, at
   the owner's request: the Mac collector may read Facebook, Instagram and YouTube keyword search through a person's
-  signed-in session, with agent-reach as the backend. Platforms switched on so far: none recorded - add each here
-  with who and when.** LinkedIn is unchanged: the clients' own pages through LinkedIn's API, no scraping path.
+  signed-in session, with agent-reach as the backend. Platforms switched on so far: Facebook
+  (the owner's Mac, user heshhomefolder, 11 November 2026, through opencli) - add each here with who and when.** LinkedIn is unchanged: the clients' own pages through LinkedIn's API, no scraping path.
   TikTok and Threads are not collected.
   - `tools/reach_social.py` (`CHANNELS`: facebook -> keyword search, instagram -> registered accounts' posts,
     youtube -> keyword search, bridge source `ytsearch`). `status()` / `assert_ready()` check, not assume; `sweep()`

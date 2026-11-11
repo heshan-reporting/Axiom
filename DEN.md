@@ -278,7 +278,8 @@ For the owner, to switch a route on:
 
 Decision D7, as the owner asked on 11 November 2026: the Mac collector reads social platforms through a person's
 signed-in session. **Nothing is switched on by this release.** A platform collects only after a person signs in to it
-on the Mac, having read the warning. Platforms the owner has switched on so far: none recorded.
+on the Mac, having read the warning. Platforms the owner has switched on so far: Facebook (the owner's Mac, user heshhomefolder,
+11 November 2026, through opencli; s.3.2).
 
 **Corrected by the first live run (11 November 2026, the owner's Mac; s.3.1 below).** Agent Reach v1.5.0 as installed
 has no `facebook`, `instagram`, `youtube` or `login` command at all: its commands are `setup, install, configure,
