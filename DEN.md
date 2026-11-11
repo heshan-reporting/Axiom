@@ -983,3 +983,60 @@ npx wrangler secret put OPENAUSTRALIA_KEY --name newsaus # free, openaustralia.o
 
 Then: Sources, Untried, Sweep (the 29 sources and 7 parliament pages); `POST /den/watch/seed` and approve what is
 wanted in Watch; add the three missing bills once their addresses are known.
+
+## 9. A wider net (build `2026-11-11.studio-p62`; no page marker changed)
+
+Asked for by the owner on 11 November 2026: collect more, from more places, on the clients' topics. Built under the
+rules already in force and nothing else: public content, no sign-in, every new site through the public reader
+(robots.txt obeyed, an honest user agent, ten seconds between requests to a host, a refusal not asked again for a
+day), nobody named, and only rows on a client issue.
+
+### 9.1 What exists
+
+| What | How it is read | What is kept |
+|---|---|---|
+| Lexicon sweep, Google News (`lex_gnews`) | Each search term of the lexicon in turn, twelve a run, the last two days | A headline that carries a client issue, the outlet, the term that found it |
+| Lexicon sweep, GDELT (`lex_gdelt`) | Three terms a run, Australian sources only | The same; a headline and a link, never a body |
+| Lemmy (`lemmy_aussiezone`) | The instance's own posts, newest first | A post on an issue or from a politics community; then its comments |
+| Hacker News (`hn_australia`) | Stories of the last three days on "australia" | A story that says Australia and carries an issue; then its comments |
+| Forum feeds (`forum_ozpolitic`, `forum_propertychat`, `forum_bigfooty_pol`) | Each forum's own feed of threads | Threads (a general forum: only those on an issue). The feed gives no replies |
+| Comments under news articles | A WordPress site's own comments interface, for sites already read that way | Comments under an article on a client issue, three hours after it appeared |
+| 89 more outlets and organisations (`wn_*`) | Google News for the site, then its sitemap | Headlines, tagged like every other source |
+| Reddit | 28 subreddits (15 more) | As before, on the Mac |
+| Mastodon | Two more tags | As before |
+
+A failing source now waits longer each time it fails (double, to a day at most), which is what makes room in a tick
+for 96 more sources. The var `SOURCES_PER_TICK` raises the 50 a tick reads.
+
+### 9.2 Not verified here, and what verifies each
+
+| Not verified | Why | What verifies it |
+|---|---|---|
+| Every new address (89 sites, three forum feeds, the Lemmy instance) | No egress from the sandbox; the addresses are from memory of the sites, none was opened | Sources, filter Untried, Sweep. A wrong address fails in words on its own row and backs off |
+| The three forum feed addresses in particular | Forum software moves its feeds; these are the usual addresses for each product | `GET /sources/probe?id=forum_ozpolitic` (and the other two). A feed that is not there: correct `urls.forum` in the drawer, or switch the source off |
+| The answer shapes: Lemmy `post/list` and `comment/list`, the Hacker News search and item, GDELT's article list, WordPress comments | The fixtures in `tests/widenet-worker.mjs` are invented stand-ins written from each service's public documentation | The Probe on each source; the Signals tabs after one Sweep; a shape that differs fails as "no list of posts" and the like, never as an empty success |
+| What each site's robots.txt allows this reader | Not read | The source's last error (`robots.txt ... disallows`) |
+| Whether GDELT answers a Cloudflare address, and how often | Not contacted | `lex_gdelt` in Sources after a day: delivering, or refused and backed off |
+| Which WordPress sites publish comments | Many close the interface or use another comment system | Signals, Web comments, after a day. An article whose site answers no list is marked and not asked again |
+| How long a tick's sweep now takes | Cannot be timed here | `lastSweep.ms` on `GET /sources` (the Sources strip). Raise `SOURCES_PER_TICK` only if it is well under a minute |
+| The database under more rows | The p61 overload was reasoned, not measured, and this release adds rows | Anne's Den opening without `db_busy` a week on. If it returns, the tags-by-item table (s.6.9) is the fix |
+
+### 9.3 The owner's steps for this release
+
+```
+tools/deploy-worker.sh                    # then the page from main
+```
+
+Then, in the app: Sources, filter Untried, Sweep (the new rows); Signals, Lemmy, Sweep (one job reads every community
+source and the comments). A day later: Sources, filter Failing and Dead, and switch off or correct what never
+delivered. To add a forum, a Lemmy instance or a Hacker News word: Sources, Add source, tier Community.
+
+### 9.4 Asked for and not built, with the reason
+
+- **Forums without a feed, read page by page.** Each would need its own parser and many requests a thread; a feed is
+  the forum's own statement of what may be read in bulk.
+- **Disqus, Facebook-plugin and publisher-hosted comments.** No public keyless interface; reading them means driving
+  a browser against a third party's widget.
+- **More Reddit from the cloud, X search, Facebook and Instagram.** Unchanged: the Mac collector, as sections 3 to 3.3
+  say.
+- **Paywalled bodies.** Unchanged: headlines only unless a source is cleared (decision D8).

@@ -1915,7 +1915,10 @@ async function metaCron(env) {
 // (r/victoria is Victoria, British Columbia, and refuses us anyway; r/melbourne
 // is where the state's argument happens.)
 const REDDIT_POLITICS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon', 'auscorp',
-  'melbourne', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs'];
+  'melbourne', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs',
+  // p62, a wider net: the other capitals and regions, and where law, property, money, work and power bills are argued
+  'aus', 'Adelaide', 'canberra', 'tasmania', 'darwin', 'newcastle', 'geelong', 'queensland',
+  'AusProperty', 'AusLegal', 'AusHENRY', 'fiaustralia', 'friendlyjordies', 'AustralianTeachers', 'AusElectricians'];
 // The keyword pass searches all of Reddit, so a generic client term - 'interest
 // rates', 'gas prices', 'question time' - also finds American and British
 // threads, and the wide matchers tag them. A hit outside the watched subs is
@@ -2318,7 +2321,7 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook', 'ytsearch', 'gated', 'hansard', 'blueskyaccounts'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook', 'ytsearch', 'gated', 'hansard', 'blueskyaccounts', 'community'];   // topic: keyword research; sources: a registry sweep; community: Lemmy, Hacker News, forum feeds and the comments underneath; render: a page through a real browser
 const BRIDGE_DESKTOP_ONLY = ['x', 'ytsearch', 'gated'];      // no server-side path exists for these (ytsearch: YouTube keyword search through a collector)
 /* The signed-in layer (DEN.md, layer 2): what a Mac collector may be asked to read, and the switch that stops it. */
 const REACH_SOURCES = ['facebook', 'instagram', 'ytsearch', 'x', 'reddit', 'gated'];
@@ -4610,15 +4613,15 @@ function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) +
 // source_health with the reason.
 // ==============================================================================
 let SOURCES_READY = false;
-const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'wire', 'independent', 'official', 'party', 'polling', 'thinktank', 'sector', 'podcast', 'video', 'newsletter', 'sweep'];
+const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'wire', 'independent', 'official', 'party', 'polling', 'thinktank', 'sector', 'podcast', 'video', 'newsletter', 'community', 'sweep'];
 const SOURCE_JURIS = ['au', 'nsw', 'vic', 'qld', 'wa', 'sa', 'tas', 'act', 'nt'];
-const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render', 'public', 'process'];
+const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render', 'public', 'process', 'lexicon', 'lemmy', 'hn', 'forum'];
 const SOURCES_PER_TICK = 50;        // registry sources swept per cron tick (the core is fetched separately)
 const SOURCE_DEAD_FAILS = 6;        // consecutive failed sweeps before a source is reported dead
 const SOURCE_WINDOW_H = 72;         // dated items older than this are not filed
 const SOURCE_FETCH_MS = 7000;       // per-request abort
 const SOURCE_HEALTH_KEEP = 4000;    // rows kept in source_health
-const SOURCE_SCHED = { core: 30, wire: 30, broadcaster: 30, national: 45, metro: 45, regional: 90, independent: 90, sector: 90, official: 120, party: 120, polling: 180, thinktank: 180, podcast: 240, video: 120, newsletter: 180, sweep: 60 };
+const SOURCE_SCHED = { core: 30, wire: 30, broadcaster: 30, national: 45, metro: 45, regional: 90, independent: 90, sector: 90, official: 120, party: 120, polling: 180, thinktank: 180, podcast: 240, video: 120, newsletter: 180, community: 60, sweep: 60 };
 /* Names, tiers and jurisdictions for the AU_FEEDS core (keys not listed here
  * are Google News sweeps, named from their key). */
 const CORE_META = {
@@ -4960,6 +4963,105 @@ const SOURCE_SEED_EXT = [
   ['sweep_activism', 'Sweep: activist campaigns', 'sweep', 'au', 'activism', { g: 'australia "rising tide" OR "lock the gate" OR "market forces" OR "extinction rebellion" OR "blockade australia"' }],
   ['sweep_firearms', 'Sweep: firearms policy', 'sweep', 'au', '', { g: 'australia firearms OR "gun laws" OR "national firearms register" OR "gun buyback"' }],
   ['sweep_education', 'Sweep: education policy', 'sweep', 'au', '', { g: 'australia "education minister" OR "school funding" OR universities policy OR "early childhood education"' }],
+  // -- p62, a wider net: sweeps that follow the lexicon (x), community sources (l Lemmy instance, k Hacker News words, f a
+  //    forum's own feed), and outlets not yet held (site only: Google News and the site's own sitemap are the routes).
+  //    Nothing here is verified until a sweep proves it --
+  ['lex_gnews', 'Lexicon sweep: Google News', 'sweep', 'au', '', { x: 'gnews' }, 30],
+  ['lex_gdelt', 'Lexicon sweep: GDELT', 'sweep', 'au', '', { x: 'gdelt' }, 60],
+  ['lemmy_aussiezone', 'Lemmy: aussie.zone', 'community', 'au', '', { l: 'aussie.zone' }, 60],
+  ['hn_australia', 'Hacker News: stories that name Australia', 'community', 'au', '', { k: 'australia,australian' }, 180],
+  ['forum_ozpolitic', 'OzPolitic forum', 'community', 'au', 'gov', { f: 'https://www.ozpolitic.com/forum/YaBB.pl?action=RSSrecent' }, 60],
+  ['forum_propertychat', 'PropertyChat forum', 'community', 'au', 'housing', { f: 'https://www.propertychat.com.au/community/index.rss' }, 60],
+  ['forum_bigfooty_pol', 'BigFooty: Australian politics board', 'community', 'au', 'gov', { f: 'https://www.bigfooty.com/forum/forums/australian-politics.229/index.rss' }, 90],
+  ['wn_fifthestate', 'The Fifth Estate', 'sector', 'au', 'housing,energy', { s: 'thefifthestate.com.au' }],
+  ['wn_thedriven', 'The Driven', 'sector', 'au', 'electrify,energy', { s: 'thedriven.io' }],
+  ['wn_onestep', 'One Step Off The Grid', 'sector', 'au', 'energy,electrify', { s: 'onestepoffthegrid.com.au' }],
+  ['wn_arena', 'ARENA', 'official', 'au', 'energy', { s: 'arena.gov.au' }],
+  ['wn_cefc', 'Clean Energy Finance Corporation', 'official', 'au', 'energy', { s: 'cefc.com.au' }],
+  ['wn_aemc', 'Australian Energy Market Commission', 'official', 'au', 'energy,gas', { s: 'aemc.gov.au' }],
+  ['wn_energycouncil', 'Australian Energy Council', 'sector', 'au', 'energy,gas', { s: 'energycouncil.com.au' }],
+  ['wn_energynetworks', 'Energy Networks Australia', 'sector', 'au', 'energy,gas,electrify', { s: 'energynetworks.com.au' }],
+  ['wn_nopta', 'NOPTA', 'official', 'au', 'gasprojects', { s: 'nopta.gov.au' }],
+  ['wn_ga', 'Geoscience Australia', 'official', 'au', 'cm,mining', { s: 'ga.gov.au' }],
+  ['wn_csiro', 'CSIRO', 'official', 'au', 'energy,cm', { s: 'csiro.au' }],
+  ['wn_nswmining', 'NSW Minerals Council', 'sector', 'nsw', 'mining', { s: 'nswmining.com.au' }],
+  ['wn_miningmonthly', 'Australia\'s Mining Monthly', 'sector', 'au', 'mining', { s: 'miningmonthly.com' }],
+  ['wn_marketonline', 'The Market Online', 'sector', 'au', 'mining,cm,econ', { s: 'themarketonline.com.au' }],
+  ['wn_smallcaps', 'Small Caps', 'sector', 'au', 'mining,cm', { s: 'smallcaps.com.au' }],
+  ['wn_businessnewswa', 'Business News (WA)', 'sector', 'wa', 'mining,gasprojects,econ', { s: 'businessnews.com.au' }],
+  ['wn_ahuri', 'AHURI', 'thinktank', 'au', 'housing', { s: 'ahuri.edu.au' }],
+  ['wn_shelter', 'National Shelter', 'sector', 'au', 'housing', { s: 'shelter.org.au' }],
+  ['wn_everybodyshome', 'Everybody\'s Home', 'sector', 'au', 'housing,activism', { s: 'everybodyshome.com.au' }],
+  ['wn_propertyupdate', 'Property Update', 'sector', 'au', 'housing', { s: 'propertyupdate.com.au' }],
+  ['wn_architectureau', 'ArchitectureAU', 'sector', 'au', 'housing,construction', { s: 'architectureau.com' }],
+  ['wn_housingaus', 'Housing Australia', 'official', 'au', 'housing', { s: 'housingaustralia.gov.au' }],
+  ['wn_infraaus', 'Infrastructure Australia', 'official', 'au', 'construction', { s: 'infrastructureaustralia.gov.au' }],
+  ['wn_awu', 'Australian Workers\' Union', 'sector', 'au', 'construction,mining', { s: 'awu.net.au' }],
+  ['wn_etu', 'Electrical Trades Union', 'sector', 'au', 'construction,energy', { s: 'etunational.asn.au' }],
+  ['wn_mua', 'Maritime Union of Australia', 'sector', 'au', 'construction', { s: 'mua.org.au' }],
+  ['wn_amwu', 'Australian Manufacturing Workers\' Union', 'sector', 'au', 'construction', { s: 'amwu.org.au' }],
+  ['wn_unionsnsw', 'Unions NSW', 'sector', 'nsw', 'construction', { s: 'unionsnsw.org.au' }],
+  ['wn_racgp', 'RACGP newsGP', 'sector', 'au', 'pharmacy', { s: 'racgp.org.au' }],
+  ['wn_chf', 'Consumers Health Forum', 'sector', 'au', 'pharmacy', { s: 'chf.org.au' }],
+  ['wn_insightplus', 'MJA InSight+', 'sector', 'au', 'pharmacy', { s: 'insightplus.mja.com.au' }],
+  ['wn_healthservices', 'Health Services Daily', 'sector', 'au', 'pharmacy', { s: 'healthservicesdaily.com.au' }],
+  ['wn_hospitalhealth', 'Hospital and Healthcare', 'sector', 'au', 'pharmacy', { s: 'hospitalhealth.com.au' }],
+  ['wn_sff', 'Shooters, Fishers and Farmers Party', 'party', 'au', 'firearms,hunting', { s: 'shootersfishersandfarmers.org.au' }],
+  ['wn_ssaaqld', 'SSAA Queensland', 'sector', 'qld', 'firearms,hunting', { s: 'ssaaqld.org.au' }],
+  ['wn_ssaawa', 'SSAA Western Australia', 'sector', 'wa', 'firearms,hunting', { s: 'ssaawa.org.au' }],
+  ['wn_ssaasa', 'SSAA South Australia', 'sector', 'sa', 'firearms,hunting', { s: 'ssaasa.org.au' }],
+  ['wn_gma', 'Game Management Authority (Victoria)', 'official', 'vic', 'hunting', { s: 'gma.vic.gov.au' }],
+  ['wn_invasives', 'Invasive Species Council', 'sector', 'au', 'hunting', { s: 'invasives.org.au' }],
+  ['wn_rspca', 'RSPCA Australia', 'sector', 'au', 'hunting', { s: 'rspca.org.au' }],
+  ['wn_animalsaus', 'Animals Australia', 'sector', 'au', 'hunting', { s: 'animalsaustralia.org' }],
+  ['wn_ajp', 'Animal Justice Party', 'party', 'au', 'hunting', { s: 'animaljusticeparty.org' }],
+  ['wn_acic', 'Australian Criminal Intelligence Commission', 'official', 'au', 'firearms', { s: 'acic.gov.au' }],
+  ['wn_afp', 'Australian Federal Police', 'official', 'au', 'firearms', { s: 'afp.gov.au' }],
+  ['wn_wwf', 'WWF-Australia', 'sector', 'au', 'energy,activism', { s: 'wwf.org.au' }],
+  ['wn_aycc', 'Australian Youth Climate Coalition', 'sector', 'au', 'energy,activism', { s: 'aycc.org.au' }],
+  ['wn_accr', 'Australasian Centre for Corporate Responsibility', 'sector', 'au', 'energy,gas,gasprojects,activism', { s: 'accr.org.au' }],
+  ['wn_commsdeclare', 'Comms Declare', 'sector', 'au', 'energy,gas,activism', { s: 'commsdeclare.org' }],
+  ['wn_parentsclimate', 'Parents for Climate', 'sector', 'au', 'energy,electrify,activism', { s: 'parentsforclimate.org' }],
+  ['wn_farmersclimate', 'Farmers for Climate Action', 'sector', 'au', 'energy,regional,activism', { s: 'farmersforclimateaction.org.au' }],
+  ['wn_dea', 'Doctors for the Environment Australia', 'sector', 'au', 'energy,gas,activism', { s: 'dea.org.au' }],
+  ['wn_seedmob', 'Seed Indigenous Youth Climate Network', 'sector', 'au', 'gasprojects,activism', { s: 'seedmob.org.au' }],
+  ['wn_tomorrow', 'Tomorrow Movement', 'sector', 'au', 'energy,activism', { s: 'tomorrowmovement.com' }],
+  ['wn_ss4c', 'School Strike 4 Climate', 'sector', 'au', 'energy,activism', { s: 'schoolstrike4climate.com' }],
+  ['wn_sunrise', 'The Sunrise Project', 'sector', 'au', 'energy,gas,activism', { s: 'sunriseproject.org' }],
+  ['wn_solutions', 'Solutions for Climate Australia', 'sector', 'au', 'energy,gas,activism', { s: 'solutionsforclimate.org.au' }],
+  ['wn_climateworks', 'Climateworks Centre', 'thinktank', 'au', 'energy', { s: 'climateworkscentre.org' }],
+  ['wn_carbonmarket', 'Carbon Market Institute', 'thinktank', 'au', 'energy', { s: 'carbonmarketinstitute.org' }],
+  ['wn_igcc', 'Investor Group on Climate Change', 'thinktank', 'au', 'energy', { s: 'igcc.org.au' }],
+  ['wn_advance', 'Advance', 'sector', 'au', 'gov,energy,activism', { s: 'advanceaustralia.org.au' }],
+  ['wn_spectator', 'The Spectator Australia', 'independent', 'au', 'gov', { s: 'spectator.com.au' }],
+  ['wn_quadrant', 'Quadrant', 'independent', 'au', 'gov', { s: 'quadrant.org.au' }],
+  ['wn_newmatilda', 'New Matilda', 'independent', 'au', 'gov', { s: 'newmatilda.com' }],
+  ['wn_redflag', 'Red Flag', 'independent', 'au', 'gov,activism', { s: 'redflag.org.au' }],
+  ['wn_overland', 'Overland', 'independent', 'au', 'gov', { s: 'overland.org.au' }],
+  ['wn_eurekastreet', 'Eureka Street', 'independent', 'au', 'gov', { s: 'eurekastreet.com.au' }],
+  ['wn_probono', 'Pro Bono Australia', 'sector', 'au', 'gov', { s: 'probonoaustralia.com.au' }],
+  ['wn_thesenior', 'The Senior', 'independent', 'au', 'col', { s: 'thesenior.com.au' }],
+  ['wn_govnews', 'Government News', 'sector', 'au', 'gov', { s: 'governmentnews.com.au' }],
+  ['wn_psnews', 'PS News', 'sector', 'au', 'gov', { s: 'psnews.com.au' }],
+  ['wn_insidelg', 'Inside Local Government', 'sector', 'au', 'gov,regional', { s: 'insidelocalgovernment.com.au' }],
+  ['wn_innovationaus', 'InnovationAus', 'sector', 'au', 'econ', { s: 'innovationaus.com' }],
+  ['wn_itnews', 'iTnews', 'sector', 'au', 'econ', { s: 'itnews.com.au' }],
+  ['wn_ausbiz', 'ausbiz', 'sector', 'au', 'econ', { s: 'ausbiz.com.au' }],
+  ['wn_bna', 'Business News Australia', 'sector', 'au', 'econ', { s: 'businessnewsaustralia.com' }],
+  ['wn_startupdaily', 'Startup Daily', 'sector', 'au', 'econ', { s: 'startupdaily.net' }],
+  ['wn_apra', 'APRA', 'official', 'au', 'econ', { s: 'apra.gov.au' }],
+  ['wn_acma', 'ACMA', 'official', 'au', 'gov', { s: 'acma.gov.au' }],
+  ['wn_esafety', 'eSafety Commissioner', 'official', 'au', 'gov', { s: 'esafety.gov.au' }],
+  ['wn_nacc', 'National Anti-Corruption Commission', 'official', 'au', 'gov', { s: 'nacc.gov.au' }],
+  ['wn_trademin', 'Minister for Trade', 'official', 'au', 'gov,econ', { s: 'trademinister.gov.au' }],
+  ['wn_dssmin', 'Social Services ministers', 'official', 'au', 'gov,col', { s: 'ministers.dss.gov.au' }],
+  ['wn_edumin', 'Education ministers', 'official', 'au', 'gov', { s: 'ministers.education.gov.au' }],
+  ['wn_agmin', 'Minister for Agriculture', 'official', 'au', 'gov,regional', { s: 'minister.agriculture.gov.au' }],
+  ['wn_agsmin', 'Attorney-General\'s ministers', 'official', 'au', 'gov,firearms', { s: 'ministers.ag.gov.au' }],
+  ['wn_pmcmin', 'PM and Cabinet ministers', 'official', 'au', 'gov', { s: 'ministers.pmc.gov.au' }],
+  ['wn_finmin', 'Minister for Finance', 'official', 'au', 'gov,econ', { s: 'financeminister.gov.au' }],
+  ['wn_wamedia', 'WA Government media statements', 'official', 'wa', 'gov,gasprojects,mining', { s: 'wa.gov.au/government/media-statements' }],
+  ['wn_nswmedia', 'NSW Government media releases', 'official', 'nsw', 'gov', { s: 'nsw.gov.au/media-releases' }],
 ];
 function sourceMethods(urls, explicit) {
   urls = urls || {};
@@ -4977,6 +5079,10 @@ function sourceMethods(urls, explicit) {
   if (urls.home) m.push('html');
   if (urls.site || urls.gnews) m.push('gnews');
   if (urls.home) m.push('render');
+  if (urls.lexicon) m.push('lexicon');
+  if (urls.lemmy) m.push('lemmy');
+  if (urls.hn) m.push('hn');
+  if (urls.forum) m.push('forum');
   return m;
 }
 /** The whole seed: the AU_FEEDS core (fetched by buildAllNews, health mirrored
@@ -4994,6 +5100,7 @@ function sourceSeed() {
     if (u.r) urls.rss = u.r; if (u.w) urls.wp = u.w; if (u.j) urls.json = u.j; if (u.m) urls.sitemap = u.m;
     if (u.p) urls.podcast = u.p; if (u.h) urls.home = u.h; if (u.s) urls.site = u.s; if (u.g) urls.gnews = u.g;
     if (u.y) urls.youtube = u.y; if (u.n) urls.substack = u.n; if (u.b) urls.public = u.b;
+    if (u.x) urls.lexicon = u.x; if (u.l) urls.lemmy = u.l; if (u.k) urls.hn = u.k; if (u.f) urls.forum = u.f;
     out.push({ id: r[0], name: r[1], tier: r[2], juris: r[3], issues: String(r[4] || '').split(/[,\s]+/).filter(Boolean), methods: sourceMethods(urls, null), urls, schedule: r[6] || SOURCE_SCHED[r[2]] || 60, core: false });
   });
   PROCESS_SEED.forEach(r => out.push({ id: r[0], name: r[1], tier: 'official', juris: r[2], issues: String(r[6] || '').split(',').filter(Boolean), methods: ['process'], urls: { process: r[5], ptype: r[4], house: r[3] }, schedule: 360, core: false }));
@@ -5108,11 +5215,14 @@ function sourceSanitize(b, cur) {
   let urls = cur ? Object.assign({}, cur.urls) : {};
   if (u) {
     urls = {};
-    ['rss', 'wp', 'json', 'sitemap', 'home', 'substack', 'public', 'process'].forEach(k => { const v = String(u[k] || '').trim(); if (/^https?:\/\/\S+$/.test(v)) urls[k] = v.slice(0, 400); });
+    ['rss', 'wp', 'json', 'sitemap', 'home', 'substack', 'public', 'process', 'forum'].forEach(k => { const v = String(u[k] || '').trim(); if (/^https?:\/\/\S+$/.test(v)) urls[k] = v.slice(0, 400); });
     if (u.youtube) { const y = String(u.youtube).trim(); const idm = y.match(/(UC[\w-]{22})/); if (idm) urls.youtube = idm[1]; else if (/^@?[\w.-]{2,60}$/.test(y.replace(/^https?:\/\/(www\.)?youtube\.com\//, ''))) urls.youtube = y.replace(/^https?:\/\/(www\.)?youtube\.com\//, '').replace(/^@?/, '@').slice(0, 64); }
     if (u.site) urls.site = String(u.site).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '').slice(0, 120);
     if (u.gnews) urls.gnews = String(u.gnews).trim().slice(0, 200);
     if (u.podcast) urls.podcast = String(u.podcast).trim().slice(0, 120);
+    if (u.lexicon && (u.lexicon === 'gnews' || u.lexicon === 'gdelt')) urls.lexicon = u.lexicon;
+    if (u.lemmy && LEMMY_HOST_RX.test(String(u.lemmy).trim().toLowerCase())) urls.lemmy = String(u.lemmy).trim().toLowerCase();
+    if (u.hn) { const wds = String(u.hn).split(',').map(x => x.replace(/[^A-Za-z0-9 -]/g, '').trim()).filter(Boolean).slice(0, 4); if (wds.length) urls.hn = wds.join(','); }
     if (urls.process) { if (PROCESS_TYPES.indexOf(String(u.ptype)) >= 0) urls.ptype = String(u.ptype); if (u.house && PROCESS_HOUSES.indexOf(String(u.house)) >= 0) urls.house = String(u.house); }
   }
   const name = String(b.name || (cur && cur.name) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
@@ -5226,13 +5336,13 @@ async function srcRss(env, src) {
 }
 async function srcWp(env, src) {
   const base = String(src.urls.wp).replace(/\/+$/, '');
-  const f = await srcFetch(base + '/wp-json/wp/v2/posts?per_page=20&_fields=link,title,date_gmt,excerpt,content', 'application/json');
+  const f = await srcFetch(base + '/wp-json/wp/v2/posts?per_page=20&_fields=id,link,title,date_gmt,excerpt,content', 'application/json');
   if (!f.ok) return srcFail(f);
   let arr; try { arr = JSON.parse(f.text); } catch (e) { return { ok: false, items: [], status: f.status, detail: 'HTTP 200 but not JSON (REST API disabled?)' }; }
   if (!Array.isArray(arr)) return { ok: false, items: [], status: f.status, detail: arr && arr.message ? String(arr.message).slice(0, 100) : 'unexpected JSON shape' };
   const items = arr.map(p => ({ title: stripHtml((p.title && p.title.rendered) || ''), link: p.link || '',
     date: p.date_gmt ? String(p.date_gmt).replace(/Z?$/, 'Z') : (p.date || ''),
-    desc: stripHtml((p.excerpt && p.excerpt.rendered) || '').slice(0, 240), text: stripHtml((p.content && p.content.rendered) || '').slice(0, 6000) })).filter(i => i.title && i.link);
+    desc: stripHtml((p.excerpt && p.excerpt.rendered) || '').slice(0, 240), text: stripHtml((p.content && p.content.rendered) || '').slice(0, 6000), wpid: Number(p.id) > 0 ? Number(p.id) : 0 })).filter(i => i.title && i.link);
   return items.length ? { ok: true, items, status: f.status, full: true } : { ok: false, items: [], status: f.status, detail: 'REST API answered with no posts' };
 }
 async function srcJson(env, src) {
@@ -5301,14 +5411,18 @@ async function srcHtml(env, src) {
   const items = listingLinks(f.text, f.url || src.urls.home);
   return items.length ? { ok: true, items, status: f.status, undated: true } : { ok: false, items: [], status: f.status, detail: 'page had no article-shaped links (built client-side? render would show)' };
 }
+/** Google News items: the outlet is the suffix of each headline; it moves to its own field. */
+function gnewsItems(xml) {
+  return parseFeedXml(xml).map(it => {
+    const m = it.title.match(/\s[-\u2013\u2014]\s([^-\u2013\u2014]{2,60})$/);
+    return { title: m ? it.title.slice(0, m.index).trim() : it.title, link: it.link, date: it.date || '', desc: '', outlet: m ? m[1].trim() : '' };
+  });
+}
 async function srcGnews(env, src) {
   const q = src.urls.gnews || ('site:' + String(src.urls.site || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, ''));
   const f = await srcFetch('https://news.google.com/rss/search?q=' + encodeURIComponent(q + ' when:2d') + '&hl=en-AU&gl=AU&ceid=AU:en', 'application/rss+xml,application/xml,text/xml,*/*', 8000);
   if (!f.ok) return srcFail(f);
-  const items = parseFeedXml(f.text).map(it => {
-    const m = it.title.match(/\s[-\u2013\u2014]\s([^-\u2013\u2014]{2,60})$/);
-    return { title: m ? it.title.slice(0, m.index).trim() : it.title, link: it.link, date: it.date || '', desc: '', outlet: m ? m[1].trim() : '' };
-  });
+  const items = gnewsItems(f.text);
   return items.length ? { ok: true, items, status: f.status } : { ok: false, items: [], status: f.status, detail: 'Google News has nothing indexed for ' + q.slice(0, 60) + ' in 2 days' };
 }
 /** A rendered page, for sites built entirely in the browser. Two back ends:
@@ -5343,6 +5457,194 @@ async function srcRender(env, src) {
   const items = listingLinks(r.html, src.urls.home);
   return items.length ? { ok: true, items, status: 200, undated: true } : { ok: false, items: [], status: 200, detail: 'rendered page had no article-shaped links' };
 }
+/* ---- A wider net (p62): lexicon sweeps and community sources -------------------------------------------------------
+ * Four more methods, all keyless and all public. `lexicon` asks a news index for the next few of the lexicon's own
+ * search terms in turn (issueQueries(): every client's terms and the terms a person approved on a desk) and keeps only
+ * what carries a client issue, so the net follows the lexicon instead of a list of mastheads. `lemmy`, `hn` and `forum`
+ * read public community threads; communityEnrich() reads the comments under the ones that drew any, and under WordPress
+ * articles on an issue. Every request to a site added here goes through pubFetch: robots.txt obeyed, the honest user
+ * agent, ten seconds a host, a refusal backed off for a day. Nobody is named: no creator, author or commenter is read.
+ * Every address and answer shape is as each service documents it, and unverified until a live sweep (DEN.md s.9). */
+const LEX_PER_RUN = { gnews: 12, gdelt: 3 };
+const LEMMY_HOST_RX = /^[a-z0-9][a-z0-9.-]{1,80}\.[a-z]{2,24}(\/c\/[a-z0-9_]{1,60})?$/;
+const COMMUNITY_POLITICS_RX = /politic|auspol/i;
+const WP_COMMENT_WAIT_MS = 3 * 3600000;      // an article is asked for its comments once, after readers have had this long
+function mdText(s) { return String(s || '').replace(/```[\s\S]*?```/g, ' ').replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^[>#]+\s*/gm, '').replace(/\*+|~~|`/g, '').replace(/\s+/g, ' ').trim(); }
+function gdeltDate(s) { const m = String(s || '').match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/); return m ? m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6] + 'Z' : ''; }
+function pubJson(f) { if (!f || !f.ok) return null; try { return JSON.parse(f.text); } catch (e) { return null; } }
+const pubStop = f => !!(f && (f.refused || /^robots/.test(String(f.code || ''))));     // the host said no: ask it nothing more this run
+/** The next n search terms of the lexicon for this source, in turn. A probe reads without moving the cursor. */
+async function lexTerms(env, src, n) {
+  const all = issueQueries(); if (!all.length) return [];
+  const key = 'lex_cur_' + src.id; const cur = (Number(await kvGet(env.AXIOM_KV, key)) || 0) % all.length;
+  const out = []; for (let i = 0; i < Math.min(n, all.length); i++) out.push(all[(cur + i) % all.length]);
+  if (!src.probe) await kvPut(env.AXIOM_KV, key, String((cur + out.length) % all.length), 30 * 86400);
+  return out;
+}
+/** Source Registry method `lexicon` (urls.lexicon = gnews | gdelt): the lexicon's own terms asked of a news index, a
+ *  few a run. Only a headline that carries a client issue is kept; the term that found it rides on the row (meta.q). */
+async function srcLexicon(env, src) {
+  const engine = String((src.urls || {}).lexicon || '') === 'gdelt' ? 'gdelt' : 'gnews';
+  const terms = await lexTerms(env, src, LEX_PER_RUN[engine]);
+  if (!terms.length) return { ok: false, items: [], detail: 'the lexicon has no search terms' };
+  const items = []; const errs = []; const seen = new Set(); let answered = 0; let refused = false;
+  for (const term of terms) {
+    let got = [];
+    if (engine === 'gnews') {
+      const f = await srcFetch('https://news.google.com/rss/search?q=' + encodeURIComponent(auQualify(term) + ' when:2d') + '&hl=en-AU&gl=AU&ceid=AU:en', 'application/rss+xml,application/xml,text/xml,*/*', 8000);
+      if (!f.ok) { errs.push(term + ': ' + String(srcFail(f).detail || 'failed')); continue; }
+      answered++; got = gnewsItems(f.text);
+    } else {
+      const q = '"' + String(term).replace(/["()]/g, ' ').replace(/\s+/g, ' ').trim() + '" sourcecountry:australia';
+      const f = await pubFetch(env, 'https://api.gdeltproject.org/api/v2/doc/doc?query=' + encodeURIComponent(q) + '&mode=artlist&format=json&maxrecords=75&timespan=2d&sort=datedesc', { accept: 'application/json,*/*', ms: 12000 });
+      if (!f.ok) { errs.push(term + ': ' + String(f.error)); if (pubStop(f)) { refused = !!f.refused; break; } continue; }
+      const d = pubJson(f);
+      if (!d || typeof d !== 'object' || (d.articles != null && !Array.isArray(d.articles))) { errs.push(term + ': GDELT did not answer with a list (not JSON): ' + f.text.replace(/\s+/g, ' ').slice(0, 70)); continue; }
+      answered++; got = (d.articles || []).map(a => ({ title: String((a && a.title) || '').replace(/\s+/g, ' ').trim(), link: String((a && a.url) || ''), date: gdeltDate(a && a.seendate), desc: '', outlet: String((a && a.domain) || '').slice(0, 60) }));
+    }
+    got.forEach(it => { if (!it.link || seen.has(it.link) || !issueTag(it.title).length) return; seen.add(it.link); it.q = term; items.push(it); });
+  }
+  if (!answered) return { ok: false, items: [], status: 0, refused, detail: ('no term was answered. ' + errs.slice(0, 2).join('; ')).slice(0, 160) };
+  return { ok: true, items, status: 200, quiet: !items.length, asked: terms.length, answered };
+}
+/** Source Registry method `lemmy` (urls.lemmy = an instance's host, or host/c/community): the instance's own posts,
+ *  newest first. A post is kept when it carries a client issue or comes from a politics community. */
+async function srcLemmy(env, src) {
+  const spec = String((src.urls || {}).lemmy || '').trim().toLowerCase();
+  if (!LEMMY_HOST_RX.test(spec)) return { ok: false, items: [], detail: 'lemmy needs an instance host, e.g. aussie.zone, or host/c/community' };
+  const host = spec.split('/')[0]; const comm = (spec.match(/\/c\/([a-z0-9_]+)$/) || [])[1] || '';
+  const f = await pubFetch(env, 'https://' + host + '/api/v3/post/list?' + (comm ? 'community_name=' + encodeURIComponent(comm) : 'type_=Local') + '&sort=New&limit=50', { accept: 'application/json', ms: 12000 });
+  if (!f.ok) return { ok: false, items: [], status: f.status, refused: !!f.refused, detail: String(f.error).slice(0, 160) };
+  const d = pubJson(f);
+  if (!d || !Array.isArray(d.posts)) return { ok: false, items: [], status: 200, detail: 'the instance answered with no list of posts' + (d && d.error ? ' (' + String(d.error).slice(0, 60) + ')' : '') };
+  const now = Date.now(); const cut = now - SOURCE_WINDOW_H * 3600000; const rows = []; const items = [];
+  d.posts.forEach(x => { const p = (x && x.post) || {}; const c = (x && x.counts) || {}; const cm = (x && x.community) || {};
+    if (!p.id || !p.name || p.deleted || p.removed) return; const ts = Date.parse(p.published || '') || 0; if (!ts || ts < cut || ts > now + 86400000) return;
+    const body = mdText(p.body).slice(0, 2400); const issues = issueTag(p.name + ' ' + body);
+    if (!issues.length && !COMMUNITY_POLITICS_RX.test(String(cm.name || ''))) return;
+    const url = 'https://' + host + '/post/' + p.id;
+    const row = engRow(sigThreadRow({ platform: 'lemmy', id: 'lm' + arcHash(host) + '_' + p.id, title: String(p.name), body, page: String(cm.name || '').slice(0, 60), page_name: String(cm.title || cm.name || '').slice(0, 80), score: Number(c.score) || 0, comments: Number(c.comments) || 0, link: /^https?:\/\//.test(String(p.url || '')) ? String(p.url) : '', url, ts, via: 'worker' }), { likes: Number(c.upvotes) || Number(c.score) || 0, replies: Number(c.comments) || 0 });
+    row.meta.source = src.id; row.meta.lemmy = { host, post: Number(p.id) };
+    rows.push(row); items.push({ title: String(p.name), link: url, date: new Date(ts).toISOString(), desc: body.slice(0, 200) }); });
+  return { ok: true, items, status: 200, quiet: !items.length, kind: 'sig_thread', rows, extra: [] };
+}
+/** Source Registry method `hn` (urls.hn = words, comma separated): Hacker News stories of the window found on each
+ *  word, kept when the story itself names Australia and carries a client issue. */
+async function srcHn(env, src) {
+  const words = String((src.urls || {}).hn || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 4);
+  if (!words.length) return { ok: false, items: [], detail: 'hn needs one or more words to search for' };
+  const now = Date.now(); const since = Math.floor((now - SOURCE_WINDOW_H * 3600000) / 1000); const seen = new Set(); const rows = []; const items = []; const errs = []; let answered = 0; let refused = false;
+  for (const wd of words) {
+    const f = await pubFetch(env, 'https://hn.algolia.com/api/v1/search_by_date?query=' + encodeURIComponent(wd) + '&tags=story&hitsPerPage=50&numericFilters=' + encodeURIComponent('created_at_i>' + since), { accept: 'application/json', ms: 12000 });
+    if (!f.ok) { errs.push(String(f.error)); if (pubStop(f)) { refused = !!f.refused; break; } continue; }
+    const d = pubJson(f); if (!d || !Array.isArray(d.hits)) { errs.push('no list of stories'); continue; }
+    answered++;
+    d.hits.forEach(h => { const id = String((h && h.objectID) || '').replace(/[^0-9]/g, ''); const title = String((h && h.title) || '').replace(/\s+/g, ' ').trim(); if (!id || !title || seen.has(id)) return;
+      const body = stripHtml(String(h.story_text || '')).slice(0, 2400); const text = title + ' ' + body;
+      if (!issueTag(text).length || !AU_QUERY_RX.test(text)) return; seen.add(id);
+      const ts = (Number(h.created_at_i) || 0) * 1000 || now; const url = 'https://news.ycombinator.com/item?id=' + id;
+      const row = engRow(sigThreadRow({ platform: 'hn', id: 'hn' + id, title, body, page: 'news.ycombinator.com', page_name: 'Hacker News', score: Number(h.points) || 0, comments: Number(h.num_comments) || 0, link: /^https?:\/\//.test(String(h.url || '')) ? String(h.url) : '', url, ts, q: wd, via: 'worker' }), { likes: Number(h.points) || 0, replies: Number(h.num_comments) || 0 });
+      row.meta.source = src.id; row.meta.hn = id;
+      rows.push(row); items.push({ title, link: url, date: new Date(ts).toISOString(), desc: '' }); });
+  }
+  if (!answered) return { ok: false, items: [], status: 0, refused, detail: ('Hacker News search did not answer. ' + errs.slice(0, 2).join('; ')).slice(0, 160) };
+  return { ok: true, items, status: 200, quiet: !items.length, kind: 'sig_thread', rows, extra: [] };
+}
+/** Source Registry method `forum` (urls.forum = a forum's own feed of threads): each thread as a community row. A
+ *  general forum keeps only the threads on a client issue; a board the registry lists under an issue keeps them all.
+ *  A feed says who started a thread; that is not read. */
+async function srcForum(env, src) {
+  const f = await pubFetch(env, (src.urls || {}).forum, { accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*', ms: 12000 });
+  if (!f.ok) return { ok: false, items: [], status: f.status, refused: !!f.refused, detail: String(f.error).slice(0, 160) };
+  const posts = parseFeedXml(f.text);
+  if (!posts.length) return { ok: false, items: [], status: 200, detail: 'the forum feed had no threads' };
+  const now = Date.now(); const cut = now - SOURCE_WINDOW_H * 3600000; const host = siteHost((src.urls || {}).forum); const rows = []; const items = []; const seen = new Set();
+  const board = Array.isArray(src.issues) && src.issues.length > 0;      // the registry says this board is about a client issue: it is on topic as a whole
+  posts.forEach(p => { const title = String(p.title || '').replace(/\s+/g, ' ').trim(); const link = String(p.link || '').trim(); if (title.length < 6 || !/^https?:\/\//.test(link) || seen.has(link)) return;
+    const t = Date.parse(p.date || ''); if (!isNaN(t) && t > 0 && (t < cut || t > now + 86400000)) return;
+    const text = stripHtml(String(p.desc || '')).slice(0, 1200); if (!board && !issueTag(title + ' ' + text).length) return; seen.add(link);
+    const row = sigThreadRow({ platform: 'forum', id: 'f' + arcHash(link), title, body: text, page: host, page_name: String(src.name || host).slice(0, 80), score: 0, comments: 0, url: link, ts: (!isNaN(t) && t > 0) ? t : now, via: 'worker' });
+    row.meta.source = src.id; rows.push(row); items.push({ title, link, date: p.date || '', desc: '' }); });
+  return { ok: true, items, status: 200, quiet: !items.length, kind: 'sig_thread', rows, extra: [] };
+}
+/** The comments under what the community methods found, and under WordPress articles on a client issue (the standard
+ *  public comments route of a site whose posts are already read that way). Each thread and each article is asked once.
+ *  No commenter's name is read. A few a run, a host at a time, under the public rules. */
+async function communityEnrich(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {}); const now = Date.now();
+  const out = { ok: true, platform: 'community', threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [], by: { lemmy: { threads: 0, comments: 0 }, hn: { threads: 0, comments: 0 }, web: { threads: 0, comments: 0 } } };
+  if (!env.MIND_DB) return Object.assign(out, { ok: false, detail: 'Bind the D1 database as MIND_DB.' });
+  await ensureArchive(env); await ensureSources(env);
+  const per = Math.min(Math.max(parseInt(opts.max, 10) || 4, 1), 12); const since = now - SOURCE_WINDOW_H * 3600000;
+  const mark = (id, k, v) => env.MIND_DB.prepare("UPDATE arc_items SET meta=json_set(COALESCE(meta,'{}'), '$." + k + "', ?) WHERE id=?").bind(v, id).run();
+  const trows = []; const crows = [];
+  for (const plat of ['lemmy', 'hn']) {
+    const rows = ((await env.MIND_DB.prepare("SELECT id, title, url, meta FROM arc_items WHERE kind='sig_thread' AND src=? AND ts>? AND COALESCE(json_extract(meta,'$.comments'),0)>0 AND json_extract(meta,'$.enriched') IS NULL ORDER BY json_array_length(COALESCE(json_extract(meta,'$.issues'),'[]')) DESC, json_extract(meta,'$.comments') DESC LIMIT ?").bind(plat, since, per).all()).results) || [];
+    for (const r of rows) {
+      let m = {}; try { m = JSON.parse(r.meta || '{}'); } catch (e) { m = {}; }
+      const thread = { id: String(m.id || ''), title: r.title, url: r.url, issues: Array.isArray(m.issues) ? m.issues : [] }; const got = [];
+      if (plat === 'lemmy') {
+        const lm = m.lemmy || {}; if (!lm.host || !lm.post) { await mark(r.id, 'enriched', 0); continue; }
+        await log('cmd', 'GET ' + lm.host + '/api/v3/comment/list?post_id=' + lm.post);
+        const f = await pubFetch(env, 'https://' + lm.host + '/api/v3/comment/list?post_id=' + encodeURIComponent(lm.post) + '&sort=Top&limit=50&max_depth=6', { accept: 'application/json', ms: 12000 });
+        const d = pubJson(f); if (!f.ok || !d || !Array.isArray(d.comments)) { out.errors.push('lemmy: ' + (f.ok ? 'no list of comments' : f.error)); await log('err', out.errors[out.errors.length - 1]); if (pubStop(f)) break; continue; }
+        d.comments.forEach(x => { const c = (x && x.comment) || {}; if (!c.id || c.deleted || c.removed) return; const body = mdText(c.content); if (!body) return;
+          got.push({ id: 'lm' + arcHash(lm.host) + '_c' + c.id, body, score: Number((x.counts || {}).score) || 0, depth: Math.max(0, String(c.path || '').split('.').length - 2), ts: Date.parse(c.published || '') || now }); });
+      } else {
+        const id = String(m.hn || '').replace(/[^0-9]/g, ''); if (!id) { await mark(r.id, 'enriched', 0); continue; }
+        await log('cmd', 'GET hn.algolia.com/api/v1/items/' + id);
+        const f = await pubFetch(env, 'https://hn.algolia.com/api/v1/items/' + id, { accept: 'application/json', ms: 12000 });
+        const d = pubJson(f); if (!f.ok || !d || typeof d !== 'object') { out.errors.push('hn: ' + (f.ok ? 'no story' : f.error)); await log('err', out.errors[out.errors.length - 1]); if (pubStop(f)) break; continue; }
+        const walk = (arr, depth) => (Array.isArray(arr) ? arr : []).forEach(c => { if (!c || got.length >= 80) return; const body = stripHtml(String(c.text || '')); if (body && c.id) got.push({ id: 'hn' + c.id, body, score: 0, depth, ts: (Number(c.created_at_i) || 0) * 1000 || now }); walk(c.children, depth + 1); });
+        walk(d.children, 0);
+      }
+      got.forEach(c => crows.push(engRow(sigCommentRow({ platform: plat, id: c.id, body: c.body, score: c.score, depth: c.depth, ts: c.ts, via: 'worker' }, thread), { likes: c.score })));
+      await mark(r.id, 'enriched', got.length); out.by[plat].threads++; out.by[plat].comments += got.length; await log('out', got.length + ' comments');
+    }
+  }
+  // WordPress sites already read through their own public API: the comments under an article on a client issue
+  const wps = ((await env.MIND_DB.prepare("SELECT id, name, urls FROM sources WHERE method_ok='wp' AND enabled=1 LIMIT 80").all()).results) || [];
+  const base = {}; wps.forEach(s => { let u = {}; try { u = JSON.parse(s.urls || '{}'); } catch (e) { u = {}; } if (u.wp) base[s.id] = { root: String(u.wp).replace(/\/+$/, ''), name: s.name }; });
+  const ids = Object.keys(base);
+  if (ids.length) {
+    const arts = ((await env.MIND_DB.prepare("SELECT id, src, title, url, ts, meta FROM arc_items WHERE kind='news' AND src IN (" + ids.map(() => '?').join(',') + ") AND ts>? AND ts<? AND json_extract(meta,'$.wp') IS NOT NULL AND json_extract(meta,'$.wpc') IS NULL AND json_array_length(COALESCE(json_extract(meta,'$.issues'),'[]'))>0 ORDER BY ts DESC LIMIT ?").bind(...ids, since, now - WP_COMMENT_WAIT_MS, per).all()).results) || [];
+    for (const a of arts) {
+      let m = {}; try { m = JSON.parse(a.meta || '{}'); } catch (e) { m = {}; } const b = base[a.src]; if (!b || !(Number(m.wp) > 0)) continue;
+      await log('cmd', 'GET ' + b.root + '/wp-json/wp/v2/comments?post=' + m.wp);
+      const f = await pubFetch(env, b.root + '/wp-json/wp/v2/comments?post=' + Number(m.wp) + '&per_page=50&_fields=id,parent,date_gmt,content', { accept: 'application/json', ms: 12000 });
+      const d = pubJson(f); if (!f.ok || !Array.isArray(d)) { out.errors.push(a.src + ': ' + (f.ok ? 'no list of comments (comments may be closed to the public API)' : f.error)); await log('err', out.errors[out.errors.length - 1]); if (f.ok || !pubStop(f)) await mark(a.id, 'wpc', -1); continue; }
+      const thread = { id: 'wp' + arcHash(a.url), title: a.title, url: a.url, issues: Array.isArray(m.issues) ? m.issues : [] }; let n = 0;
+      d.forEach(c => { const body = stripHtml(String((c && c.content && c.content.rendered) || '')); if (!c || !c.id || !body) return; n++;
+        crows.push(sigCommentRow({ platform: 'web', id: thread.id + '_' + c.id, body, score: 0, depth: Number(c.parent) > 0 ? 1 : 0, ts: Date.parse(String(c.date_gmt || '').replace(/Z?$/, 'Z')) || now, via: 'worker' }, thread)); });
+      if (n) { const row = sigThreadRow({ platform: 'web', id: thread.id, title: a.title, body: '', page: a.src, page_name: String(b.name || a.src).slice(0, 80), score: 0, comments: n, link: a.url, url: a.url + '#comments', ts: a.ts, via: 'worker' }); row.meta.source = a.src; row.meta.item = a.id; trows.push(row); out.by.web.threads++; out.by.web.comments += n; }
+      await mark(a.id, 'wpc', n); await log('out', n + ' comments under ' + String(a.title).slice(0, 60));
+    }
+  }
+  out.threads = out.by.lemmy.threads + out.by.hn.threads + out.by.web.threads; out.comments = crows.length; out.hostile = crows.filter(r => r.tone < 0).length;
+  const f = await sigFile(env, trows, crows); out.threadRows = f.threadRows; out.commentRows = f.commentRows;
+  await log('info', 'read ' + out.threads + ' threads: filed ' + f.commentRows + ' new comments');
+  return out;
+}
+/** The community job (Signals tabs Lemmy, Hacker News, Forums, Web comments; POST /social/sweep {platform:'community'};
+ *  socialCron): the registry's community sources first (a Lemmy instance, Hacker News, a forum's own feed), then the
+ *  comments under what they and the WordPress sites found. `max` bounds the comment reads, since one host is asked
+ *  once in ten seconds: a job the worker runs after a response has about thirty, and the tick finishes the rest. */
+const COMMUNITY_METHODS = ['lemmy', 'hn', 'forum'];
+async function communitySweep(env, p, log) {
+  p = p || {}; log = log || (async () => {});
+  if (!(await ensureSources(env))) return { ok: false, platform: 'community', error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  const rows = ((await env.MIND_DB.prepare("SELECT id, methods FROM sources WHERE enabled=1 AND core=0 AND tier='community' ORDER BY COALESCE(last_try,0) LIMIT 40").all()).results) || [];
+  const ids = rows.filter(r => { let m = []; try { m = JSON.parse(r.methods || '[]'); } catch (e) { m = []; } return m.some(x => COMMUNITY_METHODS.indexOf(x) >= 0); }).map(r => r.id).slice(0, 12);
+  let sources = { ran: 0, succeeded: 0, failed: 0, items: 0, added: 0 }; let note = '';
+  if (ids.length) {
+    await log('info', 'reading ' + ids.length + ' community source' + (ids.length === 1 ? '' : 's') + ' from the Source Registry');
+    const sw = await sourceSweep(env, { ids, log });
+    sources = { ran: sw.ran || 0, succeeded: sw.succeeded || 0, failed: sw.failed || 0, items: sw.items || 0, added: sw.added || 0 };
+  } else { note = 'No community source is switched on in the Source Registry (tier community: a Lemmy instance, Hacker News, a forum feed). Add one in Sources.'; await log('info', note); }
+  await log('info', 'reading the comments under the threads and articles held');
+  const en = await communityEnrich(env, { max: p.max || 2, log });
+  return Object.assign(en, { sources, threadRows: (en.threadRows || 0) + sources.added, note: note || undefined });
+}
 async function srcMethod(env, m, src) {
   const u = src.urls || {};
   if (m === 'rss') return u.rss ? srcRss(env, src) : { ok: false, items: [], skipped: true, detail: 'no feed url' };
@@ -5357,6 +5659,10 @@ async function srcMethod(env, m, src) {
   if (m === 'render') return u.home ? srcRender(env, src) : { ok: false, items: [], skipped: true, detail: 'no page to render' };
   if (m === 'public') return u.public ? srcPublic(env, src) : { ok: false, items: [], skipped: true, detail: 'no public page' };
   if (m === 'process') return u.process ? srcProcess(env, src) : { ok: false, items: [], skipped: true, detail: 'no parliament page' };
+  if (m === 'lexicon') return u.lexicon ? srcLexicon(env, src) : { ok: false, items: [], skipped: true, detail: 'no news index named' };
+  if (m === 'lemmy') return u.lemmy ? srcLemmy(env, src) : { ok: false, items: [], skipped: true, detail: 'no Lemmy instance' };
+  if (m === 'hn') return u.hn ? srcHn(env, src) : { ok: false, items: [], skipped: true, detail: 'no words for Hacker News' };
+  if (m === 'forum') return u.forum ? srcForum(env, src) : { ok: false, items: [], skipped: true, detail: 'no forum feed' };
   return { ok: false, items: [], skipped: true, detail: 'unknown method ' + m };
 }
 function srcTarget(src, m) {
@@ -5365,6 +5671,8 @@ function srcTarget(src, m) {
   if (m === 'youtube') return 'youtube.com/feeds/videos.xml ' + (u.youtube || ''); if (m === 'substack') return String(u.substack || '').replace(/\/+$/, '') + '/feed';
   if (m === 'sitemap') return u.sitemap || ('https://' + siteHost(u.site) + '/robots.txt'); if (m === 'podcast') return 'itunes.apple.com/search "' + (u.podcast || '') + '"';
   if (m === 'html' || m === 'render') return u.home || ''; if (m === 'public') return u.public || ''; if (m === 'process') return u.process || ''; if (m === 'gnews') return 'news.google.com/rss/search ' + (u.gnews || ('site:' + siteHost(u.site)));
+  if (m === 'lexicon') return (u.lexicon === 'gdelt' ? 'api.gdeltproject.org' : 'news.google.com/rss/search') + ' <the next ' + (LEX_PER_RUN[u.lexicon] || LEX_PER_RUN.gnews) + ' lexicon terms>';
+  if (m === 'lemmy') return String(u.lemmy || '').split('/')[0] + '/api/v3/post/list'; if (m === 'hn') return 'hn.algolia.com/api/v1/search_by_date ' + (u.hn || ''); if (m === 'forum') return u.forum || '';
   return '';
 }
 /** Run one source through its method chain. Normally stops at the first method
@@ -5410,16 +5718,30 @@ function sourceRows(src, hit, now) {
     const meta = { reg: 1, source: src.id, tier: src.tier, juris: src.juris, method: hit.method, issues: issueTag(title + ' ' + (it.desc || '') + ' ' + text.slice(0, 1500)), dated: dated ? 1 : 0 };
     if (e.parties) meta.parties = e.parties;
     if (it.outlet) meta.outlet = String(it.outlet).slice(0, 60);
+    if (it.q) meta.q = String(it.q).slice(0, 80);                 // the lexicon term that found it
+    if (it.wpid) meta.wp = it.wpid;                               // the site's own post number: what its comments hang from
     const claim = claimOf(title + '. ' + (it.desc || '') + ' ' + text.slice(0, 3000)); if (claim) meta.claim = claim;
     if (text.length > 600) { meta.full = 1; meta.ft = hit.method; }
     rows.push({ src: src.id, title: title.slice(0, 500), body: (text.length > (it.desc || '').length ? text : String(it.desc || '')).slice(0, 6000), url: link, tone: e.tone, meta, ts: dated ? t : now });
   }
   return rows;
 }
+/** How long until a source is due again. One failure is a blip and changes nothing; from the second failure in a row
+ *  the wait doubles, a dead source (SOURCE_DEAD_FAILS) is asked once a day, and a source that delivers is back on its
+ *  schedule. A failing source walks every method it has, so it is the dearest run there is: backing it off is what
+ *  leaves room in a tick for the sources that deliver. */
+function sourceWaitMs(s, ok) {
+  const base = Math.max(15, Number(s.schedule) || 60) * 60000; if (ok) return base;
+  const fails = (Number(s.fails) || 0) + 1; if (fails >= SOURCE_DEAD_FAILS) return 86400000;
+  return Math.min(86400000, base * Math.pow(2, Math.max(0, fails - 1)));
+}
+/** Registry sources read in one tick: SOURCES_PER_TICK, or the var of that name (1 to 150) once the owner has seen how
+ *  long a sweep takes (`lastSweep.ms` on GET /sources). */
+function sourcesPerTick(env) { const n = parseInt(String((env && env.SOURCES_PER_TICK) || ''), 10); return n > 0 ? Math.min(150, n) : SOURCES_PER_TICK; }
 function sourceStmts(env, run, added, now) {
   const s = run.src; const stmts = [];
   // a host that refused the public reader is not due again for a day: the refusal is its health, and it backs off
-  const next = now + (run.tried.some(t => t.refused) ? PUB_BACKOFF_S * 1000 : Math.max(15, Number(s.schedule) || 60) * 60000);
+  const next = now + (run.tried.some(t => t.refused) ? PUB_BACKOFF_S * 1000 : sourceWaitMs(s, run.ok));
   const short = run.tried.map(t => t.method + ':' + (t.ok ? t.n : (t.skipped ? 'skip' : 'x' + (t.status || '')))).join(' ');
   const detail = run.ok ? short : (short + ' | ' + run.tried.filter(t => !t.skipped).map(t => t.method + ' ' + t.detail).join('; ')).slice(0, 400);
   if (run.ok) {
@@ -5462,7 +5784,7 @@ async function sourceSweep(env, opts) {
   if (!(await ensureSources(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
   const now = Date.now();
   const ids = Array.isArray(opts.ids) ? opts.ids.map(sourceIdClean).filter(Boolean).slice(0, 150) : [];
-  const limit = Math.min(Math.max(parseInt(opts.limit, 10) || (opts.all ? 150 : SOURCES_PER_TICK), 1), 150);
+  const limit = Math.min(Math.max(parseInt(opts.limit, 10) || (opts.all ? 150 : sourcesPerTick(env)), 1), 150);
   let rows = [];
   if (ids.length) { for (let i = 0; i < ids.length; i += 90) { const part = ids.slice(i, i + 90); rows.push(...((await env.MIND_DB.prepare('SELECT * FROM sources WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results || [])); } }   // P49 (F8): under D1's 100 bound variables
   else if (opts.all) rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE enabled=1 AND core=0 ORDER BY COALESCE(last_try,0) LIMIT ?').bind(limit).all()).results || [];
@@ -5540,7 +5862,7 @@ async function sourcesList(env, filt) {
   const q = String(filt.q || '').toLowerCase();
   const list = rows.filter(s => (!filt.tier || s.tier === filt.tier) && (!filt.juris || s.juris === filt.juris) && (!filt.status || s.status === filt.status)
     && (!filt.issue || s.issues.indexOf(filt.issue) >= 0) && (!q || (s.name + ' ' + s.id + ' ' + JSON.stringify(s.urls)).toLowerCase().indexOf(q) >= 0));
-  return { ok: true, sources: list, summary, lastSweep: last, tiers: SOURCE_TIERS, juris: SOURCE_JURIS, methods: SOURCE_METHODS, deadAfter: SOURCE_DEAD_FAILS, perTick: SOURCES_PER_TICK, renderConfigured: renderConfigured(env) };
+  return { ok: true, sources: list, summary, lastSweep: last, tiers: SOURCE_TIERS, juris: SOURCE_JURIS, methods: SOURCE_METHODS, deadAfter: SOURCE_DEAD_FAILS, perTick: sourcesPerTick(env), renderConfigured: renderConfigured(env) };
 }
 
 // ==============================================================================
@@ -5837,10 +6159,10 @@ async function renderJob(env, job, log) {
 // their own posts. What each platform needs, what it can and cannot reach and
 // how it fared last time is one table: socialCoverage().
 // ==============================================================================
-const SOCIAL_PLATFORMS = ['bluesky', 'mastodon', 'youtube', 'petitions', 'instagram', 'facebook', 'hansard', 'blueskyaccounts'];   // worker-side sweeps the Signals view can start as jobs
+const SOCIAL_PLATFORMS = ['bluesky', 'mastodon', 'youtube', 'petitions', 'instagram', 'facebook', 'hansard', 'blueskyaccounts', 'community'];   // worker-side sweeps the Signals view can start as jobs
 const BSKY_API = 'https://public.api.bsky.app/xrpc/';
 const MASTO_INSTANCES = ['aus.social', 'mastodon.au', 'theblower.au', 'mastodon.social'];
-const MASTO_TAGS = ['auspol', 'springst', 'nswpol', 'qldpol', 'wapol', 'sapol', 'taspol', 'ntpol', 'actpol', 'ausvotes', 'insiders', 'qanda'];
+const MASTO_TAGS = ['auspol', 'springst', 'nswpol', 'qldpol', 'wapol', 'sapol', 'taspol', 'ntpol', 'actpol', 'ausvotes', 'insiders', 'qanda', 'vicpol', 'auspolitics'];
 const X_TIMELINE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
 const X_TWEET = 'https://cdn.syndication.twimg.com/tweet-result';
 const YT_FEED = 'https://www.youtube.com/feeds/videos.xml?channel_id=';
@@ -6403,7 +6725,7 @@ async function socialCoverage(env, probe) {
       await ensureArchive(env);
       const rows = (await db.prepare("SELECT COALESCE(json_extract(meta,'$.platform'), src) p, kind, SUM(ts>?) d1, COUNT(*) d7, MAX(ts) newest FROM arc_items WHERE ts>? AND kind IN ('sig_thread','sig_comment','petition','transcript','reddit_thread','reddit_comment','forum','oppads','hansard') GROUP BY p, kind").bind(now - 86400000, now - 7 * 86400000).all()).results || [];
       rows.forEach(r => {
-        const p = /^reddit_/.test(r.kind) ? 'reddit' : r.kind === 'forum' ? 'forums' : r.kind === 'oppads' ? 'adlibrary' : (r.p || 'unknown');
+        const p = /^reddit_/.test(r.kind) ? 'reddit' : (r.kind === 'forum' || r.p === 'forum') ? 'forums' : r.kind === 'oppads' ? 'adlibrary' : (r.p || 'unknown');
         const c = counts[p] = counts[p] || { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 };
         const isC = /comment/.test(r.kind);
         if (isC) { c.comments24 += r.d1 || 0; c.comments7 += r.d7 || 0; } else { c.threads24 += r.d1 || 0; c.threads7 += r.d7 || 0; }
@@ -6429,7 +6751,10 @@ async function socialCoverage(env, probe) {
     { id: 'instagram', label: 'Instagram public accounts and hashtags', method: 'layer 1: Business Discovery and hashtag search through the Graph API, or the Supermetrics Instagram Public Data connector in a session; layer 2: a signed-in collector on a Mac', keys: 'META_TOKEN + META_IG_USER (the agency\'s Instagram business account id); hashtag search also needs Instagram Public Content Access (Meta app review)', configured: igConfigured(env) || agents.some(a => a.live && (a.sources || []).indexOf('instagram') >= 0), where: igConfigured(env) ? 'worker' : 'mac', reach: 'registered business and creator accounts\' posts with likes and comment counts; recent posts on up to ' + IG_HASHTAG_LIMIT + ' hashtags a week', unreachable: 'comment text, personal accounts, stories, keyword search beyond hashtags' },
     { id: 'threads', label: 'Threads', method: 'none available', keys: 'Threads API is for the account\'s own posts; keyword search needs the threads_keyword_search permission (app review)', configured: false, where: 'none', reach: '', unreachable: 'no public route to others\' posts; the web pages are built client-side behind a login prompt' },
     { id: 'tiktok', label: 'TikTok', method: 'oEmbed for a single post url', keys: 'none; the Research API needs approval', configured: true, where: 'worker', reach: 'title and thumbnail of a given post', unreachable: 'profiles, search and comments: signed requests from a browser session (a Mac render job could read a profile; the Research API is approval-gated)' },
-    { id: 'forums', label: 'Forums', method: 'RSS, Discourse JSON and listing pages (AU_FORUMS)', keys: 'none', configured: true, where: 'worker', reach: 'new threads on Whirlpool, OzBargain, BigFooty, HotCopper, PropertyChat and Discourse boards', unreachable: 'reply text on most boards' },
+    { id: 'forums', label: 'Forums', method: 'forum feeds as Source Registry sources (urls.forum) under the public reader: robots.txt obeyed; and the older listing readers', keys: 'none', configured: true, where: 'worker', reach: 'new threads on the listed forums, as community rows with their issues; older readers: Whirlpool, BigFooty, HotCopper, PropertyChat titles', unreachable: 'reply text on most boards; who posted is never read' },
+    { id: 'lemmy', label: 'Lemmy', method: 'an instance\'s public API (post and comment lists) under the public reader: robots.txt obeyed, ten seconds a request', keys: 'none', configured: true, where: 'worker', reach: 'posts on a client issue or from a politics community on each listed instance (urls.lemmy), and the comments under them', unreachable: 'instances whose robots.txt disallows the API; who posted is never read' },
+    { id: 'hn', label: 'Hacker News', method: 'the public search API, stories that name Australia, under the public reader (robots.txt obeyed)', keys: 'none', configured: true, where: 'worker', reach: 'stories on a client issue and their comment trees', unreachable: 'anything that does not say Australia in the story itself' },
+    { id: 'web', label: 'Site comments', method: 'the standard public comments route of WordPress sites already read through their own API, under the public reader (robots.txt obeyed)', keys: 'none', configured: true, where: 'worker', reach: 'readers\' comments under articles on a client issue, each article asked once', unreachable: 'sites that use a comment service, close their comments to the API or put them behind a sign-in; who commented is never read' },
     { id: 'petitions', label: 'Petitions', method: 'the parliaments\' e-petition pages, daily', keys: 'none', configured: true, where: 'worker', reach: PETITION_SITES.map(s => s.name).join(', ') + ': title, text, signatures a day, closing date; campaigns\' own counters, marked self-reported', unreachable: 'change.org (bot-walled from servers; add a petition url as a source to try)' },
     { id: 'substack', label: 'Substack', method: 'publication feed plus the comments API, as Source Registry sources (urls.substack)', keys: 'none', configured: true, where: 'worker', reach: 'posts and comment threads of any listed publication; discovery through /social/substack/search', unreachable: '' },
   ];
@@ -6462,7 +6787,8 @@ async function socialSweep(env, params, log) {
     case 'facebook': return fbPublicSweep(env, p);
     case 'hansard': return hansardSweep(env, Object.assign({ force: true }, p));
     case 'blueskyaccounts': return bskyActorSweep(env, p);
-    default: return { ok: false, error: 'unknown_platform', detail: 'platform must be one of bluesky, blueskyaccounts, mastodon, youtube, petitions, hansard, x, instagram, facebook.' };
+    case 'community': return communitySweep(env, p, log);
+    default: return { ok: false, error: 'unknown_platform', detail: 'platform must be one of bluesky, blueskyaccounts, mastodon, youtube, petitions, hansard, community, x, instagram, facebook.' };
   }
 }
 function socialSummary(r) {
@@ -6494,6 +6820,7 @@ async function socialCron(env) {
   await run('mastodon', () => mastodonSweep(env, { threads: 15, days: 3 }));
   await run('x', () => xSyndSweep(env, { max: 30, days: 3 }));
   await run('youtube', () => youtubeEnrich(env, { max: 6 }));
+  await run('community', () => communityEnrich(env, { max: 4 }));
   // the Graph routes run only when what they need is in place: a refusal every two hours tells nobody anything
   if (igConfigured(env)) await run('instagram', () => instagramSweep(env, { max: 15 }));
   if (env.META_TOKEN && String(env.META_PUBLIC_PAGES || '') === '1') await run('facebook', () => fbPublicSweep(env, { max: 15 }));
@@ -7451,7 +7778,7 @@ const DEN_SLOW_TTL = 900;
 function denBusy(e) { return /D1 DB is overloaded|Too many resources consumed|too many requests queued|D1_ERROR[^.]*overload|database is locked|SQLITE_BUSY/i.test(String((e && e.message) || e || '')); }
 const DEN_BUSY = { ok: false, error: 'db_busy', retry: true, detail: 'The database is busy right now: too much is reading it at once. Nothing was changed. Try again in a few seconds.' };
 const DEN_MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-const DEN_CH_NAME = { news: 'News', x: 'X', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', reddit: 'Reddit', bluesky: 'Bluesky', tiktok: 'TikTok', threads: 'Threads', linkedin: 'LinkedIn', mastodon: 'Mastodon' };
+const DEN_CH_NAME = { news: 'News', x: 'X', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', reddit: 'Reddit', bluesky: 'Bluesky', tiktok: 'TikTok', threads: 'Threads', linkedin: 'LinkedIn', mastodon: 'Mastodon', lemmy: 'Lemmy', hn: 'Hacker News', forum: 'Forums', web: 'Site comments', substack: 'Substack' };
 const DEN_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 let DESKS_READY = false;
 async function ensureDesks(env) {
@@ -9692,7 +10019,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-11.studio-p61';
+const AXIOM_BUILD = '2026-11-11.studio-p62';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -17681,7 +18008,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { communityEnrich, communitySweep, sourcesPerTick, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -20348,7 +20675,7 @@ const AXIOM_WORKER = {
         if (path === '/sources/add') {
           const s = sourceSanitize(sb, null);
           if (!s.id || !s.name) return jsonResp({ error: 'missing_name', detail: 'Give the source a name.' }, 400);
-          if (!s.methods.length) return jsonResp({ error: 'missing_urls', detail: 'Give at least one way in: urls.rss, urls.wp, urls.json, urls.sitemap, urls.home, urls.public, urls.site, urls.gnews or urls.podcast.' }, 400);
+          if (!s.methods.length) return jsonResp({ error: 'missing_urls', detail: 'Give at least one way in: urls.rss, urls.wp, urls.json, urls.sitemap, urls.home, urls.public, urls.site, urls.gnews urls.podcast, urls.lexicon (gnews or gdelt), urls.lemmy (an instance), urls.hn (words) or urls.forum (a forum feed).' }, 400);
           const had = await sourceGet(env, s.id);
           if (had && had.core) return jsonResp({ error: 'core_source', detail: s.id + ' is a core feed; edit it with /sources/update.' }, 400);
           await sourceUpsert(env, s, Date.now());

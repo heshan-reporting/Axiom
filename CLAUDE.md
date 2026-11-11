@@ -771,6 +771,53 @@ X tab has **Read account timelines**. Harnesses in the session scratchpad:
 `social-worker.mjs` (16 route and cron tests over the SQLite-backed D1),
 `signals-browser.mjs` (7 browser tests).
 
+## A wider net (build `2026-11-11.studio-p62`; no page marker changed; `DEN.md` s.9 is the hand-over)
+
+At the owner's request (11 November 2026): more news, more community threads and the comments under them, on the
+clients' topics, because the engines have nothing to analyse without rows. Everything here is a keyless public route
+under the rules already in force: a new site is read only through `pubFetch` (robots.txt, the honest user agent, ten
+seconds a host, a refusal backed off a day), nobody is named, and a row is kept because it is on a client issue, not
+because it exists. **Every address and every answer shape below is unverified until a live sweep proves it.**
+
+- **Four Source Registry methods** (so each is a row in `sources` with health, a probe and a switch):
+  `lexicon` (`urls.lexicon` = `gnews` | `gdelt`; seed key `x`) asks a news index for the lexicon's own search terms
+  (`issueQueries()`: the client terms plus each desk's approved terms), `LEX_PER_RUN` = 12 a run on Google News and 3
+  on GDELT (Australian sources only, through `pubFetch`), in turn by cursor (KV `lex_cur_<source>`; a probe does not
+  move it); only a headline that carries a client issue is kept, with `meta.q` the term that found it.
+  `lemmy` (`urls.lemmy` = host or host/c/community; key `l`): an instance's own posts, kept when on an issue or from a
+  politics community, `meta.lemmy {host, post}`. `hn` (`urls.hn` = words; key `k`): Hacker News stories that say
+  Australia and carry an issue. `forum` (`urls.forum` = a forum's own feed; key `f`): a general forum keeps only
+  threads on a client issue, a board the registry lists under an issue keeps them all. The three community methods
+  file `sig_thread` rows (platforms `lemmy`, `hn`, `forum`), tier `community` (hourly).
+- **Comments** - `communityEnrich(env, {max})`: Lemmy comment lists, Hacker News comment trees, and the comments under
+  a WordPress article on a client issue (the site's own `/wp-json/wp/v2/comments?post=`, only for sources that already
+  deliver through `wp`, once an article is three hours old; `srcWp` now carries the post number as `meta.wp`). The
+  article becomes a `sig_thread` of platform `web` (url `<article>#comments`) and the comments hang from it. Each
+  thread and article is asked once (`meta.enriched`, `meta.wpc`). No commenter's name is read.
+  `communitySweep(env, p, log)` reads the registry's community sources and then the comments: bridge source and
+  `/social/sweep` platform `community`, which is what the Sweep button on the new Signals tabs starts; `socialCron`
+  runs the comments each time (the registry sweep reads the sources).
+- **The seed** grew by 96 (481 sources in the table, 86 of them the core feeds): `lex_gnews`, `lex_gdelt`, `lemmy_aussiezone`, `hn_australia`, three
+  forum feeds (`forum_*`), and 89 outlets, peak bodies, unions, campaign groups, agencies and ministers not held
+  before (`wn_*`: site only, so Google News and the site's own sitemap are the routes; no feed address was guessed).
+  `REDDIT_POLITICS` is 28 subreddits (the other capitals and regions, law, property, money, work), published to the
+  Mac by `GET /reddit/issues` and mirrored in `tools/reach-reddit.py` `SUBS`; `MASTO_TAGS` gained `vicpol` and
+  `auspolitics`.
+- **Room for it.** The registry wants about 6,100 source runs a day and a tick reads 50 (2,400 a day), so it was
+  already behind. `sourceWaitMs(s, ok)`: one failure changes nothing, from the second in a row the wait doubles, a dead
+  source (six) is asked once a day, a success restores the schedule - a failing source walks every method it has and
+  was retried at full pace forever. `sourcesPerTick(env)`: the var `SOURCES_PER_TICK` (1 to 150) raises what a tick
+  reads once `lastSweep.ms` on `GET /sources` shows there is time. **More rows make every archive scan dearer** (the
+  p61 overload): the tags-by-item table proposed in `DEN.md` s.6.9 is still the lasting fix and is not built.
+- In the app: Signals tabs Lemmy, Hacker News, Forums and Web comments (one Sweep job, `community`); the Coverage
+  table rows `lemmy`, `hn`, `web` and a rewritten `forums`; the Sources view labels the methods and the Community
+  tier and has fields for a forum feed, a Lemmy instance and Hacker News words, so a person adds a community source
+  there.
+- Not built, and why: a forum with no feed of its own is not read page by page (the older listing readers still
+  take thread titles from Whirlpool, BigFooty, HotCopper and PropertyChat as kind `forum`); Disqus, Facebook-plugin and publisher-hosted comment systems are not read (no public,
+  keyless interface); Reddit and X stay where they were (the Mac). Nothing signed-in was added.
+- Harnesses: `tests/widenet-worker.mjs` (11), the community tabs case in `tests/signals-browser.mjs` (9).
+
 ## Sentiment by party, person, organisation and topic (Phase 3)
 
 Every number is a sum over rows in D1 `sent_entities`, each pointing at the

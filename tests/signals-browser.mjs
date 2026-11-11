@@ -20,6 +20,10 @@ const threads = {
   facebook: [thread('f1', 'facebook', 'Harbour Watch: the fuel tax credit petition has passed 40,000 signatures', { channel: 'harbourwatch', q: '', score: 420, comments: 61, eng: { likes: 420, comments: 61, shares: 88 }, eng_at: NOW - 30 * 60e3, layers: [1, 2], actor: { id: 'w1', name: 'Harbour Watch', kind: 'org' } }),
     thread('f2', 'facebook', 'Someone in Sydney on the diesel rebate', { q: 'diesel rebate', score: 12, comments: 2, eng: { likes: 12, comments: 2, shares: 0 }, eng_at: NOW - 3 * H, layers: [2], actor: null })],
   instagram: [thread('i1', 'instagram', 'Hands off our fuel, say the truckies', { q: '', hashtag: 'auspol', score: 900, comments: 40, eng: { likes: 900, comments: 40, views: 15000 }, eng_at: NOW - H, layers: [1], actor: null })],
+  lemmy: [thread('lm1', 'lemmy', 'Gas export tax: the Senate vote is this week', { channel: 'australia', issues: ['gastax'], q: '' })],
+  hn: [thread('hn1', 'hn', 'Australia weighs a domestic gas reservation', { issues: ['gas'], q: '' })],
+  forum: [thread('fo1', 'forum', 'Negative gearing: what happens to rents', { channel: 'forum.example', issues: ['housing'], q: '' })],
+  web: [thread('wb1', 'web', 'Sixty-day dispensing: pharmacists respond', { channel: 'Example Outlet', issues: ['pharmacy'], q: '' })],
   reddit: [],
 };
 const calls = [];
@@ -114,6 +118,18 @@ await t('Facebook and Instagram tabs: a registered public actor is named, nobody
   await page.click('.sig-tab:has-text("Instagram")'); await page.waitForFunction(() => /Hands off our fuel/.test((document.querySelector('.rd-th') || {}).textContent || ''));
   const ig = await texts(page, '.rd-th'); eq(ig.length, 1); ok(/15K views/.test(ig[0]) && /L1/.test(ig[0]), ig[0]);
   await page.close();
+});
+await t('the community tabs (Lemmy, Hacker News, Forums, Web comments) list through the same routes and their Sweep starts one job', async () => {
+  const labels = await texts(page, '.sig-tabs .sig-tab'); ok(['Lemmy', 'Hacker News', 'Forums', 'Web comments'].every(l => labels.some(x => x.startsWith(l))), labels.join(' | '));
+  ok(/Nobody is named/.test(await page.getAttribute('.sig-tab:has-text("Lemmy")', 'title')) && /Commenters are not named/.test(await page.getAttribute('.sig-tab:has-text("Web comments")', 'title')), 'each tab says who is not named');
+  for (const [label, re] of [['Lemmy', /Gas export tax/], ['Hacker News', /gas reservation/], ['Forums', /Negative gearing/], ['Web comments', /Sixty-day dispensing/]]) {
+    await page.click('.sig-tab:has-text("' + label + '")'); await page.waitForFunction(s => new RegExp(s).test((document.querySelector('.rd-th') || {}).textContent || ''), re.source, { timeout: 15000 });
+  }
+  ok(calls.some(c => c.p === '/signals/threads' && c.q.platform === 'web') && calls.some(c => c.p === '/signals/threads' && c.q.platform === 'hn'));
+  const before = calls.length; await page.click('.sig-tab:has-text("Lemmy")'); await page.waitForFunction(() => /Gas export tax/.test((document.querySelector('.rd-th') || {}).textContent || ''));
+  await page.click('.rd-ctl button:has-text("Sweep")'); 
+  for (let i = 0; i < 50 && !calls.slice(before).some(c => c.p === '/bridge/run'); i++) await page.waitForTimeout(100);
+  const run = calls.slice(before).find(c => c.p === '/bridge/run'); ok(run, 'Sweep starts a job'); eq(run.body.source, 'community', 'one job reads every community source');
 });
 await t('the Petitions tab ranks by growth, filters by issue, and reads the pages on demand', async () => {
   await page.click('.sig-tab:has-text("Petitions")');

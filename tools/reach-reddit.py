@@ -40,7 +40,11 @@ WORKER = 'https://newsaus.heshan-998.workers.dev'
 # (r/victoria is Victoria, British Columbia - and refuses us; r/melbourne is
 # where the state's argument happens.)
 SUBS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon', 'auscorp',
-        'melbourne', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs']
+        'melbourne', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs',
+        # a wider net: the other capitals and regions, and where law, property, money, work and power bills are argued
+        # (the worker's REDDIT_POLITICS, which GET /reddit/issues publishes; this is the fallback copy)
+        'aus', 'Adelaide', 'canberra', 'tasmania', 'darwin', 'newcastle', 'geelong', 'queensland',
+        'AusProperty', 'AusLegal', 'AusHENRY', 'fiaustralia', 'friendlyjordies', 'AustralianTeachers', 'AusElectricians']
 LABEL = 'com.curiousminds.axiom.reach-reddit'
 
 # The client issues, mirrored from CLIENT_ISSUES in the worker so tags match.
