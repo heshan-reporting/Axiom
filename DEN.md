@@ -492,7 +492,13 @@ YouTube is `yt-dlp`. Decision D7 is unchanged - a person signs in by hand, publi
   marketplace-*, memories, notifications, profile, search and whoami: its search has no posts filter and nothing reads
   a page's own posts. **So this backend cannot collect public Facebook posts by keyword.** The collector now says so
   (`facebook_no_posts`, three in a row pause the platform) instead of "0 items, 0 posts". Open for the owner: whether
-  opencli 2.x searches posts (not checked), the official routes, or leaving Facebook to the news rows' reach counts.
+  the official routes, or leaving Facebook to the news rows' reach counts.
+- **Checked the same evening.** opencli 2.0.3 (the newest on npm, read with `npx` in the sandbox, nothing installed on
+  the Mac): the same Facebook commands and the same search with only `--limit`, so upgrading changes nothing; its
+  Instagram `search` finds users, not posts. Supermetrics, asked live from a session: `FBPD` (report types Page,
+  PagePosts, UrlShares) and `IGPD2` both answer `LICENSE_DATA_SOURCE_NOT_AVAILABLE` for licence 2083978 - the route
+  in s.2 is built and still waits on the licence. Meta's Page Public Content Access was not probed from here (it needs
+  the AXIOM key: `GET /meta/status?probe=1`).
 - **Not collected still:** comment text on Facebook and Instagram, a Facebook page's own timeline, Instagram keyword
   search.
 
