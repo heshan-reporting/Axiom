@@ -406,6 +406,49 @@ about X below is proven against stand-ins only.
 Harnesses: `tests/reach-agent-test.py` (26, new), `tests/reach-channels-test.py` (80), `tests/den-reach-worker.mjs`
 (9), `tests/topics-worker.mjs` (4, new).
 
+### 3.2 The tools underneath agent-reach, called directly (11 November 2026, at the owner's request; no worker or page change)
+
+Section 3.1 left Facebook, Instagram and YouTube with nothing to run, pending the owner's choice of a backend. The owner
+chose: the tools agent-reach itself installs for those channels. Read from agent-reach 1.5.0's own channel files on the
+owner's Mac: Facebook and Instagram are `opencli <site> ...` (it drives the Chrome a person is already signed in to),
+YouTube is `yt-dlp`. Decision D7 is unchanged - a person signs in by hand, public content only, the pace, the caps, the
+24-hour pause - and only the command the collector runs is new.
+
+- **When it applies.** `use_native(channel)`: agent-reach is absent or has no command for the channel, and the tool is
+  on the machine (`NATIVE`, found through `_which`). An agent-reach that one day has the commands is still used first.
+- **YouTube keyword search**: `yt-dlp "ytsearchdate<N>:<term>" --flat-playlist --dump-json --skip-download
+  --no-warnings --ignore-config --no-cookies`. Public results, no account, never a cookie. Usable as soon as yt-dlp is
+  installed. The channel's and uploader's names are not read.
+- **Facebook keyword search**: `opencli facebook search <term> --limit N -f json --window background`. Its columns are
+  index, title, text, url. `title` can be a person's or a page's name and is never read; a result whose address is not
+  a post (a page, a person) is dropped. **It returns no counts and no date**, so a Facebook row from this route has
+  words and an address only.
+- **Instagram, registered accounts' posts**: `opencli instagram user <account> --limit N -f json --window background`.
+  Its documented columns are index, caption, likes, comments, type, date - **no address**. The collector takes `url`,
+  `link`, `permalink` or a `shortcode` when the JSON carries one; when no post carries any, the sweep fails as
+  `instagram_no_address` in words. It is never guessed and never an empty success.
+- **Only reads.** opencli can also like, follow, comment, post, add a friend and join a group. `OPENCLI_READS` is the
+  whole list of what this collector may run (`facebook search`, `facebook whoami`, `instagram user`,
+  `instagram whoami`); anything else raises before a process starts. `login` runs only inside `login()`, typed for by a
+  person.
+- **Switching on.** `python3 tools/reach-agent.py --login facebook` (or `instagram`): the warning, the client-admin
+  question, the platform's name typed, then `opencli <site> login`; it is recorded as switched on only when
+  `opencli <site> whoami` then reports someone signed in. Until then the channel is `needs_login` and is not offered.
+  Each job asks `whoami` once before it sweeps; the account's name is never logged or stored.
+- **Refusals** are read from what the tool said (its error stream; its output only when that is not data, so a post
+  that says "checkpoint" is a post): a verification stops the sweep and pauses the platform 24 hours, a slow-down stops
+  it, signed out is `needs_login`, a disconnected browser bridge says to run `opencli doctor`.
+- **Not verified.** No real answer of `yt-dlp` or `opencli` has been seen: the Mac's sandbox would not install yt-dlp,
+  and nobody has signed in. The command forms are from each tool's own `--help` on the owner's Mac; the answers in
+  `tests/reach-channels-test.py` (47 new cases, 127 in all) are stand-ins. The first `--channels` and the first sweep
+  on the Mac verify them; the Instagram address is the likeliest thing to fail.
+- **Not collected still:** comment text on Facebook and Instagram, a Facebook page's own timeline, Instagram keyword
+  search.
+
+Owner's steps: `uv tool install yt-dlp`; `python3 tools/reach-agent.py --channels` (YouTube should read usable);
+with Chrome open and `opencli doctor` green, `--login facebook` and `--login instagram` on a profile that administers
+no client asset; record each under D7 with who and when; restart the agent.
+
 ## 4. Release 4 - subscriber news, newsletters and monitoring exports (build `2026-11-11.studio-p56`, page `?v=r43`)
 
 Decision D8, as the owner asked on 11 November 2026. About 117 of the 1,061 links in the reports read point at

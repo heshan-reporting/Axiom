@@ -337,7 +337,19 @@ verifies each, and what was asked for and not built.
     and nothing removed an unserved one. `topicMpPosts()` is the stand-in for the MP accounts: posts already held
     with `meta.mp` (the keyless timeline reader) that carry the keyword, returned by `topicResults` under `x` with
     `held: true` and `xNote`. Nothing new is fetched.
-  - Harnesses: `tests/reach-agent-test.py` (26), `tests/reach-channels-test.py` (80), `tests/den-reach-worker.mjs`
+  - **The backend the owner chose (11 November 2026; `DEN.md` s.3.2): the tools agent-reach installs, called directly.**
+    When agent-reach has no command for a channel and the tool is on the machine (`NATIVE`, `use_native`), `reach_social.py`
+    runs it itself: YouTube search is `yt-dlp "ytsearchdateN:<term>" --flat-playlist --dump-json ... --no-cookies` (no
+    account; usable once installed), Facebook search is `opencli facebook search` and Instagram's registered accounts are
+    `opencli instagram user`, both in the Chrome a person signed in to. opencli can also write (like, follow, post):
+    `OPENCLI_READS` is the whole list of commands this collector may run and anything else raises before a process
+    starts. Facebook and Instagram stay `needs_login` until a person runs `--login <platform>` (the warning, the
+    question, `opencli <site> login`, then `whoami` must report someone); each job asks `whoami` first and never logs
+    the name. A Facebook result's `title` is never read (it can be a person's name) and only post addresses are kept;
+    this route gives Facebook no counts or dates. Instagram posts with no address fail as `instagram_no_address`. A
+    refusal is read from the error stream, never from a post's own words. Every yt-dlp and opencli answer in the tests
+    is a stand-in: unverified until the first sweep on the Mac.
+  - Harnesses: `tests/reach-agent-test.py` (30), `tests/reach-channels-test.py` (127), `tests/den-reach-worker.mjs`
     (9), `tests/topics-worker.mjs` (4).
 
 ## The research agent

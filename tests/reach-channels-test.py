@@ -15,6 +15,7 @@ os.environ['AXIOM_REACH_HOME'] = tempfile.mkdtemp()
 def load(name, fn):
     spec = importlib.util.spec_from_file_location(name, os.path.join(TOOLS, fn)); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 rs = load('reach_social', 'reach_social.py')
+rs._which = lambda b: None            # no native tool unless a case says so: the Mac this runs on may have opencli
 
 passed = failed = 0
 def t(name, cond, detail=''):
@@ -263,6 +264,141 @@ r4, _ = real(doctor='  ✅ YouTube 视频和字幕 — ok\n', helptext=REAL_HELP
 t('a tick and a command together are usable', rs.status('youtube', runner=r4)['usable'] is True, rs.status('youtube', runner=r4))
 said = []; ran = []
 t('signing in is refused in words when this agent-reach has no login command, before any question', rs.login('facebook', ask=lambda q: said.append('ASKED') or 'no', out=said.append, call=lambda c: ran.append(c) or 0, runner=r) is False and ran == [] and 'ASKED' not in said and 'no `login` command' in said[-1], said)
+
+# ---- the tools underneath agent-reach: yt-dlp and opencli (stand-ins; no real answer of either has been seen) ----
+print('native backends')
+YT_LINES = '\n'.join(json.dumps(v) for v in [
+    {'id': 'dQw4w9WgXcQ', 'title': 'Why a gas export tax would work', 'description': 'An explainer on the gas export tax in Australia.', 'view_count': 34000, 'timestamp': 1794276000, 'channel': 'Sam Private', 'uploader': 'Sam Private', 'uploader_id': '@samprivate'},
+    {'id': 'PLx', 'title': 'a playlist'}]) + '\n'
+OC_FB = [{'index': 1, 'title': 'Jo Citizen', 'text': 'Sign the gas export tax petition, Canberra', 'url': 'https://www.facebook.com/108000000000001/posts/990000000000002'},
+         {'index': 2, 'title': 'Harbour Watch', 'text': 'Community organisation', 'url': 'https://www.facebook.com/harbourwatch'}]
+OC_IG = [{'index': 1, 'caption': 'A gas export tax would fund hospitals', 'likes': 900, 'comments': 40, 'type': 'reel', 'date': '2026-11-10T02:00:00Z', 'url': 'https://www.instagram.com/reel/DAbCdEfGhI3/'}]
+def nat(answers=None, have=('opencli', 'yt-dlp'), who=True, calls=None, ar=True):
+    """agent-reach as it really answers (no channel command), plus stand-ins for yt-dlp and opencli."""
+    answers = answers or {}; calls = calls if calls is not None else []
+    rs._which = lambda b: ('/usr/local/bin/' + b) if b in have else None
+    base, _ = real()
+    def runner(cmd, timeout):
+        if cmd[0] == 'agent-reach': return base(cmd, timeout)
+        calls.append(cmd)
+        if cmd[0] == 'yt-dlp':
+            a = answers.get('yt', (0, YT_LINES, ''))
+        elif cmd[2] == 'whoami':
+            a = answers.get((cmd[1], 'whoami'), (0, json.dumps([{'username': 'agency.monitor', 'name': 'A Person'}]), '') if who else (1, '', 'Error: not logged in to %s' % cmd[1]))
+        else:
+            a = answers.get((cmd[1], cmd[2]), (0, json.dumps(OC_FB if cmd[1] == 'facebook' else OC_IG), ''))
+        if isinstance(a, list): a = a.pop(0) if len(a) > 1 else a[0]
+        return a
+    return runner, calls
+def on(*chs):
+    for c in chs: rs.save_state(c, dict(rs.state(c), switched_on={'at': 1, 'by': 'test'}))
+
+fresh(); r, calls = nat()
+st = rs.status('youtube', runner=r)
+t('with yt-dlp on the machine YouTube search is usable, and says which tool reads it', st['usable'] is True and st['status'] == 'ready' and st.get('backend') == 'yt-dlp', st)
+st = rs.status('facebook', runner=r)
+t('opencli on the machine is not enough: Facebook waits for a person to switch it on', st['usable'] is False and st['status'] == 'needs_login' and '--login facebook' in st['why'], st)
+t('only YouTube is offered until then', rs.offered(runner=r) == ['ytsearch'], rs.offered(runner=r))
+on('facebook', 'instagram')
+t('once switched on, all three are offered', rs.offered(runner=r) == ['facebook', 'instagram', 'ytsearch'], rs.offered(runner=r))
+r0, _ = nat(have=())
+st = rs.status('youtube', runner=r0)
+t('with neither tool the answer is still no_command, and it names the tool to install', st['status'] == 'no_command' and 'yt-dlp' in (st.get('native_hint') or '') and 'uv tool install yt-dlp' in st['native_hint'], st)
+
+# the commands themselves
+cmd = rs.native_cmd('youtube', 'search', 'gas export tax', 10)
+t('the YouTube command searches newest first, downloads nothing and sends no cookie', cmd[0] == 'yt-dlp' and cmd[1] == 'ytsearchdate10:gas export tax' and '--skip-download' in cmd and '--no-cookies' in cmd and '--ignore-config' in cmd and not any('cookies-from' in c for c in cmd), cmd)
+t('the Facebook command is opencli\'s search, as JSON, in a background window', rs.native_cmd('facebook', 'search', 'scott reef', 10) == ['opencli', 'facebook', 'search', 'scott reef', '--limit', '10', '-f', 'json', '--window', 'background'])
+t('the Instagram command reads one registered account\'s posts', rs.native_cmd('instagram', 'posts', 'harbour.watch', 10)[:4] == ['opencli', 'instagram', 'user', 'harbour.watch'])
+for bad in (('facebook', 'like'), ('facebook', 'comment'), ('facebook', 'add-friend'), ('facebook', 'join-group'), ('instagram', 'follow'), ('instagram', 'post'), ('instagram', 'search'), ('facebook', 'login')):
+    t('a command that writes is refused before it runs: %s %s' % bad, isinstance(raises(lambda: rs.native_cmd(bad[0], bad[1], 'x', 1), RuntimeError), RuntimeError))
+
+# rows
+fresh(); r, calls = nat(); on('facebook', 'instagram')
+items = rs.run_native('youtube', 'search', 'gas export tax', 10, runner=r)
+t('a YouTube result becomes one item with its address, words, views and date', len(items) == 1 and items[0]['url'] == 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' and items[0]['view_count'] == 34000 and items[0]['published_at'] == 1794276000, items)
+t('  and the channel\'s and uploader\'s names are not carried', 'Sam Private' not in json.dumps(items) and 'samprivate' not in json.dumps(items))
+row = rs.item_row('youtube', items[0], 1794300000000, q='gas export tax')
+t('  and it files in the Signals shape', bool(row) and row['platform'] == 'youtube' and row['eng']['views'] == 34000 and 'author' not in json.dumps(row), row)
+items = rs.run_native('facebook', 'search', 'gas export tax', 10, runner=r)
+t('a Facebook search keeps posts only: a page or a person in the results is dropped', len(items) == 1 and '990000000000002' in items[0]['url'], items)
+t('  and the result\'s title, which can be a person\'s name, is never read', 'Jo Citizen' not in json.dumps(items) and 'title' not in items[0])
+items = rs.run_native('instagram', 'posts', 'harbour.watch', 10, runner=r)
+t('an Instagram post carries its caption, counts, date and address', len(items) == 1 and items[0]['likes'] == 900 and items[0]['comments'] == 40 and 'DAbCdEfGhI3' in items[0]['url'], items)
+r1, _ = nat({('instagram', 'user'): (0, json.dumps([{'index': 1, 'caption': 'x', 'likes': 1, 'comments': 0, 'type': 'post', 'date': '2026-11-10', 'shortcode': 'DAbCdEfGhI3'}]), '')})
+t('a shortcode stands for the address when that is what opencli gives', 'instagram.com/p/DAbCdEfGhI3' in rs.run_native('instagram', 'posts', 'a', 5, runner=r1)[0]['url'])
+r1, _ = nat({('instagram', 'user'): (0, json.dumps([{'index': 1, 'caption': 'x', 'likes': 1, 'comments': 0, 'type': 'post', 'date': '2026-11-10'}]), '')})
+e = raises(lambda: rs.run_native('instagram', 'posts', 'a', 5, runner=r1), rs.ParseFailed)
+t('posts with no address are a named failure, never an empty success', bool(e) and 'instagram_no_address' in str(e) and 'caption' in str(e), e)
+r1, _ = nat({('facebook', 'search'): (0, 'opencli v1.8.6 - update available\n' + json.dumps(OC_FB) + '\n', '')})
+t('a banner before the JSON does not hide it', len(rs.run_native('facebook', 'search', 'q', 5, runner=r1)) == 1)
+r1, _ = nat({('facebook', 'search'): (0, json.dumps([dict(OC_FB[0], text='Police checkpoint protest: please sign in at the gate, 429 people came')]), '')})
+t('a post that says "checkpoint" or "sign in" is a post, not a refusal', len(rs.run_native('facebook', 'search', 'q', 5, runner=r1)) == 1)
+r1, _ = nat({'yt': (0, json.dumps({'id': 'dQw4w9WgXcQ', 'title': 'Captcha farms explained', 'description': 'verify your account scams'}) + '\n', '')})
+t('a video about captchas is a video, not a refusal', len(rs.run_native('youtube', 'search', 'q', 5, runner=r1)) == 1)
+r1, _ = nat({('facebook', 'search'): (0, json.dumps([]), '')})
+t('no results is an empty answer, not a failure', rs.run_native('facebook', 'search', 'q', 5, runner=r1) == [])
+
+# refusals
+r1, _ = nat({('facebook', 'search'): (1, '', 'Error: Facebook checkpoint: verify it\'s you')})
+t('a verification is a Challenge', isinstance(raises(lambda: rs.run_native('facebook', 'search', 'q', 5, runner=r1), rs.Challenge), rs.Challenge))
+r1, _ = nat({'yt': (1, '', 'ERROR: [youtube] Sign in to confirm you\'re not a bot')})
+t('YouTube asking to confirm you are not a bot is a Challenge, not retried with cookies', isinstance(raises(lambda: rs.run_native('youtube', 'search', 'q', 5, runner=r1), rs.Challenge), rs.Challenge))
+r1, _ = nat({('instagram', 'user'): (1, '', 'Error: not logged in')})
+e = raises(lambda: rs.run_native('instagram', 'posts', 'a', 5, runner=r1), rs.Unavailable)
+t('signed out is needs_login', bool(e) and e.why == 'needs_login', e)
+r1, _ = nat({('facebook', 'search'): (1, '', 'HTTP 429 Too Many Requests')})
+t('a slow-down is RateLimited', isinstance(raises(lambda: rs.run_native('facebook', 'search', 'q', 5, runner=r1), rs.RateLimited), rs.RateLimited))
+r1, _ = nat({('facebook', 'search'): (1, '', 'Browser extension not connected')})
+e = raises(lambda: rs.run_native('facebook', 'search', 'q', 5, runner=r1), rs.Unavailable)
+t('a disconnected browser bridge is said, with opencli doctor', bool(e) and e.why == 'bridge' and 'opencli doctor' in str(e), e)
+r1, _ = nat({('facebook', 'search'): (0, '<html>hello</html>', '')})
+t('an answer that is not JSON is ParseFailed', isinstance(raises(lambda: rs.run_native('facebook', 'search', 'q', 5, runner=r1), rs.ParseFailed), rs.ParseFailed))
+r1, _ = nat({'yt': (1, '', 'ERROR: unable to download webpage')})
+t('yt-dlp failing with no video is ParseFailed, not an empty success', isinstance(raises(lambda: rs.run_native('youtube', 'search', 'q', 5, runner=r1), rs.ParseFailed), rs.ParseFailed))
+
+# the sweep and the job
+fresh(); r, calls = nat(); on('facebook', 'instagram'); lines = []
+rows, stats = rs.sweep('youtube', PLAN, log=log, runner=r, sleep=lambda s: None, clock=lambda: 1794300000)
+t('a YouTube sweep runs one yt-dlp search a term and files the videos', stats['reads'] == 3 and all(c[0] == 'yt-dlp' for c in calls) and len(rows) >= 1, (stats, calls[:1]))
+t('  and the console shows the real command', any(k == 'cmd' and x.startswith('yt-dlp ytsearchdate') for k, x in lines), lines[:3])
+calls.clear()
+rows, stats = rs.sweep('instagram', PLAN, log=log, runner=r, sleep=lambda s: None, clock=lambda: 1794300000)
+t('an Instagram sweep reads the registered accounts and nothing else', [c[1:4] for c in calls] == [['instagram', 'user', 'harbour.watch'], ['instagram', 'user', 'baykeepers']] and len(rows) >= 1, calls)
+fresh(); r, calls = nat({('facebook', 'search'): (1, '', 'checkpoint required')}); on('facebook')
+e = raises(lambda: rs.sweep('facebook', PLAN, log=log, runner=r, sleep=lambda s: None, clock=lambda: 1794300000), rs.Challenge)
+t('a verification stops the sweep at the first read and pauses the platform', bool(e) and len(calls) == 1 and rs.paused('facebook', 1794300000)[0] > 1794300000, (e, calls))
+posted = []
+def http(url, key, body=None):
+    if '/den/desks' in url: return {'ok': True, 'desks': [{'ns': 'aep'}]}
+    if '/den/plan' in url: return PLAN
+    posted.append(body); return {'ok': True, 'kept': len(body['rows']), 'inserted': len(body['rows']), 'updated': 0, 'skipped': {}}
+fresh(); r, calls = nat(who=False); on('facebook')
+e = raises(lambda: rs.collect('facebook', 'https://w.example', 'k', {'ns': 'aep'}, log, http=http, runner=r, sleep=lambda s: None, clock=lambda: 1794300000), rs.Unavailable)
+t('the job asks opencli who is signed in first, and stops when nobody is', bool(e) and e.why == 'needs_login' and [c[1:3] for c in calls] == [['facebook', 'whoami']], (e, calls))
+fresh(); r, calls = nat(); on('facebook'); lines = []; posted = []
+out = rs.collect('facebook', 'https://w.example', 'k', {'ns': 'aep'}, log, http=http, runner=r, sleep=lambda s: None, clock=lambda: 1794300000)
+t('signed in, the job files its posts as layer 2', out['ok'] and posted and posted[0]['layer'] == 2 and posted[0]['rows'], out.get('summary'))
+t('  and the signed-in account\'s name reaches no log and no row', 'agency.monitor' not in json.dumps(lines) and 'A Person' not in json.dumps(lines) and 'agency.monitor' not in json.dumps(posted))
+fresh(); r, calls = nat(); posted = []
+out = rs.collect('youtube', 'https://w.example', 'k', {'ns': 'aep'}, log, http=http, runner=r, sleep=lambda s: None, clock=lambda: 1794300000)
+t('YouTube needs no sign-in check and files its videos', out['ok'] and not any(c[0] == 'opencli' for c in calls) and posted, out.get('summary'))
+
+# signing in
+fresh(); r, calls = nat(who=False); said = []; ran = []
+ok = rs.login('youtube', ask=lambda q: said.append('ASKED') or '', out=said.append, call=lambda c: ran.append(c) or 0, runner=r)
+t('YouTube has nothing to sign in to, and says so without a question', ok is True and ran == [] and 'ASKED' not in said and 'no account' in ' '.join(said), said)
+answers = iter(['no', 'facebook']); said = []; ran = []
+r, calls = nat(who=True)
+ok = rs.login('facebook', ask=lambda q: said.append(q) or next(answers), out=said.append, call=lambda c: ran.append(c) or 0, runner=r)
+t('Facebook through opencli: the warning, the client-admin question, then opencli\'s own login', ok is True and ran == [['opencli', 'facebook', 'login']] and bool(rs.state('facebook').get('switched_on')) and any('NEVER' in str(x) or 'administers' in str(x) for x in said), (ok, ran, said[-2:]))
+fresh(); r, calls = nat(who=False); answers = iter(['no', 'instagram']); said = []; ran = []
+ok = rs.login('instagram', ask=lambda q: next(answers), out=said.append, call=lambda c: ran.append(c) or 0, runner=r)
+t('nothing is switched on when opencli still reports nobody signed in', ok is False and not rs.state('instagram').get('switched_on') and 'Nothing was switched on' in said[-1], said[-1:])
+fresh(); r, calls = nat(); said = []; ran = []
+ok = rs.login('facebook', ask=lambda q: 'yes', out=said.append, call=lambda c: ran.append(c) or 0, runner=r)
+t('a profile that administers a client asset stops the sign-in', ok is False and ran == [], said[-1:])
+rs._which = lambda b: None
 
 print('\n%d passed, %d failed' % (passed, failed))
 sys.exit(1 if failed else 0)

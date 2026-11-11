@@ -590,7 +590,7 @@ def main(argv=None):
         print('gated      %s' % (('usable for: ' + ', '.join(gated_profiles())) if (have_playwright() and gated_profiles()) else 'no publisher is signed in on this machine (--login news:<source id>)'))
         for c in rs.CHANNELS:
             st = rs.status(c)
-            print('%-10s %s%s' % (c, 'usable, %d of %d reads today' % (st['reads_today'], st['per_day']) if st['usable'] else (st['status'] or 'not installed'), ('  - ' + st['why']) if st.get('why') else ''))
+            print('%-10s %s%s' % (c, 'usable, %d of %d reads today' % (st['reads_today'], st['per_day']) if st['usable'] else (st['status'] or 'not installed'), ('  - ' + st['why']) if st.get('why') else '') + (('\n             ' + st['native_hint']) if st.get('native_hint') else '') + ((' (read through %s)' % st['backend']) if st.get('backend') and st['usable'] else ''))
         return 0
     if not a.key: sys.exit('need --key or AXIOM_KEY (export it in ~/.zshrc so the background agent can find it)')
     say = (lambda *x: None) if a.quiet else print
@@ -618,7 +618,7 @@ def serve(worker, key, agent, fixed, poll=15.0, once=False, say=print, echo=True
     if not have('rdt'): say('  (rdt not installed: Reddit jobs will wait for another machine)')
     if not have('twitter'): say('  (twitter not installed: X jobs will wait for another machine)')
     if 'render' not in sources: say('  (Playwright not installed: render jobs will wait for another machine - python3 -m pip install playwright && python3 -m playwright install chromium)')
-    if not any(s in sources for s in ('facebook', 'instagram', 'ytsearch')): say('  (no social channel through agent-reach is usable here: python3 tools/reach-agent.py --channels says why)')
+    if not any(s in sources for s in ('facebook', 'instagram', 'ytsearch')): say('  (no social channel is usable here - Facebook, Instagram or YouTube search: python3 tools/reach-agent.py --channels says why)')
     n = 0
     while rounds is None or n < rounds:
         n += 1
