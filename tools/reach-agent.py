@@ -19,6 +19,7 @@ Usage (on the Mac, from the repo):
   python3 tools/reach-agent.py --uninstall-launchd
   python3 tools/reach-agent.py --channels                  # what this machine can collect right now, and why not
   python3 tools/reach-agent.py --login facebook            # a person signs in to a platform for collection (also instagram, youtube)
+  python3 tools/reach-agent.py --login news:afr            # a person signs in to a publisher the agency subscribes to
 
 Facebook, Instagram and YouTube keyword search are read through agent-reach
 (tools/reach_social.py) when it is installed and a person has signed in. Read
@@ -98,6 +99,7 @@ def collectors():
     if have('rdt'): out.append('reddit')
     if have('twitter'): out.append('x')
     if have_playwright(): out.append('render')
+    if have_playwright() and gated_profiles(): out.append('gated')      # subscriber news: only with a publisher a person signed in to
     # Facebook, Instagram and YouTube search: only when agent-reach is installed, the channel is signed in to and
     # usable, it is not paused after a verification, and it is not switched off on this machine
     try:
@@ -298,6 +300,102 @@ def job_render(worker, key, params, log):
             'filed': (filed or {}).get('id', 0), 'text': text[:2000]}
 
 
+# ---- subscriber news: a publisher the agency subscribes to, read with the profile a person signed in to -------------
+PROFILES = os.path.join(os.path.expanduser(os.environ.get('AXIOM_REACH_HOME', '~/.axiom-reach')), 'profiles')
+
+
+def gated_profiles():
+    """The publishers a person has signed in to on this machine (one browser profile each)."""
+    try:
+        return sorted(d[5:] for d in os.listdir(PROFILES) if d.startswith('news-') and os.path.isdir(os.path.join(PROFILES, d)))
+    except Exception:
+        return []
+
+
+def profile_dir(source_id):
+    sid = re.sub(r'[^a-z0-9_]', '', str(source_id or '').lower())[:40]
+    if not sid: raise RuntimeError('a publisher profile needs the source id from the Sources view')
+    return os.path.join(PROFILES, 'news-' + sid)
+
+
+def render_profile(url, source_id, wait_ms=2500, headless=True, wait_closed=False):
+    """Load a page in Chromium with the publisher's own signed-in profile. The profile folder holds that session's
+    cookies and stays on this machine; nothing reads or copies them."""
+    from playwright.sync_api import sync_playwright
+    d = profile_dir(source_id); os.makedirs(d, mode=0o700, exist_ok=True)
+    with sync_playwright() as p:
+        ctx = p.chromium.launch_persistent_context(d, headless=headless, user_agent=UA, viewport={'width': 1280, 'height': 2200})
+        try:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            page.goto(url, wait_until='domcontentloaded', timeout=45000)
+            if wait_closed:
+                page.wait_for_event('close', timeout=0); return '', url
+            try: page.wait_for_load_state('networkidle', timeout=15000)
+            except Exception: pass
+            page.wait_for_timeout(wait_ms)
+            return page.content(), page.url
+        finally:
+            try: ctx.close()
+            except Exception: pass
+
+
+def job_gated(worker, key, params, log, render=None):
+    """One article of a cleared subscriber source, read as the signed-in subscriber sees it, and handed to the worker,
+    which keeps it apart from everything it serves. A page that still shows the paywall is reported as that."""
+    src = re.sub(r'[^a-z0-9_]', '', str(params.get('profile') or '').lower()); url = str(params.get('url') or '')
+    if not re.match(r'^https?://', url): raise RuntimeError('the subscriber read needs the article address')
+    if src not in gated_profiles():
+        raise RuntimeError('no signed-in profile for "%s" on this machine. A person signs in once: python3 tools/reach-agent.py --login news:%s' % (src, src))
+    log('cmd', 'chromium (profile news-%s) goto %s' % (src, url))
+    html_text, final = (render or render_profile)(url, src)
+    _title, text = extract_article(html_text)
+    text = str(text or '')
+    base = worker.rstrip('/'); body = {'id': params.get('id'), 'url': url, 'source': src, 'gated': True, 'via': 'reach'}
+    if len(text) < FT_MIN:
+        log('err', '%s still showed its paywall to the signed-in browser (%d characters of article)' % (src, len(text)))
+        r = _post_soft(base + '/fulltext/save', key, dict(body, wall=True))
+        return {'ok': False, 'error': 'subscription_wall', 'source': src, 'url': url, 'chars': len(text), 'detail': (r or {}).get('detail') or 'the page still showed its paywall'}
+    log('out', '%d characters of article' % len(text))
+    r = _post_soft(base + '/fulltext/save', key, dict(body, text=text))
+    if not (r or {}).get('ok'):
+        return {'ok': False, 'error': (r or {}).get('error') or 'save_refused', 'source': src, 'url': url, 'detail': (r or {}).get('detail') or 'the worker did not file the text'}
+    return {'ok': True, 'source': src, 'url': url, 'chars': len(text), 'method': 'subscriber', 'filed': r.get('id', 0)}
+
+
+def _post_soft(url, key, body):
+    """POST and return the JSON answer even when the worker refuses (a refusal carries the reason)."""
+    try:
+        return rr.http_json(url, key, body, timeout=30)
+    except urllib.error.HTTPError as e:
+        try: return json.loads(e.read().decode() or '{}')
+        except Exception: return {'ok': False, 'error': 'http_%s' % e.code}
+
+
+NEWS_WARNING = '''
+  Before you sign in to a publisher for collection, read this.
+
+  - Use only a subscription the agency holds. Never a personal, borrowed or shared login.
+  - The worker reads nothing from this publisher until someone has recorded, on the source in the
+    Sources view, what covers reading it for monitoring (the subscription or the copyright licence).
+  - Only articles already tagged to a client issue are read, inside a daily cap. The collector does
+    not download the paper, and it uses no paywall-bypass service or trick.
+  - The text is for the team's own reading. AXIOM serves it to nobody outside the team.
+  - You sign in yourself, in the window that opens, then close the window. This tool never sees the password.
+'''
+
+
+def login_news(source_id, url, ask=input, out=print, render=None):
+    out(NEWS_WARNING)
+    if ask('  Is this a subscription the agency holds? (yes/no): ').strip().lower() != 'yes':
+        out('  Stopped: nothing was opened.'); return False
+    if not have_playwright() and render is None:
+        out('  This needs Playwright: pip install playwright && playwright install chromium'); return False
+    out('  A browser window is opening at %s. Sign in, then close the window.' % url)
+    (render or render_profile)(url, source_id, headless=False, wait_closed=True)
+    out('  Signed-in profile kept for "%s" on this Mac. Remove it at any time by deleting %s' % (source_id, profile_dir(source_id)))
+    return True
+
+
 def job_social(channel):
     def run(worker, key, params, log):
         return rs.collect(channel, worker, key, params, log)
@@ -305,7 +403,7 @@ def job_social(channel):
 
 
 JOBS = {'reddit': job_reddit, 'x': job_x, 'render': job_render,
-        'facebook': job_social('facebook'), 'instagram': job_social('instagram'), 'ytsearch': job_social('youtube')}
+        'facebook': job_social('facebook'), 'instagram': job_social('instagram'), 'ytsearch': job_social('youtube'), 'gated': job_gated}
 
 
 def run_job(worker, key, job, echo=True):
@@ -421,18 +519,30 @@ def main(argv=None):
     ap.add_argument('--quiet', action='store_true')
     ap.add_argument('--install-launchd', action='store_true')
     ap.add_argument('--login', metavar='PLATFORM', help='sign in to facebook, instagram or youtube for collection (a person does this, by hand)')
+    ap.add_argument('--url', default='', help='with --login news:<source id>: the page to open')
     ap.add_argument('--channels', action='store_true', help='what this machine can collect right now, and why not where it cannot')
     ap.add_argument('--uninstall-launchd', action='store_true')
     a = ap.parse_args(argv)
     repo = os.path.dirname(HERE)
     if a.install_launchd: install_launchd(repo); return 0
     if a.uninstall_launchd: uninstall_launchd(); return 0
+    if a.login and a.login.strip().lower().startswith('news:'):
+        sid = re.sub(r'[^a-z0-9_]', '', a.login.strip().lower()[5:])
+        url = a.url
+        if not url:
+            if not a.key: sys.exit('give --url (the publisher\'s sign-in or home page), or --key so the address can be read from the Sources view')
+            lst = rr.http_json(a.worker.rstrip('/') + '/sources?q=' + urllib.parse.quote(sid), a.key, timeout=30)
+            s = next((x for x in (lst.get('sources') or []) if x.get('id') == sid), None)
+            if not s: sys.exit('no source with id "%s" in the Sources view' % sid)
+            url = (s.get('urls') or {}).get('home') or ('https://' + (s.get('urls') or {}).get('site', ''))
+        return 0 if login_news(sid, url) else 1
     if a.login:
         return 0 if rs.login(a.login.strip().lower()) else 1
     if a.channels:
         print('reddit     %s' % ('usable' if have('rdt') else 'rdt is not installed'))
         print('x          %s' % ('usable' if have('twitter') else 'twitter is not installed'))
         print('render     %s' % ('usable' if have_playwright() else 'Playwright is not installed'))
+        print('gated      %s' % (('usable for: ' + ', '.join(gated_profiles())) if (have_playwright() and gated_profiles()) else 'no publisher is signed in on this machine (--login news:<source id>)'))
         for c in rs.CHANNELS:
             st = rs.status(c)
             print('%-10s %s%s' % (c, 'usable, %d of %d reads today' % (st['reads_today'], st['per_day']) if st['usable'] else (st['status'] or 'not installed'), ('  - ' + st['why']) if st.get('why') else ''))

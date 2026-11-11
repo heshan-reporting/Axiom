@@ -192,5 +192,33 @@ for name, exc, code in (('a verification', agent.rs.Challenge('facebook', 'check
     t('  and no session string is in the report or the log', 'aabbccddeeff001122' not in json.dumps(posted), json.dumps(posted)[:300])
 agent.rs.status = real
 
+# ---- subscriber news: one article through a publisher's signed-in profile ----
+agent.PROFILES = os.path.join(tempfile.mkdtemp(), 'profiles')
+t('with no publisher signed in, the agent does not offer the subscriber read', agent.gated_profiles() == [] and 'gated' not in agent.collectors())
+os.makedirs(agent.profile_dir('afr')); agent.have_playwright = lambda: True
+t('with a publisher\'s profile on the machine it does', agent.gated_profiles() == ['afr'] and 'gated' in agent.collectors() and 'gated' in agent.JOBS)
+LONGP = '<p>' + ('The Senate will vote on a gas export tax this week after the crossbench secured a debate on the floor. ' * 3) + '</p>'
+PAGE = '<html><head><title>Senate to vote</title></head><body><article>' + LONGP * 5 + '</article></body></html>'
+WALL = '<html><body><article><p>Subscribe to read the full story. Already a subscriber? Log in.</p></article></body></html>'
+saved = []
+agent.rr.http_json = lambda url, key, body=None, timeout=30: saved.append((url.rsplit('/', 2)[-2] + '/' + url.rsplit('/', 1)[-1], body)) or {'ok': True, 'id': 7}
+glog = []
+res = agent.job_gated('https://x.workers.test', 'k', {'id': 7, 'url': 'https://www.afr.com/politics/a', 'profile': 'afr'}, lambda k, x: glog.append((k, x)), render=lambda url, src, **kw: (PAGE, url))
+t('an article read through the profile is handed to the worker as subscriber text', res['ok'] and res['method'] == 'subscriber' and saved[-1][0] == 'fulltext/save' and saved[-1][1]['gated'] is True and saved[-1][1]['source'] == 'afr' and len(saved[-1][1]['text']) > 600, (res, saved[-1][1].keys()))
+t('and the log names the profile, never a cookie', any('profile news-afr' in x for _, x in glog))
+saved.clear(); agent.rr.http_json = lambda url, key, body=None, timeout=30: saved.append(body) or {'ok': False, 'error': 'subscription_wall', 'detail': 'still showed its paywall'}
+res = agent.job_gated('https://x.workers.test', 'k', {'id': 7, 'url': 'https://www.afr.com/politics/a', 'profile': 'afr'}, lambda k, x: None, render=lambda url, src, **kw: (WALL, url))
+t('a page that still shows its paywall is reported as that, with no text sent', res['ok'] is False and res['error'] == 'subscription_wall' and saved[0].get('wall') is True and 'text' not in saved[0], (res, saved))
+e = raises(lambda: agent.job_gated('https://x.workers.test', 'k', {'id': 7, 'url': 'https://www.theaustralian.com.au/a', 'profile': 'theaustralian'}, lambda k, x: None, render=lambda *a, **k: (PAGE, '')), RuntimeError)
+t('a publisher nobody signed in to on this machine is refused, with the command', bool(e) and '--login news:theaustralian' in str(e), e)
+agent.rr.http_json = lambda url, key, body=None, timeout=30: {'ok': False, 'error': 'source_not_cleared', 'detail': 'not cleared for the subscriber read'}
+res = agent.job_gated('https://x.workers.test', 'k', {'id': 7, 'url': 'https://www.afr.com/politics/a', 'profile': 'afr'}, lambda k, x: None, render=lambda url, src, **kw: (PAGE, url))
+t('the worker\'s refusal of an uncleared source fails the job in its words', res['ok'] is False and res['error'] == 'source_not_cleared' and 'not cleared' in res['detail'], res)
+said = []; opened = []
+t('signing in to a publisher stops unless it is the agency\'s own subscription', agent.login_news('afr', 'https://www.afr.com/', ask=lambda q: 'no', out=said.append, render=lambda *a, **k: opened.append(a)) is False and opened == [])
+flat = ' '.join(said[0].split())
+t('the warning names the rules', 'Never a personal, borrowed or shared login' in flat and 'does not download the paper' in flat and 'never sees the password' in flat and 'no paywall-bypass' in flat, flat[:200])
+t('with yes, a visible window opens at the publisher and waits for the person', agent.login_news('afr', 'https://www.afr.com/', ask=lambda q: 'yes', out=said.append, render=lambda url, src, **kw: opened.append((url, src, kw)) or ('', url)) is True and opened[0][0] == 'https://www.afr.com/' and opened[0][2] == {'headless': False, 'wait_closed': True}, opened)
+
 print('\n%d passed, %d failed' % (passed, failed))
 sys.exit(1 if failed else 0)

@@ -2318,11 +2318,11 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook', 'ytsearch'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
-const BRIDGE_DESKTOP_ONLY = ['x', 'ytsearch'];      // no server-side path exists for these (ytsearch: YouTube keyword search through a collector)
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook', 'ytsearch', 'gated'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
+const BRIDGE_DESKTOP_ONLY = ['x', 'ytsearch', 'gated'];      // no server-side path exists for these (ytsearch: YouTube keyword search through a collector)
 /* The signed-in layer (DEN.md, layer 2): what a Mac collector may be asked to read, and the switch that stops it. */
-const REACH_SOURCES = ['facebook', 'instagram', 'ytsearch', 'x', 'reddit'];
-const REACH_LABEL = { facebook: 'Facebook', instagram: 'Instagram', ytsearch: 'YouTube search', x: 'X', reddit: 'Reddit' };
+const REACH_SOURCES = ['facebook', 'instagram', 'ytsearch', 'x', 'reddit', 'gated'];
+const REACH_LABEL = { facebook: 'Facebook', instagram: 'Instagram', ytsearch: 'YouTube search', x: 'X', reddit: 'Reddit', gated: 'Subscriber news' };
 const BRIDGE_LOG_KEEP = 400;            // lines kept per job
 async function ensureBridge(env) {
   if (!env.MIND_DB) return false;
@@ -2975,6 +2975,7 @@ async function topicResults(env, idOrKeyword, days) {
   const x = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.mp') mp, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='sig_thread' AND json_extract(meta,'$.platform')='x' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 80").bind(id, since).all()).results || [];
   const reddit = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.sub') sub, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='reddit_thread' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 80").bind(id, since).all()).results || [];
   const cm = (await db.prepare("SELECT json_extract(meta,'$.platform') platform, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND json_extract(meta,'$.topic')=? AND ts>? GROUP BY platform").bind(id, since).all()).results || [];
+  await ensureBridge(env);   // a topic that has never run has no job table yet: its results are empty, not a failure
   const jobs = (await db.prepare('SELECT id,source,status,agent,created,finished,ok FROM bridge_jobs WHERE who=? ORDER BY created DESC LIMIT 12').bind('topic:' + id).all()).results || [];
   let brief = null; try { brief = JSON.parse((await kvGet(env.AXIOM_KV, 'topic_brief_' + id)) || 'null'); } catch (e) { brief = null; }
   const strip = r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, source: r.source || '', outlet: r.outlet || r.src || '', mp: pj(r.mp), excerpt: String(r.body || '').split('\n')[0].slice(0, 400) });
@@ -4903,6 +4904,8 @@ async function ensureSources(env) {
     env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS source_health(id INTEGER PRIMARY KEY AUTOINCREMENT, src TEXT, ts INTEGER, ok INTEGER, method TEXT, n INTEGER, ms INTEGER, detail TEXT)'),
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS source_health_src ON source_health(src, id)'),
   ]);
+  // how a source may be read (open, metered, subscriber, newsletter, official) and who cleared a paid one for the subscriber read
+  for (const col of ["access TEXT DEFAULT ''", "cleared_by TEXT DEFAULT ''", 'cleared_at INTEGER DEFAULT 0', "cleared_basis TEXT DEFAULT ''"]) { try { await env.MIND_DB.prepare('ALTER TABLE sources ADD COLUMN ' + col).run(); } catch (e) {} }
   SOURCES_READY = true;
   try { await sourcesSeed(env); } catch (e) {}
   return true;
@@ -4981,7 +4984,8 @@ function sourceRow(r) {
   return { id: r.id, name: r.name || r.id, tier: r.tier || 'core', juris: r.juris || 'au', issues: pjs(r.issues, []), methods: pjs(r.methods, []), urls: pjs(r.urls, {}),
     schedule: Number(r.schedule) || 60, enabled: !!r.enabled, core: !!r.core, edited: !!r.edited, created: r.created || 0, updated: r.updated || 0,
     last_try: r.last_try || 0, last_ok: r.last_ok || 0, next_due: r.next_due || 0, fails: r.fails || 0, method_ok: r.method_ok || '', last_error: r.last_error || '',
-    latest_ts: r.latest_ts || 0, note: r.note || '', alerted: r.alerted || 0 };
+    latest_ts: r.latest_ts || 0, note: r.note || '', alerted: r.alerted || 0,
+    access: sourceAccessOf(r), cleared: !!r.cleared_at, cleared_by: r.cleared_by || '', cleared_at: r.cleared_at || 0, cleared_basis: r.cleared_basis || '' };
 }
 function sourceStatus(s, now) {
   if (!s.enabled) return 'off';
@@ -5624,6 +5628,7 @@ function metaJson(meta) {
  *  route, the cron, the render job and the desktop collector. */
 async function fulltextSave(env, b) {
   b = b || {};
+  if (b.gated || b.wall) return gatedSave(env, b, b.by);   // read through a subscription: its own store and its own rules
   if (!env.MIND_DB || !(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
   const id = parseInt(b.id, 10) || 0; const url = String(b.url || '');
   const row = id ? await env.MIND_DB.prepare('SELECT id,meta FROM arc_items WHERE id=?').bind(id).first()
@@ -6836,6 +6841,174 @@ async function instagramSweep(env, opts) {
   const b = await igHashtagSweep(env, opts);
   return { ok: !!(a.ok || b.ok), platform: 'instagram', accounts: a.accounts || 0, hashtags: b.hashtags || 0, threads: (a.threads || 0) + (b.threads || 0), threadRows: (a.threadRows || 0) + (b.threadRows || 0), updated: (a.updated || 0) + (b.updated || 0),
     refused: b.refused || [], allowance: b.allowance, errors: (a.errors || []).concat(b.errors || []), detail: a.detail || b.detail || '' };
+}
+
+// ==============================================================================
+// GATED AND IMPORTANT NEWS (DEN.md, Phase 4). A subscriber outlet is read only
+// through a subscription the agency holds, signed in by a person on a Mac, and
+// only once an operator has recorded on that source what covers monitoring use.
+// The text is never written into arc_items.body: it lives in arc_gated, which
+// no existing route reads, so nothing outside the key gate can return it - the
+// partner system, a review link and public mode all read arc_items. One
+// function, gatedView(), decides who is given it.
+// ==============================================================================
+const SOURCE_ACCESS = ['open', 'metered', 'subscriber', 'newsletter', 'official'];
+/* What the seed knows about who charges to read (best effort, edited in the Sources view; unverified until someone looks). */
+const SOURCE_ACCESS_SEED = { theaustralian: 'subscriber', heraldsun: 'subscriber', dailytelegraph: 'subscriber', couriermail: 'subscriber', adelaidenow: 'subscriber', themercury: 'subscriber',
+  thewest: 'subscriber', afr: 'subscriber', capitalbrief: 'subscriber', energynewsbulletin: 'subscriber', smh: 'metered', smh_pol: 'metered', theage: 'metered', brisbanetimes: 'metered', watoday: 'metered',
+  canberratimes: 'metered', thenightly: 'open' };
+const GATED_NEEDS_CLEARANCE = ['subscriber', 'metered', 'newsletter'];
+const GATED_TEXT_MAX = 60000, GATED_QUOTE_WORDS = 30, GATED_PER_SOURCE = 20, GATED_PER_TICK = 8;
+let GATED_READY = false;
+async function ensureGated(env) {
+  if (!env.MIND_DB) return false;
+  if (GATED_READY) return true;
+  await ensureArchive(env); await ensureSources(env);
+  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS arc_gated(item INTEGER PRIMARY KEY, src TEXT, url TEXT, text TEXT, chars INTEGER, via TEXT, by TEXT, at INTEGER)').run();
+  GATED_READY = true;
+  return true;
+}
+function sourceAccessOf(r) { const a = String((r && r.access) || '').toLowerCase(); return SOURCE_ACCESS.indexOf(a) >= 0 ? a : (SOURCE_ACCESS_SEED[r && r.id] || ((r && r.tier) === 'official' ? 'official' : 'open')); }
+async function sourceAccessGet(env, id) {
+  await ensureGated(env);
+  const r = await env.MIND_DB.prepare('SELECT id, name, tier, access, cleared_by, cleared_at, cleared_basis FROM sources WHERE id=?').bind(String(id || '')).first();
+  return r ? { id: r.id, name: r.name || r.id, access: sourceAccessOf(r), cleared: !!r.cleared_at, cleared_by: r.cleared_by || '', cleared_at: r.cleared_at || 0, cleared_basis: r.cleared_basis || '' } : null;
+}
+/** Record how a source may be read. Clearing a paid source for the subscriber read needs the basis in words: which
+ *  subscription or licence covers monitoring use. That sentence is the record. */
+async function sourceAccessSet(env, b, who) {
+  await ensureGated(env); b = b || {};
+  const cur = await sourceAccessGet(env, sourceIdClean(b.id));
+  if (!cur) return { ok: false, status: 404, error: 'unknown_source', detail: 'No source with that id.' };
+  const access = b.access == null ? cur.access : String(b.access).toLowerCase();
+  if (SOURCE_ACCESS.indexOf(access) < 0) return { ok: false, status: 400, error: 'bad_access', detail: 'access is one of ' + SOURCE_ACCESS.join(', ') + '.' };
+  let by = cur.cleared_by, at = cur.cleared_at, basis = cur.cleared_basis;
+  if (b.cleared === true) {
+    if (GATED_NEEDS_CLEARANCE.indexOf(access) < 0) return { ok: false, status: 400, error: 'nothing_to_clear', detail: 'Only a subscriber, metered or newsletter source is cleared for the subscriber read; an open or official source is read as it is.' };
+    basis = String(b.basis || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (basis.length < 12) return { ok: false, status: 400, error: 'basis_required', detail: 'Say what covers reading this source for monitoring: the subscription the agency holds, or its copyright licence. That sentence is the record.' };
+    by = String(who || '').slice(0, 60); at = Date.now();
+  } else if (b.cleared === false || GATED_NEEDS_CLEARANCE.indexOf(access) < 0) { by = ''; at = 0; basis = ''; }
+  await env.MIND_DB.prepare('UPDATE sources SET access=?, cleared_by=?, cleared_at=?, cleared_basis=?, updated=? WHERE id=?').bind(access, by, at, basis, Date.now(), cur.id).run();
+  return { ok: true, source: await sourceAccessGet(env, cur.id) };
+}
+function gatedExcerpt(text, words) { const w = String(text || '').replace(/\s+/g, ' ').trim().split(' '); const n = words || GATED_QUOTE_WORDS; return w.slice(0, n).join(' ') + (w.length > n ? ' ...' : ''); }
+/** The one place that decides who is given subscriber text. A person signed in with their own key reads it; public
+ *  mode, a guest link and anything outside the key gate get the headline's row and the reason, never the text. */
+async function gatedView(env, row, auth) {
+  let meta = {}; try { meta = typeof row.meta === 'string' ? (JSON.parse(row.meta || '{}') || {}) : (row.meta || {}); } catch (e) { meta = {}; }
+  if (!meta.gated) return { gated: false };
+  if (!auth || !auth.ok || auth.public || auth.guest) return { gated: true, allowed: false, error: 'gated_internal', detail: 'This article was read through the agency\'s subscription. Its text is for the team\'s own reading and is not served to a guest link, to public access or outside AXIOM. The headline and the link are.' };
+  await ensureGated(env);
+  const g = await env.MIND_DB.prepare('SELECT text, chars, via, by, at FROM arc_gated WHERE item=?').bind(row.id).first();
+  if (!g) return { gated: true, allowed: true, text: '', chars: 0, detail: 'The row is marked as read through a subscription but its text is not on file.' };
+  return { gated: true, allowed: true, text: g.text || '', chars: g.chars || 0, via: g.via || '', at: g.at || 0, excerpt: gatedExcerpt(g.text) };
+}
+/** Subscriber text for rows the caller already holds, for the team's own analysis (the Den's board and brief). */
+async function gatedTexts(env, ids) {
+  await ensureGated(env); const out = {}; ids = (ids || []).map(Number).filter(Boolean);
+  for (let i = 0; i < ids.length; i += 80) { const part = ids.slice(i, i + 80); (((await env.MIND_DB.prepare('SELECT item, text FROM arc_gated WHERE item IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results) || []).forEach(r => { out[r.item] = r.text || ''; }); }
+  return out;
+}
+/** File what a Mac read through a subscription. Refused unless the row's source is cleared; a page that still shows a
+ *  paywall is recorded as that, never saved as the article. */
+async function gatedSave(env, b, who) {
+  b = b || {};
+  if (!(await ensureGated(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  const id = parseInt(b.id, 10) || 0; const url = String(b.url || '');
+  const row = id ? await env.MIND_DB.prepare('SELECT id, url, src, meta FROM arc_items WHERE id=?').bind(id).first() : (url ? await env.MIND_DB.prepare("SELECT id, url, src, meta FROM arc_items WHERE kind='news' AND url=?").bind(url).first() : null);
+  if (!row) return { ok: false, error: 'unknown_row', detail: 'No archive row with that id or url.' };
+  let meta = {}; try { meta = JSON.parse(row.meta || '{}') || {}; } catch (e) { meta = {}; }
+  const sid = sourceIdClean(b.source || meta.source || row.src);
+  const src = sid ? await sourceAccessGet(env, sid) : null;
+  if (!src) return { ok: false, status: 409, error: 'source_unknown', detail: 'The row does not belong to a source in the registry, so nothing says it may be read through a subscription.' };
+  if (GATED_NEEDS_CLEARANCE.indexOf(src.access) < 0 || !src.cleared) return { ok: false, status: 409, error: 'source_not_cleared', detail: src.name + ' is not cleared for the subscriber read. In Sources, record what covers reading it for monitoring (the agency\'s subscription or its copyright licence); until then it stays headlines only.' };
+  if (b.wall) {
+    meta.ft_g = 'wall'; meta.ft_err = 'subscription_wall';
+    await env.MIND_DB.prepare('UPDATE arc_items SET meta=? WHERE id=?').bind(metaJson(meta), row.id).run();
+    return { ok: false, status: 422, error: 'subscription_wall', detail: src.name + ' still showed its paywall to the signed-in browser. Sign in again on the Mac (python3 tools/reach-agent.py --login news:' + src.id + ') or check the subscription.' };
+  }
+  const text = String(b.text || '').replace(/\u0000/g, '').replace(/\s+\n/g, '\n').trim().slice(0, GATED_TEXT_MAX);
+  if (text.length < 200) return { ok: false, error: 'too_short', detail: 'Body text under 200 characters is not filed as the article.' };
+  const now = Date.now();
+  await env.MIND_DB.prepare('INSERT INTO arc_gated(item,src,url,text,chars,via,by,at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET text=excluded.text, chars=excluded.chars, via=excluded.via, by=excluded.by, at=excluded.at')
+    .bind(row.id, src.id, row.url, text, text.length, String(b.via || 'reach').slice(0, 20), String(who || '').slice(0, 60), now).run();
+  meta.ft = 'subscriber'; meta.gated = 1; meta.ft_chars = text.length; meta.layer = 2; meta.access = src.access; delete meta.ft_try; delete meta.ft_err; delete meta.ft_g;
+  await env.MIND_DB.prepare('UPDATE arc_items SET meta=? WHERE id=?').bind(metaJson(meta), row.id).run();   // the body column is left as the public headline and summary
+  return { ok: true, id: row.id, chars: text.length, method: 'subscriber', gated: true, source: src.id };
+}
+/** Queue the subscriber read for one row a person asked for, or - from the tick - for the newest issue-tagged headlines
+ *  of cleared sources. The Mac that holds the publisher's signed-in profile claims it. No model call. */
+async function gatedQueue(env, row, who) {
+  let meta = {}; try { meta = JSON.parse(row.meta || '{}') || {}; } catch (e) { meta = {}; }
+  const sid = sourceIdClean(meta.source || row.src); const src = sid ? await sourceAccessGet(env, sid) : null;
+  if (!src || GATED_NEEDS_CLEARANCE.indexOf(src.access) < 0 || !src.cleared) return { ok: false, status: 409, error: 'source_not_cleared', detail: (src ? src.name : 'This row\'s source') + ' is not cleared for the subscriber read. Record what covers it in Sources first.' };
+  if ((await reachOff(env)).indexOf('gated') >= 0) return { ok: false, status: 409, error: 'reach_off', detail: 'The subscriber read is switched off for every collector.' };
+  const day = auDayKey(); const k = 'gated_n_' + src.id + '_' + day; const n = Number(await kvGet(env.AXIOM_KV, k) || 0);
+  const cap = Math.max(1, parseInt(env.GATED_PER_SOURCE, 10) || GATED_PER_SOURCE);
+  if (n >= cap) return { ok: false, status: 429, error: 'gated_cap', detail: 'Today\'s cap of ' + cap + ' subscriber reads for ' + src.name + ' is spent. The collector does not download the paper.' };
+  await kvPut(env.AXIOM_KV, k, String(n + 1), 2 * 86400);
+  const j = await jobCreate(env, 'gated', { id: row.id, url: row.url, profile: src.id, where: 'desktop' }, who || 'plan');
+  return { ok: true, job: j.id, source: src.id, where: 'desktop' };
+}
+async function gatedCron(env) {
+  if (!env.MIND_DB || !(await ensureGated(env))) return { ok: false };
+  if (!(await agentsSeen(env)).some(a => a.live && (a.sources || []).indexOf('gated') >= 0)) return { ok: true, skipped: 'no collector with a publisher profile is connected' };
+  const cleared = (((await env.MIND_DB.prepare("SELECT id, access FROM sources WHERE cleared_at>0").all()).results) || []).filter(s => GATED_NEEDS_CLEARANCE.indexOf(sourceAccessOf(s)) >= 0).map(s => s.id).slice(0, 80);
+  if (!cleared.length) return { ok: true, skipped: 'no source is cleared for the subscriber read' };
+  const rows = ((await env.MIND_DB.prepare("SELECT id, url, src, meta FROM arc_items WHERE kind='news' AND ts>? AND url LIKE 'http%' AND json_extract(meta,'$.source') IN (" + cleared.map(() => '?').join(',') + ") AND json_extract(meta,'$.gated') IS NULL AND json_extract(meta,'$.ft_g') IS NULL AND json_array_length(COALESCE(json_extract(meta,'$.issues'),'[]'))>0 ORDER BY ts DESC LIMIT ?")
+    .bind(Date.now() - 48 * 3600000, ...cleared, GATED_PER_TICK).all()).results) || [];
+  const out = { ok: true, queued: 0, held: [] };
+  for (const r of rows) {
+    const q = await gatedQueue(env, r, 'plan');
+    if (q.ok) { out.queued++; await env.MIND_DB.prepare("UPDATE arc_items SET meta=json_set(COALESCE(meta,'{}'), '$.ft_g', 'queued') WHERE id=?").bind(r.id).run(); } else out.held.push(q.error);
+  }
+  return out;
+}
+/** Newsletters and monitoring-service exports, filed in one place with the rules applied here. A newsletter is
+ *  subscriber content: its source must be cleared and its text goes to arc_gated. A monitoring export brings a
+ *  headline, an outlet, a date, a link and the service's own short excerpt. What it brought that AXIOM did not
+ *  already hold is counted: that number is a coverage measure. */
+async function denImport(env, b, who) {
+  b = b || {};
+  if (!(await ensureGated(env)) || !(await ensureDen(env))) return { ok: false, status: 501, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  const ns = String(b.ns || '').toLowerCase(); const kind = String(b.kind || '').toLowerCase();
+  if (!denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'Say which client this was collected for (ns).' };
+  if (kind !== 'newsletter' && kind !== 'monitor') return { ok: false, status: 400, error: 'bad_kind', detail: 'kind is newsletter or monitor.' };
+  const items = Array.isArray(b.items) ? b.items : [];
+  if (!items.length) return { ok: false, status: 400, error: 'no_items', detail: 'Send items: [{title, url, ts, text, outlet}].' };
+  if (items.length > 300) return { ok: false, status: 413, error: 'too_many_items', detail: 'At most 300 items a request.' };
+  let src = null;
+  if (kind === 'newsletter') {
+    src = await sourceAccessGet(env, sourceIdClean(b.source));
+    if (!src) return { ok: false, status: 404, error: 'unknown_source', detail: 'A newsletter is imported under its source in the registry: add it in Sources first.' };
+    if (GATED_NEEDS_CLEARANCE.indexOf(src.access) < 0 || !src.cleared) return { ok: false, status: 409, error: 'source_not_cleared', detail: src.name + ' is not cleared. A newsletter is subscriber content: in Sources, set its access to newsletter and record what covers reading it for monitoring.' };
+  }
+  const now = Date.now(); const mine = denNsIssues(ns);
+  const out = { ok: true, ns, kind, received: items.length, added: 0, held: 0, gated: 0, on_topic: 0, skipped: { empty: 0, bad_url: 0 } };
+  for (const it0 of items) {
+    const it = (it0 && typeof it0 === 'object') ? it0 : {};
+    const title = String(it.title || '').replace(/\s+/g, ' ').trim().slice(0, 400); const text = String(it.text || '').replace(/\u0000/g, '').trim();
+    if (title.length < 4) { out.skipped.empty++; continue; }
+    let url = canonPermalink('news', it.url);
+    if (!url) { if (kind === 'monitor') { out.skipped.bad_url++; continue; } url = 'x:nl:' + src.id + ':' + arcHash(title + '|' + String(it.ts || '')); }
+    const ts = Number(it.ts) > 1e11 ? Number(it.ts) : (Date.parse(String(it.ts || '')) || now);
+    const issues = issueTag(title + ' ' + text.slice(0, 2000)); if (issues.some(i => mine.indexOf(i) >= 0)) out.on_topic++;
+    const cand = Array.from(new Set([url, url + '/', String(it.url || '').trim()].filter(Boolean)));
+    let row = await env.MIND_DB.prepare("SELECT id, meta FROM arc_items WHERE kind='news' AND url IN (" + cand.map(() => '?').join(',') + ') LIMIT 1').bind(...cand).first();
+    if (row) out.held++;
+    else {
+      const meta = kind === 'newsletter' ? { reg: 1, source: src.id, method: 'newsletter', access: src.access, via: 'import', issues, ns, dated: 1 }
+        : { via: 'monitor', method: 'monitor', outlet: String(it.outlet || '').replace(/\s+/g, ' ').trim().slice(0, 80), issues, ns, dated: 1 };
+      // a newsletter's body column holds the headline only: its words are subscriber text and go to arc_gated
+      await archiveItems(env, 'news', [{ src: kind === 'newsletter' ? src.id : 'monitor', title, body: kind === 'monitor' ? text.slice(0, 500) : '', url, author: '', ts, meta }]);
+      row = await env.MIND_DB.prepare("SELECT id, meta FROM arc_items WHERE kind='news' AND url=?").bind(url).first();
+      if (row) out.added++;
+    }
+    if (kind === 'newsletter' && row && text.length >= 200) { const g = await gatedSave(env, { id: row.id, text, source: src.id, via: 'newsletter' }, who); if (g.ok) out.gated++; }
+  }
+  out.summary = out.added + ' new to AXIOM, ' + out.held + ' already held' + (kind === 'newsletter' ? ', ' + out.gated + ' with their text filed for the team' : '') + '; ' + out.on_topic + ' on this client\'s issues';
+  return out;
 }
 
 // ==============================================================================
@@ -8119,7 +8292,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-11.studio-p55';
+const AXIOM_BUILD = '2026-11-11.studio-p56';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -16100,7 +16273,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { issueTag, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, jobRoute, xSyndSweep, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { issueTag, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -18532,6 +18705,7 @@ const AXIOM_WORKER = {
     //    POST /den/reach {off: [platform], clear}        switch signed-in collection of a platform off or on (full)
     //    POST /den/watch/add|propose|decide|update|delete    (full)
     //    POST /signals/ingest {ns, layer, via, rows, comments, fb}   posts from any collector on any layer (full)
+    //    POST /den/import {ns, kind newsletter|monitor, source, items}   newsletters and monitoring-service exports (full)
     if (path.startsWith('/den/') || path === '/signals/ingest') {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let ob = {}; if (req.method === 'POST') { try { ob = await req.json(); } catch (e) { ob = {}; } }
@@ -18553,6 +18727,7 @@ const AXIOM_WORKER = {
           if (path === '/den/watch/update') return send(await denWatchUpdate(env, ob));
           if (path === '/den/watch/delete') return send(await denWatchDelete(env, ob));
           if (path === '/signals/ingest') return send(await signalsIngest(env, ob, auth.name));
+          if (path === '/den/import') return send(await denImport(env, ob, auth.name));
         }
         return jsonResp({ error: 'not_found' }, 404);
       } catch (e) { return jsonResp({ ok: false, error: 'den_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
@@ -18609,8 +18784,19 @@ const AXIOM_WORKER = {
         if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
         if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Filing text needs a full-access key.' }, 403);
         let fb = {}; try { fb = await req.json(); } catch (e) { fb = {}; }
-        const sv = await fulltextSave(env, fb);
-        return jsonResp(sv, sv.ok ? 200 : (sv.error === 'unknown_row' ? 404 : 400));
+        const sv = await fulltextSave(env, Object.assign({}, fb, { by: auth.name }));
+        const svSt = sv.ok ? 200 : (sv.status || (sv.error === 'unknown_row' ? 404 : 400)); delete sv.status;
+        return jsonResp(sv, svSt);
+      }
+      if (path === '/fulltext/gated' && req.method === 'POST') {
+        // a person asks for one article to be read through the agency's subscription: a job for the Mac that holds the profile
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Asking for a subscriber read needs a full-access key.' }, 403);
+        let gb = {}; try { gb = await req.json(); } catch (e) { gb = {}; }
+        await ensureGated(env);
+        const grow = await env.MIND_DB.prepare('SELECT id, url, src, meta FROM arc_items WHERE id=?').bind(parseInt(gb.id, 10) || 0).first();
+        if (!grow) return jsonResp({ error: 'unknown_row', detail: 'No archive row with that id.' }, 404);
+        const gq = await gatedQueue(env, grow, auth.name); const gst = gq.ok ? 200 : (gq.status || 400); delete gq.status;
+        return jsonResp(gq, gst);
       }
       if (req.method !== 'GET') return jsonResp({ error: 'not_found' }, 404);
       let url = String(reqUrl.searchParams.get('url') || '').trim();
@@ -18622,6 +18808,13 @@ const AXIOM_WORKER = {
         row = await env.MIND_DB.prepare('SELECT id,url,meta FROM arc_items WHERE id=?').bind(rowId).first();
         if (!row) return jsonResp({ error: 'unknown_row', detail: 'No archive row ' + rowId + '.' }, 404);
         url = row.url;
+      }
+      {
+        // a row read through a subscription answers from its own store, and only to a person signed in with their own key
+        const grow = row || (env.MIND_DB && url ? await env.MIND_DB.prepare("SELECT id,url,meta FROM arc_items WHERE kind='news' AND url=?").bind(url).first() : null);
+        const gv = grow ? await gatedView(env, grow, auth) : { gated: false };
+        if (gv.gated && !gv.allowed) return jsonResp({ ok: false, gated: true, error: gv.error, detail: gv.detail }, 403);
+        if (gv.gated && gv.text) return jsonResp({ ok: true, gated: true, method: 'subscriber', id: grow.id, url: grow.url, text: gv.text, chars: gv.chars, excerpt: gv.excerpt, at: gv.at, note: 'Read through the agency\'s subscription: for the team\'s own reading. Quote no more than ' + GATED_QUOTE_WORDS + ' words, with the link.' });
       }
       if (!/^https?:\/\//.test(url)) return jsonResp({ error: 'missing_url', detail: 'Give url=https://... or id=<archive row>.' }, 400);
       const ft = await fullText(env, url, { save: reqUrl.searchParams.get('save') === '1', light: reqUrl.searchParams.get('light') === '1', render: reqUrl.searchParams.get('light') !== '1' });
@@ -18679,6 +18872,11 @@ const AXIOM_WORKER = {
           if (had && had.core) return jsonResp({ error: 'core_source', detail: s.id + ' is a core feed; edit it with /sources/update.' }, 400);
           await sourceUpsert(env, s, Date.now());
           return jsonResp({ ok: true, added: !had, source: await sourceGet(env, s.id) });
+        }
+        if (path === '/sources/access') {
+          // how the source may be read, and - for a paid one - what covers reading it for monitoring (the record that lets the subscriber read run)
+          const r = await sourceAccessSet(env, sb, auth.name); const st = r.ok ? 200 : (r.status || 400); delete r.status;
+          return jsonResp(r, st);
         }
         if (path === '/sources/update') {
           const id = sourceIdClean(sb.id);
@@ -20678,6 +20876,8 @@ async function handleScheduled(env) {
   // Full text for the news of the last two days that arrived as a headline and
   // a blurb: reader extraction, AMP, the archives, a rendered page.
   try { const ft = await fulltextCron(env); if (ft && ft.tried) console.log('Full text:', ft.got, 'of', ft.tried); } catch (e) { console.log('fulltext cron failed', String(e).slice(0, 120)); }
+  // the subscriber read: jobs for the Mac that holds a cleared publisher's signed-in profile; no model call, never gated by AI_AUTOMATION
+  try { await gatedCron(env); } catch (e) { console.log('gated cron failed', String(e).slice(0, 120)); }
   // The Sentinel runs every tick: detect spikes on client issues, draft the
   // angle, push it to Slack. This is the loop that makes response time small.
   // Automated model spend is gated (AI_AUTOMATION: always / daily / off): detection, alerts and every collector run on;

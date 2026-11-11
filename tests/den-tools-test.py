@@ -86,5 +86,31 @@ t('an empty register asks for nothing', plan.queries({'plan': {}, 'urls': []})[0
 fields_fb = set(by['fbposts.json']['fields'].split(','))
 t('no field that names a person is ever requested', not (fields_fb | set(by['igposts.json']['fields'].split(','))) & {'from_name', 'from_id', 'name', 'story_tags'})
 
+# ---- newsletters and monitoring exports ----
+imp = load('den_import', 'den-import.py')
+nl = tempfile.mkdtemp()
+BODY = 'The Senate will vote on a gas export tax this week after the crossbench secured a debate. ' * 6
+open(os.path.join(nl, 'a.eml'), 'w').write('From: Sam Private <sam.private@example.com>\nTo: team@example.com\nSubject: Morning briefing: the gas export tax vote\nDate: Tue, 10 Nov 2026 06:00:00 +1100\nContent-Type: text/html; charset=utf-8\n\n<html><body><style>p{color:red}</style><p>' + BODY + '</p><p>Unsubscribe</p></body></html>\n')
+open(os.path.join(nl, 'b.eml'), 'w').write('From: x@example.com\nSubject: Too short\nDate: Tue, 10 Nov 2026 06:00:00 +1100\n\nhello\n')
+open(os.path.join(nl, 'notes.txt'), 'w').write('not an email')
+items = imp.from_eml(nl)
+t('a saved newsletter becomes one item: its subject, its date and its words', len(items) == 1 and items[0]['title'] == 'Morning briefing: the gas export tax vote' and items[0]['ts'] == 1794250800000 and 'gas export tax' in items[0]['text'] and 'color:red' not in items[0]['text'], items[:1])
+t('the sender is not read', 'Sam Private' not in json.dumps(items) and 'sam.private' not in json.dumps(items))
+csvp = os.path.join(tmp, 'export.csv')
+open(csvp, 'w', encoding='utf-8-sig').write('Date;Headline;Source Name;URL;Hit Sentence;Author\n2026-11-10;Greens renew call for windfall tax on gas;Regional Daily;https://example-regional.com.au/story/windfall;A windfall tax on gas companies.;Jo Citizen\n2026-11-10;No link here;Somewhere;;x;y\n')
+mon = imp.from_monitor(csvp)
+t('a monitoring export is read by its column names, whatever the separator', mon == [{'title': 'Greens renew call for windfall tax on gas', 'url': 'https://example-regional.com.au/story/windfall', 'ts': '2026-11-10', 'outlet': 'Regional Daily', 'text': 'A windfall tax on gas companies.'}], mon)
+t('and the journalist\'s name in it is not carried', 'Jo Citizen' not in json.dumps(mon))
+sent = []; said = []
+r = imp.run('monitor', mon, 'aep', '', 'https://worker.test', 'k', False, send=lambda *a: sent.append(a) or {'ok': True}, out=said.append)
+t('without --apply nothing is sent, and it says so', sent == [] and r == {'sent': 0} and 'nothing was sent' in said[-1])
+r = imp.run('newsletter', items, 'aep', 'capitalbrief', 'https://worker.test/', 'k', True, send=lambda url, key, body: sent.append((url, body)) or {'ok': True, 'added': 1, 'held': 0, 'gated': 1, 'on_topic': 1}, out=said.append)
+t('with --apply it files through /den/import under the source and says what was new', sent[0][0] == 'https://worker.test/den/import' and sent[0][1]['kind'] == 'newsletter' and sent[0][1]['source'] == 'capitalbrief' and r['added'] == 1 and '1 new to AXIOM' in said[-1] and 'text filed for the team' in said[-1], (sent[0][1].keys(), said[-1]))
+try:
+    imp.run('newsletter', items, 'aep', 'capitalbrief', 'https://worker.test', 'k', True, send=lambda *a: {'ok': False, 'error': 'source_not_cleared', 'detail': 'not cleared'}, out=lambda *_: None); stopped = False
+except SystemExit as e:
+    stopped = 'source_not_cleared' in str(e)
+t('a refusal from the worker stops the import and says why', stopped)
+
 print('\n%d passed, %d failed' % (passed, failed))
 sys.exit(1 if failed else 0)

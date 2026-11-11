@@ -13,7 +13,7 @@ for (let i = 0; i < 40; i++) { try { const r = await fetch('http://127.0.0.1:' +
 const NOW = Date.now(), H = 3600e3;
 const base = (o) => Object.assign({ issues: [], schedule: 60, enabled: true, core: false, edited: false, created: NOW - 30 * 86400e3, updated: NOW - H, last_try: NOW - H, last_ok: NOW - H, next_due: NOW + H, fails: 0, method_ok: 'rss', last_error: '', latest_ts: NOW - 2 * H, note: '', alerted: 0, items24: 3, status: 'ok' }, o);
 let sources = [
-  base({ id: 'theaustralian', name: 'The Australian', tier: 'national', juris: 'au', issues: ['gov', 'econ'], methods: ['rss', 'sitemap', 'html', 'gnews', 'render'], urls: { rss: 'https://www.theaustralian.com.au/feed', site: 'theaustralian.com.au', home: 'https://www.theaustralian.com.au/nation/politics' }, fails: 2, method_ok: '', last_ok: 0, latest_ts: 0, items24: 0, status: 'failing', last_error: 'rss:x404 sitemap:x403 html:x403 gnews:x200 | rss HTTP 404; sitemap HTTP 403; html HTTP 403; gnews Google News has nothing indexed for site:theaustralian.com.au in 2 days' }),
+  base({ access: 'subscriber', cleared: false, id: 'theaustralian', name: 'The Australian', tier: 'national', juris: 'au', issues: ['gov', 'econ'], methods: ['rss', 'sitemap', 'html', 'gnews', 'render'], urls: { rss: 'https://www.theaustralian.com.au/feed', site: 'theaustralian.com.au', home: 'https://www.theaustralian.com.au/nation/politics' }, fails: 2, method_ok: '', last_ok: 0, latest_ts: 0, items24: 0, status: 'failing', last_error: 'rss:x404 sitemap:x403 html:x403 gnews:x200 | rss HTTP 404; sitemap HTTP 403; html HTTP 403; gnews Google News has nothing indexed for site:theaustralian.com.au in 2 days' }),
   base({ id: 'miningnews', name: 'MiningNews.net', tier: 'sector', juris: 'au', issues: ['mining'], methods: ['sitemap', 'gnews'], urls: { site: 'miningnews.net' }, fails: 7, alerted: 1, method_ok: '', last_ok: 0, latest_ts: 0, items24: 0, status: 'dead', last_error: 'sitemap:x403 gnews:x200 | sitemap HTTP 403; gnews Google News has nothing indexed for site:miningnews.net in 2 days' }),
   base({ id: 'nationals', name: 'The Nationals', tier: 'party', juris: 'au', issues: ['regional', 'gov'], methods: ['rss', 'wp', 'sitemap', 'gnews'], urls: { rss: 'https://nationals.org.au/feed/', wp: 'https://nationals.org.au', site: 'nationals.org.au' }, method_ok: 'wp', items24: 4, latest_ts: NOW - 0.5 * H, last_ok: NOW - 0.3 * H }),
   base({ id: 'smh', name: 'Sydney Morning Herald', tier: 'metro', juris: 'nsw', methods: ['rss'], urls: { rss: 'https://www.smh.com.au/rss/feed.xml' }, core: true, items24: 40, schedule: 30 }),
@@ -39,6 +39,7 @@ const stub = (url, method, body) => {
   if (p === '/bridge/job') return { ok: true, id: 'j77', source: 'sources', status: 'done', agent: '', success: true, cursor: 3, result: { ok: true, ran: 50, succeeded: 31 }, lines: [{ id: 1, ts: NOW, kind: 'info', text: 'sweeping 50 sources (due now)' }, { id: 2, ts: NOW, kind: 'cmd', text: 'nationals: wp https://nationals.org.au/wp-json/wp/v2/posts' }, { id: 3, ts: NOW, kind: 'out', text: 'nationals: 2 items via wp (480ms)' }] };
   if (p === '/sources/update') { const s = sources.find(x => x.id === body.id); Object.assign(s, body.patch || body); if (body.enabled === false) s.status = 'off'; if (body.enabled === true) s.status = 'ok'; return { ok: true, source: s }; }
   if (p === '/sources/add') { const s = base({ id: body.name.toLowerCase().replace(/[^a-z0-9]+/g, '_'), name: body.name, tier: body.tier, juris: body.juris, issues: body.issues, methods: Object.keys(body.urls).map(k => ({ rss: 'rss', wp: 'wp', home: 'html', site: 'gnews' })[k]).filter(Boolean), urls: body.urls, edited: true, last_try: 0, last_ok: 0, latest_ts: 0, items24: 0, method_ok: '', status: 'unverified' }); sources.push(s); return { ok: true, added: true, source: s }; }
+  if (p === '/sources/access') { const s = sources.find(x => x.id === body.id); if (body.cleared === true && String(body.basis || '').trim().length < 12) return { ok: false, error: 'basis_required' }; s.access = body.access || s.access; if (body.cleared === true) { s.cleared = true; s.cleared_by = 'Tester'; s.cleared_at = NOW; s.cleared_basis = body.basis; } if (body.cleared === false) { s.cleared = false; s.cleared_basis = ''; } return { ok: true, source: s }; }
   if (p === '/sources/export') return { ok: true, exported: new Date().toISOString(), count: sources.length, sources };
   if (p === '/bridge/run') return { ok: true, id: 'j78', source: body.source, where: 'desktop' };
   return { ok: true };
@@ -188,6 +189,27 @@ await t('Sweep what is due starts a job and the console tails it', async () => {
 });
 if (process.env.SHOT) { await page.click('.src-table tr:has-text("The Australian")'); await page.waitForSelector('.src-drawer:has-text("The Australian")'); await page.screenshot({ path: 'shot-sources.png', fullPage: false }); }
 await page.close();
+await t('a subscriber source says headlines only until a person records what covers reading it, then says who cleared it', async () => {
+  const p3 = await open();
+  await p3.selectOption('.src-filters select[aria-label="Status"]', '');
+  await p3.click('.src-table tr:has-text("The Australian")');
+  await p3.waitForSelector('.src-drawer .src-access');
+  const facts = () => p3.textContent('.src-drawer .src-facts');
+  ok(/Subscribers only/.test(await facts()) && /headlines only until it is cleared/.test(await facts()), 'says how it is read and that it is not cleared');
+  const btn = p3.locator('.src-access button:has-text("Record and clear")');
+  ok(await btn.isDisabled(), 'no clearance without a basis');
+  await p3.fill('.src-access input[type="text"]', 'too short');
+  ok(await btn.isDisabled(), 'a basis under twelve characters is not one');
+  await p3.fill('.src-access input[type="text"]', 'The agency subscription and its copyright licence');
+  await btn.click();
+  await p3.waitForFunction(() => /cleared for the subscriber read/.test((document.querySelector('.src-drawer .src-facts') || {}).textContent || ''));
+  const sent = calls.filter(c => c.p === '/sources/access').pop();
+  eq([sent.body.id, sent.body.access, sent.body.cleared], ['theaustralian', 'subscriber', true]);
+  ok(/by Tester/.test(await facts()) && /The agency subscription and its copyright licence/.test(await facts()), 'who cleared it and what covers it');
+  await p3.click('.src-access button:has-text("Withdraw the clearance")');
+  await p3.waitForFunction(() => /headlines only until it is cleared/.test((document.querySelector('.src-drawer .src-facts') || {}).textContent || ''));
+  await p3.close();
+});
 await t('a read-only key sees the table and can probe, but nothing that changes the registry', async () => {
   const p2 = await open('read');
   ok(!(await p2.$('.src-actions')), 'no sweep buttons');
@@ -196,6 +218,7 @@ await t('a read-only key sees the table and can probe, but nothing that changes 
   await p2.click('.src-table tr:has-text("The Nationals")');
   await p2.waitForSelector('.src-drawer');
   ok(await p2.$('.src-drawer button:has-text("Probe every route")'));
+  ok(!(await p2.$('.src-drawer .src-access')), 'no clearance form for a read-only key');
   ok(!(await p2.$('.src-drawer button:has-text("Sweep now")')) && !(await p2.$('.src-drawer button:has-text("Edit")')) && !(await p2.$('.src-drawer button:has-text("Switch off")')));
   await p2.close();
 });

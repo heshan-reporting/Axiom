@@ -347,3 +347,73 @@ python3 tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out 
 
 Read `/tmp/yt.json`: every row should have an address, words and counts. If the counts are missing, the field names
 in `_ALIASES` need the ones agent-reach uses. Then Facebook and Instagram, each with `--login` first.
+
+## 4. Release 4 - subscriber news, newsletters and monitoring exports (build `2026-11-11.studio-p56`, page `?v=r43`)
+
+Decision D8, as the owner asked on 11 November 2026. About 117 of the 1,061 links in the reports read point at
+mastheads that are subscribers-only or metered (0.3). Until now AXIOM held their headlines and nothing else.
+**Nothing is switched on by this release.** A source is read through a subscription only after two things a person
+does: records on the source what covers reading it for monitoring, and signs in to it on the Mac. Sources cleared so
+far: none recorded.
+
+**How a source is read** is now a fact on the source: open, metered, subscribers only, a subscriber newsletter, or an
+official source. The mastheads the reports cite are marked from a seed list (The Australian, the News Corp metros, the
+AFR, Capital Brief, The West, Energy News Bulletin as subscribers only; the Nine metros and the Canberra Times as
+metered); the seed is a starting point a person corrects in the Sources view, not a finding about any publisher's terms.
+
+**Clearing a source** (Sources view, full key): choose how it is read, write what covers reading it for monitoring
+(the agency's subscription, or its copyright licence; twelve characters at least), press Record. The source then shows
+who cleared it, when, and the words they wrote. Withdraw takes it back. **Whether a given subscription's terms or the
+agency's copyright licence do cover monitoring use is a question for the person who records it; the software records
+the answer and cannot check it.**
+
+**What is read, and how much.** Headlines are found as before (feed, sitemap, listing page, Google News). Only rows
+tagged with a client issue, under 48 hours old, from a cleared source go on to the subscriber read: at most eight
+queued a tick and twenty a source a day, and only while a collector with that publisher's profile is connected. One
+article can also be asked for by hand (`POST /fulltext/gated {id}`). The collector does not download the paper.
+
+**Where the text goes.** Not into the archive row. It is kept in its own table, which no list, feed, summary, partner
+or review-link route reads; the archive row keeps its public summary and says only that a subscriber read exists.
+One function hands the text out: to a signed-in member of the team, with a thirty-word excerpt and the note that a
+brief quotes no more than that with the link. A guest link and a keyless reader are refused with the reason. A page
+that still shows its paywall after sign-in is reported as `subscription_wall` and never saved as an article.
+
+**On the Mac:**
+
+```
+pip install playwright && playwright install chromium
+python3 tools/reach-agent.py --login news:afr --url https://www.afr.com/login   # a person signs in; the profile is kept for that publisher
+python3 tools/reach-agent.py --channels                                         # "gated" appears once a profile exists
+```
+
+**Newsletters and monitoring exports** (decision D9: built; whether to use it is the analyst's call):
+
+```
+python3 tools/den-import.py eml=~/Downloads/briefings --source capitalbrief --ns aep --key $AXIOM_KEY          # says what it would file
+python3 tools/den-import.py eml=~/Downloads/briefings --source capitalbrief --ns aep --key $AXIOM_KEY --apply
+python3 tools/den-import.py monitor=~/Downloads/export.csv --ns aep --key $AXIOM_KEY --apply
+```
+
+A newsletter is subscriber content: its source must be cleared, its words go to the same separate table, and the
+sender is not read. A monitoring export is read by its column names (headline, link, date, outlet, summary), the
+journalist's name is not carried, and the answer counts what AXIOM did not already hold - which is itself a measure of
+coverage.
+
+**Differences from the prompt, and why.**
+- The prompt put the subscriber read on the existing `render` job with a `profile` parameter and stored the result on
+  the archive row with `meta.gated`. It is a bridge source of its own (`gated`) and a table of its own instead:
+  marking a row and trusting every present and future route to check the mark is how such text leaks; a separate
+  table cannot be returned by a route that does not know it exists.
+- No `reach` method was added to a source's method chain. How a source is read is the `access` field; discovery is
+  unchanged.
+- Links inside a newsletter are **not** followed. The newsletter's own words are filed; following links is not built.
+- The thirty-word limit is in `gatedExcerpt` now; the brief's own check (`denClean`) arrives with the Den in release 6.
+
+Harnesses: `tests/den-gated-worker.mjs` (9), `tests/reach-channels-test.py` (62), `tests/den-tools-test.py` (30),
+`tests/sources-browser.mjs` (15).
+
+**Not verifiable here.** No publisher was contacted and nothing was signed in to. The persistent browser profile, the
+sign-in flow and each publisher's page shape (whether `extract_article` finds the article body behind a real
+subscription, and whether a real paywall page comes back short enough to be recognised as a wall) are proven only
+against stand-ins. The first real read on the Mac is the test; read the job log for `subscription_wall`.
+

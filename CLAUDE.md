@@ -148,7 +148,38 @@ repo), the gap list, which collection layer can reach what, and the decisions in
     a live collector offers (no model call, never gated); `xSyndSweep` reads the registers' X accounts.
   - **Comment text on Facebook and Instagram is collected by no layer**, and a Facebook page's own timeline only by
     the official route. `DEN.md` s.3 says what was assumed and what agent-reach actually offers.
-  - Harnesses: `tests/reach-channels-test.py` (52), `tests/den-reach-worker.mjs` (7).
+  - Harnesses: `tests/reach-channels-test.py` (62), `tests/den-reach-worker.mjs` (7).
+- **Release 4, subscriber news (build `2026-11-11.studio-p56`, page `?v=r43`). Decision D8, 11 November 2026, at the
+  owner's request: a paid source may be read through a subscription the agency holds, signed in by a person on the
+  Mac, and only after someone has recorded on that source what covers reading it for monitoring. Sources cleared so
+  far: none recorded - add each here with who and when.** This replaces the old rule "no credentialed access
+  anywhere" for cleared sources only; an uncleared source stays headlines only, and no paywall is ever worked around.
+  - `sources` gained `access` (open / metered / subscriber / newsletter / official; `SOURCE_ACCESS_SEED` marks the
+    mastheads the reports cite), `cleared_by`, `cleared_at`, `cleared_basis`. `POST /sources/access {id, access,
+    cleared, basis}` (full; a basis of twelve characters or more). The Sources drawer shows how a source is read,
+    who cleared it and on what basis, and holds the form.
+  - **Subscriber text never enters `arc_items`.** It lives in D1 `arc_gated(item, src, url, text, chars, via, by,
+    at)`, so no list, feed, summary, partner or review route can return it; the archive row keeps its public summary
+    and `meta {ft: 'subscriber', gated: 1, layer: 2, access}`. `gatedView(env, row, auth)` is the one function that
+    hands it out: to a roster key, with a thirty-word `excerpt` (`gatedExcerpt`) and the note that a brief quotes no
+    more; a guest link or a keyless reader gets `403 gated_internal`. `gatedTexts(env, ids)` is for server-side
+    analysis.
+  - `gatedSave` (through `POST /fulltext/save {gated|wall}`): `source_not_cleared` 409, `subscription_wall` 422 (a
+    page still showing its paywall is reported, never saved as a body), `too_short`. `POST /fulltext/gated {id}`
+    queues one article; `gatedCron()` each tick queues at most `GATED_PER_TICK` = 8 issue-tagged rows under 48 hours
+    from cleared sources, only while a live collector offers `gated`, `GATED_PER_SOURCE` = 20 a source a day (KV
+    `gated_n_<src>_<day>`). Bridge source `gated` is desktop only and obeys the `/den/reach` kill switch.
+  - On the Mac: `python3 tools/reach-agent.py --login news:<source id> [--url <sign-in page>]` opens a browser
+    profile kept for that publisher (`~/.axiom-reach/profiles/`), after the warning; `job_gated` reads one article
+    with it and saves the text or reports the wall. Never a paywall-bypass service, a borrowed login or a
+    metered-wall trick.
+  - `tools/den-import.py eml=<folder> --source <id> --ns aep` (newsletters saved as .eml: the source must be
+    cleared, the text goes to `arc_gated`, the sender is not read) and `monitor=<csv> --ns aep` (a monitoring
+    service's export, columns found by name; journalists' names not carried); dry by default, `--apply` files
+    through `POST /den/import` and reports what AXIOM did not already hold.
+  - `/sifa/results` no longer fails on a database that has never run a job.
+  - Harnesses: `tests/den-gated-worker.mjs` (9), the publisher cases in `tests/reach-channels-test.py`, the
+    importer cases in `tests/den-tools-test.py` (30), the clearance case in `tests/sources-browser.mjs` (15).
 
 ## The research agent
 
@@ -474,9 +505,12 @@ attempt is returned with its reason. `GET /fulltext?url=|id=&save=&light=`
 (the Mac writes back). `fulltextCron()` gives `FT_PER_TICK` = 40 news rows
 under 48h with a body under 600 chars their text each tick (`light`: no
 archive.today, no render unless `FULLTEXT_RENDER=1`), marks `meta.ft` with the
-method, or `retry` then `none` after two failures with `meta.ft_err`. No
-credentialed access anywhere: paywalled copy comes only from routes a
-publisher serves publicly, or not at all.
+method, or `retry` then `none` after two failures with `meta.ft_err`. The worker
+itself holds no credential for any publisher: from the cloud, paywalled copy
+comes only from routes a publisher serves publicly, or not at all. The one
+exception is decision D8 (11 November 2026, the owner): a source a person has
+cleared is read on the Mac through the agency's own subscription, and that
+text is kept apart from the archive (see the monitoring desk, release 4).
 
 **Rendering.** `renderConfigured(env)` is true with `RENDER_URL` (an HTTP
 service taking `{url}` and answering `{html}` - a Playwright box on AWS or a

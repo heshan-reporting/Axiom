@@ -105,6 +105,27 @@
 
   /* The drawer: one source in full - its routes, the live probe, its recent
      attempts, and the fields the operator can change. */
+  /* How a source may be read. A paid source stays headlines only until a person records what covers reading it for
+     monitoring; that record is what lets the Mac read it through the agency's own subscription. */
+  const ACCESS_LABEL = { open: 'Open to read', metered: 'Metered (a few free articles)', subscriber: 'Subscribers only', newsletter: 'A subscriber newsletter', official: 'An official source' };
+  const PAID = ['metered', 'subscriber', 'newsletter'];
+  function AccessForm({ s, onChanged }) {
+    const [access, setAccess] = useState(s.access || 'open');
+    const [basis, setBasis] = useState('');
+    const [busy, setBusy] = useState(false);
+    useEffect(() => { setAccess(s.access || 'open'); setBasis(''); }, [s.id, s.access, s.cleared]);
+    const send = async body => { setBusy(true); try { await call('/sources/access', Object.assign({ id: s.id }, body)); onChanged(); } catch (e) { toastMsg(e.message, true); } setBusy(false); };
+    return html`<div class="src-access">
+      <label>How it is read
+        <select value=${access} disabled=${busy} aria-label="How this source is read" onChange=${e => { setAccess(e.target.value); send({ access: e.target.value }); }}>${Object.keys(ACCESS_LABEL).map(k => html`<option key=${k} value=${k}>${ACCESS_LABEL[k]}</option>`)}</select>
+      </label>
+      ${PAID.indexOf(s.access) >= 0 && !s.cleared ? html`<label class="wide">What covers reading it for monitoring
+        <input type="text" value=${basis} maxlength="300" placeholder="The agency's subscription, or its copyright licence" aria-label="What covers reading this source for monitoring" onInput=${e => setBasis(e.target.value)} />
+      </label>
+      <button class="btn sm" disabled=${busy || basis.trim().length < 12} title="Only through a subscription the agency holds. The text is kept for the team and served to no one else." onClick=${() => send({ access: s.access, cleared: true, basis })}>Record and clear for the subscriber read</button>` : null}
+      ${s.cleared ? html`<button class="btn sm ghost" disabled=${busy} onClick=${() => send({ access: s.access, cleared: false })}>Withdraw the clearance</button>` : null}
+    </div>`;
+  }
   function Drawer({ s, canWrite, renderReady, onClose, onChanged, onJob }) {
     const [probe, setProbe] = useState(null);
     const [probing, setProbing] = useState(false);
@@ -153,7 +174,10 @@
         ${s.issues.length ? html`<div class="wide"><span class="k">Client issues</span>${s.issues.map(issueLabel).join(', ')}</div>` : null}
         ${s.last_error ? html`<div class="wide err"><span class="k">Last failure</span>${s.last_error}</div>` : null}
         ${s.note ? html`<div class="wide"><span class="k">Note</span>${s.note}</div>` : null}
+        <div class="wide"><span class="k">How it is read</span>${ACCESS_LABEL[s.access] || s.access || 'open'}${PAID.indexOf(s.access) >= 0 ? (s.cleared ? html` - <span style=${{ color: 'var(--x-pos)' }}>cleared for the subscriber read</span> by ${s.cleared_by || 'someone'}, ${new Date(s.cleared_at).toLocaleDateString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'long', year: 'numeric' })}` : html` - <span style=${{ color: 'var(--x-warn)' }}>headlines only until it is cleared</span>`) : ''}</div>
+        ${s.cleared && s.cleared_basis ? html`<div class="wide"><span class="k">What covers it</span>${s.cleared_basis}</div>` : null}
       </div>
+      ${canWrite ? html`<${AccessForm} s=${s} onChanged=${onChanged} />` : null}
       <div class="src-sub">Routes, in the order the sweep tries them</div>
       <div class="src-routes">${(s.methods || []).map(m => html`<span key=${m} class=${'src-chip' + (m === s.method_ok ? ' on' : '')} title=${s.urls[m === 'html' || m === 'render' ? 'home' : m === 'gnews' ? (s.urls.gnews ? 'gnews' : 'site') : m] || ''}>${METHOD_LABEL[m] || m}</span>`)}</div>
       <div class="src-urls">${Object.keys(s.urls).map(k => html`<div key=${k}><span class="k">${k}</span><span class="u">${s.urls[k]}</span></div>`)}</div>
