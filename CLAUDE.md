@@ -279,6 +279,32 @@ verifies each, and what was asked for and not built.
     recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
+- **Release 7, public-record routes (build `2026-11-11.studio-p59`, page `den.js?v=r45`; `DEN.md` s.8 is the hand-over).**
+  Keyless public routes only; no signed-in route added, no decision changed, no model call.
+  - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
+    robots.txt obeyed (`robotsAllows`, cached a day in KV `pub_robots_<host>`), an honest user agent (`pubUA`:
+    `AxiomPublicRecord/1.0`, or the var `PUBLIC_UA`), `PUB_PACE_MS` = ten seconds between requests to one host (not a
+    setting; kept per isolate), and a refusal (401, 403, 407, 429, a challenge page) recorded in KV
+    `pub_refused_<host>` and not asked again for a day (`refused`, then `refused_backoff`); a sign-in page is
+    `login_required`. Never a retry, a proxy or a solved challenge. Do not fetch a new public source any other way.
+  - **Source methods `public` and `process`** (`urls.public`, `urls.process` + `ptype` + `house`; seed key `b`).
+    `public` files a headline and a link, never a body. `sourceRun` counts a method that answers `quiet` as a success
+    with no items; a refused source is not due again for a day.
+  - **The process calendar**, D1 `den_process(id, juris, house, type bill|inquiry|motion|disallowance|regulation|
+    decision, title, stage, url, issues, next_date, next_what, dates, submissions, src, seen, updated)`:
+    `processParse` (labelled status and dates only; a date with no year is not read), `processNotices` (a notice on a
+    client issue; the agency's own `cmm` issues do not count), `srcProcess` (first sight and each stage change file one
+    `news` row with `meta.process`). `GET /den/process?ns=|desk=` (read), `POST /den/process/add` (full).
+    `denBoard` puts `processUpcoming()` first in Upcoming, marked `recorded`. Submitters' names are never read.
+  - **`hansardSweep`** (kind `hansard`, once a Sydney day a client, needs `OPENAUSTRALIA_KEY`; the speaker named only
+    from the MP register), **`petitionCountersSweep`** (campaign pages' own counts, `meta.self_reported`, a daily
+    snapshot; a count not found is `<host>_parse_failed`, never zero; `GET/POST /social/petitions/counters`),
+    **`claimOf`** (`meta.claim {kind, sponsor, pollster, n}` on registry rows, "sponsor not stated" otherwise),
+    **`bskyActorSweep`** (register accounts on Bluesky marked as public actors, own posts only, through
+    `signalsIngest`; `bluesky` joined `DEN_INGEST_PLATFORMS` and `canonPermalink`), and **`POST /den/watch/seed`**
+    (full; proposes campaign names as terms - nothing is proposed unasked). Job sources `hansard`, `blueskyaccounts`.
+  - Every seed address and every parser is unverified until a live sweep: the fixtures in `tests/fixtures/public/`
+    are invented stand-ins. Harness: `tests/den-public-worker.mjs` (12).
 
 - **The first live run of the Mac collector (build `2026-11-11.studio-p59`, page `?v=r45`; `DEN.md` s.3.1).**
   - **Agent Reach v1.5.0 has no `facebook`, `instagram`, `youtube` or `login` command** (its commands: setup, install,
