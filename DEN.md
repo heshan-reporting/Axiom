@@ -407,19 +407,57 @@ about X below is proven against stand-ins only.
 Harnesses: `tests/reach-agent-test.py` (26, new), `tests/reach-channels-test.py` (80), `tests/den-reach-worker.mjs`
 (9), `tests/topics-worker.mjs` (4, new).
 
-### 3.2 The tools underneath agent-reach, called directly (11 November 2026, at the owner's request; no worker or page change)
+### 3.2 After the deploy (11 November 2026, evening; tools only, worker and page unchanged)
 
-Section 3.1 left Facebook, Instagram and YouTube with nothing to run, pending the owner's choice of a backend. The owner
-chose: the tools agent-reach itself installs for those channels. Read from agent-reach 1.5.0's own channel files on the
+**Seen on the owner's Mac and the live worker (build p59):** the deploy verified; the agent started with one line
+"not offering X", offered `reddit, render` and claimed no X job; `--channels` printed X as "search is unavailable"
+and the three social channels as `no_command`. twitter-cli there is installed with pipx at 0.8.5 with
+xclienttransaction 1.0.3 (the newest of both), and the unreleased twitter-cli 0.8.6 (commit 7c634e0) was tried and
+did not fix X search. **So there is no fix upstream, released or not; X keyword search waits on those projects.**
+Homebrew's Python refuses `pip install`, so the collector has its own environment, `~/.axiom-reach/venv`, and is
+run with `~/.axiom-reach/venv/bin/python`.
+
+Changed after that, at the owner's word ("fix all"):
+
+- **The X message knows what is installed.** `x_versions()` asks the Python of twitter-cli's own environment (pipx or
+  uv; nothing fetched) and `x_remedy()` says which case the machine is in: on the newest releases, "Nothing to do on
+  this Mac: no fix is available yet"; behind them, the upgrade command for the installer that was used, both
+  packages; unreadable, the general advice. `X_NEWEST` holds the versions known to carry the fault.
+- **The background agent runs with the Python that installed it** (`launchd_command`): install it with
+  `~/.axiom-reach/venv/bin/python tools/reach-agent.py --install-launchd` and it sees Playwright and yt-dlp. It used
+  a bare `python3`, which on this Mac has neither.
+- **YouTube keyword search reads through yt-dlp. Decision D7 amended, 11 November 2026, the owner:** agent-reach
+  cannot search YouTube, so `reach_social.py` uses yt-dlp directly for the `youtube` channel when agent-reach has no
+  such command (`backend()`): `yt-dlp "ytsearchN:<term>" --flat-playlist --dump-json --no-warnings --ignore-config`,
+  public search, no sign-in, no cookies. The rules are unchanged: the ten-second floor and the daily cap; "Sign in to
+  confirm you're not a bot" is a challenge (stop, 24 hours, no retry, no cookies handed over); a line that is not
+  JSON is `youtube_parse_failed`; a 429 ends the run; the channel's and uploader's names and ids are never carried.
+  A person still switches it on once: `--login youtube` asks for the platform's name and records who (there is
+  nothing to sign in to); until then the status is `not_switched_on`. Facebook and Instagram are unchanged.
+  **Not proven on a real machine:** the field names (`id`, `title`, `description`, `view_count`, `timestamp`,
+  `upload_date`) are yt-dlp's as recalled. The dry run below is the test.
+
+```
+~/.axiom-reach/venv/bin/pip install -U "yt-dlp[default]"
+~/.axiom-reach/venv/bin/python tools/reach-agent.py --channels          # youtube: not_switched_on
+~/.axiom-reach/venv/bin/python tools/reach-agent.py --login youtube     # type: youtube
+~/.axiom-reach/venv/bin/python tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out /tmp/yt.json
+~/.axiom-reach/venv/bin/python tools/reach-agent.py --install-launchd   # the background agent, with this Python
+```
+
+Harnesses: `tests/reach-agent-test.py` (37), `tests/reach-channels-test.py` (96).
+### 3.3 Facebook and Instagram through opencli, the tool agent-reach installs for them (11 November 2026, at the owner's request; no worker or page change)
+
+Section 3.2 gave YouTube a backend and left Facebook and Instagram with nothing to run. The owner then asked for those
+too ("i need all these"): the tool agent-reach itself installs for them. Read from agent-reach 1.5.0's own channel files on the
 owner's Mac: Facebook and Instagram are `opencli <site> ...` (it drives the Chrome a person is already signed in to),
 YouTube is `yt-dlp`. Decision D7 is unchanged - a person signs in by hand, public content only, the pace, the caps, the
 24-hour pause - and only the command the collector runs is new.
 
 - **When it applies.** `use_native(channel)`: agent-reach is absent or has no command for the channel, and the tool is
-  on the machine (`NATIVE`, found through `_which`). An agent-reach that one day has the commands is still used first.
-- **YouTube keyword search**: `yt-dlp "ytsearchdate<N>:<term>" --flat-playlist --dump-json --skip-download
-  --no-warnings --ignore-config --no-cookies`. Public results, no account, never a cookie. Usable as soon as yt-dlp is
-  installed. The channel's and uploader's names are not read.
+  on the machine (`NATIVE` = Facebook and Instagram, found through `_which`). An agent-reach that one day has the commands is still used first.
+- **YouTube** keeps the yt-dlp path of s.3.2 (`backend()`, `run_ytsearch()`); a second yt-dlp path written here was
+  removed when the two were merged.
 - **Facebook keyword search**: `opencli facebook search <term> --limit N -f json --window background`. Its columns are
   index, title, text, url. `title` can be a person's or a page's name and is never read; a result whose address is not
   a post (a page, a person) is dropped. **It returns no counts and no date**, so a Facebook row from this route has
@@ -439,14 +477,19 @@ YouTube is `yt-dlp`. Decision D7 is unchanged - a person signs in by hand, publi
 - **Refusals** are read from what the tool said (its error stream; its output only when that is not data, so a post
   that says "checkpoint" is a post): a verification stops the sweep and pauses the platform 24 hours, a slow-down stops
   it, signed out is `needs_login`, a disconnected browser bridge says to run `opencli doctor`.
-- **Not verified.** No real answer of `yt-dlp` or `opencli` has been seen: the Mac's sandbox would not install yt-dlp,
-  and nobody has signed in. The command forms are from each tool's own `--help` on the owner's Mac; the answers in
-  `tests/reach-channels-test.py` (47 new cases, 127 in all) are stand-ins. The first `--channels` and the first sweep
-  on the Mac verify them; the Instagram address is the likeliest thing to fail.
+- **A refused sign-in pauses the platform.** When `opencli <site> login` or the check after it answers "too many
+  requests" or a verification, nothing is switched on, the platform is paused 24 hours, and a second `--login` inside
+  the day stops before any question.
+- **What has run for real (the owner's Mac, 11 November 2026).** `opencli doctor` clean; `--login facebook` confirmed
+  through `whoami` and recorded; `--login instagram` refused by Instagram with HTTP 429 (before the pause existed: it is
+  not to be tried again until the next day). **No sweep has run**: the first Facebook job went to the worker's own
+  Graph route because the collector on the Mac was the `main` copy, which had no Facebook path. The answers of
+  `opencli facebook search` and `opencli instagram user` in `tests/reach-channels-test.py` are stand-ins; the
+  Instagram address is the likeliest thing to fail.
 - **Not collected still:** comment text on Facebook and Instagram, a Facebook page's own timeline, Instagram keyword
   search.
 
-Owner's steps: `uv tool install yt-dlp`; `python3 tools/reach-agent.py --channels` (YouTube should read usable);
+Owner's steps: `--login youtube` (s.3.2);
 with Chrome open and `opencli doctor` green, `--login facebook` and `--login instagram` on a profile that administers
 no client asset; record each under D7 with who and when; restart the agent.
 

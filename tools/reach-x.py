@@ -21,7 +21,7 @@ Normally you do not run this by hand: tools/reach-agent.py runs it when someone
 presses Sweep in AXIOM. Needs `twitter` on PATH (uv tool install twitter-cli)
 and a browser logged in to x.com (check with: twitter status).
 """
-import argparse, datetime, importlib.util, json, os, re, subprocess, sys, time
+import argparse, datetime, importlib.util, json, os, re, shutil, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # the Reddit bridge owns the shared pieces: the client lexicon, tone, the push
@@ -58,6 +58,49 @@ X_CAUSE = (
     '"Failed to init ClientTransaction" and carries on).'
 )
 X_UNAVAILABLE = 'X search is unavailable on this machine. ' + X_REMEDY + ' ' + X_CAUSE
+# The newest releases known to carry the flaw (PyPI, 11 November 2026). On the owner's Mac that day both were already
+# installed, and the unreleased twitter-cli 0.8.6 was tried and did not fix it either - so telling that machine to
+# upgrade was noise. x_remedy() reads what is installed and says which case this machine is in.
+X_NEWEST = {'twitter-cli': '0.8.5', 'xclienttransaction': '1.0.3'}
+
+
+def _ver(v):
+    return tuple(int(x) for x in re.findall(r'\d+', str(v or ''))[:4])
+
+
+def x_versions():
+    """{'twitter-cli': '0.8.5', 'xclienttransaction': '1.0.3', 'via': 'pipx'|'uv'|''} for the twitter on PATH, or {}
+    when they cannot be read. Asks the Python of twitter-cli's own environment; nothing is fetched."""
+    try:
+        exe = shutil.which('twitter')
+        if not exe: return {}
+        real = os.path.realpath(exe); py = os.path.join(os.path.dirname(real), 'python')
+        if not os.path.isfile(py): return {}
+        p = subprocess.run([py, '-c', "import importlib.metadata as m; print(m.version('twitter-cli')); print(m.version('xclienttransaction'))"], capture_output=True, text=True, timeout=20)
+        out = [l.strip() for l in (p.stdout or '').split('\n') if l.strip()]
+        if p.returncode != 0 or len(out) < 2: return {}
+        return {'twitter-cli': out[0], 'xclienttransaction': out[1], 'via': 'pipx' if 'pipx' in real else 'uv' if '/uv/' in real else ''}
+    except Exception:
+        return {}
+
+
+def x_remedy(versions=None):
+    """What to do about X search on this machine, from what is installed here. Leads with the action."""
+    v = x_versions() if versions is None else versions
+    tw, xc = v.get('twitter-cli'), v.get('xclienttransaction')
+    if not tw or not xc: return X_REMEDY
+    tail = ' The agent stops offering X and rechecks every ten minutes, so it comes back by itself when a fix is installed. Meanwhile the worker still reads MP and registered account timelines itself.'
+    if _ver(tw) >= _ver(X_NEWEST['twitter-cli']) and _ver(xc) >= _ver(X_NEWEST['xclienttransaction']):
+        return ('Nothing to do on this Mac: no fix is available yet. It already has twitter-cli %s and xclienttransaction %s, the newest releases '
+                '(checked 11 November 2026), and they still carry the fault; the unreleased twitter-cli 0.8.6 was tried that day and did not fix it.' % (tw, xc)) + tail
+    cmd = ('`pipx upgrade twitter-cli && pipx runpip twitter-cli install -U xclienttransaction`' if v.get('via') == 'pipx'
+           else '`uv tool upgrade twitter-cli`' if v.get('via') == 'uv' else '`pipx upgrade twitter-cli` or `uv tool upgrade twitter-cli`, whichever installed it')
+    return ('To try on this Mac: %s, then `python3 tools/reach-agent.py --channels` - X reads "usable" when search works. This Mac has twitter-cli %s and '
+            'xclienttransaction %s; the newest are %s and %s, which may not fix it either.' % (cmd, tw, xc, X_NEWEST['twitter-cli'], X_NEWEST['xclienttransaction'])) + tail
+
+
+def x_unavailable(versions=None):
+    return 'X search is unavailable on this machine. ' + x_remedy(versions) + ' ' + X_CAUSE
 TRANSACTION_HINT = '. ' + X_REMEDY + ' ' + X_CAUSE
 NOT_FOUND_HINT = (
     '. X answered 404. If `twitter status` works but every search 404s, it is the '
@@ -82,7 +125,7 @@ class XUnavailable(RuntimeError):
 def assert_searchable():
     """Raise before a sweep that would return nothing and look successful."""
     if transaction_generator_broken():
-        raise XUnavailable(X_UNAVAILABLE)
+        raise XUnavailable(x_unavailable())
 
 
 def run_twitter(args, timeout=90):
@@ -311,7 +354,7 @@ def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1
             # Conditions that will not change between keywords: stop, rather
             # than log the same failure once per keyword and return nothing.
             if 'logged-in' in str(e) or 'not installed' in str(e): raise
-            if 'x-client-transaction-id' in str(e): raise XUnavailable(X_UNAVAILABLE)
+            if 'x-client-transaction-id' in str(e): raise XUnavailable(x_unavailable())
             if 'rate-limiting' in str(e): break
         time.sleep(pace)
     posts = list(seen.values())

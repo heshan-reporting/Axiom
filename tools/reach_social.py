@@ -178,12 +178,12 @@ def _run(cmd, timeout):
 # ---- the tools underneath agent-reach ------------------------------------------------------------------------------
 # agent-reach v1.5.0 installs and checks other tools; it has no search command of its own. Its own channel files say
 # which tool reads each platform: Facebook and Instagram are `opencli <site> ...` in the person's signed-in Chrome,
-# YouTube is `yt-dlp`. When agent-reach has no command for a channel, the collector calls that tool directly, under the
+# YouTube is `yt-dlp` (its own path below: run_ytsearch). When agent-reach has no command for Facebook or Instagram, the collector calls that tool directly, under the
 # same rules. opencli can also WRITE (like, follow, comment, post, add-friend): only the read commands listed here are
 # ever run, and `login` only from login(), by a person.
-NATIVE = {'facebook': 'opencli', 'instagram': 'opencli', 'youtube': 'yt-dlp'}
+NATIVE = {'facebook': 'opencli', 'instagram': 'opencli'}          # YouTube has its own path: backend() == 'ytdlp', run_ytsearch()
 OPENCLI_READS = {('facebook', 'search'), ('facebook', 'whoami'), ('instagram', 'user'), ('instagram', 'whoami')}
-NATIVE_INSTALL = {'opencli': 'npm install -g @jackwener/opencli (agent-reach installs it with: agent-reach install --system --channels opencli)', 'yt-dlp': 'uv tool install yt-dlp'}
+NATIVE_INSTALL = {'opencli': 'npm install -g @jackwener/opencli (agent-reach installs it with: agent-reach install --system --channels opencli)'}
 _which = shutil.which
 _RX_LOGIN = re.compile(r'(?i)not logged in|log ?in (is )?required|please (log|sign) ?in|sign in to continue|auth_required|unauthori[sz]ed|no active session')
 _RX_CHALLENGE = re.compile(r'(?i)captcha|checkpoint|verify (it.?s you|your (identity|account))|verification required|suspicious|unusual activity|confirm you.?re not a (bot|robot)|challenge_required')
@@ -192,7 +192,7 @@ _RX_BRIDGE = re.compile(r'(?i)(extension|bridge|daemon)[^.\n]{0,60}(not (connect
 
 
 def native(channel):
-    """The tool that really reads this channel, when it is on this machine: 'opencli', 'yt-dlp' or ''."""
+    """The tool that really reads this channel, when it is on this machine: 'opencli' or ''."""
     b = NATIVE.get(channel, '')
     return b if b and _which(b) else ''
 
@@ -218,9 +218,6 @@ def _json_in(text):
 
 def native_cmd(channel, action, arg='', limit=10):
     """The exact command for one read. Raises on anything that is not an allowed read."""
-    if NATIVE[channel] == 'yt-dlp':
-        # newest first; no download; no cookies and no config file, so no session of the person's is ever sent
-        return ['yt-dlp', 'ytsearchdate%d:%s' % (int(limit), arg), '--flat-playlist', '--dump-json', '--skip-download', '--no-warnings', '--ignore-config', '--no-cookies']
     act = {'posts': 'user'}.get(action, action)
     if (channel, act) not in OPENCLI_READS:
         raise RuntimeError('refused: `opencli %s %s` is not one of the read commands this collector may run' % (channel, act))
@@ -234,27 +231,9 @@ def run_native(channel, action, arg, limit, runner=None, timeout=150):
     code, out, err = (runner or _run)(cmd, timeout)
     # what the tool SAID is its error stream, and its output only when that is not data: a post's own words ("checkpoint",
     # "sign in") must never be read as the platform refusing us
-    d = None if NATIVE[channel] == 'yt-dlp' else _json_in(out)
-    isdata = any(l.strip().startswith('{') for l in (out or '').split('\n')) if NATIVE[channel] == 'yt-dlp' else d is not None
+    d = _json_in(out); isdata = d is not None
     both = (err or '') + ('' if isdata else '\n' + (out or ''))
     if _RX_CHALLENGE.search(both): raise Challenge(channel, scrub(both.strip()[:160]))
-    if NATIVE[channel] == 'yt-dlp':
-        if _RX_RATE.search(err or ''): raise RateLimited(channel, 600)
-        items = []
-        for line in (out or '').split('\n'):
-            line = line.strip()
-            if not line.startswith('{'): continue
-            try:
-                v = json.loads(line)
-            except Exception:
-                continue
-            vid = str(v.get('id') or '')
-            if not re.match(r'^[A-Za-z0-9_-]{11}$', vid): continue
-            items.append({'url': 'https://www.youtube.com/watch?v=' + vid, 'title': str(v.get('title') or ''), 'text': str(v.get('description') or ''), 'view_count': v.get('view_count'),
-                          'published_at': v.get('timestamp') or v.get('release_timestamp') or ''})        # `channel` and `uploader` are never read
-        if not items and (code != 0 or (err or '').strip()):
-            raise ParseFailed(channel, 'yt-dlp gave no video for "%s" (exit %s): %s' % (arg, code, scrub((err or out).strip()[:160]) or 'nothing'))
-        return items
     if _RX_LOGIN.search(both): raise Unavailable(channel, 'needs_login', channel + ': ' + WHY['needs_login'] % {'channel': channel})
     if _RX_RATE.search(both): raise RateLimited(channel, 600)
     if _RX_BRIDGE.search(both): raise Unavailable(channel, 'bridge', channel + ': opencli cannot reach Chrome (its browser bridge is not connected). Open Chrome, then run: opencli doctor')
@@ -322,8 +301,6 @@ def read(channel, action, arg, limit, runner=None):
 
 def native_status(channel, cfg, until):
     """(status, why) for a channel read through its own tool."""
-    if NATIVE[channel] == 'yt-dlp':
-        return 'ready', ''                    # public search, no account: nothing to sign in to
     if not state(channel).get('switched_on'):
         return 'needs_login', 'nobody has switched %s on for collection on this machine. A person does it, after reading the warning: python3 tools/reach-agent.py --login %s' % (channel, channel)
     return 'unverified', ''                   # the sign-in is checked at the start of each sweep, not every ten minutes
@@ -377,6 +354,16 @@ def status(channel, runner=None, now=None):
     cfg = settings(channel); until, reason = paused(channel, now)
     out = {'channel': channel, 'source': CHANNELS[channel]['source'], 'installed': installed() or runner is not None, 'status': '', 'usable': False,
            'enabled': cfg['enabled'], 'paused_until': until, 'pause_reason': reason, 'reads_today': int(state(channel, now).get('reads') or 0), 'per_day': cfg['per_day']}
+    if backend(channel, runner, now) == 'ytdlp':
+        ok, ver = ytdlp_ready(runner); on = bool(state(channel, now).get('switched_on'))
+        out['backend'] = 'yt-dlp'; out['installed'] = ok
+        st = 'ytdlp_not_installed' if not ok else 'not_switched_on' if not on else 'ready'
+        out['status'] = st; out['usable'] = st == 'ready' and cfg['enabled'] and not until
+        if not ok: out['why'] = 'YouTube search reads through yt-dlp, which is not installed for the collector. Install it beside the collector\'s Python: ~/.axiom-reach/venv/bin/pip install -U "yt-dlp[default]"  (then run the agent with ~/.axiom-reach/venv/bin/python)'
+        elif not cfg['enabled']: out['why'] = WHY['off'] % {'channel': channel}
+        elif until: out['why'] = '%s is paused on this machine until %s: %s' % (channel, datetime.fromtimestamp(until).strftime('%d %b %H:%M'), reason)
+        elif not on: out['why'] = 'yt-dlp %s is installed, and YouTube search has not been switched on for collection on this Mac. A person does that once: python3 tools/reach-agent.py --login youtube  (nothing to sign in to)' % ver
+        return out
     if not out['installed']:
         if not native(channel):
             out['why'] = WHY['not_installed']; return out
@@ -489,6 +476,75 @@ def commands(runner=None, now=None):
     return v
 
 
+# ---- YouTube keyword search through yt-dlp ---------------------------------------------------------------------------
+# The owner's decision, 11 November 2026 ("fix all", after the first live run): since agent-reach has no youtube
+# command, YouTube keyword search reads through yt-dlp directly - the tool agent-reach's own doctor asks for. It reads
+# public search results with no sign-in: `yt-dlp "ytsearchN:<term>" --flat-playlist --dump-json`, one JSON object a
+# line. The same rules hold: the pace floor, the daily cap, a stop on a verification ("Sign in to confirm you're not a
+# bot" is a challenge: 24 hours, no retry, no cookies handed over, no proxy), an unreadable answer is a named failure,
+# and the channel and uploader names yt-dlp returns are never read. A person still switches it on once on this Mac
+# (`--login youtube`: nothing to sign in to, the switch-on is recorded).
+# NOT PROVEN ON A REAL MACHINE: the field names below are yt-dlp's as recalled; the first dry run on the Mac is the test.
+YTDLP = 'yt-dlp'
+
+
+def ytdlp_bin():
+    """yt-dlp beside the Python running this (the collector's own environment), else on PATH."""
+    here = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), YTDLP)
+    return here if os.path.isfile(here) else (shutil.which(YTDLP) or '')
+
+
+def backend(channel, runner=None, now=None):
+    """'ytdlp' for YouTube when agent-reach cannot search it (not installed, or no youtube command); else 'agent-reach'."""
+    if channel != 'youtube': return 'agent-reach'
+    if runner is None and not installed(): return 'ytdlp'
+    cmds = commands(runner, now)
+    return 'ytdlp' if (cmds is not None and 'youtube' not in cmds) else 'agent-reach'
+
+
+def ytdlp_ready(runner=None):
+    """(ok, detail): whether yt-dlp answers on this machine. Asked, not assumed."""
+    b = ytdlp_bin() if runner is None else YTDLP
+    if not b: return False, ''
+    try:
+        code, out, err = (runner or _run)([b, '--version'], 30)
+        return (code == 0 and bool(out.strip())), out.strip()[:40]
+    except Exception:
+        return False, ''
+
+
+def run_ytsearch(q, limit, runner=None, timeout=120):
+    """One YouTube keyword search through yt-dlp. Returns items in the shape item_row reads. Raises Challenge (YouTube
+    asks for a sign-in or a bot check), RateLimited (429), ParseFailed (lines that are not the JSON it promises)."""
+    b = ytdlp_bin() if runner is None else YTDLP
+    if not b: raise Unavailable('youtube', 'ytdlp_not_installed')
+    code, out, err = (runner or _run)([b, 'ytsearch%d:%s' % (int(limit), q), '--flat-playlist', '--dump-json', '--no-warnings', '--ignore-config'], timeout)
+    lines = [l for l in (out or '').split('\n') if l.strip()]
+    low = (err or '').lower()
+    if not lines and ('not a bot' in low or 'sign in to confirm' in low or 'captcha' in low):
+        raise Challenge('youtube', 'YouTube asked for a sign-in or a bot check')
+    if not lines and ('429' in low or 'too many requests' in low):
+        raise RateLimited('youtube', 300)
+    if not lines and code != 0:
+        raise ParseFailed('youtube', 'yt-dlp did not answer for "%s" (exit %s): %s' % (q[:60], code, scrub((err or '').strip()[-160:]) or 'nothing'))
+    items = []
+    for l in lines:
+        try:
+            d = json.loads(l)
+        except Exception:
+            raise ParseFailed('youtube', 'yt-dlp answered with a line that is not JSON for "%s": %s' % (q[:60], scrub(l[:80])))
+        if not isinstance(d, dict): continue
+        vid = str(d.get('id') or '')
+        if not re.match(r'^[A-Za-z0-9_-]{11}$', vid): continue          # a channel or a playlist in the results is not a video
+        ts = d.get('timestamp') or d.get('release_timestamp') or ''
+        if not ts and re.match(r'^\d{8}$', str(d.get('upload_date') or '')):
+            u = str(d['upload_date']); ts = '%s-%s-%sT00:00:00Z' % (u[:4], u[4:6], u[6:])
+        # the uploader, channel and their ids are deliberately not carried
+        items.append({'title': str(d.get('title') or ''), 'url': 'https://www.youtube.com/watch?v=' + vid, 'text': str(d.get('description') or ''), 'published_at': ts,
+                      'raw': {k: d.get(k) for k in ('view_count', 'like_count', 'comment_count') if d.get(k) is not None}})
+    return items
+
+
 NO_COMMAND = ('the agent-reach on this machine has no `%(channel)s` command (it has: %(have)s). It checks and installs other tools; '
               'it does not search %(channel)s, so nothing is collected here and nothing is offered to AXIOM. This is not something '
               'to fix on the Mac: the collector was written to a command form this tool does not have (DEN.md s.3)')
@@ -582,10 +638,10 @@ def sweep(channel, plan, log=print, runner=None, sleep=time.sleep, clock=time.ti
         for action, arg, q, watch in jobs:
             if not first: sleep(cfg['pace'])
             first = False
-            nat = use_native(channel, runner)
-            log_('cmd', ' '.join(native_cmd(channel, action, arg, cfg['per_query'])) if nat else '%s %s %s "%s" --limit %d' % (BIN, channel, action, arg, cfg['per_query']))
+            via = backend(channel, runner, clock()); nat = via != 'ytdlp' and use_native(channel, runner)
+            log_('cmd', ('yt-dlp "ytsearch%d:%s" --flat-playlist --dump-json' % (cfg['per_query'], arg)) if via == 'ytdlp' else ' '.join(native_cmd(channel, action, arg, cfg['per_query'])) if nat else '%s %s %s "%s" --limit %d' % (BIN, channel, action, arg, cfg['per_query']))
             try:
-                items = read(channel, action, arg, cfg['per_query'], runner=runner)
+                items = run_ytsearch(arg, cfg['per_query'], runner=runner) if via == 'ytdlp' else read(channel, action, arg, cfg['per_query'], runner=runner)
             except RateLimited as e:
                 log_('err', str(e)); stats['errors'].append(str(e)); break          # slow down means stop for this run
             except ParseFailed as e:
@@ -689,10 +745,20 @@ WARNING = '''
 def login(channel, ask=input, out=print, call=None, who=None, runner=None):
     """Show what signing in means, ask the question that matters, then let agent-reach open its sign-in window."""
     if channel not in CHANNELS: raise SystemExit('unknown platform "%s": one of %s' % (channel, ', '.join(CHANNELS)))
+    if backend(channel, runner) == 'ytdlp':
+        # nothing to sign in to: public search through yt-dlp. A person still switches it on, once, on this machine.
+        ok, ver = ytdlp_ready(runner)
+        if not ok:
+            out('  YouTube search reads through yt-dlp, which is not installed for the collector: ~/.axiom-reach/venv/bin/pip install -U "yt-dlp[default]". Nothing was switched on.'); return False
+        out('  YouTube keyword search reads public search results through yt-dlp %s. There is no sign-in and no account.\n  It reads at a person\'s pace inside a daily cap, stops for 24 hours if YouTube asks for a verification,\n  and never carries a channel\'s or uploader\'s name.' % ver)
+        if ask('  Type the platform\'s name to switch collection on for it on this Mac: ').strip().lower() != channel:
+            out('  Stopped: nothing was switched on.'); return False
+        st = state(channel); st['switched_on'] = {'by': who or os.environ.get('USER', ''), 'at': int(time.time()), 'backend': 'yt-dlp'}; st.pop('paused_until', None); st.pop('pause_reason', None); st['parse_fails'] = 0
+        save_state(channel, st)
+        out('  youtube is switched on for collection on this Mac (yt-dlp). Tell the owner, so it is recorded: %s, %s.' % (st['switched_on']['by'] or 'someone', datetime.now().strftime('%d %B %Y')))
+        return True
     cmds = commands(runner) if (runner is not None or installed()) else None
     nat = native(channel) if (cmds is None or 'login' not in cmds or channel not in cmds) else ''
-    if nat == 'yt-dlp':
-        out('  YouTube search is read through yt-dlp: public results, no account and nothing to sign in to. It is on whenever yt-dlp is installed; switch it off in Anne\'s Den, Collection, or in ~/.axiom-reach/reach.json.'); return True
     if cmds is not None and not nat and ('login' not in cmds or channel not in cmds):
         out('  Stopped before anything was asked: the agent-reach on this machine has no `login` command and no `%s` command (it has: %s), so there is nothing to sign in to and nothing would be collected. Nothing was switched on.' % (channel, ', '.join(sorted(cmds))))
         return False

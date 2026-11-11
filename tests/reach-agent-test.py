@@ -133,6 +133,25 @@ setup(0, twitter=False); buf = io.StringIO()
 with contextlib.redirect_stdout(buf): agent.main(['--channels'])
 t('and "not installed" when twitter-cli is absent', any(l.startswith('x ') and 'not installed' in l for l in buf.getvalue().splitlines()), buf.getvalue())
 
+# ---- the message knows what is installed (the owner's Mac was already on the newest: "upgrade" was noise) ------------
+newest = rx.x_remedy({'twitter-cli': '0.8.5', 'xclienttransaction': '1.0.3', 'via': 'pipx'})
+t('on the newest releases it says there is nothing to do here, and does not send anyone to upgrade', newest.startswith('Nothing to do on this Mac') and 'upgrade twitter-cli' not in newest and '0.8.5' in newest and '1.0.3' in newest, newest)
+t('  and still says the agent rechecks by itself', 'rechecks every ten minutes' in newest)
+t('a newer unreleased build is not told to upgrade either', rx.x_remedy({'twitter-cli': '0.8.6', 'xclienttransaction': '1.0.3', 'via': 'pipx'}).startswith('Nothing to do'))
+old = rx.x_remedy({'twitter-cli': '0.8.5', 'xclienttransaction': '1.0.1', 'via': 'pipx'})
+t('behind the newest, installed with pipx: the pipx commands, both packages, first', old.startswith('To try on this Mac: `pipx upgrade twitter-cli && pipx runpip twitter-cli install -U xclienttransaction`') and '1.0.1' in old and 'may not fix' in old, old)
+t('behind the newest, installed with uv: the uv command', '`uv tool upgrade twitter-cli`' in rx.x_remedy({'twitter-cli': '0.8.0', 'xclienttransaction': '1.0.3', 'via': 'uv'})[:80])
+t('when the versions cannot be read it falls back to the general advice', rx.x_remedy({}) == rx.X_REMEDY)
+full = rx.x_unavailable({'twitter-cli': '0.8.5', 'xclienttransaction': '1.0.3', 'via': 'pipx'})
+t('the whole message still fits a console line and keeps the cause', len(full) <= 1200 and 'x-client-transaction-id' in full and full.index('Nothing to do') < full.index('x-client-transaction-id'), len(full))
+t('reading the versions never raises when twitter-cli is absent', rx.x_versions() == {} or isinstance(rx.x_versions(), dict))
+
+# ---- launchd: the background agent runs with the Python that installed it --------------------------------------------
+cmd = agent.launchd_command('/Users/someone/Axiom', '/Users/someone/.axiom-reach/venv/bin/python')
+t('the background agent uses the collector\'s own Python, so it sees Playwright and yt-dlp', cmd == "cd '/Users/someone/Axiom' && '/Users/someone/.axiom-reach/venv/bin/python' tools/reach-agent.py --quiet", cmd)
+t('by default that is the Python running the installer, never a bare python3', sys.executable in agent.launchd_command('/x') and ' python3 tools' not in agent.launchd_command('/x'))
+t('a path with a space or a quote is quoted', agent.launchd_command("/Users/a b/Ax'iom", '/p y').startswith("cd '/Users/a b/Ax'\\''iom' && '/p y' "), agent.launchd_command("/Users/a b/Ax'iom", '/p y'))
+
 # ---- names: nothing in the report names an account ------------------------------------------------------------------
 t('no handle or name travels in the failure report', 'screenName' not in json.dumps(w.done) and '@' not in msg)
 

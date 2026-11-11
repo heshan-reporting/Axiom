@@ -67,7 +67,7 @@ rs._write('reach.json', {'facebook': {'enabled': False}, 'instagram': {'pace': 1
 t('a platform switched off on this machine is not offered', not rs.status('facebook', runner=r)['usable'] and 'switched off' in rs.status('facebook', runner=r)['why'])
 t('the pace cannot be set under ten seconds', rs.settings('instagram')['pace'] == 10.0 and rs.settings('instagram')['per_day'] == 5)
 real_which = rs.shutil.which; rs.shutil.which = lambda b: None
-e = raises(lambda: rs.assert_ready('youtube'), rs.Unavailable)
+e = raises(lambda: rs.assert_ready('facebook'), rs.Unavailable)
 t('not installed is said, with how to install it', bool(e) and e.why == 'not_installed' and 'agent-reach setup' in str(e), e)
 rs.shutil.which = real_which
 
@@ -167,7 +167,7 @@ answers = iter(['no', 'facebook'])
 ok = rs.login('facebook', ask=lambda q: next(answers), out=said.append, call=lambda c: ran.append(c) or 0, who='anne')
 t('the right answers hand over to agent-reach\'s own sign-in window, and the switch-on is recorded', ok and ran == [['agent-reach', 'login', 'facebook']] and rs.state('facebook')['switched_on']['by'] == 'anne')
 answers = iter(['youtube'])
-t('YouTube needs no profile question', rs.login('youtube', ask=lambda q: next(answers), out=said.append, call=lambda c: 0) is True)
+t('YouTube needs no profile question', rs.login('youtube', ask=lambda q: next(answers), out=said.append, call=lambda c: 0, runner=mk()[0]) is True)
 answers = iter(['no', 'instagram'])
 t('a sign-in that does not finish switches nothing on', rs.login('instagram', ask=lambda q: next(answers), out=said.append, call=lambda c: 1) is False and 'switched_on' not in rs.state('instagram'))
 
@@ -243,13 +243,11 @@ t('Facebook and Instagram are read from the list of channels still to unlock', m
 t('a channel marked usable or needing sign-in is read as that', rs.doctor_marks('  ✅ YouTube 视频和字幕 — ok\n  [!]  Facebook 帖子 — login')['youtube']['mark'] == 'ok' and rs.doctor_marks('  [!]  Facebook 帖子 — login')['facebook']['mark'] == 'needs_config')
 t('the commands this agent-reach has are read from its help', rs.commands(real()[0]) == {'setup', 'install', 'configure', 'doctor', 'uninstall', 'skill', 'format', 'transcribe', 'check-update', 'watch', 'version'}, rs.commands(real()[0]))
 r, calls = real()
-for c in ('facebook', 'instagram', 'youtube'):
+for c in ('facebook', 'instagram'):
     st = rs.status(c, runner=r)
     t('%s on the real answers: not usable, and the reason is named, not "unknown"' % c, st['usable'] is False and st['status'] == 'no_command' and 'unknown' not in st['why'] and ('no `%s` command' % c) in st['why'], st)
     t('  and it does not send anyone to a command that does not exist', 'doctor --text' not in st['why'] and 'agent-reach add' not in st['why'] and 'agent-reach check' not in st['why'], st['why'])
 t('the doctor is asked the way this version accepts', ['doctor'] in calls and not any(c[:1] == ['doctor'] and len(c) > 1 for c in calls), calls)
-st = rs.status('youtube', runner=r)
-t('YouTube says what the doctor said as well', 'yt-dlp' in st['why'], st['why'])
 t('nothing is offered to the worker on the real answers', rs.offered(runner=r) == [], rs.offered(runner=r))
 e = raises(lambda: rs.assert_ready('facebook', runner=r), rs.Unavailable)
 t('a sweep stops before it starts, as facebook_unavailable with that reason', bool(e) and e.why == 'no_command', e)
@@ -258,14 +256,75 @@ r2, _ = real(doctor='something else entirely\n', helptext='no usage here\n')
 st = rs.status('facebook', runner=r2)
 t('a doctor answer that cannot be read is "unreadable", never usable', st['usable'] is False and st['status'] == 'unreadable' and 'could not be read' in st['why'], st)
 # usable on the real shape needs both: the doctor's tick and a command to run
-r3, _ = real(doctor='  ✅ YouTube 视频和字幕 — ok\n')
-t('a tick from the doctor is not enough without a command to search with', rs.status('youtube', runner=r3)['usable'] is False and rs.status('youtube', runner=r3)['status'] == 'no_command')
-r4, _ = real(doctor='  ✅ YouTube 视频和字幕 — ok\n', helptext=REAL_HELP.replace('{setup,', '{youtube,setup,'))
-t('a tick and a command together are usable', rs.status('youtube', runner=r4)['usable'] is True, rs.status('youtube', runner=r4))
+r3, _ = real(doctor='  \u2705 Facebook \u5e16\u5b50 \u2014 ok\n')
+t('a tick from the doctor is not enough without a command to search with', rs.status('facebook', runner=r3)['usable'] is False and rs.status('facebook', runner=r3)['status'] == 'no_command')
+r4, _ = real(doctor='  \u2705 Facebook \u5e16\u5b50 \u2014 ok\n', helptext=REAL_HELP.replace('{setup,', '{facebook,setup,'))
+t('a tick and a command together are usable', rs.status('facebook', runner=r4)['usable'] is True, rs.status('facebook', runner=r4))
 said = []; ran = []
 t('signing in is refused in words when this agent-reach has no login command, before any question', rs.login('facebook', ask=lambda q: said.append('ASKED') or 'no', out=said.append, call=lambda c: ran.append(c) or 0, runner=r) is False and ran == [] and 'ASKED' not in said and 'no `login` command' in said[-1], said)
 
-# ---- the tools underneath agent-reach: yt-dlp and opencli (stand-ins; no real answer of either has been seen) ----
+
+# ---- YouTube keyword search through yt-dlp (the owner's decision, 11 November 2026) ----------------------------------
+# yt-dlp is a stand-in that answers one JSON object a line, as `--flat-playlist --dump-json` is recalled to. NOT proven
+# on a real machine: the first dry run on the Mac is the test.
+YT_LINES = [{'_type': 'url', 'id': 'dQw4w9WgXcQ', 'title': 'Why a gas export tax would work', 'description': 'An explainer from Canberra.', 'view_count': 34000, 'channel': 'Sam Private', 'uploader': 'Sam Private', 'channel_id': 'UCxxxxxxxxxxxxxxxxxxxxxx', 'uploader_id': '@samprivate', 'timestamp': 1794276000},
+            {'_type': 'url', 'id': 'UCxxxxxxxxxxxxxxxxxxxxxx', 'title': 'A channel, not a video'},
+            {'_type': 'url', 'id': 'aaaaaaaaaaa', 'title': 'Scott Reef: what NOPSEMA decided', 'description': None, 'view_count': None, 'upload_date': '20261109'}]
+def ytd(answer=None, version='2026.10.30', calls=None, help_text=REAL_HELP):
+    calls = calls if calls is not None else []
+    def runner(cmd, timeout):
+        calls.append(cmd)
+        if cmd[0] == 'yt-dlp':
+            if cmd[1] == '--version': return (0, version + '\n', '') if version else (127, '', 'not found')
+            a = answer(cmd[1]) if callable(answer) else answer
+            return a if isinstance(a, tuple) else (0, '\n'.join(json.dumps(x) for x in (a if a is not None else YT_LINES)) + '\n', '')
+        if cmd[1:] == ['--help']: return (0, help_text, '')
+        if cmd[1:] == ['doctor']: return (0, REAL_DOCTOR, '')
+        return (2, '', 'invalid choice')
+    return runner, calls
+fresh(); r, calls = ytd()
+t('with an agent-reach that has no youtube command, YouTube reads through yt-dlp', rs.backend('youtube', r) == 'ytdlp' and rs.backend('facebook', r) == 'agent-reach')
+st = rs.status('youtube', runner=r)
+t('installed is not switched on: a person does that once, and the line says how', st['usable'] is False and st['status'] == 'not_switched_on' and '--login youtube' in st['why'] and st.get('backend') == 'yt-dlp', st)
+t('  so nothing is offered yet', rs.offered(runner=r) == [])
+r0, _ = ytd(version='')
+st = rs.status('youtube', runner=r0)
+t('without yt-dlp it says so, with the install command for the collector\'s environment', st['status'] == 'ytdlp_not_installed' and 'yt-dlp[default]' in st['why'] and st['usable'] is False, st)
+said = []
+t('switching on without yt-dlp stops before the question', rs.login('youtube', ask=lambda q: said.append('ASKED') or 'youtube', out=said.append, runner=r0) is False and 'ASKED' not in said)
+said = []
+t('the wrong word switches nothing on', rs.login('youtube', ask=lambda q: 'yes', out=said.append, runner=r) is False and 'switched_on' not in rs.state('youtube'))
+ok = rs.login('youtube', ask=lambda q: 'youtube', out=said.append, runner=r, who='anne')
+t('typing the platform\'s name switches it on, recorded with who and the backend, and nothing is signed in to', ok and rs.state('youtube')['switched_on']['by'] == 'anne' and rs.state('youtube')['switched_on']['backend'] == 'yt-dlp' and any('no sign-in' in x for x in said) and not any(c[0] != 'yt-dlp' and c[1:2] == ['login'] for c in calls), said)
+st = rs.status('youtube', runner=r)
+t('then it is usable and offered as ytsearch', st['usable'] is True and st['status'] == 'ready' and rs.offered(runner=r) == ['ytsearch'], st)
+items = rs.run_ytsearch('gas export tax', 10, runner=r)
+t('a search is one yt-dlp call in the public form, with no cookies and no config', calls[-1][:2] == ['yt-dlp', 'ytsearch10:gas export tax'] and '--flat-playlist' in calls[-1] and '--dump-json' in calls[-1] and '--ignore-config' in calls[-1] and not any('cookie' in str(x) for x in calls[-1]), calls[-1])
+t('videos come back with an address, words, the date and the count; a channel in the results is not a video', [i['url'] for i in items] == ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://www.youtube.com/watch?v=aaaaaaaaaaa'] and items[0]['raw'] == {'view_count': 34000} and items[1]['published_at'] == '2026-11-09T00:00:00Z', items)
+t('the channel and uploader are never carried', 'Sam Private' not in json.dumps(items) and 'samprivate' not in json.dumps(items) and 'UCxxxx' not in json.dumps(items))
+PLAN_YT = {'ok': True, 'ns': 'aep', 'queries': ['gas export tax', 'scott reef'], 'plan': {'youtube': {'accounts': []}}}
+slept = []; ylog = []
+rows, stt = rs.sweep('youtube', PLAN_YT, log=lambda k, x: ylog.append((k, x)), runner=r, sleep=slept.append, clock=lambda: 1794300000)
+t('a sweep files rows in the ingest shape and names no one', len(rows) == 2 and all(set(x) <= {'platform', 'url', 'text', 'eng', 'eng_at', 'ts', 'q'} for x in rows) and rows[0]['eng'].get('views') == 34000 and 'Sam Private' not in json.dumps(rows), rows)
+t('the pace floor holds between searches', slept == [10.0] or (len(slept) == 1 and slept[0] >= 10), slept)
+t('the console shows the yt-dlp command, not an agent-reach one', any(k == 'cmd' and x.startswith('yt-dlp "ytsearch') for k, x in ylog) and not any('agent-reach youtube' in x for _, x in ylog), ylog[:2])
+fresh(); rs.login('youtube', ask=lambda q: 'youtube', out=lambda x: None, runner=r)
+rb, _ = ytd(answer=(1, '', "ERROR: [youtube] Sign in to confirm you're not a bot. Use --cookies-from-browser"))
+e = raises(lambda: rs.sweep('youtube', PLAN_YT, log=lambda k, x: None, runner=rb, sleep=lambda s: None, clock=lambda: 1794300000), rs.Challenge)
+t('a bot check stops the sweep at once and pauses YouTube for 24 hours; no cookies are tried', bool(e) and rs.paused('youtube', 1794300000)[0] > 1794300000 and rs.status('youtube', runner=r, now=1794300001)['usable'] is False, e)
+fresh(); rs.login('youtube', ask=lambda q: 'youtube', out=lambda x: None, runner=r)
+rj, _ = ytd(answer=(0, 'WARNING: something\n<html>not json</html>\n', ''))
+rows, stt = rs.sweep('youtube', {'ok': True, 'queries': ['gas export tax'], 'plan': {}}, log=lambda k, x: None, runner=rj, sleep=lambda s: None, clock=lambda: 1794300000)
+t('an answer that is not JSON is a named failure, never an empty success', rows == [] and len(stt['errors']) == 1 and 'not JSON' in stt['errors'][0], stt)
+rl, _ = ytd(answer=(1, '', 'ERROR: HTTP Error 429: Too Many Requests'))
+rows, stt = rs.sweep('youtube', PLAN_YT, log=lambda k, x: None, runner=rl, sleep=lambda s: None, clock=lambda: 1794300000)
+t('a 429 stops the run after one read', stt['reads'] == 1 and 'slow down' in stt['errors'][0], stt)
+re_, _ = ytd(answer=(0, '', ''))
+rows, stt = rs.sweep('youtube', {'ok': True, 'queries': ['a term nobody uses'], 'plan': {}}, log=lambda k, x: None, runner=re_, sleep=lambda s: None, clock=lambda: 1794300000)
+t('a search with no results is a quiet answer, not an error', rows == [] and stt['errors'] == [] and stt['reads'] == 1, stt)
+t('Facebook and Instagram are unchanged: still no_command, nothing offered for them', rs.status('facebook', runner=r)['status'] == 'no_command' and rs.status('instagram', runner=r)['status'] == 'no_command')
+
+# ---- Facebook and Instagram through opencli, the tool agent-reach installs for them (stand-ins: no real sweep answer has been seen) ----
 print('native backends')
 YT_LINES = '\n'.join(json.dumps(v) for v in [
     {'id': 'dQw4w9WgXcQ', 'title': 'Why a gas export tax would work', 'description': 'An explainer on the gas export tax in Australia.', 'view_count': 34000, 'timestamp': 1794276000, 'channel': 'Sam Private', 'uploader': 'Sam Private', 'uploader_id': '@samprivate'},
@@ -294,20 +353,16 @@ def on(*chs):
     for c in chs: rs.save_state(c, dict(rs.state(c), switched_on={'at': 1, 'by': 'test'}))
 
 fresh(); r, calls = nat()
-st = rs.status('youtube', runner=r)
-t('with yt-dlp on the machine YouTube search is usable, and says which tool reads it', st['usable'] is True and st['status'] == 'ready' and st.get('backend') == 'yt-dlp', st)
 st = rs.status('facebook', runner=r)
 t('opencli on the machine is not enough: Facebook waits for a person to switch it on', st['usable'] is False and st['status'] == 'needs_login' and '--login facebook' in st['why'], st)
-t('only YouTube is offered until then', rs.offered(runner=r) == ['ytsearch'], rs.offered(runner=r))
+t('nothing is offered until then', rs.offered(runner=r) == [], rs.offered(runner=r))
 on('facebook', 'instagram')
-t('once switched on, all three are offered', rs.offered(runner=r) == ['facebook', 'instagram', 'ytsearch'], rs.offered(runner=r))
+t('once switched on, Facebook and Instagram are offered', rs.offered(runner=r) == ['facebook', 'instagram'], rs.offered(runner=r))
 r0, _ = nat(have=())
-st = rs.status('youtube', runner=r0)
-t('with neither tool the answer is still no_command, and it names the tool to install', st['status'] == 'no_command' and 'yt-dlp' in (st.get('native_hint') or '') and 'uv tool install yt-dlp' in st['native_hint'], st)
+st = rs.status('facebook', runner=r0)
+t('without opencli the answer is still no_command, and it names the tool to install', st['status'] == 'no_command' and 'opencli' in (st.get('native_hint') or ''), st)
 
 # the commands themselves
-cmd = rs.native_cmd('youtube', 'search', 'gas export tax', 10)
-t('the YouTube command searches newest first, downloads nothing and sends no cookie', cmd[0] == 'yt-dlp' and cmd[1] == 'ytsearchdate10:gas export tax' and '--skip-download' in cmd and '--no-cookies' in cmd and '--ignore-config' in cmd and not any('cookies-from' in c for c in cmd), cmd)
 t('the Facebook command is opencli\'s search, as JSON, in a background window', rs.native_cmd('facebook', 'search', 'scott reef', 10) == ['opencli', 'facebook', 'search', 'scott reef', '--limit', '10', '-f', 'json', '--window', 'background'])
 t('the Instagram command reads one registered account\'s posts', rs.native_cmd('instagram', 'posts', 'harbour.watch', 10)[:4] == ['opencli', 'instagram', 'user', 'harbour.watch'])
 for bad in (('facebook', 'like'), ('facebook', 'comment'), ('facebook', 'add-friend'), ('facebook', 'join-group'), ('instagram', 'follow'), ('instagram', 'post'), ('instagram', 'search'), ('facebook', 'login')):
@@ -315,11 +370,6 @@ for bad in (('facebook', 'like'), ('facebook', 'comment'), ('facebook', 'add-fri
 
 # rows
 fresh(); r, calls = nat(); on('facebook', 'instagram')
-items = rs.run_native('youtube', 'search', 'gas export tax', 10, runner=r)
-t('a YouTube result becomes one item with its address, words, views and date', len(items) == 1 and items[0]['url'] == 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' and items[0]['view_count'] == 34000 and items[0]['published_at'] == 1794276000, items)
-t('  and the channel\'s and uploader\'s names are not carried', 'Sam Private' not in json.dumps(items) and 'samprivate' not in json.dumps(items))
-row = rs.item_row('youtube', items[0], 1794300000000, q='gas export tax')
-t('  and it files in the Signals shape', bool(row) and row['platform'] == 'youtube' and row['eng']['views'] == 34000 and 'author' not in json.dumps(row), row)
 items = rs.run_native('facebook', 'search', 'gas export tax', 10, runner=r)
 t('a Facebook search keeps posts only: a page or a person in the results is dropped', len(items) == 1 and '990000000000002' in items[0]['url'], items)
 t('  and the result\'s title, which can be a person\'s name, is never read', 'Jo Citizen' not in json.dumps(items) and 'title' not in items[0])
@@ -334,16 +384,12 @@ r1, _ = nat({('facebook', 'search'): (0, 'opencli v1.8.6 - update available\n' +
 t('a banner before the JSON does not hide it', len(rs.run_native('facebook', 'search', 'q', 5, runner=r1)) == 1)
 r1, _ = nat({('facebook', 'search'): (0, json.dumps([dict(OC_FB[0], text='Police checkpoint protest: please sign in at the gate, 429 people came')]), '')})
 t('a post that says "checkpoint" or "sign in" is a post, not a refusal', len(rs.run_native('facebook', 'search', 'q', 5, runner=r1)) == 1)
-r1, _ = nat({'yt': (0, json.dumps({'id': 'dQw4w9WgXcQ', 'title': 'Captcha farms explained', 'description': 'verify your account scams'}) + '\n', '')})
-t('a video about captchas is a video, not a refusal', len(rs.run_native('youtube', 'search', 'q', 5, runner=r1)) == 1)
 r1, _ = nat({('facebook', 'search'): (0, json.dumps([]), '')})
 t('no results is an empty answer, not a failure', rs.run_native('facebook', 'search', 'q', 5, runner=r1) == [])
 
 # refusals
 r1, _ = nat({('facebook', 'search'): (1, '', 'Error: Facebook checkpoint: verify it\'s you')})
 t('a verification is a Challenge', isinstance(raises(lambda: rs.run_native('facebook', 'search', 'q', 5, runner=r1), rs.Challenge), rs.Challenge))
-r1, _ = nat({'yt': (1, '', 'ERROR: [youtube] Sign in to confirm you\'re not a bot')})
-t('YouTube asking to confirm you are not a bot is a Challenge, not retried with cookies', isinstance(raises(lambda: rs.run_native('youtube', 'search', 'q', 5, runner=r1), rs.Challenge), rs.Challenge))
 r1, _ = nat({('instagram', 'user'): (1, '', 'Error: not logged in')})
 e = raises(lambda: rs.run_native('instagram', 'posts', 'a', 5, runner=r1), rs.Unavailable)
 t('signed out is needs_login', bool(e) and e.why == 'needs_login', e)
@@ -354,14 +400,9 @@ e = raises(lambda: rs.run_native('facebook', 'search', 'q', 5, runner=r1), rs.Un
 t('a disconnected browser bridge is said, with opencli doctor', bool(e) and e.why == 'bridge' and 'opencli doctor' in str(e), e)
 r1, _ = nat({('facebook', 'search'): (0, '<html>hello</html>', '')})
 t('an answer that is not JSON is ParseFailed', isinstance(raises(lambda: rs.run_native('facebook', 'search', 'q', 5, runner=r1), rs.ParseFailed), rs.ParseFailed))
-r1, _ = nat({'yt': (1, '', 'ERROR: unable to download webpage')})
-t('yt-dlp failing with no video is ParseFailed, not an empty success', isinstance(raises(lambda: rs.run_native('youtube', 'search', 'q', 5, runner=r1), rs.ParseFailed), rs.ParseFailed))
 
 # the sweep and the job
 fresh(); r, calls = nat(); on('facebook', 'instagram'); lines = []
-rows, stats = rs.sweep('youtube', PLAN, log=log, runner=r, sleep=lambda s: None, clock=lambda: 1794300000)
-t('a YouTube sweep runs one yt-dlp search a term and files the videos', stats['reads'] == 3 and all(c[0] == 'yt-dlp' for c in calls) and len(rows) >= 1, (stats, calls[:1]))
-t('  and the console shows the real command', any(k == 'cmd' and x.startswith('yt-dlp ytsearchdate') for k, x in lines), lines[:3])
 calls.clear()
 rows, stats = rs.sweep('instagram', PLAN, log=log, runner=r, sleep=lambda s: None, clock=lambda: 1794300000)
 t('an Instagram sweep reads the registered accounts and nothing else', [c[1:4] for c in calls] == [['instagram', 'user', 'harbour.watch'], ['instagram', 'user', 'baykeepers']] and len(rows) >= 1, calls)
@@ -380,14 +421,8 @@ fresh(); r, calls = nat(); on('facebook'); lines = []; posted = []
 out = rs.collect('facebook', 'https://w.example', 'k', {'ns': 'aep'}, log, http=http, runner=r, sleep=lambda s: None, clock=lambda: 1794300000)
 t('signed in, the job files its posts as layer 2', out['ok'] and posted and posted[0]['layer'] == 2 and posted[0]['rows'], out.get('summary'))
 t('  and the signed-in account\'s name reaches no log and no row', 'agency.monitor' not in json.dumps(lines) and 'A Person' not in json.dumps(lines) and 'agency.monitor' not in json.dumps(posted))
-fresh(); r, calls = nat(); posted = []
-out = rs.collect('youtube', 'https://w.example', 'k', {'ns': 'aep'}, log, http=http, runner=r, sleep=lambda s: None, clock=lambda: 1794300000)
-t('YouTube needs no sign-in check and files its videos', out['ok'] and not any(c[0] == 'opencli' for c in calls) and posted, out.get('summary'))
 
 # signing in
-fresh(); r, calls = nat(who=False); said = []; ran = []
-ok = rs.login('youtube', ask=lambda q: said.append('ASKED') or '', out=said.append, call=lambda c: ran.append(c) or 0, runner=r)
-t('YouTube has nothing to sign in to, and says so without a question', ok is True and ran == [] and 'ASKED' not in said and 'no account' in ' '.join(said), said)
 answers = iter(['no', 'facebook']); said = []; ran = []
 r, calls = nat(who=True)
 ok = rs.login('facebook', ask=lambda q: said.append(q) or next(answers), out=said.append, call=lambda c: ran.append(c) or 0, runner=r)

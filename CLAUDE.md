@@ -337,19 +337,30 @@ verifies each, and what was asked for and not built.
     and nothing removed an unserved one. `topicMpPosts()` is the stand-in for the MP accounts: posts already held
     with `meta.mp` (the keyless timeline reader) that carry the keyword, returned by `topicResults` under `x` with
     `held: true` and `xNote`. Nothing new is fetched.
-  - **The backend the owner chose (11 November 2026; `DEN.md` s.3.2): the tools agent-reach installs, called directly.**
-    When agent-reach has no command for a channel and the tool is on the machine (`NATIVE`, `use_native`), `reach_social.py`
-    runs it itself: YouTube search is `yt-dlp "ytsearchdateN:<term>" --flat-playlist --dump-json ... --no-cookies` (no
-    account; usable once installed), Facebook search is `opencli facebook search` and Instagram's registered accounts are
+  - **After the deploy, same day (tools only; `DEN.md` s.3.2).** Seen on the owner's Mac and the live worker: the
+    agent offers `reddit, render`, says once that X is not offered and claims no X job. twitter-cli is pipx-installed
+    at 0.8.5 / xclienttransaction 1.0.3, and the unreleased 0.8.6 did not fix X search: **no fix exists upstream.**
+    The collector runs from its own environment (`~/.axiom-reach/venv/bin/python`; Homebrew's Python refuses pip).
+    `x_versions()` / `x_remedy()` in `tools/reach-x.py` say which case a machine is in ("Nothing to do on this Mac"
+    on the newest; the pipx or uv command when behind). `--install-launchd` uses the Python that runs it
+    (`launchd_command`). **Decision D7 amended (the owner, 11 November 2026): YouTube keyword search reads through
+    yt-dlp directly** (`backend()`, `run_ytsearch()`, `ytdlp_ready()` in `reach_social.py`: public search, no sign-in,
+    no cookies; a bot check is a challenge; names never carried; switched on once with `--login youtube`, status
+    `not_switched_on` until then). Its field names are unproven until the first dry run on the Mac. YouTube is not yet switched on
+    (`--login youtube`).
+  - **The backend the owner chose (11 November 2026; `DEN.md` s.3.3): Facebook and Instagram through opencli, the tool agent-reach installs for them.**
+    When agent-reach has no command for the channel and opencli is on the machine (`NATIVE`, `use_native`), `reach_social.py`
+    runs it itself (YouTube keeps its own yt-dlp path above): Facebook search is `opencli facebook search` and Instagram's registered accounts are
     `opencli instagram user`, both in the Chrome a person signed in to. opencli can also write (like, follow, post):
     `OPENCLI_READS` is the whole list of commands this collector may run and anything else raises before a process
     starts. Facebook and Instagram stay `needs_login` until a person runs `--login <platform>` (the warning, the
     question, `opencli <site> login`, then `whoami` must report someone); each job asks `whoami` first and never logs
     the name. A Facebook result's `title` is never read (it can be a person's name) and only post addresses are kept;
     this route gives Facebook no counts or dates. Instagram posts with no address fail as `instagram_no_address`. A
-    refusal is read from the error stream, never from a post's own words. Every yt-dlp and opencli answer in the tests
-    is a stand-in: unverified until the first sweep on the Mac.
-  - Harnesses: `tests/reach-agent-test.py` (30), `tests/reach-channels-test.py` (127), `tests/den-reach-worker.mjs`
+    refusal is read from the error stream, never from a post's own words. A sign-in the platform refuses (429, a verification)
+    pauses it 24 hours and a second `--login` inside the day asks nothing. `whoami` is the one real opencli answer
+    seen (it confirmed the Facebook switch-on); every sweep answer in the tests is a stand-in until the first sweep.
+  - Harnesses: `tests/reach-agent-test.py` (41), `tests/reach-channels-test.py` (141), `tests/den-reach-worker.mjs`
     (9), `tests/topics-worker.mjs` (4).
 
 ## The research agent
