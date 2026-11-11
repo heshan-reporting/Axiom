@@ -1,4 +1,4 @@
-# Claude Code prompt: Anne's Den - a total interface upgrade (first pass built: page `?v=r45`; worker unchanged at `studio-p58`)
+# Claude Code prompt: Anne's Den - a total interface upgrade (two passes built: page `?v=r46`; worker unchanged at `studio-p58`)
 
 Paste everything below the line into Claude Code, opened at the root of the `Axiom` repository.
 
@@ -113,33 +113,28 @@ and an empty table is never read as a quiet day. Do not restyle any other view i
   `tests/den-inject-browser.mjs` 60, `tests/den-worker.mjs` 17, `tests/studio-tokens-test.mjs` 4, `node tests/run.mjs
   check` 26: all pass. One contrast failure (a green chip at 4.48:1) was found by axe and fixed.
 
+## Built in the second pass (page `?v=r46`)
+
+A dark theme by choice; a Cards / Table switch on Today; channel tiles above Collection's table; skeletons; citation
+tips in the brief; a score meter in Watch; five new browser cases (`tests/den-browser.mjs` is 29). `DEN.md` s.8 has
+the detail.
+
 ## What is left to build, in this order
 
 Work to 1366 x 768 first, then 1440, 1920 and a usable 1024. Keep every rule under "What must not change".
 
-1. **Tests for the first pass.** Browser cases for the overview: each tile opens its table; the chart's columns sum to
-   the rows on the board; a board with nothing collected says so and draws no zero; the menu works by keyboard; no
-   horizontal scroll at 1024.
-2. **Today as a feed.** Mention cards (channel glyph, outlet monogram, time, headline, two-line excerpt, figures, tone,
-   layer, Pin / Set aside / Open) with a Cards / Table switch; the tables stay, and both give the same rows in the
-   same order. No third-party logos fetched or bundled.
-3. **Brief as a document.** A centred page in a readable measure, ratings as segmented controls, citation ids as
-   numbered chips that show the cited row on hover or focus and open it in a panel beside the page, the two checks as
-   inline marks with the reason in the margin, History and Compare in a side sheet, one "Get it out" menu. If the
-   editors move off plain textareas, the working copy, save on blur, the conflict flow and every existing case still
-   hold; if that cannot be guaranteed, keep textareas.
-4. **Collection as a health board.** One card per channel with its state in words, how it is read, the last delivery,
-   a seven-day sparkline and Collect now; the job console as a docked drawer; the recall result as the headline figure
-   when it exists.
-5. **Watch.** Proposals as review cards with their evidence and a score meter; Preview in a side sheet with counts by
-   channel.
-6. **Options.** A settings page with a section index, switches, a keyboard-operable order for the report's sections
+1. **Brief as a document.** Ratings as segmented controls, citation ids as numbered chips inside the text that open
+   the cited row in a panel beside the page, the two checks as inline marks with the reason in the margin, History and
+   Compare in a side sheet, one "Get it out" menu. If the editors move off plain textareas, the working copy, save on
+   blur, the conflict flow and every existing case still hold; if that cannot be guaranteed, keep textareas.
+2. **Watch.** Proposals as review cards with their evidence; Preview in a side sheet with counts by channel.
+3. **Options.** A settings page with a section index, switches, a keyboard-operable order for the report's sections
    and a Save bar that appears only when something changed.
-7. **Controls.** A proper desk menu in place of the native select (keep a labelled select for the harness or change the
-   harness and say so), a tooltip component, skeletons with an `aria-live` sentence in place of "Loading ...".
-8. **A dark theme for the Den**, chosen in Options and remembered per person, with dark steps of the chart colours
-   checked against the dark surface. Today the Den is light only.
-9. **The styleguide.** A Den section in `docs/styleguide.html` showing every component.
+4. **Collection.** A seven-day sparkline a channel (needs a daily series from the worker: add it to
+   `/den/collection`, additively, with a worker case); the job console as a docked drawer.
+5. **Controls.** A desk menu in place of the native select (keep a labelled select for the harness, or change the
+   harness and say so) and a tooltip component.
+6. **The styleguide.** A Den section in `docs/styleguide.html` showing every component in both themes.
 
 After each item run the Den harnesses and retake that area with `node --experimental-sqlite tests/den-shots.mjs`.
 Bump the `?v=` of `den.js` and `den.css` in `docs/index.html` on every page release and run

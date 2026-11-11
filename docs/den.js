@@ -46,7 +46,7 @@
     useEffect(() => { if (last.current !== key) { last.current = key; setSt({ data: null, err: '', loading: true }); } load(); }, deps);   // eslint-disable-line
     return Object.assign({ reload: load, set: d => setSt({ data: d, err: '', loading: false }) }, st);
   }
-  const Loading = ({ what }) => html`<div class="den-state" role="status">Loading ${what || ''}...</div>`;
+  const Loading = ({ what }) => html`<div class="den-state den-load" role="status"><span class="den-sk" aria-hidden="true"></span><span class="den-sk" aria-hidden="true"></span><span class="den-sk" aria-hidden="true"></span>Loading ${what || ''}...</div>`;
   const Failed = ({ what, err, onRetry }) => html`<div class="den-state err" role="alert"><b>${what} could not be loaded.</b> ${err} ${onRetry ? html`<button class="den-mini" onClick=${onRetry}>Try again</button>` : null}</div>`;
   const Empty = ({ children }) => html`<div class="den-state">${children}</div>`;
   /* A failure in one panel never blanks the page. */
@@ -161,14 +161,14 @@
   }
   function Board({ desk, tick, bump, setTab, canWrite }) {
     const b = useLoad(() => get('/den/board?' + q({ desk: desk.id }), 'counts'), [desk.id, tick], desk.id);
-    const [offer, setOffer] = useState(null); const [showAside, setShowAside] = useState(false); const root = useRef(null);
+    const [offer, setOffer] = useState(null); const [showAside, setShowAside] = useState(false); const root = useRef(null); const [view, setViewRaw] = useState(() => (ls.get('ax_den_view', 'table') === 'cards' ? 'cards' : 'table')); const setView = v => { setViewRaw(v); ls.set('ax_den_view', v); };
     const done = d => { if (d && d.offer) setOffer(d.offer); b.reload(); };
     const mute = async on => { if (on) { try { await call('/den/mute', { desk: desk.id, kind: offer.kind, value: offer.value }); toastMsg('Muted on this desk'); b.reload(); bump('desk'); } catch (e) { toastMsg(say(e), true); } } setOffer(null); };
     // keyboard: j and k move between rows, p pins, x sets aside, o opens, 1 to 5 jump to a section
-    const onKey = e => { if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; if (e.metaKey || e.ctrlKey || e.altKey) return; const rows = root.current ? Array.from(root.current.querySelectorAll('tr.den-row')) : []; const i = rows.indexOf(document.activeElement.closest ? document.activeElement.closest('tr.den-row') : null);
+    const onKey = e => { if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; if (e.metaKey || e.ctrlKey || e.altKey) return; const rows = root.current ? Array.from(root.current.querySelectorAll('.den-row')) : []; const i = rows.indexOf(document.activeElement.closest ? document.activeElement.closest('.den-row') : null);
       const go = n => { if (rows[n]) { rows[n].focus(); e.preventDefault(); } };
       if (e.key === 'j') return go(i < 0 ? 0 : Math.min(rows.length - 1, i + 1)); if (e.key === 'k') return go(i < 0 ? 0 : Math.max(0, i - 1));
-      if (/^[1-5]$/.test(e.key)) { const p = root.current.querySelectorAll('section.den-panel')[+e.key - 1]; if (p) { const r = p.querySelector('tr.den-row') || p; if (r.focus) r.focus(); p.scrollIntoView({ block: 'start' }); e.preventDefault(); } return; }
+      if (/^[1-5]$/.test(e.key)) { const p = root.current.querySelectorAll('section.den-panel')[+e.key - 1]; if (p) { const r = p.querySelector('.den-row') || p; if (r.focus) r.focus(); p.scrollIntoView({ block: 'start' }); e.preventDefault(); } return; }
       if (i < 0) return; const btn = t => Array.from(rows[i].querySelectorAll('button')).find(x => t.test(x.textContent));
       if (e.key === 'p') { const x = btn(/^Pin/); if (x) { x.click(); e.preventDefault(); } } if (e.key === 'x') { const x = btn(/^Set aside$/); if (x) { x.click(); e.preventDefault(); } } if (e.key === 'o' || e.key === 'Enter') { const a = rows[i].querySelector('a[href]'); if (a && e.target === rows[i]) { a.click(); e.preventDefault(); } } };
     if (b.loading && !b.data) return html`<${Loading} what="today's evidence" />`;
@@ -176,11 +176,28 @@
     const d = b.data, c = d.counts; const none = why => html`<${Empty}>${why} <button class="den-link" onClick=${() => setTab('collection')}>See what was collected, and why not</button><//>`;
     const act = (r, kind) => html`<td class="act"><${RowActions} r=${r} kind=${kind} desk=${desk} canWrite=${canWrite} onDone=${done} /></td>`;
     const row = (r, cells, kind) => html`<tr key=${r.id} class=${'den-row' + (r.pinned ? ' pinned' : '')} tabIndex="0" aria-label=${(r.pinned ? 'Pinned. ' : '') + kind + ': ' + String(r.title || r.text || r.label || '').slice(0, 120)}>${cells}${act(r, kind)}</tr>`;
+    /* The same rows as cards: nothing a table row does not show, and the same actions. */
+    const card = (r, kind, mark, col, meta, title, sub, figs) => html`<article key=${r.id} class=${'den-row den-mcard' + (r.pinned ? ' pinned' : '')} tabIndex="0" aria-label=${(r.pinned ? 'Pinned. ' : '') + kind + ': ' + String(r.title || r.text || '').slice(0, 120)}>
+      <span class="den-mc-av" aria-hidden="true" style=${{ background: col }}>${mark}</span>
+      <div class="den-mc-b"><div class="den-mc-m">${meta}</div><div class="den-t">${title}</div>${sub || null}<div class="den-mc-f">${figs}</div></div>
+      <div class="den-mc-a"><${RowActions} r=${r} kind=${kind} desk=${desk} canWrite=${canWrite} onDone=${done} /></div></article>`;
+    const ini = v => String(v || '?').replace(/^the\s+/i, '').charAt(0).toUpperCase(); const fig = (label, value) => html`<span><b>${value}</b> ${label}</span>`;
+    const layers = r => (r.layers || []).map(l => html`<span key=${l} class="den-chip" title=${l === 1 ? 'Layer 1: an official route' : l === 2 ? 'Layer 2: a signed-in collector on the Mac' : 'Layer 3: a keyless read from the worker'}>L${l}</span>`);
+    const mediaCards = () => html`<div class="den-feed">${d.media.map(m => card(m, 'story', ini(m.outlet), serCol('news'), html`<b>${m.outlet}</b>${m.tier ? ' - ' + m.tier + (m.juris && m.juris !== 'au' ? ', ' + m.juris.toUpperCase() : '') : ''} - ${aest(m.ts)}`, m.title,
+      m.n > 1 ? html`<span class="den-sub">also in ${m.outlets.slice(1, 6).join(', ')}${m.n > 6 ? ' and ' + (m.n - 6) + ' more' : ''}</span>` : null,
+      html`${fig(m.n === 1 ? 'outlet' : 'outlets', m.n)}${m.fb ? fig('on Facebook', fmtN((+m.fb.reactions || 0) + (+m.fb.comments || 0) + (+m.fb.shares || 0))) : html`<span>no Facebook reach held</span>`}${m.gated ? html`<span class="den-chip warn" title="Read through the agency's subscription. A brief quotes at most thirty words.">subscriber</span>` : m.full ? html`<span class="den-chip" title="The full text is held">full text</span>` : null}`))}</div>`;
+    const socialCards = () => html`<div class="den-feed">${d.social.map(x => card(x, 'post', ini(CH[x.platform] || x.platform), serCol(serKey(x.platform)), html`<b>${CH[x.platform] || x.platform}</b>${x.sub ? ' - r/' + x.sub : ''} - ${x.eng_at ? 'read ' + since(x.eng_at) : aest(x.ts)}`, x.text,
+      x.term || x.hashtag ? html`<span class="den-sub">found by ${x.hashtag ? '#' + x.hashtag : '"' + x.term + '"'}</span>` : x.registered ? html`<span class="den-sub">a registered account</span>` : null,
+      html`${x.total ? fig('interactions', fmtN(x.total)) : html`<span>no counts held</span>`}${x.growth == null ? null : fig('since yesterday', (x.growth > 0 ? '+' : '') + fmtN(x.growth))}${x.held ? html`<span><b>${x.held.n}</b> comments held <span class=${'den-chip ' + (x.held.tone < -0.2 ? 'neg' : x.held.tone > 0.2 ? 'pos' : '')}>${x.held.tone < -0.2 ? 'hostile' : x.held.tone > 0.2 ? 'warm' : 'mixed'}</span></span>` : null}${layers(x)}`))}</div>`;
+    const actorCards = () => html`<div class="den-feed">${d.actors.map(x => card(x, 'post by ' + x.who, ini(x.who), serCol(serKey(x.platform)), html`<b>${x.who}</b> - ${x.role === 'mp' ? 'MP' + (x.party ? ', ' + x.party : '') : x.role === 'org' ? 'organisation' : x.role} - ${CH[x.platform] || x.platform} - ${aest(x.ts)}`, x.text, null,
+      x.total ? fig('interactions', fmtN(x.total)) : html`<span>no counts held</span>`))}</div>`;
     return html`<div ref=${root} onKeyDown=${onKey}>
       ${b.err ? html`<div class="den-notice bad" role="alert">The board could not be refreshed: ${b.err} What is shown is the last read. <button class="den-mini" onClick=${b.reload}>Try again</button></div>` : null}
       ${d.capped ? html`<div class="den-notice">This window holds more rows than one board reads (${fmtN(4000)}). The newest are shown; shorten the window in Options to see all of a busy day.</div>` : null}
       ${offer ? html`<div class="den-notice" role="alert">${offer.text} A mute hides its rows on this desk only, and can be removed in Options. <div><button class="den-mini primary" onClick=${() => mute(true)}>Mute it on this desk</button><button class="den-mini" onClick=${() => mute(false)}>Not now</button></div></div>` : null}
-      <${Overview} d=${d} desk=${desk} setTab=${setTab} jump=${name => { const p = root.current && root.current.querySelector('section.den-panel[aria-label="' + name + '"]'); if (p) { p.scrollIntoView({ block: 'start', behavior: 'auto' }); const r = p.querySelector('tr.den-row'); if (r) r.focus({ preventScroll: true }); } }} />
+      <${Overview} d=${d} desk=${desk} setTab=${setTab} jump=${name => { const p = root.current && root.current.querySelector('section.den-panel[aria-label="' + name + '"]'); if (p) { p.scrollIntoView({ block: 'start', behavior: 'auto' }); const r = p.querySelector('.den-row'); if (r) r.focus({ preventScroll: true }); } }} />
+      <div class="den-toolbar"><h3>The evidence, in the report's sections</h3><span class="den-note">${fmtN(c.rows)} rows in the window</span><span class="den-spacer"></span>
+        <div class="den-seg" role="group" aria-label="Show stories and posts as">${[['table', 'Table'], ['cards', 'Cards']].map(v => html`<button key=${v[0]} type="button" class="den-tab" aria-pressed=${view === v[0] ? 'true' : 'false'} onClick=${() => setView(v[0])}>${v[1]}</button>`)}</div></div>
       <${Panel} title="Key narratives" note=${c.narratives ? c.narratives + ' moving on this desk\'s issues' : ''} flush=${true}>
         ${d.narratives.length ? html`<table class="den-table"><thead><tr><th>Narrative</th><th>Toward the client</th><th class="num">Rows</th><th class="num">Last day</th><th>Taken up by</th><th></th></tr></thead><tbody>
           ${d.narratives.map(n => html`<tr key=${n.id} class="den-row" tabIndex="0" aria-label=${'Narrative: ' + n.label}><td><span class="den-t">${n.label}</span>${n.claim ? html`<span class="den-sub">${n.claim}</span>` : null}</td><td><span class=${'den-chip ' + (n.side === 'hostile' ? 'neg' : n.side === 'supportive' ? 'pos' : '')}>${n.side || 'not read yet'}</span> ${n.status ? html`<span class="den-chip">${n.status}</span>` : null}</td>
@@ -188,13 +205,13 @@
           : none('No narrative on this desk\'s issues gained rows in this window.')}
       <//>
       <${Panel} title="Traditional media" note=${c.news ? c.news + ' stories, ' + c.media + ' after folding copies' : ''} flush=${true}>
-        ${d.media.length ? html`<table class="den-table"><thead><tr><th>Story</th><th>Outlet</th><th class="num">Outlets</th><th class="num">Facebook</th><th>When</th><th></th></tr></thead><tbody>
+        ${d.media.length && view === 'cards' ? mediaCards() : d.media.length ? html`<table class="den-table"><thead><tr><th>Story</th><th>Outlet</th><th class="num">Outlets</th><th class="num">Facebook</th><th>When</th><th></th></tr></thead><tbody>
           ${d.media.map(m => row(m, html`<td><span class="den-t">${m.title}</span>${m.gated ? html` <span class="den-chip warn" title="Read through the agency's subscription. A brief quotes at most thirty words.">subscriber</span>` : m.full ? html` <span class="den-chip" title="The full text is held">full text</span>` : null}${m.n > 1 ? html`<span class="den-sub">also in ${m.outlets.slice(1, 6).join(', ')}${m.n > 6 ? ' and ' + (m.n - 6) + ' more' : ''}</span>` : null}</td>
             <td>${m.outlet}${m.tier ? html`<span class="den-sub">${m.tier}${m.juris && m.juris !== 'au' ? ', ' + m.juris.toUpperCase() : ''}</span>` : null}</td><td class="num">${m.n}</td><td class="num" title=${m.fb ? (m.fb.reactions || 0) + ' reactions, ' + (m.fb.comments || 0) + ' comments, ' + (m.fb.shares || 0) + ' shares' : 'No Facebook reach is held for this story'}>${m.fb ? fmtN((+m.fb.reactions || 0) + (+m.fb.comments || 0) + (+m.fb.shares || 0)) : '-'}</td><td class="den-mono">${aest(m.ts)}</td>`, 'story'))}</tbody></table>`
           : none('No story on this desk\'s issues' + (desk.region !== 'au' ? ' in ' + desk.region.toUpperCase() : '') + ' was filed in this window.')}
       <//>
       <${Panel} title="Social" note=${c.social ? c.social + ' posts' + (c.underMinimum ? ', ' + c.underMinimum + ' under this desk\'s minimum' : '') : ''} flush=${true}>
-        ${d.social.length ? html`<table class="den-table"><thead><tr><th>Post</th><th>Channel</th><th class="num">Interactions</th><th class="num">Since yesterday</th><th>Comments held</th><th>Read</th><th></th></tr></thead><tbody>
+        ${d.social.length && view === 'cards' ? socialCards() : d.social.length ? html`<table class="den-table"><thead><tr><th>Post</th><th>Channel</th><th class="num">Interactions</th><th class="num">Since yesterday</th><th>Comments held</th><th>Read</th><th></th></tr></thead><tbody>
           ${d.social.map(s => row(s, html`<td><span class="den-t">${s.text}</span>${s.term || s.hashtag ? html`<span class="den-sub">found by ${s.hashtag ? '#' + s.hashtag : '"' + s.term + '"'}</span>` : s.registered ? html`<span class="den-sub">a registered account</span>` : null}</td>
             <td>${CH[s.platform] || s.platform}${s.sub ? html`<span class="den-sub">r/${s.sub}</span>` : null} ${(s.layers || []).map(l => html`<span key=${l} class="den-chip" title=${l === 1 ? 'Layer 1: an official route' : l === 2 ? 'Layer 2: a signed-in collector on the Mac' : 'Layer 3: a keyless read from the worker'}>L${l}</span>`)}</td>
             <td class="num" title=${engText(s.eng) || 'No counts are held for this post'}>${s.total ? fmtN(s.total) : '-'}</td><td class="num">${s.growth == null ? html`<span title="No read from yesterday to compare with">-</span>` : (s.growth > 0 ? '+' : '') + fmtN(s.growth)}</td>
@@ -202,7 +219,7 @@
           : none('No post on this desk\'s terms or from its registered accounts was collected in this window.')}
       <//>
       <${Panel} title="Influencer and political" note="Registered public actors and MPs, on their own posts" flush=${true}>
-        ${d.actors.length ? html`<table class="den-table"><thead><tr><th>Who</th><th>Post</th><th>Channel</th><th class="num">Interactions</th><th>When</th><th></th></tr></thead><tbody>
+        ${d.actors.length && view === 'cards' ? actorCards() : d.actors.length ? html`<table class="den-table"><thead><tr><th>Who</th><th>Post</th><th>Channel</th><th class="num">Interactions</th><th>When</th><th></th></tr></thead><tbody>
           ${d.actors.map(a => row(a, html`<td><span class="den-t">${a.who}</span><span class="den-sub">${a.role === 'mp' ? 'MP' + (a.party ? ', ' + a.party : '') : a.role === 'org' ? 'organisation' : a.role}</span></td><td>${a.text}</td><td>${CH[a.platform] || a.platform}</td><td class="num">${a.total ? fmtN(a.total) : '-'}</td><td class="den-mono">${aest(a.ts)}</td>`, 'post by ' + a.who))}</tbody></table>`
           : none('No registered organisation, official or MP posted on this desk in this window.')}
       <//>
@@ -234,7 +251,7 @@
     return html`<div class="den-sec" data-section=${s.id}>
       <h4>${s.title}${sec && sec.edited ? html`<span class="den-chip acc" title="A person has edited this section; a model will not write over it unless asked">edited by ${sec.by}</span>` : sec && sec.by === 'model' ? html`<span class="den-chip">drafted</span>` : null}${dirty ? html`<span class="den-chip warn">not saved</span>` : null}</h4>
       <textarea class="den-ta" aria-label=${s.title} readOnly=${readOnly} value=${text} placeholder=${readOnly ? 'Nothing written yet.' : 'Write this section, or draft the brief. Keep the [M:123] marks: they are the citations.'} onInput=${e => onChange(s.id, e.target.value)} onBlur=${onBlur}></textarea>
-      ${cites.length ? html`<div class="den-cites" aria-label="What this section cites">${cites.map(id => { const e = evidence[id] || {}; return web(e.url) ? html`<a key=${id} class="den-chip" href=${web(e.url)} target="_blank" rel="noopener" title=${e.label || id}>${id}${e.gated ? ' (subscriber)' : ''}</a>` : html`<span key=${id} class="den-chip" title=${e.label || id}>${id}</span>`; })}</div>` : null}
+      ${cites.length ? html`<div class="den-cites" aria-label="What this section cites">${cites.map(id => { const e = evidence[id] || {}; return web(e.url) ? html`<a key=${id} class="den-chip den-cite" href=${web(e.url)} target="_blank" rel="noopener" data-tip=${String(e.label || id).slice(0, 160)} aria-label=${id + ': ' + (e.label || 'the cited row')}>${id}${e.gated ? ' (subscriber)' : ''}</a>` : html`<span key=${id} class="den-chip den-cite" tabIndex="0" data-tip=${String(e.label || id).slice(0, 160)}>${id}</span>`; })}</div>` : null}
       ${sec && !dirty && ((sec.uncited || []).length || (sec.unverified || []).length || (sec.trimmed || []).length) ? html`<ul class="den-flags">
         ${(sec.uncited || []).map((u, i) => html`<li key=${'u' + i}><span class="w">No evidence behind:</span> ${u}</li>`)}
         ${(sec.unverified || []).map((u, i) => html`<li key=${'f' + i}><span class="w">${u.figures.join(', ')}</span> is not in the row it cites: ${u.sentence}</li>`)}
@@ -350,7 +367,7 @@
         ${mode === 'approve' ? html`<div class="den-form" style=${{ marginTop: '8px' }}>${p.kind === 'term' ? html`<label class="den-lab">Files under<select value=${issue} onChange=${e => setIssue(e.target.value)}>${desk.issues.map(i => html`<option key=${i.id} value=${i.id}>${i.label}</option>`)}<option value="">no issue (searched for only)</option></select></label>` : null}
           <button class="den-mini primary" disabled=${busy} onClick=${() => decide(Object.assign({ decision: 'approve' }, p.kind === 'term' ? { issue } : {}))}>Approve</button><button class="den-mini" onClick=${() => setMode('')}>Cancel</button><span class="den-sub">${p.kind === 'term' ? 'It joins what every collector searches for and how new rows are filed. It never changes what counts as a spike.' : 'Collectors read it from the next sweep.'}</span></div>` : null}
         ${mode === 'dismiss' ? html`<div class="den-form" style=${{ marginTop: '8px' }}><label class="den-lab" style=${{ flex: '1 1 240px' }}>Why (it is never proposed again)<input value=${why} maxlength="300" onInput=${e => setWhy(e.target.value)} /></label><button class="den-mini danger" disabled=${busy || why.trim().length < 3} onClick=${() => decide({ decision: 'dismiss', reason: why })}>Dismiss</button><button class="den-mini" onClick=${() => setMode('')}>Cancel</button></div>` : null}</td>
-      <td class="num">${p.score ? Math.round(p.score) : '-'}</td>
+      <td class="num">${p.score ? html`${Math.round(p.score)}<span class="den-meter sm" aria-hidden="true"><i style=${{ width: Math.min(100, Math.round(p.score) * 10) + '%' }}></i></span>` : '-'}</td>
       <td class="act">${p.kind === 'term' ? html`<button class="den-mini" disabled=${busy} aria-expanded=${prev ? 'true' : 'false'} title="What it would have caught in what is already held. Free." onClick=${preview}>Preview</button> ` : null}${canWrite && !mode ? html`<button class="den-mini" onClick=${() => setMode('approve')}>Approve</button> <button class="den-mini" onClick=${() => setMode('dismiss')}>Dismiss</button>` : null}</td></tr>`;
   }
   function WatchPanel({ desk, tick, bump, canWrite }) {
@@ -418,6 +435,8 @@
     return html`<div>
       <div class="den-notice ${live.length ? 'good' : ''}" role="status">${live.length ? live.length + ' collector' + (live.length === 1 ? ' is' : 's are') + ' connected (' + live.map(a => a.agent).join(', ') + ').' : 'No Mac collector is connected. Channels read from the worker still run; signed-in reads wait.'} ${canWrite ? '' : 'Your key is read-only: collecting and the switches need a full key.'}</div>
       ${job ? html`<${Console} job=${job} title=${job.title} canWrite=${canWrite} />` : null}
+      <div class="den-health" role="group" aria-label="Channels at a glance">${d.channels.map(c => { const k = c.collector; const st = !c.delivered.d1 ? (k && k.off ? ['off', 'switched off'] : k && k.challenge ? ['bad', 'paused at a verification'] : ['bad', 'nothing in the last day']) : ['ok', 'delivering']; return html`<div key=${c.id} class=${'den-hc ' + st[0]}>
+        <span class="k"><i aria-hidden="true"></i>${c.label}</span><span class="v">${fmtN(c.delivered.d1 || 0)}<small>last day</small></span><span class="f">${st[1]} - ${fmtN(c.delivered.d7)} in 7 days</span></div>`; })}</div>
       <${Panel} title="Channels" note=${'What each delivered for ' + desk.name} flush=${true}>
         <table class="den-table"><thead><tr><th>Channel</th><th>How it is read</th><th>Now</th><th class="num">Last day</th><th class="num">7 days</th><th>Last delivered</th><th></th></tr></thead><tbody>
         ${d.channels.map(c => html`<tr key=${c.id} class="den-row"><td><span class="den-t">${c.label}</span>${c.accounts != null ? html`<span class="den-sub">${c.accounts} registered account${c.accounts === 1 ? '' : 's'}</span>` : null}</td><td>${c.how}${c.cannot ? html`<span class="den-sub">Cannot reach: ${c.cannot}</span>` : null}</td><td>${state(c)}</td>
@@ -495,7 +514,7 @@
 
   function DenApp() {
     const D = useLoad(() => get('/den/desks', 'desks'), [], 'desks'); const [deskId, setDeskId] = useState(() => ls.get('ax_den_desk', '')); const [tab, setTabRaw] = useState(() => ls.get('ax_den_tab', 'today')); const [tick, setTick] = useState(0); const [keys, setKeys] = useState(false);
-    const [budget, setBudget] = useState(null); const [, setRole] = useState(window.AX_ROLE); const [briefSeen, setBriefSeen] = useState(false);
+    const [budget, setBudget] = useState(null); const [, setRole] = useState(window.AX_ROLE); const [theme, setThemeRaw] = useState(() => (ls.get('ax_den_theme', 'light') === 'dark' ? 'dark' : 'light')); const setTheme = v => { setThemeRaw(v); ls.set('ax_den_theme', v); const r = document.getElementById('den-root'); if (r) r.dataset.theme = v; }; const [briefSeen, setBriefSeen] = useState(false);
     // the worker says what this key may do a moment after the page opens: the controls follow it
     useEffect(() => { const f = () => setRole(window.AX_ROLE); window.addEventListener('ax:role', f); return () => window.removeEventListener('ax:role', f); }, []);
     const canWrite = canWriteNow();
@@ -517,6 +536,7 @@
         <div class="den-deskcard"><span class="den-av" aria-hidden="true">${String(desk.client || desk.name || 'A').charAt(0).toUpperCase()}</span><span><b>${desk.client}</b><span>${desk.name}</span></span></div>
         <div class="den-tabs den-menu" role="tablist" aria-orientation="vertical" aria-label="Anne's Den">${MENU.map(g => [html`<span key=${g[0]} class="den-menu-h" aria-hidden="true">${g[0]}</span>`].concat(g[1].map(id => html`<button key=${id} role="tab" id=${'den-tab-' + id} class="den-tab" aria-selected=${tab === id ? 'true' : 'false'} aria-controls="den-tabpanel" onClick=${() => setTab(id)}><${Ico} n=${id} />${TABS.find(t => t[0] === id)[1]}</button>`)))}</div>
         ${budget ? html`<div class="den-sidefoot"><b>Model calls today</b><div class="den-meter" aria-hidden="true"><i style=${{ width: Math.min(100, (budget.used / Math.max(1, budget.cap)) * 100) + '%' }}></i></div>${budget.used} of ${budget.cap} used. Only a draft spends one.</div>` : null}
+        <div class="den-seg den-theme" role="group" aria-label="Theme">${[['light', 'Light'], ['dark', 'Dark']].map(v => html`<button key=${v[0]} type="button" class="den-tab" aria-pressed=${theme === v[0] ? 'true' : 'false'} onClick=${() => setTheme(v[0])}>${v[1]}</button>`)}</div>
       </aside>
       <div class="den-main">
       <div class="den-head">
@@ -546,6 +566,6 @@
   window.denInit = function () {
     const root = document.getElementById('den-root');
     if (!root) return;
-    if (!mounted) { mounted = true; ReactDOM.createRoot(root).render(html`<${DenApp} />`); }
+    if (!mounted) { mounted = true; root.dataset.theme = ls.get('ax_den_theme', 'light') === 'dark' ? 'dark' : 'light'; ReactDOM.createRoot(root).render(html`<${DenApp} />`); }
   };
 })();

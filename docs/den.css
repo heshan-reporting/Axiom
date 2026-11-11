@@ -6,7 +6,7 @@
    Desktop first (1366 wide and up); below 1100 the side menu becomes a row. */
 
 /* ---- the light theme: the app's own tokens, re-declared while the Den is the open view ---- */
-body:has(#v-den.on){
+body:has(#v-den.on):not(:has(#den-root[data-theme="dark"])){
   --x-bg0:#ECEEF2; --x-bg1:#F4F5F7; --x-bg2:#FFFFFF; --x-bg3:#FFFFFF;
   --x-sur1:rgba(15,23,42,.03); --x-sur2:rgba(15,23,42,.055); --x-sur3:rgba(15,23,42,.09);
   --x-line1:rgba(15,23,42,.09); --x-line2:rgba(15,23,42,.16); --x-line3:rgba(15,23,42,.26);
@@ -24,9 +24,9 @@ body:has(#v-den.on){
   --pos:var(--x-pos); --neg:var(--x-neg); --amb:var(--x-warn);
   background:var(--x-bg1); color:var(--x-ink0);
 }
-body:has(#v-den.on) .main,body:has(#v-den.on) .rail,body:has(#v-den.on) .top{background:var(--x-bg1)}
-body:has(#v-den.on) .rail{border-bottom:1px solid var(--x-line1)}
-body:has(#v-den.on) .rbtn-studio,body:has(#v-den.on) .rbtn-studio svg,body:has(#v-den.on) .rbtn-studio.on{color:var(--x-cy)}
+body:has(#v-den.on):not(:has(#den-root[data-theme="dark"])) .main,body:has(#v-den.on):not(:has(#den-root[data-theme="dark"])) .rail,body:has(#v-den.on):not(:has(#den-root[data-theme="dark"])) .top{background:var(--x-bg1)}
+body:has(#v-den.on):not(:has(#den-root[data-theme="dark"])) .rail{border-bottom:1px solid var(--x-line1)}
+body:has(#v-den.on):not(:has(#den-root[data-theme="dark"])) .rbtn-studio,body:has(#v-den.on):not(:has(#den-root[data-theme="dark"])) .rbtn-studio svg,body:has(#v-den.on):not(:has(#den-root[data-theme="dark"])) .rbtn-studio.on{color:var(--x-cy)}
 /* the scope bar does not drive the Den (a desk is the scope), so it is not shown here */
 body:has(#v-den.on) #scope-root{display:none}
 body:has(#v-den.on) .content{padding-top:6px}
@@ -252,3 +252,61 @@ body:has(#v-den.on) .content{padding-top:6px}
 }
 @media(prefers-reduced-motion:reduce){.den-mini,.den-ta,.den-col .s{transition:none}}
 .den-table input.den-in:not([type="number"]):not([type="checkbox"]){width:100%;max-width:360px}
+
+/* ---- second pass: the dark theme, cards, skeletons, the channels at a glance ---- */
+#den-root[data-theme="dark"]{
+  --den-ground:#0B0F16; --den-card:#121821; --den-soft:#171E29; --den-hover:#1C2431;
+  --den-line:#252E3B; --den-line2:#344052;
+  --den-ink:#F2F5FA; --den-ink1:#C9D0DB; --den-ink2:#9AA4B3; --den-ink3:#8791A0;
+  --den-btn:#F2F5FA; --den-btn-ink:#0E121B;
+  --den-ac:#8FB9FF; --den-ac-bg:#17274A;
+  --den-pos:#6FCF9C; --den-pos-bg:#12301F; --den-neg:#F08A86; --den-neg-bg:#3A1A1A; --den-warn:#E5A662; --den-warn-bg:#3A2810;
+  --den-tip:#2A3344; --den-tip-ink:#FFFFFF; --den-tip-sub:#B9C0CC;
+  --den-s1:#3987E5; --den-s2:#D95926; --den-s3:#199E70; --den-s4:#C98500; --den-s5:#D55181; --den-s6:#008300; --den-s7:#9085E9; --den-s0:#7C8696;
+  --den-sh1:0 1px 2px rgba(0,0,0,.4); --den-sh2:0 4px 14px rgba(0,0,0,.4); --den-sh3:0 12px 40px rgba(0,0,0,.6);
+}
+#den-root[data-theme="dark"] .den-mini.primary:hover:not(:disabled){background:var(--den-ink1);border-color:var(--den-ink1)}
+#den-root[data-theme="dark"] .den-mini.primary:disabled{color:var(--den-card)}
+#den-root[data-theme="dark"] .den-av{color:var(--den-tip-ink)}
+.den-seg{display:inline-flex;gap:2px;background:var(--den-hover);border:1px solid var(--den-line);border-radius:var(--den-r);padding:3px}
+.den-seg .den-tab[aria-pressed="true"]{color:var(--den-ink);background:var(--den-card);box-shadow:var(--den-sh1);font-weight:600}
+.den-theme{align-self:flex-start}
+.den-toolbar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:4px 0 12px}
+.den-toolbar h3{font-family:var(--den-font);font-size:15.5px;font-weight:600;color:var(--den-ink);margin:0}
+.den-toolbar .den-note{font-size:12.5px;color:var(--den-ink2)}
+.den-feed{display:flex;flex-direction:column}
+.den-mcard{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:var(--den-pad) 14px;border-bottom:1px solid var(--den-line)}
+.den-mcard:last-child{border-bottom:0}
+.den-mcard:hover{background:var(--den-soft)}
+.den-mcard.pinned{background:var(--den-ac-bg);box-shadow:inset 3px 0 0 var(--den-s1)}
+.den-mc-av{width:34px;height:34px;border-radius:var(--den-r-sm);display:grid;place-items:center;color:var(--den-tip-ink);font-family:var(--den-num);font-weight:800;font-size:14px;margin-top:2px;background-image:linear-gradient(rgba(0,0,0,.28),rgba(0,0,0,.28))}
+.den-mc-b{min-width:0}
+.den-mc-m{font-size:12px;color:var(--den-ink2)}
+.den-mc-m b{color:var(--den-ink1);font-weight:600}
+.den-mc-b .den-t{display:block;font-size:14px;line-height:1.45;margin:1px 0}
+.den-mc-f{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;margin-top:5px;font-size:12.5px;color:var(--den-ink2)}
+.den-mc-f b{font-family:var(--den-num);font-weight:700;color:var(--den-ink);font-variant-numeric:tabular-nums}
+.den-mc-a{white-space:nowrap;text-align:right}
+.den-load{display:flex;flex-direction:column;gap:9px}
+.den-sk{display:block;height:12px;border-radius:var(--den-r-xs);background:linear-gradient(90deg,var(--den-hover) 25%,var(--den-line) 50%,var(--den-hover) 75%);background-size:200% 100%;animation:den-sk 1.2s linear infinite}
+.den-sk:nth-child(1){width:38%}.den-sk:nth-child(2){width:72%}.den-sk:nth-child(3){width:55%}
+@keyframes den-sk{from{background-position:200% 0}to{background-position:-200% 0}}
+.den-health{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;margin:0 0 var(--den-gap)}
+.den-hc{display:flex;flex-direction:column;border:1px solid var(--den-line);border-radius:var(--den-r);background:var(--den-card);box-shadow:var(--den-sh1);overflow:hidden;min-width:0}
+.den-hc .k{display:flex;align-items:center;gap:7px;padding:10px 12px 0;font-size:13px;font-weight:500;color:var(--den-ink1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.den-hc .k i{flex:none;width:8px;height:8px;border-radius:var(--den-r-pill);background:var(--den-pos)}
+.den-hc.bad .k i{background:var(--den-neg);border-radius:var(--den-r-xs)}
+.den-hc.off .k i{background:var(--den-s0);border-radius:0}
+.den-hc .v{padding:2px 12px 8px;font-family:var(--den-num);font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--den-ink);font-variant-numeric:tabular-nums}
+.den-hc .v small{font-family:var(--den-font);font-size:12px;font-weight:400;letter-spacing:0;color:var(--den-ink2);margin-left:6px}
+.den-hc .f{margin-top:auto;padding:6px 12px;border-top:1px solid var(--den-line);background:var(--den-soft);font-size:12px;color:var(--den-ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.den-hc.bad .f{color:var(--den-neg);background:var(--den-neg-bg)}
+.den-meter.sm{display:block;width:56px;height:4px;margin:4px 0 0 auto}
+.den-cite{position:relative;cursor:help}
+a.den-cite{cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.den-cite:hover::after,.den-cite:focus-visible::after{content:attr(data-tip);position:absolute;left:0;bottom:calc(100% + 6px);z-index:6;width:max-content;max-width:340px;white-space:normal;background:var(--den-tip);color:var(--den-tip-ink);border-radius:var(--den-r-sm);padding:7px 10px;font-size:12px;font-weight:400;line-height:1.45;box-shadow:var(--den-sh3)}
+.den-cite:focus-visible{outline:2px solid var(--den-ac);outline-offset:1px}
+/* the brief reads as a page: a measure a person can read, centred in the card */
+.den-sec{max-width:880px;margin:0 auto}
+@media(max-width:1100px){.den-mcard{grid-template-columns:36px minmax(0,1fr)}.den-mc-a{grid-column:2;text-align:left}}
+@media(prefers-reduced-motion:reduce){.den-sk{animation:none}}

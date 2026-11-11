@@ -723,10 +723,28 @@ count says why and is never drawn as zero; an empty table is never read as a qui
 `tests/den-inject-browser.mjs` 60, `tests/den-worker.mjs` 17, `tests/studio-tokens-test.mjs` 4, `node tests/run.mjs
 check` 26. No test was changed. Screenshots of every tab were retaken with `tests/den-shots.mjs` and looked at.
 
-**Not built yet** (the order is in `prompts/annes-den-ui.md`): tests of the overview itself; mention cards with a
-Cards / Table switch; the brief as a document with citation chips and an evidence panel; Collection as a health board;
-review cards in Watch; Options as a settings page; a desk menu in place of the native select; skeletons; a dark theme
-for the Den (it is light only); the styleguide section.
+**Second pass (page `?v=r46`, worker unchanged).**
+- **A dark theme**, this person's choice (Light / Dark under the side menu, localStorage `ax_den_theme`, stamped on
+  `#den-root[data-theme]` before the island draws). Dark leaves the app's own tokens alone and gives the Den dark
+  steps of its tokens, chart colours included.
+- **Cards or a table** for stories, posts and public actors on Today (the switch above the sections, localStorage
+  `ax_den_view`; the table is the default). A card shows what its table row shows and nothing more, carries the same
+  Pin / Set aside / Open, and answers the same keys (the handler reads `.den-row`, which both carry).
+- **Collection at a glance**: one tile a channel above the table - the last day's count, the state in words
+  (delivering / nothing in the last day / switched off / paused at a verification) and seven days. The tiles hold no
+  buttons; Collect now stays in the table.
+- Skeleton bars while a panel loads (the "Loading ..." sentence stays, for a screen reader and a slow line); a
+  citation chip in the brief says what it cites on hover and on keyboard focus; the brief's sections sit in a
+  readable measure; a proposal's score has a meter.
+- `tests/den-browser.mjs` is 29: five new cases (the figures equal the tables and the chart adds up; a desk with
+  nothing collected draws no chart and no zero; cards and table hold the same rows, keys and actions, and pass axe;
+  the dark theme survives a reload and passes axe on all five tabs; the menu by keyboard, the channel tiles, and no
+  sideways scroll at 1024). No earlier case was changed.
+
+**Not built yet**: the brief's editors are still text boxes (citation ids are typed marks in the text, with chips
+under each section), and there is no evidence panel beside the page; Watch proposals are still table rows; Options is
+still one form with its Save button; the desk is still a native select; History and Compare are not side sheets; the
+job console is not docked; the styleguide has no Den section.
 
 **Not verifiable here.** The page was seen only on the fixture's invented rows. `:has()` carries the theme switch:
 it needs a browser from 2023 or later (Chrome 105, Safari 15.4, Firefox 121); an older one shows the Den's cards

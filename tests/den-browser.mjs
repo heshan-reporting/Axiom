@@ -225,4 +225,49 @@ await t('a slow draft says it is working and locks its own buttons, not the page
   await tab(p, 'brief'); await p.waitForSelector('.den-sec[data-section="summary"] textarea', { timeout: 15000 }); eq(w3.calls.length, 1); await p.context().close();
 });
 
+/* ---- the redesigned interface (DEN.md s.8) ---- */
+const AXE_SRC = fs.readFileSync(new URL('../node_modules/axe-core/axe.min.js', import.meta.url), 'utf8');
+const axeBad = async pg => { await pg.waitForTimeout(300); return pg.evaluate(async () => { const r = await window.axe.run(document.querySelector('#v-den'), { resultTypes: ['violations'] }); return r.violations.filter(x => x.impact === 'serious' || x.impact === 'critical').map(x => x.id + ' x' + x.nodes.length + ' at ' + x.nodes.slice(0, 6).map(n => n.target.join(' ') + ' [' + ((n.any[0] || {}).data ? (n.any[0].data.contrastRatio + ' ' + n.any[0].data.fgColor + ' on ' + n.any[0].data.bgColor) : '') + ']').join('; ')); }); };
+await t('the figures are counts of the rows on the board, each tile opens its table, and the chart adds up', async () => {
+  const w4 = await world(); const p = await open(w4, 'full-key', { width: 1366, height: 768 }); await tab(p, 'today'); await p.waitForSelector('.den-kpis');
+  const media = await panel(p, 'Traditional media').locator('tr.den-row').count(); const social = await panel(p, 'Social').locator('tr.den-row').count(); const actors = await panel(p, 'Influencer and political').locator('tr.den-row').count();
+  const tiles = await p.$$eval('.den-kpi', els => els.map(e => [e.querySelector('.k').textContent.trim(), e.querySelector('.v').textContent.trim()]));
+  eq(tiles.map(x => x[0]), ['Stories', 'Social posts', 'Interactions', 'Narratives moving', 'In the report']); eq(tiles[0][1], String(media)); eq(tiles[1][1], String(social));
+  const cols = await p.$$eval('.den-col', els => els.map(e => e.getAttribute('aria-label'))); eq(cols.length, 12);
+  const sum = cols.reduce((a, l) => a + (l.match(/(\d+) (?=[A-Z])/g) || []).reduce((x, n) => x + parseInt(n, 10), 0), 0); eq(sum, media + social + actors, 'the chart holds every story and post once');
+  await p.locator('.den-kpi').nth(1).click(); ok(await p.evaluate(() => { const a = document.activeElement; return !!(a && a.closest('section.den-panel[aria-label="Social"]')); }), 'the Social tile lands on a row of the Social table');
+  await p.locator('.den-col:has(.s)').first().focus(); await p.waitForSelector('.den-tip'); ok(/\d/.test(await txt(p, '.den-tip')), 'a focused column says its figures');
+  eq(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scroll at 1366'); await p.context().close();
+});
+await t('a desk with nothing collected draws no chart and no zero that reads as a quiet day', async () => {
+  const w5 = await world(); const p = await open(w5); await p.selectOption('.den-head select[aria-label="Desk"]', 'mca_vic'); await p.waitForFunction(() => /MCA/.test(document.querySelector('.den-win').textContent)); await tab(p, 'today'); await p.waitForSelector('.den-kpis');
+  eq(await p.locator('.den-col').count(), 0); ok(/not the same as a quiet day/.test(await txt(p, '.den-card[aria-label="Volume through the window"]'))); eq(await txt(p, '.den-kpi:nth-child(3) .v'), '-'); await p.context().close();
+});
+await t('cards and the table hold the same rows in the same order, with the same actions and keys; the choice is kept', async () => {
+  const w6 = await world(); const p = await open(w6); await tab(p, 'today'); const sec = panel(p, 'Traditional media'); await sec.locator('tr.den-row').first().waitFor();
+  const asTable = await sec.locator('tr.den-row .den-t').allTextContents();
+  await p.getByRole('button', { name: 'Cards', exact: true }).click(); await sec.locator('article.den-row').first().waitFor(); eq(await sec.locator('tr.den-row').count(), 0);
+  eq(await sec.locator('article.den-row .den-t').allTextContents(), asTable);
+  await sec.locator('article.den-row').first().focus(); await p.keyboard.press('j'); eq(await p.evaluate(() => Array.from(document.querySelectorAll('section.den-panel[aria-label="Traditional media"] article.den-row')).indexOf(document.activeElement)), 1, 'j moves to the next card');
+  await p.keyboard.press('p'); await sec.locator('article.den-row.pinned').waitFor(); eq(await sec.locator('article.den-row.pinned').count(), 1);
+  await p.reload(); await p.waitForSelector('section.den-panel[aria-label="Traditional media"] article.den-row'); ok(true, 'cards are still chosen after a reload');
+  eq(await axeBad(await (async () => { await p.evaluate(s => { const e = document.createElement('script'); e.textContent = s; document.head.appendChild(e); }, AXE_SRC); return p; })()), [], 'cards pass axe');
+  await p.getByRole('button', { name: 'Table', exact: true }).click(); await sec.locator('tr.den-row').first().waitFor(); await p.context().close();
+});
+await t('the dark theme is this person\'s choice, survives a reload, and passes axe on every tab', async () => {
+  const w7 = await world(); await w7.F('POST', '/den/brief', { desk: 'aep_au' }); const p = await open(w7, 'full-key', { width: 1366, height: 768 }); await tab(p, 'today'); await p.waitForSelector('.den-kpis');
+  const bg = () => p.evaluate(() => getComputedStyle(document.querySelector('.den-main')).backgroundColor); const light = await bg();
+  await p.getByRole('button', { name: 'Dark', exact: true }).click(); await p.waitForFunction(() => document.getElementById('den-root').dataset.theme === 'dark'); ok((await bg()) !== light, 'the workspace changed');
+  await p.reload(); await p.waitForSelector('.den-kpis'); eq(await p.evaluate(() => document.getElementById('den-root').dataset.theme), 'dark');
+  await p.evaluate(s => { const e = document.createElement('script'); e.textContent = s; document.head.appendChild(e); }, AXE_SRC); const bad = [];
+  for (const name of ['today', 'brief', 'watch', 'collection', 'options']) { await tab(p, name); (await axeBad(p)).forEach(x => bad.push(name + ': ' + x)); }
+  eq(bad, []); await p.getByRole('button', { name: 'Light', exact: true }).click(); eq(await bg(), light); await p.context().close();
+});
+await t('the side menu is a tablist a keyboard can use, and Collection shows every channel at a glance', async () => {
+  const w8 = await world(); const p = await open(w8, 'full-key', { width: 1024, height: 768 }); await tab(p, 'collection'); await p.waitForSelector('.den-health .den-hc');
+  eq(await p.locator('.den-health .den-hc').count(), await panel(p, 'Channels').locator('tr.den-row').count()); eq(await p.getByRole('button', { name: 'Collect now' }).count() > 0, true);
+  eq(await p.getAttribute('.den-menu', 'aria-orientation'), 'vertical'); await p.focus('#den-tab-watch'); await p.keyboard.press('Enter'); await p.waitForSelector('#den-tab-watch[aria-selected="true"]');
+  eq(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scroll at 1024'); await p.context().close();
+});
+
 await finish();
