@@ -774,7 +774,7 @@ against her own report for the same day. That comparison is the acceptance test 
 - **Re-tagging rows collected before a term was approved.** A term tags from its approval onwards.
 
 
-## 8. Release 7 - public-record routes (build `2026-11-11.studio-p59`, page `den.js?v=r45`)
+## 8. Release 7 - public-record routes (build `2026-11-11.studio-p59`, page `den.js?v=r46`)
 
 Keyless public routes that a research pass on 11 November 2026 found productive. No signed-in route was added and no
 decision in 7.3 changed. The research report itself is client intelligence and is not in the repository.
@@ -792,7 +792,7 @@ decision in 7.3 changed. The research report itself is client intelligence and i
 | Sponsor on polls and estimates | `claimOf()` in `sourceRows`: `meta.claim {kind, sponsor, pollster, n}` by rules, "sponsor not stated" otherwise; the brief's evidence line carries it | worker |
 | Registered actors on Bluesky | `bskyActorSweep()`: register accounts on Bluesky marked as public actors, their own posts (no reposts) through the public AppView, filed through `signalsIngest` as layer 3 so the name comes from the register. `canonPermalink` knows Bluesky (mirrored in `tools/den_permalink.py`) | worker, `socialCron` |
 | Campaign names for the Ad Library | `POST /den/watch/seed` (full) proposes three campaign names as terms. Nothing is proposed unasked and nothing searches a proposal until a person approves it | worker |
-| Seeds | 29 sources (release wire, court lists, Treasury's FOI log, NOPSEMA decisions, campaign and member pages of both sides, trade and community press), 5 watched parliament pages, 6 petition counters, 9 organisations in the entity register | worker |
+| Seeds | 29 sources (release wire, court lists, Treasury's FOI log, NOPSEMA decisions, campaign and member pages of both sides, trade and community press), 7 watched parliament pages, 6 petition counters, 9 organisations in the entity register | worker |
 
 `GET /den/collection` lists Parliamentary record, Hansard and Campaign petition counters with what each delivered;
 `GET /social/coverage` lists Parliamentary record and Hansard. Harness: `tests/den-public-worker.mjs` (12).
@@ -809,20 +809,24 @@ live registry shows (edited rows, failing addresses) was not seen**: read `/sour
 
 - **No archive kind `process`.** The record is the table; a stage change is a `news` row carrying `meta.process`, so it
   appears in the desk's media and the brief's evidence without a new kind in every reader.
-- **Three of the five pages named for seeding are not seeded**: the Mount Pleasant Mine Bill, the Tasmanian firearms
-  bill and the ACT firearms bill. The research had no page address for them. Add each with `POST /den/process/add` or
-  in Sources once its address is known. Seeded: the gas reservation inquiry and bill, the NSW firearms inquiry, the NSW
-  disallowance alerts, the Victorian firearms bill.
+- **One of the five pages named for seeding is not seeded**: the Tasmanian firearms bill. A second search found the
+  parliament's list of 2026 bills (it is Bill No. 30 of 2026) but not the bill's own page. Add it in Anne's Den,
+  Collection, once its address is known. Seeded since the follow-up: the ACT bill (its page on the ACT Legislation
+  Register surfaced in search) and the Mount Pleasant Mine Bill (**its address is built from a bill id an aggregator
+  reported; the page itself was not seen**, so expect it to need correcting).
 - **"Once a sitting day" is once a Sydney day.** There is no sitting calendar in the worker; on a non-sitting day the
   sweep finds nothing new and files nothing.
 - **Campaign names are proposed by a step a person presses**, not by the release itself: proposing them automatically
   gave three desks a register of their own accord, which changed when keyword discovery runs.
 - **The stricter rules apply to the new routes only.** Sources that were already seeded keep their existing methods
   (`html`, `rss`, `gnews`) and the existing fetch. Moving one to the public reader is a change of its `urls.public`.
-- **No page was built for adding a watched bill or a counter.** Both are routes; the Sources drawer shows the sources.
-- **The ten-second pace is kept per worker isolate**, the only memory a Worker has between requests without a write
-  to KV on every fetch. Two isolates could each make a request to one host inside ten seconds. Each source also runs
-  on its own schedule (a watched parliament page every six hours), which is the wider spacing.
+- **Adding a watched bill or a counter** is in Anne's Den, Collection (follow-up, `den.js?v=r46`): the watched pages
+  with stage, next date and the last read or its failure in words, Watch this page, Stop (`POST /den/process/remove`:
+  the source is switched off and its records leave the calendar); the desk's counters with Add and Remove; and
+  Propose campaign names.
+- **The ten-second pace** is kept in the isolate and, since the follow-up, shared through KV (`pub_next_<host>`, a
+  minute). KV is eventually consistent, so two isolates asking one host in the same second could still both go; each
+  source also runs on its own schedule (a watched parliament page every six hours), which is the wider spacing.
 
 ### 8.4 Not verified here, and what verifies each
 
@@ -846,5 +850,5 @@ npx wrangler secret put OPENAUSTRALIA_KEY --name newsaus # free, openaustralia.o
 #   set the var PUBLIC_UA in the Cloudflare dashboard
 ```
 
-Then: Sources, Untried, Sweep (the 29 sources and 5 parliament pages); `POST /den/watch/seed` and approve what is
+Then: Sources, Untried, Sweep (the 29 sources and 7 parliament pages); `POST /den/watch/seed` and approve what is
 wanted in Watch; add the three missing bills once their addresses are known.

@@ -375,6 +375,7 @@
           <div class="den-state">Clearance is recorded on the source: <button class="den-link" onClick=${() => window.AXUI.goto('sources', {})}>open Sources</button>.</div>
         <//>
       </div>
+      <${PublicRecord} desk=${desk} tick=${tick} canWrite=${canWrite} />
       <${Panel} title="Recall against the reports" note="Of the links in filed reports, how many AXIOM held at the time">
         ${bt ? html`<div><p><b class="den-t">${bt.share}%</b> - ${fmtN(bt.held)} of ${fmtN(bt.links)} links in ${bt.reports} reports${bt.period ? ' (' + bt.period + ')' : ''}; measured ${since(bt.at)} by ${bt.by}.</p>
             <table class="den-table"><thead><tr><th>Channel</th><th class="num">Links</th><th class="num">Held</th><th class="num">Share</th></tr></thead><tbody>${Object.keys(bt.byChannel).map(k => html`<tr key=${k}><td>${CH[k] || k}</td><td class="num">${bt.byChannel[k].links}</td><td class="num">${bt.byChannel[k].held}</td><td class="num">${bt.byChannel[k].links ? Math.round(bt.byChannel[k].held / bt.byChannel[k].links * 100) + '%' : '-'}</td></tr>`)}</tbody></table>
@@ -382,6 +383,50 @@
           : html`<${Empty}><b>Not measured yet.</b> This is the number that says whether collection is good enough. It is measured on the Mac, against a folder of exported reports kept outside the repository: <code>python3 tools/den-backtest.py ~/Documents/briefs --desk ${desk.id} --key $AXIOM_KEY --save</code><//>`}
       <//>
       <p class="den-mono">${(d.notBuilt || []).join(' ')}</p>
+    </div>`;
+  }
+
+  /* ---- public record: the parliament pages a desk watches and the campaign counters read for it (release 7) ---- */
+  function PublicRecord({ desk, tick, canWrite }) {
+    const P = useLoad(() => get('/den/process?' + q({ desk: desk.id }), 'process'), [desk.id, tick], desk.id);
+    const K = useLoad(() => get('/social/petitions/counters', 'counters'), [desk.id, tick], desk.id);
+    const [f, setF] = useState({ url: '', title: '', type: 'inquiry', house: '' }); const [c, setC] = useState({ url: '', name: '' }); const [busy, setBusy] = useState('');
+    const run = async (key, path, body, after) => { setBusy(key); try { const r = await call(path, body); if (after) after(r); P.reload(); K.reload(); } catch (e) { toastMsg(say(e), true); } setBusy(''); };
+    const addPage = () => run('page', '/den/process/add', { url: f.url.trim(), title: f.title.trim(), type: f.type, house: f.house, juris: desk.region && desk.region !== 'au' ? desk.region : 'au', issues: desk.issues.map(i => i.id).slice(0, 1) }, () => { setF({ url: '', title: '', type: f.type, house: f.house }); toastMsg('Watched. It is read at the next sweep, under robots.txt.'); });
+    const addCounter = () => run('counter', '/social/petitions/counters', { add: { url: c.url.trim(), name: c.name.trim(), ns: desk.ns } }, () => { setC({ url: '', name: '' }); toastMsg('Added. Its count is read once a day.'); });
+    const pages = (P.data && P.data.pages) || []; const recs = (P.data && P.data.process) || []; const byPage = id => recs.filter(r => r.source === id);
+    const counters = ((K.data && K.data.counters) || []).filter(x => !x.ns || x.ns === desk.ns);
+    return html`<div class="den-grid2">
+      <${Panel} title="Watched parliament pages" note="Stage and dates read from the parliament's own page" flush=${true}>
+        ${P.err && !P.data ? html`<${Failed} what="The process calendar" err=${P.err} onRetry=${P.reload} />` : P.loading && !P.data ? html`<${Loading} what="the process calendar" />`
+          : pages.length ? html`<table class="den-table"><thead><tr><th>Bill, inquiry or notice page</th><th>Stage</th><th>Next date</th><th>Read</th><th></th></tr></thead><tbody>
+            ${pages.map(p => { const r = byPage(p.id); const first = r[0]; return html`<tr key=${p.id} class="den-row"><td><span class="den-t">${p.name}</span><span class="den-sub">${p.type}${p.juris && p.juris !== 'au' ? ', ' + String(p.juris).toUpperCase() : ''}${r.length > 1 ? ', ' + r.length + ' notices kept' : ''}${first && first.submissions ? ', ' + fmtN(first.submissions) + ' submissions' : ''}</span></td>
+              <td>${!p.enabled ? html`<span class="den-chip warn">switched off</span>` : first ? first.stage : html`<span class="den-chip" title="Nothing has been recorded from this page yet">not read yet</span>`}</td>
+              <td class="den-mono">${first && first.next_date ? first.next_date + ' ' + first.next_what : '-'}</td>
+              <td>${p.error ? html`<span class="den-chip neg" title=${p.error}>failed</span><span class="den-sub">${p.error.slice(0, 110)}</span>` : p.last_ok ? since(p.last_ok) : 'not yet'}</td>
+              <td class="act">${web(p.url) ? html`<a class="den-link" href=${web(p.url)} target="_blank" rel="noopener" aria-label=${'Open ' + p.name}>Open</a>` : null}${canWrite && p.enabled ? html` <button class="den-mini" disabled=${!!busy} title="Its source is switched off and its records leave the calendar" onClick=${() => run('rm' + p.id, '/den/process/remove', { source: p.id })}>Stop</button>` : null}</td></tr>`; })}</tbody></table>`
+          : html`<${Empty}><b>No parliament page is watched for this desk.</b> ${canWrite ? 'Add a bill or an inquiry below by its address on the parliament\'s own site.' : 'A full-access user can add one.'}<//>`}
+        ${canWrite ? html`<div class="den-form" style=${{ padding: '10px 12px' }}>
+          <label class="den-lab" style=${{ flex: '2 1 240px' }}>Address of the page<input class="den-in" value=${f.url} maxlength="400" placeholder="https://www.aph.gov.au/..." onInput=${e => setF(Object.assign({}, f, { url: e.target.value }))} /></label>
+          <label class="den-lab" style=${{ flex: '2 1 200px' }}>Its name, as the parliament writes it<input class="den-in" value=${f.title} maxlength="120" onInput=${e => setF(Object.assign({}, f, { title: e.target.value }))} /></label>
+          <label class="den-lab">Kind<select class="den-in" value=${f.type} onChange=${e => setF(Object.assign({}, f, { type: e.target.value }))}>${[['inquiry', 'Inquiry'], ['bill', 'Bill'], ['motion', 'Notice paper'], ['disallowance', 'Disallowance list'], ['regulation', 'Regulation'], ['decision', 'Decision']].map(o => html`<option key=${o[0]} value=${o[0]}>${o[1]}</option>`)}</select></label>
+          <label class="den-lab">House<select class="den-in" value=${f.house} onChange=${e => setF(Object.assign({}, f, { house: e.target.value }))}>${[['', 'Not said'], ['senate', 'Senate'], ['reps', 'House of Representatives'], ['upper', 'Upper house'], ['lower', 'Lower house'], ['joint', 'Joint']].map(o => html`<option key=${o[0]} value=${o[0]}>${o[1]}</option>`)}</select></label>
+          <button class="den-mini primary" disabled=${!!busy || f.url.trim().length < 12 || f.title.trim().length < 4} title="No model call. The page is read at one request every ten seconds a host." onClick=${addPage}>${busy === 'page' ? 'Adding...' : 'Watch this page'}</button></div>` : null}
+        <div class="den-state">Submitters' names are never read. A page that refuses the reader is left alone for a day and says so here.</div>
+      <//>
+      <${Panel} title="Campaign petition counters" note="Self-reported by each campaign, read once a day" flush=${true}>
+        ${K.err && !K.data ? html`<${Failed} what="The petition counters" err=${K.err} onRetry=${K.reload} />` : K.loading && !K.data ? html`<${Loading} what="the petition counters" />`
+          : counters.length ? html`<table class="den-table"><thead><tr><th>Petition</th><th>Page</th><th></th></tr></thead><tbody>${counters.map(x => html`<tr key=${x.url} class="den-row"><td><span class="den-t">${x.name}</span>${x.seed ? html`<span class="den-sub">seeded; its address is unproven until it is read</span>` : x.by ? html`<span class="den-sub">added by ${x.by}</span>` : null}</td>
+              <td>${web(x.url) ? html`<a class="den-link" href=${web(x.url)} target="_blank" rel="noopener">${String(x.url).replace(/^https?:\/\/(www\.)?/, '').slice(0, 44)}</a>` : x.url}</td>
+              <td class="act">${canWrite ? html`<button class="den-mini" disabled=${!!busy} onClick=${() => run('rc' + x.url, '/social/petitions/counters', { remove: x.url })}>Remove</button>` : null}</td></tr>`)}</tbody></table>`
+          : html`<${Empty}><b>No campaign counter is read for this desk.</b> ${canWrite ? 'Add the campaign page that prints its signature count.' : ''}<//>`}
+        ${canWrite ? html`<div class="den-form" style=${{ padding: '10px 12px' }}>
+          <label class="den-lab" style=${{ flex: '2 1 220px' }}>Address of the campaign page<input class="den-in" value=${c.url} maxlength="400" placeholder="https://..." onInput=${e => setC(Object.assign({}, c, { url: e.target.value }))} /></label>
+          <label class="den-lab" style=${{ flex: '2 1 180px' }}>The petition's name<input class="den-in" value=${c.name} maxlength="120" onInput=${e => setC(Object.assign({}, c, { name: e.target.value }))} /></label>
+          <button class="den-mini primary" disabled=${!!busy || c.url.trim().length < 12 || c.name.trim().length < 3} onClick=${addCounter}>${busy === 'counter' ? 'Adding...' : 'Add counter'}</button>
+          <button class="den-mini" disabled=${!!busy} title="Proposes the campaign names found in paid advertising as terms. Nothing searches one until it is approved in Watch." onClick=${() => run('seed', '/den/watch/seed', {}, r => toastMsg(r.proposed ? r.proposed + ' campaign name' + (r.proposed === 1 ? '' : 's') + ' proposed. Approve them in Watch.' : 'Already proposed. See Watch.'))}>${busy === 'seed' ? 'Proposing...' : 'Propose campaign names'}</button></div>` : null}
+        <div class="den-state">The count is the campaign's own claim and nobody has audited it. The numbers and their daily growth are in Signals, Petitions. change.org is not read: it refuses automated readers.</div>
+      <//>
     </div>`;
   }
 

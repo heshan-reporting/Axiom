@@ -8014,7 +8014,14 @@ const PUB_PAYWALL_RX = /isAccessibleForFree["']?\s*:\s*["']?false|class=["'][^"'
 function pubUA(env) { const s = String((env && env.PUBLIC_UA) || '').replace(/[^\x20-\x7e]/g, '').trim(); return s.length >= 8 ? s.slice(0, 160) : PUB_UA_DEFAULT; }
 function pubWait(env, ms) { if (env && typeof env.__pubSleep === 'function') return env.__pubSleep(ms); return new Promise(r => setTimeout(r, ms)); }
 /** The slot is taken before the wait, so readers running side by side still queue behind one another for a host. */
-async function pubPace(env, host) { const now = Date.now(); const at = Math.max(now, PUB_LAST.get(host) || 0); PUB_LAST.set(host, at + PUB_PACE_MS); if (at > now) await pubWait(env, at - now); }
+async function pubPace(env, host) {
+  const now = Date.now(); let shared = 0;
+  // another isolate may have asked this host a moment ago: the next free slot is also kept in KV (a minute, KV's shortest life)
+  try { shared = Number(await kvGet(env.AXIOM_KV, 'pub_next_' + host)) || 0; } catch (e) { shared = 0; }
+  const at = Math.max(now, PUB_LAST.get(host) || 0, shared <= now + 6 * PUB_PACE_MS ? shared : 0); PUB_LAST.set(host, at + PUB_PACE_MS);
+  try { await kvPut(env.AXIOM_KV, 'pub_next_' + host, String(at + PUB_PACE_MS), 60); } catch (e) {}
+  if (at > now) await pubWait(env, at - now);
+}
 function robotsMatch(pat, path) {
   const end = /\$$/.test(pat); const parts = pat.replace(/\$$/, '').split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'));
   try { return new RegExp('^' + parts.join('.*') + (end ? '$' : '')).test(path); } catch (e) { return false; }
@@ -8189,7 +8196,9 @@ async function processList(env, f) {
   else if (f.ns) { const ns = String(f.ns).toLowerCase(); if (!denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'Name the client (ns) or the desk whose calendar this is.' }; mine = denNsIssues(ns); }
   else return { ok: false, status: 400, error: 'ns_required', detail: 'A calendar is one client\'s: say which with ns= or desk=.' };
   const rows = (((await env.MIND_DB.prepare('SELECT * FROM den_process ORDER BY (next_date=\'\'), next_date, updated DESC LIMIT 400').all()).results) || []).map(processView).filter(p => p.issues.some(i => mine.indexOf(i) >= 0));
-  return { ok: true, process: rows, types: PROCESS_TYPES };
+  let pages = []; try { await ensureSources(env); pages = (((await env.MIND_DB.prepare("SELECT * FROM sources WHERE methods LIKE '%process%' ORDER BY name LIMIT 200").all()).results) || []).map(sourceRow).filter(x => x.methods.indexOf('process') >= 0 && (!x.issues.length || x.issues.some(i => mine.indexOf(i) >= 0)))
+    .map(x => ({ id: x.id, name: x.name, url: (x.urls || {}).process || '', type: (x.urls || {}).ptype || 'bill', juris: x.juris, enabled: !!x.enabled, last_ok: Number(x.last_ok) || 0, last_try: Number(x.last_try) || 0, error: x.last_ok && !x.fails ? '' : String(x.last_error || '').slice(0, 200) })); } catch (e) { pages = []; }
+  return { ok: true, process: rows, pages, types: PROCESS_TYPES, houses: PROCESS_HOUSES.filter(Boolean) };
 }
 /** Watch one parliament page: a Source Registry source whose method is `process`, so its health is recorded like any other. */
 async function processAdd(env, b, who) {
@@ -8201,6 +8210,14 @@ async function processAdd(env, b, who) {
   const s = sourceSanitize({ id: 'proc_' + arcHash(u.toString()), name: title, tier: 'official', juris: b.juris, issues: b.issues, schedule: 360, urls: { process: u.toString(), ptype: type, house: b.house }, note: 'process calendar; added by ' + String(who || '').slice(0, 40) }, null);
   const had = await sourceGet(env, s.id); await sourceUpsert(env, s, Date.now());
   return { ok: true, added: !had, source: await sourceGet(env, s.id) };
+}
+/** Stop watching one parliament page: its source is switched off and its records leave the calendar. Seeded pages can be switched back on in Sources. */
+async function processRemove(env, b) {
+  b = b || {}; const id = sourceIdClean(b.source || b.id || ''); await ensureSources(env); await ensureProcess(env);
+  const src = id ? await sourceGet(env, id) : null;
+  if (!src || (src.methods || []).indexOf('process') < 0) return { ok: false, status: 404, error: 'unknown_process', detail: 'No watched parliament page has that id.' };
+  await env.MIND_DB.batch([env.MIND_DB.prepare('UPDATE sources SET enabled=0, edited=1, updated=? WHERE id=?').bind(Date.now(), id), env.MIND_DB.prepare('DELETE FROM den_process WHERE src=?').bind(id)]);
+  return { ok: true, removed: id };
 }
 /** The recorded dates ahead for a desk: read from the parliaments' own pages, never worked out from a sentence. */
 async function processUpcoming(env, mine, now) {
@@ -8217,6 +8234,9 @@ const PROCESS_SEED = [
   ['proc_nsw_pc5_firearms', 'NSW Portfolio Committee No. 5: firearms reforms repeal inquiry', 'nsw', 'upper', 'inquiry', 'https://www.parliament.nsw.gov.au/parliamentary-business/committees/committee-details?committeeId=203', 'firearms'],
   ['proc_nsw_disallowance', 'NSW Legislative Council disallowance alerts', 'nsw', 'upper', 'disallowance', 'https://www.parliament.nsw.gov.au/parliamentary-business/legislative-council/disallowance-alerts', ''],
   ['proc_vic_firearms_bill', 'Firearms Amendment Bill 2026 (Victoria)', 'vic', '', 'bill', 'https://www.legislation.vic.gov.au/bills/firearms-amendment-bill-2026', 'firearms'],
+  ['proc_act_firearms_bill', 'Firearms (Public Safety) Amendment Bill 2026 (ACT)', 'act', '', 'bill', 'https://www.legislation.act.gov.au/b/db_73940', 'firearms'],
+  // the bill id below was reported by an aggregator citing the Parliament of NSW record; the page itself was not seen
+  ['proc_nsw_mtpleasant_bill', 'Mount Pleasant Mine Bill 2026 (NSW)', 'nsw', 'lower', 'bill', 'https://www.parliament.nsw.gov.au/bills/Pages/bill-details.aspx?pk=18979', 'mining'],
 ];
 
 // -- Hansard as a standing sweep --------------------------------------------------
@@ -20157,6 +20177,7 @@ const AXIOM_WORKER = {
           if (path === '/den/backtest') return send(await denBacktestSave(env, ob, auth.name));
           if (path === '/den/process/add') return send(await processAdd(env, ob, auth.name));
           if (path === '/den/watch/seed') return send(await denSeedR7(env, auth.name));
+          if (path === '/den/process/remove') return send(await processRemove(env, ob));
           if (path === '/den/discover') return send(await denDiscover(env, ob.ns, { days: ob.days, dry: !!ob.dry }, auth.name));
           if (path === '/den/themes') return send(await denThemes(env, ob.ns));
         }
