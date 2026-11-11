@@ -792,7 +792,7 @@ decision in 7.3 changed. The research report itself is client intelligence and i
 | Sponsor on polls and estimates | `claimOf()` in `sourceRows`: `meta.claim {kind, sponsor, pollster, n}` by rules, "sponsor not stated" otherwise; the brief's evidence line carries it | worker |
 | Registered actors on Bluesky | `bskyActorSweep()`: register accounts on Bluesky marked as public actors, their own posts (no reposts) through the public AppView, filed through `signalsIngest` as layer 3 so the name comes from the register. `canonPermalink` knows Bluesky (mirrored in `tools/den_permalink.py`) | worker, `socialCron` |
 | Campaign names for the Ad Library | `POST /den/watch/seed` (full) proposes three campaign names as terms. Nothing is proposed unasked and nothing searches a proposal until a person approves it | worker |
-| Seeds | 30 sources (release wire, court lists, Treasury's FOI log, APO, NOPSEMA decisions, campaign and member pages of both sides, trade and community press), 5 watched parliament pages, 6 petition counters, 9 organisations in the entity register | worker |
+| Seeds | 29 sources (release wire, court lists, Treasury's FOI log, NOPSEMA decisions, campaign and member pages of both sides, trade and community press), 5 watched parliament pages, 6 petition counters, 9 organisations in the entity register | worker |
 
 `GET /den/collection` lists Parliamentary record, Hansard and Campaign petition counters with what each delivered;
 `GET /social/coverage` lists Parliamentary record and Hansard. Harness: `tests/den-public-worker.mjs` (12).
@@ -801,7 +801,7 @@ decision in 7.3 changed. The research report itself is client intelligence and i
 
 The prompt asked for `GET /sources` first. This session had no network route to the live worker and no key, so the
 check was made against the seed list in the worker source instead. Already seeded, and so not added again: the
-Parliamentary Budget Office, Australian Energy Producers (news), SSAA national, SIFA, Shooters Union, Sporting Shooter,
+Parliamentary Budget Office, APO (a core feed), Australian Energy Producers (news), SSAA national, SIFA, Shooters Union, Sporting Shooter,
 the Environmental Defenders Office, Beef Central, Gun Control Australia, the Alannah & Madeline Foundation. **What the
 live registry shows (edited rows, failing addresses) was not seen**: read `/sources?status=unverified` after deploy.
 
@@ -846,5 +846,5 @@ npx wrangler secret put OPENAUSTRALIA_KEY --name newsaus # free, openaustralia.o
 #   set the var PUBLIC_UA in the Cloudflare dashboard
 ```
 
-Then: Sources, Untried, Sweep (the 30 sources and 5 parliament pages); `POST /den/watch/seed` and approve what is
+Then: Sources, Untried, Sweep (the 29 sources and 5 parliament pages); `POST /den/watch/seed` and approve what is
 wanted in Watch; add the three missing bills once their addresses are known.
