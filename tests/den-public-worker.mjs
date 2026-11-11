@@ -41,6 +41,7 @@ await S.t('PF1 robots, an honest user agent, ten seconds a host', async () => {
   eq([b.ok, b.code], [false, 'robots_disallowed']); ok(/robots\.txt/.test(b.error)); eq(hits(w, /private\/members/), 0, 'a disallowed page is never requested');
   eq((await T.pubFetch(w.env, 'https://records.example.org/private/open')).ok, true, 'the longer Allow wins');
   eq(hits(w, /robots\.txt$/), 1, 'robots.txt is read once and kept');
+  ok(Number(w.kv.get('pub_next_records.example.org')) > Date.now(), 'the next free slot is shared with other isolates through KV');
   ok(w.sleeps.length >= 2 && w.sleeps.every(ms => ms >= 9000), 'each later request to the host waited ten seconds: ' + JSON.stringify(w.sleeps));
   eq(T.robotsAllows('User-agent: axiompublicrecord\nDisallow: /\n\nUser-agent: *\nDisallow:\n', '/x', 'AxiomPublicRecord/1.0'), false, 'a group naming this reader is the one that applies');
 });
@@ -100,6 +101,10 @@ await S.t('PC1 the process calendar: dates recorded, one row a stage change, no 
   const all = JSON.stringify(w.env.MIND_DB.db.prepare('SELECT * FROM den_process').all()) + JSON.stringify(arc(w, 'news'));
   ok(!/Jo Citizen|Sam Private/.test(all), 'a private submitter is never stored'); ok(/88/.test(all), 'the number of submissions is');
   eq((await w.call('GET', '/den/process?ns=guns', null, 'read-key')).body.process.length, 0, 'another desk does not see it');
+  const pg = (await w.call('GET', '/den/process?ns=aep', null, 'read-key')).body.pages; ok(pg.some(x => x.id === sid && x.enabled && x.last_ok > 0) && pg.some(x => x.id === 'proc_gasres_inquiry' && !x.last_ok), 'the watched pages are listed, read or not');
+  ok(!pg.some(x => x.id === 'proc_nsw_pc5_firearms'), 'and only this client\'s'); ok((await w.call('GET', '/den/process?ns=mca', null, 'read-key')).body.pages.some(x => x.id === 'proc_nsw_mtpleasant_bill'));
+  eq((await w.call('POST', '/den/process/remove', { source: sid }, 'read-key')).status, 403); eq((await F(w, 'POST', '/den/process/remove', { source: 'smh' })).status, 404);
+  const rm = await F(w, 'POST', '/den/process/remove', { source: sid }); eq(rm.body.removed, sid); eq((await w.call('GET', '/den/process?ns=aep', null, 'read-key')).body.process.length, 0, 'its records leave the calendar');
   eq((await w.call('POST', '/den/process/add', { url: INQ, type: 'inquiry' }, 'read-key')).status, 403);
   const bad = await addProc(w, { url: 'http://10.0.0.8/x' }); eq(bad.status, 400); ok(bad.body.detail.length > 20);
 });

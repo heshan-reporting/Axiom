@@ -279,7 +279,7 @@ verifies each, and what was asked for and not built.
     recall cases in `tests/den-tools-test.py` (54); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
-- **Release 7, public-record routes (build `2026-11-11.studio-p59`, page `den.js?v=r45`; `DEN.md` s.8 is the hand-over).**
+- **Release 7, public-record routes (build `2026-11-11.studio-p59`, page `den.js?v=r46`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
     robots.txt obeyed (`robotsAllows`, cached a day in KV `pub_robots_<host>`), an honest user agent (`pubUA`:
@@ -303,6 +303,10 @@ verifies each, and what was asked for and not built.
     **`bskyActorSweep`** (register accounts on Bluesky marked as public actors, own posts only, through
     `signalsIngest`; `bluesky` joined `DEN_INGEST_PLATFORMS` and `canonPermalink`), and **`POST /den/watch/seed`**
     (full; proposes campaign names as terms - nothing is proposed unasked). Job sources `hansard`, `blueskyaccounts`.
+  - In Anne's Den, Collection (`PublicRecord` in `docs/den.js`): the desk's watched parliament pages (`pages` on
+    `GET /den/process`: stage, next date, the last read or its failure) with Watch this page and Stop (`POST
+    /den/process/remove`), the desk's petition counters with Add and Remove, and Propose campaign names. The pace is
+    also shared across isolates through KV `pub_next_<host>`.
   - Every seed address and every parser is unverified until a live sweep: the fixtures in `tests/fixtures/public/`
     are invented stand-ins. Harness: `tests/den-public-worker.mjs` (12).
 
