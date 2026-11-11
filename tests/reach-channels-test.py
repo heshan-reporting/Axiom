@@ -409,6 +409,23 @@ t('an answer in another shape says its shape and names nobody', ok is False and 
 answers = iter(['no', 'facebook']); said = []
 rs.login('facebook', ask=lambda q: next(answers), out=said.append, call=lambda c: 0, runner=r)
 t('and signing in then says why it was not confirmed', 'not JSON' in said[-1] and 'Nothing was switched on' in said[-1], said[-1:])
+fresh(); r, calls = nat(); answers = iter(['no', 'instagram']); said = []; ran = []
+REFUSED = 'ok: false\nerror:\n  code: COMMAND_EXEC\n  message: HTTP 429 from Instagram /users/info\n  exitCode: 1\n'
+ok = rs.login('instagram', ask=lambda q: next(answers), out=said.append, call=lambda c: ran.append(c) or (1, REFUSED), runner=r)
+t('a sign-in the platform refuses with 429 switches nothing on and pauses it for 24 hours', ok is False and not rs.state('instagram').get('switched_on') and rs.paused('instagram')[0] > rs.time.time() + 23 * 3600 and '24 hours' in said[-1], said[-1:])
+asked = []; ran = []; said = []
+ok = rs.login('instagram', ask=lambda q: asked.append(q) or 'no', out=said.append, call=lambda c: ran.append(c) or (0, ''), runner=r)
+t('and a second try inside the day stops before any question and runs nothing', ok is False and asked == [] and ran == [] and 'paused' in said[-1], said[-1:])
+t('  and the paused platform is not offered', 'instagram' not in rs.offered(runner=r))
+fresh(); r, calls = nat(); answers = iter(['no', 'facebook']); said = []
+ok = rs.login('facebook', ask=lambda q: next(answers), out=said.append, call=lambda c: (1, 'Error: Facebook checkpoint: verify it\'s you'), runner=r)
+t('a verification at sign-in pauses the platform the same way', ok is False and rs.paused('facebook')[0] > 0 and 'verification' in said[-1], said[-1:])
+fresh(); r, calls = nat(); answers = iter(['no', 'facebook']); said = []
+ok = rs.login('facebook', ask=lambda q: next(answers), out=said.append, call=lambda c: (1, 'Error: window closed'), runner=r)
+t('a sign-in that simply did not finish pauses nothing', ok is False and rs.paused('facebook')[0] == 0 and 'did not finish' in said[-1], said[-1:])
+fresh(); r, calls = nat({('facebook', 'whoami'): (1, '', 'HTTP 429 Too Many Requests')}); answers = iter(['no', 'facebook']); said = []
+ok = rs.login('facebook', ask=lambda q: next(answers), out=said.append, call=lambda c: (0, 'ok'), runner=r)
+t('a refusal of the check after signing in pauses it too', ok is False and rs.paused('facebook')[0] > 0 and not rs.state('facebook').get('switched_on'), said[-1:])
 rs._which = lambda b: None
 
 print('\n%d passed, %d failed' % (passed, failed))

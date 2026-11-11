@@ -290,6 +290,14 @@ def run_native(channel, action, arg, limit, runner=None, timeout=150):
     return out_
 
 
+def _tee(cmd):
+    """Run a command a person is watching: every line reaches the terminal as it is printed, and is kept to be read."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace'); kept = []
+    for line in p.stdout:
+        sys.stdout.write(line); sys.stdout.flush(); kept.append(line)
+    return p.wait(), ''.join(kept)[-4000:]
+
+
 def native_signed_in(channel, runner=None):
     """Ask opencli who is signed in, and keep only the answer yes or no: the account's name is never logged or stored."""
     return native_who(channel, runner)[0]
@@ -299,7 +307,10 @@ def native_who(channel, runner=None):
     """(signed in?, why not - in words that name nobody)."""
     try:
         return (True, '') if run_native(channel, 'whoami', '', 0, runner=runner, timeout=90) else (False, 'opencli answered that nobody is signed in')
-    except (Unavailable, ParseFailed, RateLimited, Challenge, RuntimeError) as e:
+    except (RateLimited, Challenge) as e:
+        pause(channel, '%s refused the signed-in check (%s)' % (channel, 'a verification' if isinstance(e, Challenge) else 'too many requests'))
+        return False, scrub(str(e))
+    except (Unavailable, ParseFailed, RuntimeError) as e:
         return False, scrub(str(e))
 
 
@@ -685,6 +696,9 @@ def login(channel, ask=input, out=print, call=None, who=None, runner=None):
     if cmds is not None and not nat and ('login' not in cmds or channel not in cmds):
         out('  Stopped before anything was asked: the agent-reach on this machine has no `login` command and no `%s` command (it has: %s), so there is nothing to sign in to and nothing would be collected. Nothing was switched on.' % (channel, ', '.join(sorted(cmds))))
         return False
+    until, reason = paused(channel)
+    if until:
+        out('  Stopped before anything was asked: %s is paused on this machine until %s (%s). Nothing is tried before then, and nothing was switched on.' % (channel, datetime.fromtimestamp(until).strftime('%d %b %H:%M'), reason)); return False
     out(WARNING % {'channel': channel})
     if channel in ('facebook', 'instagram'):
         a = ask('  Does the profile you are about to use administer any client ad account, Page or Business asset? (yes/no): ').strip().lower()
@@ -694,10 +708,19 @@ def login(channel, ask=input, out=print, call=None, who=None, runner=None):
         out('  Stopped: nothing was switched on.'); return False
     if not nat and not installed() and call is None:
         out('  ' + WHY['not_installed']); return False
-    rc = (call or subprocess.call)(['opencli', channel, 'login'] if nat else [BIN, 'login', channel])
+    rc = (call or (_tee if nat else subprocess.call))(['opencli', channel, 'login'] if nat else [BIN, 'login', channel])
+    said = ''
+    if isinstance(rc, tuple): rc, said = rc
+    if nat and (_RX_CHALLENGE.search(said) or _RX_RATE.search(said)):
+        # the platform refused the sign-in check itself: that is a refusal like any other, and it is not asked again for a day
+        what = 'asked for a verification' if _RX_CHALLENGE.search(said) else 'answered "too many requests"'
+        pause(channel, '%s %s when signing in' % (channel, what))
+        out('  %s %s. Nothing was switched on, and %s is paused on this machine for 24 hours: it is not tried again before then.' % (channel, what, channel)); return False
     if rc != 0:
         out('  %s login did not finish (exit %s). Nothing was switched on.' % ('opencli' if nat else 'agent-reach', rc)); return False
     seen = native_who(channel, runner) if nat else (True, '')
+    if not seen[0] and nat and paused(channel)[0]:
+        out('  %s refused the check after signing in. Nothing was switched on, and it is paused on this machine for 24 hours.' % channel); return False
     if not seen[0]:
         out('  The check after signing in did not confirm it (%s). Nothing was switched on. Check Chrome and `opencli doctor`, then try again.' % seen[1]); return False
     st = state(channel); st['switched_on'] = {'by': who or os.environ.get('USER', ''), 'at': int(time.time())}; st.pop('paused_until', None); st.pop('pause_reason', None); st['parse_fails'] = 0
