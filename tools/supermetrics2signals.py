@@ -226,10 +226,16 @@ def main(argv=None):
         name, _, path = f.partition('=')
         if name not in DATASETS or not path:
             sys.exit('unknown dataset "%s": use one of %s as name=file' % (name, ', '.join(DATASETS)))
-        files.append((name, path))
+        if not os.path.isfile(os.path.expanduser(path)):
+            sys.exit('No such file: %s (%s= takes the saved answer of that Supermetrics query)' % (path, name))
+        files.append((name, os.path.expanduser(path)))
     reg = {}
     if a.register:
-        reg = json.load(open(a.register))
+        if not os.path.isfile(os.path.expanduser(a.register)): sys.exit('No such file: %s (--register takes a saved GET /den/watch answer)' % a.register)
+        try:
+            reg = json.load(open(os.path.expanduser(a.register)))
+        except ValueError:
+            sys.exit('%s is not JSON: --register takes a saved GET /den/watch answer' % a.register)
     elif a.key:
         reg = http_json(a.worker.rstrip('/') + '/den/watch?ns=' + a.ns, a.key)
     else:

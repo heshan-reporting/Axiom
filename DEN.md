@@ -556,7 +556,7 @@ writes to fail and to drop. The first run found that a route answering 200 with 
 fixed: a malformed answer is always said as a failure, with one press to try again, and nothing typed is lost.
 
 Harnesses: `tests/den-worker.mjs` (17), `tests/den-browser.mjs` (24), `tests/den-inject-browser.mjs` (60),
-`tests/den-tools-test.py` (54). Screenshots of each tab at 1366 x 768 and 1920 x 1080: `node --experimental-sqlite
+`tests/den-tools-test.py` (63). Screenshots of each tab at 1366 x 768 and 1920 x 1080: `node --experimental-sqlite
 tests/den-shots.mjs` (into the ignored `tests/shots/den/`); they were looked at.
 
 **Not verifiable here.** No draft has been written by a real model: the stub writes from the evidence it is sent, so

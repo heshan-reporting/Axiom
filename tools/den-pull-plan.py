@@ -53,7 +53,11 @@ def main(argv=None):
     ap.add_argument('--plan', help='a saved GET /den/plan answer'); ap.add_argument('--days', type=int, default=3)
     a = ap.parse_args(argv)
     if a.plan:
-        plan = json.load(open(a.plan))
+        if not os.path.isfile(os.path.expanduser(a.plan)): sys.exit('No such file: %s (--plan takes a saved GET /den/plan answer)' % a.plan)
+        try:
+            plan = json.load(open(os.path.expanduser(a.plan)))
+        except ValueError:
+            sys.exit('%s is not JSON: --plan takes a saved GET /den/plan answer' % a.plan)
     elif a.key:
         req = urllib.request.Request(a.worker.rstrip('/') + '/den/plan?ns=' + a.ns, headers={'X-Axiom-Key': a.key, 'User-Agent': 'axiom-den/1.0'})
         with urllib.request.urlopen(req, timeout=30) as r:

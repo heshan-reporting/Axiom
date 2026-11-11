@@ -276,7 +276,7 @@ verifies each, and what was asked for and not built.
   - Harnesses: `tests/den-worker.mjs` (17), `tests/den-browser.mjs` (24, with axe at 1366, 1440 and 1920 for a
     full and a read-only key), `tests/den-inject-browser.mjs` (60: every read failing, answering a gateway page,
     answering the wrong shape, hanging and dropping, and every write failing and dropping, one at a time), the
-    recall cases in `tests/den-tools-test.py` (54); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
+    recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
 
