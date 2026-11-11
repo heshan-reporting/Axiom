@@ -713,7 +713,7 @@ writes to fail and to drop. The first run found that a route answering 200 with 
 "nothing found" and the desk list say "no desk is set up", and that two secondary reads failed silently. All are
 fixed: a malformed answer is always said as a failure, with one press to try again, and nothing typed is lost.
 
-Harnesses: `tests/den-worker.mjs` (17), `tests/den-browser.mjs` (24), `tests/den-inject-browser.mjs` (60),
+Harnesses: `tests/den-worker.mjs` (20), `tests/den-browser.mjs` (27), `tests/den-inject-browser.mjs` (60),
 `tests/den-tools-test.py` (63). Screenshots of each tab at 1366 x 768 and 1920 x 1080: `node --experimental-sqlite
 tests/den-shots.mjs` (into the ignored `tests/shots/den/`); they were looked at.
 
@@ -721,6 +721,36 @@ tests/den-shots.mjs` (into the ignored `tests/shots/den/`); they were looked at.
 the quality of a real draft - whether it reads like her reports - is unknown until the first one on the live worker
 (one call). No live archive was read, so the board has only been seen on invented rows. Clipboard paste into a real
 Google Doc was not tried (the clipboard holds HTML and plain text; what Docs makes of it is Docs').
+
+### 6.9 The first live open (build `2026-11-11.studio-p61`, page `den.js?v=r48`)
+
+On 11 November 2026, the day it was deployed, the page's first open on the live database answered "Today's evidence
+could not be loaded. D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window."
+
+What the page asked of the database on every open, before the fix:
+
+| Read | Rows it walks | How often |
+|---|---|---|
+| The window's rows for the board | every row of the window, with its text | twice at once: the board, and the strip's own copy |
+| An issue against its fourteen-day baseline | a fortnight of the archive | every open |
+| Who is named for the first time | a fortnight of judged mentions | every open |
+| The channels the desk relies on | a week of social rows | every open |
+| A registered account's first post and its usual | a fortnight and a month of social rows | every open, once an account is registered |
+
+In `arc_items` the tags (`meta`) are stored after the article text (`body`), so reading a row's tags walks its text
+too: a scan over a fortnight is expensive in proportion to the full text held, which has grown since the full-text
+work. At the same moment the Mac collector was claiming a run of topic jobs, each of which searches the whole
+archive. Which of the two tipped it over is not known: no timing from the live database is available here.
+
+What changed: one request on Today (`/den/board?missed=1`); the board's read narrowed in the database to the desk's
+rows; the slow figures counted once in fifteen minutes for a desk and window and cached, with what is urgent read
+every time; `503 db_busy` in words, retried twice by the page. Tests: DK18 to DK20 in `tests/den-worker.mjs`, two
+cases in `tests/den-browser.mjs`; each failed before the change.
+
+Still open, and for a person to decide: the archive has no index on `(kind, ts)` and keeps `meta` behind `body`. A
+small table of tags by item (`item, issue, ts, kind`) written when a row is filed would let the board and every
+baseline count read an index and never touch article text. It is the lasting fix and it is a change to how every
+collector files a row, so it was not made in a hurry on the day of the fault.
 
 ## 7. Hand-over (11 November 2026)
 
@@ -734,6 +764,7 @@ Google Doc was not tried (the clipboard holds HTML and plain text; what Docs mak
 | 4 | p56, r43 | Subscriber outlets through the agency's own subscription, once cleared; newsletters; monitoring exports |
 | 5 | p57 | Keyword discovery: proposed with evidence, approved by a person |
 | 6 | p58, r44 | Anne's Den: the page |
+| 6.9 | p61, den.js r48 | The page's first live open overloaded the database: one read on Today, slow counts cached, a busy database said and retried |
 
 ### 7.2 The three layers, in one table
 

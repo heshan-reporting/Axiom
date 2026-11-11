@@ -198,6 +198,27 @@ await t('a desk with nothing collected says so in every panel, with the one plac
   await p.getByRole('button', { name: 'Write it by hand' }).click(); await p.waitForSelector('.den-sec[data-section="judgement"] textarea'); eq(await p.$$eval('.den-sec h4', a => a.map(x => x.childNodes[0].textContent.trim())), ['Executive Summary', 'Today\'s Key Judgement', 'Key Developments', 'News environment', 'Organisational and influencer activity', 'Assessment of Activist Momentum', 'Implications for the client', 'Bottom Line', 'Source List']);
   eq(await p.$$eval('#den-tabpanel .den-bar .den-lab', a => a.map(x => x.childNodes[0].textContent.trim())), ['Overall activity level', 'Trend', 'Media risk', 'Social risk'], 'the firearms desk rates three things'); ok(!/edited by/.test(await txt(p, '#den-tabpanel')), 'a brief started by hand has no section marked as edited'); await p.context().close();
 });
+await t('Today reads the window once: the board\'s answer carries the strip, and the strip asks for itself only elsewhere', async () => {
+  const p = await open(w); await p.waitForSelector('section.den-panel[aria-label="Traditional media"] tr.den-row'); await p.waitForSelector('.den-strip li');
+  const today = p.served.filter(x => /^GET \/den\/(board|missed)/.test(x)); ok(today.length === 1 && /^GET \/den\/board\?.*missed=1/.test(today[0]), 'one request for the board and the strip together: ' + today.join(' | '));
+  ok(/Sentinel spike: Gas taxation/.test(await txt(p, '.den-strip')), 'and the strip is drawn from it');
+  await tab(p, 'watch'); await p.waitForSelector('#den-tabpanel section.den-panel:visible'); p.served.length = 0; await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click();
+  await p.waitForFunction(() => true); for (let i = 0; i < 40 && !p.served.some(x => /^GET \/den\/missed/.test(x)); i++) await new Promise(r => setTimeout(r, 100));
+  ok(p.served.some(x => /^GET \/den\/missed/.test(x)) && !p.served.some(x => /^GET \/den\/board/.test(x)), 'on another tab the strip asks for itself and the board is not read: ' + p.served.filter(x => /den\/(board|missed)/.test(x)).join(' | '));
+  await p.waitForSelector('.den-strip li'); await p.context().close();
+});
+await t('a busy database: the page says so once and asks again by itself', async () => {
+  let busy = 1; const asked = []; w.hooks.push(async (route, r, path) => { if (/^\/den\/board/.test(path)) { asked.push(Date.now()); if (busy > 0) { busy--; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'db_busy', retry: true, detail: 'The database is busy right now: too much is reading it at once. Nothing was changed. Try again in a few seconds.' }) }); return true; } } return false; });
+  const p = await open(w, 'full-key', { view: 'command' }); await p.evaluate(() => go('den')); await p.waitForSelector('#den-app');
+  await p.waitForFunction(() => /database is busy\. Trying again/i.test((document.querySelector('.toast, #toast') || {}).textContent || ''), null, { timeout: 8000 });
+  ok(!(await p.$('#den-tabpanel .den-state.err')), 'no error is shown while it is asking again');
+  await p.waitForSelector('section.den-panel[aria-label="Traditional media"] tr.den-row', { timeout: 15000 }); ok(asked.length === 2 && asked[1] - asked[0] >= 2000, 'asked again a few seconds later, without a click: ' + asked.map(a => a - asked[0]).join(', '));
+  await p.waitForSelector('.den-strip li'); await p.context().close(); w.hooks.length = 0;
+  busy = 9; w.hooks.push(async (route, r, path) => { if (/^\/den\/(board|missed)/.test(path)) { await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'db_busy', retry: true, detail: 'The database is busy right now: too much is reading it at once. Nothing was changed. Try again in a few seconds.' }) }); return true; } return false; });
+  const q2 = await open(w, 'full-key', { view: 'command' }); await q2.evaluate(() => go('den')); await q2.waitForSelector('#den-tabpanel .den-state.err', { timeout: 20000 });
+  ok(/Today's evidence could not be loaded\. The database is busy right now/.test(await txt(q2, '#den-tabpanel .den-state.err')) && await q2.locator('#den-tabpanel .den-state.err button', { hasText: 'Try again' }).count(), 'after two more tries it says so in words, with Try again: ' + await txt(q2, '#den-tabpanel .den-state.err'));
+  await q2.context().close(); w.hooks.length = 0;
+});
 await t('a failed read says what failed and tries again; a broken panel does not blank the page', async () => {
   let failBoard = 2; w.hooks.push(async (route, r, path) => { if (/^\/den\/board/.test(path) && failBoard > 0) { failBoard--; await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done.' }) }); return true; } return false; });
   const p = await open(w); await p.waitForSelector('#den-tabpanel .den-state.err'); ok(/Today's evidence could not be loaded\. Something failed on the worker/.test(await txt(p, '#den-tabpanel .den-state.err'))); ok(await p.$('.den-strip li'), 'the strip is still there');

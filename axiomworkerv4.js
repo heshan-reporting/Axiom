@@ -7441,6 +7441,15 @@ const DEN_DESK_SEED = [
 const DEN_OPTIONS = { hidden: [], minEng: {}, fold: true, density: 'regular', mutes: [] };
 const DEN_BOARD_KINDS = ['news', 'sig_thread', 'reddit_thread', 'petition', 'transcript'];
 const DEN_BOARD_ROWS = 4000, DEN_DAILY_CALLS = 20, DEN_BRIEF_MAX = 120000, DEN_SECTION_MAX = 20000;
+/* The strip's counts over a fortnight and a month (an issue against its own baseline, who is named for the first time, a
+ * registered account's usual, the channels a desk relies on) move slowly and cost the database a long scan each, so they
+ * are counted once in this many seconds for a desk and a window. Sentinel spikes, emerging narratives and collection gaps
+ * are read on every open. Found live on 11 November 2026: every open of the page ran all of it, twice over with the
+ * board's own read, and D1 answered that it was overloaded. */
+const DEN_SLOW_TTL = 900;
+/** D1 saying it cannot answer now: too much is reading it at once. Said in words with a status a page retries on. */
+function denBusy(e) { return /D1 DB is overloaded|Too many resources consumed|too many requests queued|D1_ERROR[^.]*overload|database is locked|SQLITE_BUSY/i.test(String((e && e.message) || e || '')); }
+const DEN_BUSY = { ok: false, error: 'db_busy', retry: true, detail: 'The database is busy right now: too much is reading it at once. Nothing was changed. Try again in a few seconds.' };
 const DEN_MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 const DEN_CH_NAME = { news: 'News', x: 'X', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', reddit: 'Reddit', bluesky: 'Bluesky', tiktok: 'TikTok', threads: 'Threads', linkedin: 'LinkedIn', mastodon: 'Mastodon' };
 const DEN_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -7566,8 +7575,11 @@ async function denBoard(env, deskId, opts) {
   if (!(await ensureArchive(env))) return { ok: false, status: 501, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
   const now = Date.now(); const win = denWindow(desk, opts, now); const mine = desk.issues.map(i => i.id); const o = desk.options;
   const watch = new Map(); (((await env.MIND_DB.prepare("SELECT id, kind, platform, value, name, actor_kind, status FROM den_watch WHERE ns=? AND kind='account'").bind(desk.ns).all()).results) || []).forEach(w => watch.set(w.id, w));
-  const raw = ((await env.MIND_DB.prepare('SELECT id, kind, src, url, title, substr(body,1,600) body, tone, ts, seen, meta FROM arc_items WHERE ts>? AND ts<=? AND kind IN (' + DEN_BOARD_KINDS.map(() => '?').join(',') + ') ORDER BY ts DESC LIMIT ' + DEN_BOARD_ROWS)
-    .bind(win.from, win.to, ...DEN_BOARD_KINDS).all()).results) || [];
+  // only rows that name one of the desk's issues, or a registered account, leave the database: the test in the loop below
+  // is still the rule, this keeps the other clients' rows (most of the window) from being read out and parsed here
+  const near = mine.map(() => 'instr(meta,?)>0').concat(["instr(meta,'\"watch\"')>0"]).join(' OR ');
+  const raw = ((await env.MIND_DB.prepare('SELECT id, kind, src, url, title, substr(body,1,600) body, tone, ts, seen, meta FROM arc_items WHERE ts>? AND ts<=? AND kind IN (' + DEN_BOARD_KINDS.map(() => '?').join(',') + ') AND (' + near + ') ORDER BY ts DESC LIMIT ' + DEN_BOARD_ROWS)
+    .bind(win.from, win.to, ...DEN_BOARD_KINDS, ...mine.map(i => '"' + i + '"')).all()).results) || [];
   const muted = { account: new Set(), domain: new Set(), term: [] }; o.mutes.forEach(m => { if (m.kind === 'term') { const rx = denTermRx(m.value); if (rx) muted.term.push(rx); } else if (muted[m.kind]) muted[m.kind].add(String(m.value)); });
   const rows = []; let nMuted = 0, nLow = 0, nRegion = 0;
   for (const r0 of raw) {
@@ -7601,7 +7613,7 @@ async function denBoard(env, deskId, opts) {
   const prev = new Map(); const keys = pick.filter(r => /^https?:/.test(String(r.url || ''))).map(r => ['x:eng:' + arcHash(r.url) + ':' + auDayKey((Number(r.meta.eng_at) || r.ts) - 86400000), r.id]);
   for (let i = 0; i < keys.length; i += 90) (((await env.MIND_DB.prepare("SELECT url, meta FROM arc_items WHERE kind='sig_eng' AND url IN (" + keys.slice(i, i + 90).map(() => '?').join(',') + ')').bind(...keys.slice(i, i + 90).map(k => k[0])).all()).results) || []).forEach(s => { const k = keys.find(x => x[0] === s.url); const e = (denJ(s.meta, {}).eng) || {}; if (k) prev.set(k[1], (Number(e.likes) || 0) + (Number(e.comments) || 0) + (Number(e.shares) || 0) + (Number(e.reposts) || 0) + (Number(e.replies) || 0) + (Number(e.quotes) || 0)); });
   const held = new Map(); const tids = pick.map(r => String(r.meta.id || '')).filter(Boolean);
-  for (let i = 0; i < tids.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, AVG(tone) a FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND ts>? AND json_extract(meta,'$.thread') IN (" + tids.slice(i, i + 90).map(() => '?').join(',') + ") GROUP BY t").bind(win.from - 7 * 86400000, ...tids.slice(i, i + 90)).all()).results) || []).forEach(h => held.set(String(h.t), { n: h.n, tone: h.a == null ? null : Math.round(h.a * 100) / 100 }));
+  for (let i = 0; i < tids.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, AVG(tone) a FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND ts>? AND json_extract(meta,'$.thread') IN (" + tids.slice(i, i + 90).map(() => '?').join(',') + ") GROUP BY t").bind(win.from - 86400000, ...tids.slice(i, i + 90)).all()).results) || []).forEach(h => held.set(String(h.t), { n: h.n, tone: h.a == null ? null : Math.round(h.a * 100) / 100 }));
   const socRow = r => ({ id: r.id, platform: r.ch, text: (r.title && r.title !== r.ch + ' post' ? r.title : r.body).slice(0, 280), url: link(r), ts: r.ts, eng: r.eng, total: r.total, eng_at: Number(r.meta.eng_at) || 0, growth: prev.has(r.id) ? r.total - prev.get(r.id) : null,
     held: held.get(String(r.meta.id || '')) || null, layers: Array.isArray(r.meta.layers) ? r.meta.layers : (r.meta.via === 'reach' ? [2] : []), issues: r.issues, term: r.meta.term || r.meta.q || '', hashtag: r.meta.hashtag || '', registered: !!r.w, pinned: r.pinned, sub: r.meta.sub || '' });
   const social = pick.filter(r => !isActor(r)).slice(0, 90).map(socRow);
@@ -7661,7 +7673,7 @@ async function denMute(env, b, who) {
 async function denMissed(env, deskId, opts) {
   opts = opts || {}; const board = opts.board || await denBoard(env, deskId, Object.assign({}, opts, { keepRows: true })); if (!board.ok) return board;
   const desk = board.desk, win = board.window, mine = desk.issues.map(i => i.id); const out = []; const rows = board._rows || []; const label = id => (desk.issues.find(i => i.id === id) || {}).label || id;
-  const soft = async fn => { try { await fn(); } catch (e) {} };
+  const soft = async fn => { try { await fn(); } catch (e) { if (denBusy(e)) throw e; } };   // a busy database is said, never read as nothing found
   // 1 Sentinel spikes on this desk's issues
   await soft(async () => { await ensureSentinel(env);
     (((await env.MIND_DB.prepare('SELECT id, issue, label, ratio, hot, detected_ts, acked_ts FROM arc_alerts WHERE ns=? AND detected_ts>? AND detected_ts<=? ORDER BY detected_ts DESC LIMIT 20').bind(desk.ns, win.from, win.to).all()).results) || [])
@@ -7670,28 +7682,36 @@ async function denMissed(env, deskId, opts) {
   board.narratives.filter(n => n.status === 'emerging' && n.first >= win.from - 48 * 3600000).forEach(n => out.push({ sig: 'emerging', key: 'N:' + n.id, title: 'Emerging narrative: ' + n.label, detail: n.n + ' rows, ' + n.n24 + ' in the last day' + (n.side ? ', ' + n.side + ' toward the client' : ''), cover: ['N:' + n.id], words: [], open: { view: 'narratives', params: { id: n.id } }, at: n.first }));
   // 3 first-seen actors: a registered account, or a register entity, on this desk's issues for the first time in fourteen days
   const wIds = Array.from(new Set(rows.filter(r => r.w).map(r => r.w.id)));
-  await soft(async () => { const before = new Set();
-    for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT DISTINCT json_extract(meta,'$.watch') w FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ')').bind(win.from - 14 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => before.add(x.w));
+  // the slow figures (DEN_SLOW_TTL): counted once for this desk and window, read from the cache until then
+  const wkey = wIds.slice().sort().join(','); const sk = 'den_slow_' + desk.id + '_' + win.hours; const useCache = !opts.to; let slow = null;
+  if (useCache && !opts.fresh) { try { slow = JSON.parse((await kvGet(env.AXIOM_KV, sk)) || 'null'); } catch (e) { slow = null; } if (!slow || !(Number(slow.at) > Date.now() - DEN_SLOW_TTL * 1000) || slow.wkey !== wkey) slow = null; }
+  const cached = !!slow; if (!slow) slow = { at: Date.now(), wkey, failed: 0 };
+  const slowly = async (name, fn) => { if (cached) return slow[name]; try { slow[name] = await fn(); } catch (e) { if (denBusy(e)) throw e; slow.failed++; slow[name] = null; } return slow[name]; };
+  await soft(async () => { const seenBefore = await slowly('before', async () => { const before = [];
+    for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT DISTINCT json_extract(meta,'$.watch') w FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ')').bind(win.from - 14 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => before.push(x.w));
+      return before; }); if (!seenBefore) return; const before = new Set(seenBefore);
     wIds.filter(w => !before.has(w)).slice(0, 12).forEach(w => { const mineRows = rows.filter(r => r.w && r.w.id === w); const a = mineRows[0].w; const named = !!a.actor_kind;
       out.push({ sig: 'first_seen', key: 'W:' + w, title: (named ? (a.name || a.value) : 'A registered ' + (DEN_CH_NAME[a.platform] || a.platform) + ' account') + ' posted on this desk for the first time in fourteen days', detail: mineRows.length + ' post' + (mineRows.length === 1 ? '' : 's') + ' in the window on ' + (DEN_CH_NAME[a.platform] || a.platform) + '.', cover: mineRows.map(r => 'S:' + r.id).concat(mineRows.map(r => 'P:' + r.id)), words: named ? [a.name || a.value] : [], open: { item: mineRows[0].id, url: mineRows[0].url }, at: mineRows[0].ts }); }); });
-  await soft(async () => { await ensureSentiment(env); if (!mine.length) return;
+  await soft(async () => { const named = await slowly('ents', async () => { await ensureSentiment(env); if (!mine.length) return [];
     const like = mine.map(() => 'i.issues LIKE ?').join(' OR ');
     const ents = ((await env.MIND_DB.prepare('SELECT e.entity id, MIN(e.ts) first, COUNT(*) n FROM sent_entities e JOIN sent_items i ON i.item=e.item WHERE e.ts>? AND e.ts<=? AND (' + like + ') GROUP BY e.entity HAVING MIN(e.ts)>? ORDER BY n DESC LIMIT 12').bind(win.from - 14 * 86400000, win.to, ...mine.map(i => '%"' + i + '"%'), win.from).all()).results) || [];
-    if (!ents.length) return;
+    if (!ents.length) return [];
     const names = new Map((((await env.MIND_DB.prepare('SELECT id, name, kind FROM entities WHERE id IN (' + ents.map(() => '?').join(',') + ") AND kind IN ('org','person','party')").bind(...ents.map(e => e.id)).all()).results) || []).map(e => [e.id, e]));
-    ents.filter(e => names.has(e.id)).forEach(e => out.push({ sig: 'first_seen', key: 'E:' + e.id, title: names.get(e.id).name + ' named on this desk\'s issues for the first time in fourteen days', detail: e.n + ' judged mention' + (e.n === 1 ? '' : 's') + ' in the window.', cover: [], words: [names.get(e.id).name], open: { view: 'sentiment', params: { id: e.id } }, at: e.first })); });
+    return ents.filter(e => names.has(e.id)).map(e => ({ id: e.id, first: e.first, n: e.n, name: names.get(e.id).name })); });
+    (named || []).forEach(e => out.push({ sig: 'first_seen', key: 'E:' + e.id, title: e.name + ' named on this desk\'s issues for the first time in fourteen days', detail: e.n + ' judged mention' + (e.n === 1 ? '' : 's') + ' in the window.', cover: [], words: [e.name], open: { view: 'sentiment', params: { id: e.id } }, at: e.first })); });
   // 4 an issue running well above its own fourteen-day baseline for a window this long
-  await soft(async () => { (await overviewIssues(env, win.to, win.hours)).filter(i => i.ns === desk.ns && i.recent >= 3 && (i.ratio === null || i.ratio >= 2.5))
+  await soft(async () => { ((await slowly('burst', async () => (await overviewIssues(env, win.to, win.hours)).filter(i => i.ns === desk.ns && i.recent >= 3 && (i.ratio === null || i.ratio >= 2.5)).map(i => ({ id: i.id, label: i.label, recent: i.recent, base: i.base, ratio: i.ratio })))) || [])
     .forEach(i => out.push({ sig: 'burst', key: 'I:' + i.id, title: i.label + ' is running above its baseline', detail: i.recent + ' rows in the window against ' + i.base + ' usual' + (i.ratio ? ' (' + i.ratio + ' times)' : ' (nothing in the fortnight before)') + '. Counted nationally, whatever this desk\'s region.', cover: ['T:' + i.id], words: [i.label], open: { view: 'narratives', params: { issue: i.id } }, at: win.to })); });
   // 5 a registered account's post drawing several times what its posts usually do
-  await soft(async () => { if (!wIds.length) return; const hist = new Map();
-    for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.watch') w, COALESCE(json_extract(meta,'$.score'),0) + COALESCE(json_extract(meta,'$.comments'),0) s FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ') LIMIT 4000').bind(win.to - 30 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => { if (!hist.has(x.w)) hist.set(x.w, []); hist.get(x.w).push(Number(x.s) || 0); });
+  await soft(async () => { if (!wIds.length) return; const usual = await slowly('hist', async () => { const hist = {};
+    for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.watch') w, COALESCE(json_extract(meta,'$.score'),0) + COALESCE(json_extract(meta,'$.comments'),0) s FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ') LIMIT 4000').bind(win.to - 30 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => { (hist[x.w] = hist[x.w] || []).push(Number(x.s) || 0); });
+      return hist; }); if (!usual) return; const hist = new Map(Object.keys(usual).map(k => [k, usual[k]]));
     rows.filter(r => r.w && hist.has(r.w.id) && hist.get(r.w.id).length >= 4).forEach(r => { const h = hist.get(r.w.id).slice().sort((a, b) => a - b); const med = h[Math.floor(h.length / 2)]; if (r.total >= Math.max(20, 4 * Math.max(1, med)))
       out.push({ sig: 'outlier', key: 'S:' + r.id, title: (r.w.actor_kind ? (r.w.name || r.w.value) : 'A registered ' + (DEN_CH_NAME[r.w.platform] || r.w.platform) + ' account') + ': one post is drawing far more than usual', detail: r.total + ' interactions against a usual ' + med + ' (the middle of its last ' + h.length + ' posts).', cover: ['S:' + r.id, 'P:' + r.id], words: [], open: { item: r.id, url: r.url }, at: r.ts }); }); });
   // 6 collection gaps: a channel this desk relies on that delivered nothing, with why
   await soft(async () => { const reach = await reachView(env); const act = await denActive(env, desk.ns); const relied = new Set(['news']);
     act.filter(r => r.kind === 'account').forEach(r => relied.add(r.platform));
-    (((await env.MIND_DB.prepare("SELECT DISTINCT COALESCE(json_extract(meta,'$.platform'), 'reddit') p FROM arc_items WHERE kind IN ('sig_thread','reddit_thread') AND ts>? AND ts<=? LIMIT 20").bind(win.from - 7 * 86400000, win.from).all()).results) || []).forEach(x => { if (['x', 'facebook', 'instagram', 'youtube', 'reddit', 'bluesky'].indexOf(x.p) >= 0) relied.add(x.p); });
+    ((await slowly('relied', async () => (((await env.MIND_DB.prepare("SELECT DISTINCT COALESCE(json_extract(meta,'$.platform'), 'reddit') p FROM arc_items WHERE kind IN ('sig_thread','reddit_thread') AND ts>? AND ts<=? LIMIT 20").bind(win.from - 7 * 86400000, win.from).all()).results) || []).map(x => x.p))) || []).forEach(p => { if (['x', 'facebook', 'instagram', 'youtube', 'reddit', 'bluesky'].indexOf(p) >= 0) relied.add(p); });
     const NAME = DEN_CH_NAME;
     Array.from(relied).filter(p => !(board.byChannel[p] > 0) && NAME[p]).forEach(p => { const src = p === 'youtube' ? 'ytsearch' : p; const rp = (reach.platforms || []).find(x => x.source === src) || null; const why = [];
       if (p === 'news') why.push('No story on this desk\'s issues' + (desk.region !== 'au' ? ' in this region' : '') + ' was filed in the window. Check Sources for failing feeds before reading it as a quiet day.');
@@ -7703,7 +7723,8 @@ async function denMissed(env, deskId, opts) {
       out.push({ sig: 'gap', key: 'G:' + p, title: NAME[p] + ' delivered nothing in this window', detail: why.join(' '), cover: [], words: [], open: { tab: 'collection' }, at: win.to, channel: p }); }); });
   const order = { gap: 0, spike: 1, emerging: 2, outlier: 3, first_seen: 4, burst: 5 };
   out.sort((a, b) => (order[a.sig] - order[b.sig]) || (b.at - a.at));
-  return { ok: true, desk: desk.id, window: win, signals: out, counts: out.reduce((a, s) => { a[s.sig] = (a[s.sig] || 0) + 1; return a; }, {}), clear: !out.length };
+  if (useCache && !cached && !slow.failed) { try { await kvPut(env.AXIOM_KV, sk, JSON.stringify(slow), DEN_SLOW_TTL); } catch (e) {} }
+  return { ok: true, desk: desk.id, window: win, signals: out, counts: out.reduce((a, s) => { a[s.sig] = (a[s.sig] || 0) + 1; return a; }, {}), clear: !out.length, slow: { cached, at: slow.at, every: DEN_SLOW_TTL } };
 }
 /** The evidence a draft is written from. Every line carries an id; the map says what each id is, for the checks and for
  *  the Source List. A subscriber row gives the model thirty words and no more. */
@@ -9671,7 +9692,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-11.studio-p60';
+const AXIOM_BUILD = '2026-11-11.studio-p61';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -20122,8 +20143,13 @@ const AXIOM_WORKER = {
         if (path === '/den/plan' && req.method === 'GET') return send(await denPlan(env, sp.get('ns'), String(sp.get('platform') || '').toLowerCase()));
         if (req.method === 'GET') {
           if (path === '/den/desks') return send(await deskList(env));
-          if (path === '/den/board') { const r = await denBoard(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to') }); if (r && r._rows) delete r._rows; return send(r); }
-          if (path === '/den/missed') { const r = await denMissed(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to') }); return send(r); }
+          if (path === '/den/board') {   // with missed=1 the strip rides in the same answer, so an open of the page reads the window once
+            const both = sp.get('missed') === '1'; const r = await denBoard(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to'), keepRows: both }); if (!r || r.ok === false) return send(r);
+            const out = Object.assign({}, r); delete out._rows;
+            if (both) { try { out.missed = await denMissed(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to'), board: r, fresh: sp.get('fresh') === '1' }); }
+              catch (e) { out.missed = denBusy(e) ? Object.assign({}, DEN_BUSY) : { ok: false, error: 'den_failed', detail: 'The checks could not be read: ' + String((e && e.message) || e).slice(0, 160) }; } }
+            return send(out); }
+          if (path === '/den/missed') { const r = await denMissed(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to'), fresh: sp.get('fresh') === '1' }); return send(r); }
           if (path === '/den/collection') return send(await denCollection(env, sp.get('desk')));
           if (path === '/den/process') return send(await processList(env, { ns: sp.get('ns'), desk: sp.get('desk') }));
           if (path === '/den/held') return send(await denHeld(env, sp.getAll('u')));
@@ -20182,7 +20208,8 @@ const AXIOM_WORKER = {
           if (path === '/den/themes') return send(await denThemes(env, ob.ns));
         }
         return jsonResp({ error: 'not_found' }, 404);
-      } catch (e) { return jsonResp({ ok: false, error: 'den_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
+      } catch (e) { if (denBusy(e)) return jsonResp(Object.assign({}, DEN_BUSY), 503);
+        return jsonResp({ ok: false, error: 'den_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
     }
     if (path.startsWith('/social/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);

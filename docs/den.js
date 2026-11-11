@@ -34,7 +34,15 @@
   const q = o => Object.keys(o).filter(k => o[k] != null && o[k] !== '').map(k => encodeURIComponent(k) + '=' + encodeURIComponent(o[k])).join('&');
   /* A read that came back, but not as an answer: a gateway's page with a 200, or a worker older than this page. The
      shared caller reads that as an empty object; here it is an error with words, so a panel says so instead of drawing nothing. */
-  async function get(path, need) { const d = await call(path); if (!d || d.ok !== true || (need && !(need in d)) || (need && need !== 'brief' && need !== 'counts' && !Array.isArray(d[need]))) { const e = new Error('AXIOM answered, but not with what this page asked for (a gateway\'s page, or a worker older than this page). Nothing was changed.'); e.code = 'bad_answer'; e.status = 502; throw e; } return d; }
+  /* A busy database answers 503 db_busy: a read is asked again by itself, twice, a few seconds apart, and says so once.
+     Found live on 11 November 2026, when the first open of this page met a database that was being read too hard. */
+  const BUSY_WAITS = [2500, 6000]; let busySaid = 0;
+  async function get(path, need) { let d;
+    for (let i = 0; ; i++) { try { d = await call(path); break; } catch (e) {
+      if (!e || e.code !== 'db_busy' || i >= BUSY_WAITS.length) throw e;
+      if (Date.now() - busySaid > 10000) { busySaid = Date.now(); toastMsg('The database is busy. Trying again in a few seconds.'); }
+      await new Promise(r => setTimeout(r, BUSY_WAITS[i])); } }
+    if (!d || d.ok !== true || (need && !(need in d)) || (need && need !== 'brief' && need !== 'counts' && !Array.isArray(d[need]))) { const e = new Error('AXIOM answered, but not with what this page asked for (a gateway\'s page, or a worker older than this page). Nothing was changed.'); e.code = 'bad_answer'; e.status = 502; throw e; } return d; }
   async function getText(path) { const r = await fetch(own(path), { headers: hdrs() }); if (!r.ok) { let d = {}; try { d = await r.json(); } catch (e) {} const er = new Error(d.detail || d.error || ('HTTP ' + r.status)); er.status = r.status; throw er; } return r.text(); }
   /* One loader for every panel: data, the error in words, and a reload. A reply that arrives after a newer request was
      sent is dropped, so a slow answer for the last desk never lands on this one. */
@@ -71,10 +79,17 @@
   function openEvidence(o, setTab) { if (!o) return; if (o.tab) return setTab(o.tab); if (o.view && window.AXUI.goto) return window.AXUI.goto(o.view, o.params || {}); if (o.url && /^https?:/.test(o.url)) window.open(o.url, '_blank', 'noopener'); }
 
   /* ---- Nothing critical missed ---- */
-  function Strip({ deskId, setTab, tick }) {
-    const m = useLoad(() => get('/den/missed?' + q({ desk: deskId }), 'signals'), [deskId, tick], deskId); const [open, setOpen] = useState(() => ls.get('ax_den_strip', true) !== false);
+  const STRIP_PENDING = { data: null, loading: true, err: '', reload() {} };
+  /* On Today the board's own answer carries the strip (one read of the window, not two). The strip asks for itself on the
+     other tabs, and on Today only when the board came back without it: the board failed, or took too long to say. */
+  function Strip({ deskId, setTab, tick, handed }) {
+    const [late, setLate] = useState(false); const waiting = !!(handed && handed.loading && !handed.data);
+    useEffect(() => { setLate(false); if (!waiting) return; const t = setTimeout(() => setLate(true), 20000); return () => clearTimeout(t); }, [waiting, deskId, tick]);
+    const need = !handed || late || (!handed.loading && !handed.data);
+    const self = useLoad(() => (need ? get('/den/missed?' + q({ desk: deskId }), 'signals') : Promise.resolve(null)), [deskId, tick, need], deskId);
+    const m = need ? self : handed; const [open, setOpen] = useState(() => ls.get('ax_den_strip', true) !== false);
     const fold = () => { ls.set('ax_den_strip', !open); setOpen(!open); };
-    if (m.loading && !m.data) return html`<section class="den-strip" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3></header><${Loading} what="the checks" /></section>`;
+    if (!m.data && !m.err) return html`<section class="den-strip" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3></header><${Loading} what="the checks" /></section>`;
     if (m.err && !m.data) return html`<section class="den-strip" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3></header><${Failed} what="The checks" err=${m.err} onRetry=${m.reload} /></section>`;
     const s = m.data.signals || [];
     return html`<section class="den-strip" aria-label="Nothing critical missed">
@@ -100,8 +115,10 @@
       <button class="den-mini" disabled=${busy} title="Take it off this desk's board, with a reason" onClick=${() => setAsk(true)}>Set aside</button>${' '}
       ${web(r.url) ? html`<a class="den-link" href=${web(r.url)} target="_blank" rel="noopener" aria-label=${'Open the source of this ' + kind}>Open</a>` : null}</span>`;
   }
-  function Board({ desk, tick, bump, setTab, canWrite }) {
-    const b = useLoad(() => get('/den/board?' + q({ desk: desk.id }), 'counts'), [desk.id, tick], desk.id);
+  function Board({ desk, tick, bump, setTab, canWrite, onStrip }) {
+    const b = useLoad(() => get('/den/board?' + q({ desk: desk.id, missed: 1 }), 'counts'), [desk.id, tick], desk.id);
+    useEffect(() => { if (!onStrip) return; const ms = b.data ? b.data.missed : null; const good = !!(ms && ms.ok === true && Array.isArray(ms.signals));
+      onStrip({ data: good ? ms : null, loading: b.loading, err: b.err, reload: b.reload }); }, [b.data, b.loading, b.err]);   // eslint-disable-line
     const [offer, setOffer] = useState(null); const [showAside, setShowAside] = useState(false); const root = useRef(null);
     const done = d => { if (d && d.offer) setOffer(d.offer); b.reload(); };
     const mute = async on => { if (on) { try { await call('/den/mute', { desk: desk.id, kind: offer.kind, value: offer.value }); toastMsg('Muted on this desk'); b.reload(); bump('desk'); } catch (e) { toastMsg(say(e), true); } } setOffer(null); };
@@ -480,7 +497,7 @@
 
   function DenApp() {
     const D = useLoad(() => get('/den/desks', 'desks'), [], 'desks'); const [deskId, setDeskId] = useState(() => ls.get('ax_den_desk', '')); const [tab, setTabRaw] = useState(() => ls.get('ax_den_tab', 'today')); const [tick, setTick] = useState(0); const [keys, setKeys] = useState(false);
-    const [budget, setBudget] = useState(null); const [, setRole] = useState(window.AX_ROLE); const [briefSeen, setBriefSeen] = useState(false);
+    const [budget, setBudget] = useState(null); const [, setRole] = useState(window.AX_ROLE); const [briefSeen, setBriefSeen] = useState(false); const [boardStrip, setBoardStrip] = useState(null);
     // the worker says what this key may do a moment after the page opens: the controls follow it
     useEffect(() => { const f = () => setRole(window.AX_ROLE); window.addEventListener('ax:role', f); return () => window.removeEventListener('ax:role', f); }, []);
     const canWrite = canWriteNow();
@@ -506,11 +523,11 @@
         ${canWrite ? null : html`<span class="den-chip warn">read-only key</span>`}
         <button class="den-mini" onClick=${() => setTick(t => t + 1)} title="Read the archive again">Refresh</button><button class="den-mini" aria-label="Keyboard shortcuts" onClick=${() => setKeys(true)}>?</button>
       </div>
-      <${Boundary} name="The strip" resetKey=${desk.id + tick}><${Strip} deskId=${desk.id} setTab=${setTab} tick=${tick} /><//>
+      <${Boundary} name="The strip" resetKey=${desk.id + tick}><${Strip} deskId=${desk.id} setTab=${setTab} tick=${tick} handed=${tab === 'today' ? (boardStrip || STRIP_PENDING) : undefined} /><//>
       <div class="den-tabs" role="tablist" aria-label="Anne's Den">${TABS.map(t => html`<button key=${t[0]} role="tab" id=${'den-tab-' + t[0]} class="den-tab" aria-selected=${tab === t[0] ? 'true' : 'false'} aria-controls="den-tabpanel" onClick=${() => setTab(t[0])}>${t[1]}</button>`)}</div>
       <div role="tabpanel" id="den-tabpanel" aria-labelledby=${'den-tab-' + tab}>
         <${Boundary} name=${TABS.find(t => t[0] === tab)[1]} resetKey=${desk.id + tab}>
-          ${tab === 'today' ? html`<${Board} desk=${desk} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} />` : null}
+          ${tab === 'today' ? html`<${Board} desk=${desk} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} onStrip=${setBoardStrip} />` : null}
           ${briefSeen || tab === 'brief' ? html`<div hidden=${tab !== 'brief'}><${BriefPanel} key=${desk.id} desk=${desk} tick=${tick} bump=${bump} budget=${budget} canWrite=${canWrite} setTab=${setTab} /></div>` : null}
           ${tab === 'watch' ? html`<${WatchPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} />` : null}
           ${tab === 'collection' ? html`<${CollectionPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} />` : null}

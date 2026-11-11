@@ -273,7 +273,21 @@ verifies each, and what was asked for and not built.
   - A read that answers 200 without what was asked for (a gateway's page, an older worker, the wrong shape) is an
     error in words (`get(path, need)` in `docs/den.js`), never an empty panel: the strip must not say "nothing
     found" because a route misbehaved.
-  - Harnesses: `tests/den-worker.mjs` (17), `tests/den-browser.mjs` (24, with axe at 1366, 1440 and 1920 for a
+  - **The first live open overloaded the database (build `2026-11-11.studio-p61`, page `den.js?v=r48`; 11 November 2026).**
+    D1 answered "overloaded: too many resources consumed within a 10 second window". Opening the page read the
+    window twice at once (the board, and the strip through its own board) and ran the strip's fortnight and month
+    scans on every open. Now: on Today the page asks once, `GET /den/board?desk=&missed=1`, and the strip rides in
+    that answer (`missed`; the strip asks `/den/missed` itself on the other tabs, and on Today only when the board
+    came back without it); the board's read is narrowed in the database to rows that name one of the desk's issues
+    or a registered account (`instr(meta, ...)`; the test in the loop is still the rule); the strip's slow figures
+    (an issue against its baseline, first-seen entities and accounts, a registered account's usual, the channels a
+    desk relies on) are counted once in `DEN_SLOW_TTL` = 900 seconds for a desk and window (KV `den_slow_<desk>_<hours>`,
+    `slow {cached, at}` on the answer, `fresh=1` counts again; never cached for a past window or when a part
+    failed) while Sentinel spikes, emerging narratives and collection gaps are read every time; a busy database is
+    `503 db_busy` in words on every Den route (`denBusy`, `DEN_BUSY`), never swallowed into an empty strip, and the
+    page's `get()` asks again by itself twice (2.5 s, 6 s) and says so once. **Not measured on the live database**:
+    the sandbox cannot reach it, so the reduction is reasoned from the queries, not timed.
+  - Harnesses: `tests/den-worker.mjs` (20), `tests/den-browser.mjs` (27, with axe at 1366, 1440 and 1920 for a
     full and a read-only key), `tests/den-inject-browser.mjs` (60: every read failing, answering a gateway page,
     answering the wrong shape, hanging and dropping, and every write failing and dropping, one at a time), the
     recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
