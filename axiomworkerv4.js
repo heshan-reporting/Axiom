@@ -2434,6 +2434,41 @@ async function jobClaim(env, agent, sources) {
   return { id: row.id, source: row.source, params };
 }
 const REACH_WAIT_MS = 180000;
+const BRIDGE_STALE_MS = 30 * 60000;     // a queued job nobody tails: failed by the tick after this long with nobody to serve it
+/* What to try when X search does not work on the Mac. Mirrors X_REMEDY in tools/reach-x.py: what to do first. */
+const X_DOWN_REMEDY = 'To try on the Mac: `uv tool upgrade twitter-cli` (with pipx: `pipx upgrade twitter-cli`), then `python3 tools/reach-agent.py --channels` - X reads "usable" when search works. The collector has stopped offering X and rechecks every ten minutes, so nothing needs restarting. The upgrade helps only if that machine is behind the newest twitter-cli; otherwise it waits on an upstream fix.';
+/** Why nothing can serve a queued job, in words a person can act on. When a live collector has said the platform is
+ *  down on its machine, that is the reason - not "no collector connected". */
+function noCollector(source, agents) {
+  const label = REACH_LABEL[source] || source;
+  const downOn = (agents || []).filter(a => a.live && (a.down || []).indexOf(source) >= 0).map(a => a.agent);
+  if (source === 'x' && downOn.length) return { error: 'no_collector', why: 'x_unavailable',
+    detail: 'X search is unavailable on the connected collector (' + downOn.join(', ') + '), so this job was not going to run. ' + X_DOWN_REMEDY + ' Why: twitter-cli cannot build the x-client-transaction-id header X requires on search. The worker still reads MP and registered account timelines itself.' };
+  if (downOn.length) return { error: 'no_collector', why: source + '_unavailable', detail: label + ' cannot be read on the connected collector (' + downOn.join(', ') + ') right now, so this job was not going to run. On the Mac: python3 tools/reach-agent.py --channels says why.' };
+  return { error: 'no_collector', detail: 'No collector that can read ' + label + ' is connected, so this job was never going to run. On the Mac: python3 tools/reach-agent.py --channels says what that machine can read and why not; python3 tools/reach-agent.py --key $AXIOM_KEY connects it.' };
+}
+const collectorFor = (agents, source) => (agents || []).some(a => a.live && (a.sources || []).indexOf(source) >= 0);
+/** Queued jobs with nobody to serve them are failed in words instead of waiting for ever. The console did this for a
+ *  job someone was watching (jobTail); a job nobody tails - a topic's X child, above all - sat in the queue until a
+ *  collector connected days later and was handed the lot. `source` and `maxAgeMs: 0` are for the moment a collector
+ *  reports a platform down; the tick uses the half hour and leaves the morning plan to its own twelve-hour rule. */
+async function bridgeExpire(env, o) {
+  o = o || {}; if (!env.MIND_DB) return { ok: false, failed: 0 };
+  await ensureBridge(env);
+  const age = o.maxAgeMs == null ? BRIDGE_STALE_MS : o.maxAgeMs;
+  const w = ["status='queued'", 'created<=?']; const b = [Date.now() - age];
+  if (o.source) { w.push('source=?'); b.push(o.source); } else w.push("COALESCE(who,'')<>'plan'");
+  const rows = ((await env.MIND_DB.prepare('SELECT id, source FROM bridge_jobs WHERE ' + w.join(' AND ') + ' ORDER BY created LIMIT 200').bind(...b).all()).results) || [];
+  if (!rows.length) return { ok: true, failed: 0 };
+  const agents = await agentsSeen(env); let failed = 0;
+  for (const r of rows) {
+    if (collectorFor(agents, r.source)) continue;
+    const nc = noCollector(r.source, agents);
+    await jobLog(env, r.id, [{ k: 'err', t: nc.detail }]);
+    if (await jobFinish(env, r.id, false, Object.assign({ ok: false }, nc))) failed++;
+  }
+  return { ok: true, failed };
+}
 /** The platforms a full key has switched off for the signed-in layer (KV reach_off). */
 async function reachOff(env) { try { const v = JSON.parse((await kvGet(env.AXIOM_KV, 'reach_off')) || '[]'); return Array.isArray(v) ? v.filter(x => REACH_SOURCES.indexOf(x) >= 0) : []; } catch (e) { return []; } }
 async function reachChallenges(env) { try { return JSON.parse((await kvGet(env.AXIOM_KV, 'reach_challenges')) || '{}') || {}; } catch (e) { return {}; } }
@@ -2494,13 +2529,15 @@ async function jobTail(env, id, after) {
       job.status = 'failed'; job.ok = 0; job.finished = Date.now(); job.result = JSON.stringify({ ok: false, error: 'worker_stopped', detail });
     }
   }
-  if (job.status === 'queued' && Date.now() - (job.created || 0) > REACH_WAIT_MS) {
-    // a job waiting for a collector that is not there: say so instead of spinning
+  if (job.status === 'queued') {
+    // a job waiting for a collector that is not there: say so instead of spinning. It gets three minutes (a collector
+    // may be about to connect) - unless a live collector has already said it cannot read this platform: then at once
     const agents = await agentsSeen(env);
-    if (!agents.some(a => a.live && (a.sources || []).indexOf(job.source) >= 0)) {
-      const detail = 'No collector that can read ' + (REACH_LABEL[job.source] || job.source) + ' is connected, so this job was never going to run. On the Mac: python3 tools/reach-agent.py --channels says what that machine can read and why not; python3 tools/reach-agent.py --key $AXIOM_KEY connects it.';
-      await jobLog(env, id, [{ k: 'err', t: detail }]);
-      if (await jobFinish(env, id, false, { ok: false, error: 'no_collector', detail })) { job.status = 'failed'; job.ok = 0; job.finished = Date.now(); job.result = JSON.stringify({ ok: false, error: 'no_collector', detail }); }
+    const downNow = agents.some(a => a.live && (a.down || []).indexOf(job.source) >= 0);
+    if (!collectorFor(agents, job.source) && (downNow || Date.now() - (job.created || 0) > REACH_WAIT_MS)) {
+      const nc = Object.assign({ ok: false }, noCollector(job.source, agents));
+      await jobLog(env, id, [{ k: 'err', t: nc.detail }]);
+      if (await jobFinish(env, id, false, nc)) { job.status = 'failed'; job.ok = 0; job.finished = Date.now(); job.result = JSON.stringify(nc); }
     }
   }
   const rows = await env.MIND_DB.prepare('SELECT id,ts,kind,text FROM bridge_log WHERE job=? AND id>? ORDER BY id LIMIT 200').bind(id, Number(after) || 0).all();
@@ -2514,10 +2551,12 @@ async function jobTail(env, id, after) {
   };
 }
 /** Agents announce themselves on every poll; the app shows who is connected. */
-async function agentBeat(env, agent, sources) {
+async function agentBeat(env, agent, sources, down) {
   if (!env.AXIOM_KV || !agent) return;
+  // `down`: what the machine has the tool for and still cannot read (X search with twitter-cli's generator broken)
+  const dn = (down || []).filter(x => REACH_SOURCES.indexOf(x) >= 0).slice(0, 8);
   await kvPut(env.AXIOM_KV, 'bridge_agent_' + String(agent).replace(/[^\w-]/g, '').slice(0, 40),
-    JSON.stringify({ ts: Date.now(), sources: (sources || []).slice(0, 16) }), 3 * 86400);
+    JSON.stringify({ ts: Date.now(), sources: (sources || []).filter(x => dn.indexOf(x) < 0).slice(0, 16), down: dn }), 3 * 86400);
 }
 async function agentsSeen(env) {
   if (!env.AXIOM_KV || !env.AXIOM_KV.list) return [];
@@ -2527,7 +2566,7 @@ async function agentsSeen(env) {
     for (const k of (l.keys || []).slice(0, 10)) {
       const v = await kvGet(env.AXIOM_KV, k.name);
       let d = {}; try { d = JSON.parse(v || '{}'); } catch (e) {}
-      out.push({ agent: k.name.replace('bridge_agent_', ''), last: d.ts || 0, sources: d.sources || [], live: Date.now() - (d.ts || 0) < 5 * 60000 });
+      out.push({ agent: k.name.replace('bridge_agent_', ''), last: d.ts || 0, sources: d.sources || [], down: Array.isArray(d.down) ? d.down : [], live: Date.now() - (d.ts || 0) < 5 * 60000 });
     }
     return out.sort((a, b) => b.last - a.last);
   } catch (e) { return []; }
@@ -2901,9 +2940,24 @@ async function topicRun(env, job, log) {
   // 4. MPs on X, from their own accounts - a desktop job; replies included
   const mps = p.mps === false ? [] : await mpsList(env, { withX: true, limit: 400 });
   if (mps.length) {
-    const child = await jobCreate(env, 'x', { queries: [auQualify(keyword)], fromQueries: [keyword], from: mps.map(m => m.x), mps: mps.map(m => ({ x: m.x, name: m.name, party: m.party, house: m.house })), topic: id, ns, time: win, perQuery: 30, threads: 15, commentsPer: 40 }, 'topic:' + id);
-    out.children.x = child.id;
-    await log('info', 'queued X job ' + child.id + ' for the Mac collector: "' + keyword + '" across ' + mps.length + ' MP and senator accounts, replies included');
+    // One X job a topic, and only when something can serve it. Every run used to queue one whatever was connected, and
+    // nothing took an unserved one off the queue: the first collector to connect was handed each keyword once per run.
+    const agents = await agentsSeen(env);
+    const held = await topicMpPosts(env, keyword, hours, 200);
+    const heldWords = held.length + ' post' + (held.length === 1 ? '' : 's') + ' by MPs and senators carrying the keyword ' + (held.length === 1 ? 'is' : 'are') + ' already held from the worker\'s own timeline reader and ' + (held.length === 1 ? 'is' : 'are') + ' in this topic\'s results';
+    out.counts.xHeld = held.length;
+    const waiting = await env.MIND_DB.prepare("SELECT id FROM bridge_jobs WHERE source='x' AND who=? AND status='queued' ORDER BY created DESC LIMIT 1").bind('topic:' + id).first();
+    if (!collectorFor(agents, 'x')) {
+      const nc = noCollector('x', agents); out.xSkipped = nc.why || 'no_collector';
+      await log('info', 'X search across the ' + mps.length + ' MP and senator accounts was not queued: ' + nc.detail.replace(/, so this job (was not|was never) going to run/, '') + ' ' + heldWords + '.');
+    } else if (waiting) {
+      out.children.x = waiting.id;
+      await log('info', 'X job ' + waiting.id + ' for this topic is already waiting for the Mac collector, so another was not queued. ' + heldWords + '.');
+    } else {
+      const child = await jobCreate(env, 'x', { queries: [auQualify(keyword)], fromQueries: [keyword], from: mps.map(m => m.x), mps: mps.map(m => ({ x: m.x, name: m.name, party: m.party, house: m.house })), topic: id, ns, time: win, perQuery: 30, threads: 15, commentsPer: 40 }, 'topic:' + id);
+      out.children.x = child.id;
+      await log('info', 'queued X job ' + child.id + ' for the Mac collector: "' + keyword + '" across ' + mps.length + ' MP and senator accounts, replies included. ' + heldWords + '.');
+    }
   } else await log('info', 'no MP register yet (Sync MPs builds it from Wikidata), so no MP account sweep this run');
   // 5. the Reddit keyword pass - the Mac collector when one is connected, the worker otherwise
   {
@@ -2963,6 +3017,18 @@ async function topicRun(env, job, log) {
   out.ms = Date.now() - t0;
   return out;
 }
+/** The stand-in for X search across the MPs' accounts: posts by sitting members already in the archive (the worker's
+ *  keyless timeline reader, xSyndSweep, and earlier collector runs) that carry every word of the keyword. Nothing is
+ *  fetched. Only rows that carry meta.mp - a registered MP on its own post - so nobody else is named or included. */
+async function topicMpPosts(env, keyword, hours, limit) {
+  try {
+    const words = String(keyword || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2).slice(0, 3);
+    if (!words.length || !(await ensureArchive(env))) return [];
+    const cond = words.map(() => "(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')").join(' AND ');
+    const binds = [Date.now() - (hours || 168) * 3600000]; words.forEach(w => { const l = arcLike(w); binds.push(l, l); });
+    return ((await env.MIND_DB.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.mp') mp, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='sig_thread' AND ts>? AND json_extract(meta,'$.platform')='x' AND json_extract(meta,'$.mp') IS NOT NULL AND " + cond + ' ORDER BY ts DESC LIMIT ' + (Math.min(parseInt(limit, 10) || 80, 200))).bind(...binds).all()).results) || [];
+  } catch (e) { return []; }
+}
 /** Everything on file for one topic, for the view and for SIFA. */
 async function topicResults(env, idOrKeyword, days) {
   const topic = await topicGet(env, idOrKeyword);
@@ -2973,6 +3039,9 @@ async function topicResults(env, idOrKeyword, days) {
   const pj = s => { try { const v = JSON.parse(s); return v && typeof v === 'object' ? v : null; } catch (e) { return null; } };
   const hits = (await db.prepare("SELECT src, title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.source') source, json_extract(meta,'$.outlet') outlet, json_extract(meta,'$.mp') mp FROM arc_items WHERE kind='topic_hit' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 300").bind(id, since).all()).results || [];
   const x = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.mp') mp, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='sig_thread' AND json_extract(meta,'$.platform')='x' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 80").bind(id, since).all()).results || [];
+  // beside what an X search job filed under the topic: MPs' own posts already held that carry the keyword (marked held)
+  const xHeld = (await topicMpPosts(env, (topic && topic.keyword) || idOrKeyword, Math.round((Date.now() - since) / 3600000), 80)).filter(h => !x.some(r => r.url === h.url));
+  xHeld.forEach(h => { h.held = true; x.push(h); }); x.sort((a, b) => (b.ts || 0) - (a.ts || 0));
   const reddit = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.sub') sub, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='reddit_thread' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 80").bind(id, since).all()).results || [];
   const cm = (await db.prepare("SELECT json_extract(meta,'$.platform') platform, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND json_extract(meta,'$.topic')=? AND ts>? GROUP BY platform").bind(id, since).all()).results || [];
   await ensureBridge(env);   // a topic that has never run has no job table yet: its results are empty, not a failure
@@ -2982,7 +3051,8 @@ async function topicResults(env, idOrKeyword, days) {
   return {
     ok: true, topic: topic || { id, keyword: idOrKeyword }, days: Math.round((Date.now() - since) / 86400000), brief,
     news: hits.filter(h => h.source === 'news').map(strip), statements: hits.filter(h => h.source === 'statement').map(strip), hansard: hits.filter(h => h.source === 'hansard').map(strip),
-    x: x.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, id: r.id, score: r.score, comments: r.comments, mp: pj(r.mp), issues: pj(r.issues) || [], excerpt: String(r.body || '').split('\n')[0].slice(0, 400) })),
+    x: x.map(r => Object.assign({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, id: r.id, score: r.score, comments: r.comments, mp: pj(r.mp), issues: pj(r.issues) || [], excerpt: String(r.body || '').split('\n')[0].slice(0, 400) }, r.held ? { held: true } : {})),
+    xNote: xHeld.length ? xHeld.length + ' of these ' + (xHeld.length === 1 ? 'is a post' : 'are posts') + ' by MPs and senators already held from the worker\'s own timeline reader (their own posts only: no replies, and no keyword search of X).' : '',
     reddit: reddit.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, id: r.id, sub: r.sub || '', score: r.score, comments: r.comments, issues: pj(r.issues) || [], excerpt: String(r.body || '').split('\n')[0].slice(0, 400) })),
     comments: cm.map(c => ({ platform: c.platform || 'reddit', n: c.n || 0, hostile: c.hostile || 0, supportive: c.supportive || 0 })),
     jobs,
@@ -9149,7 +9219,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-11.studio-p58';
+const AXIOM_BUILD = '2026-11-11.studio-p59';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -17138,7 +17208,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -18157,7 +18227,8 @@ const AXIOM_WORKER = {
         if (path === '/bridge/next') {
           const agent = String(reqUrl.searchParams.get('agent') || 'agent').slice(0, 40);
           const sources = String(reqUrl.searchParams.get('sources') || '').split(',').map(x => x.trim()).filter(Boolean);
-          await agentBeat(env, agent, sources.length ? sources : BRIDGE_SOURCES);
+          const down = String(reqUrl.searchParams.get('down') || '').split(',').map(x => x.trim()).filter(Boolean);
+          await agentBeat(env, agent, sources.length ? sources : BRIDGE_SOURCES, down);
           // a platform switched off is not handed to any collector, even a job queued before the switch
           const off = await reachOff(env); const may = (sources.length ? sources : BRIDGE_SOURCES).filter(x => off.indexOf(x) < 0);
           const job = may.length ? await jobClaim(env, agent, may) : null;
@@ -18177,6 +18248,17 @@ const AXIOM_WORKER = {
           if (took && bbody.ok === false) {
             const m = /^([a-z]+)_challenge$/.exec(String((bbody.result || {}).error || ''));
             if (m) { try { const j = await env.MIND_DB.prepare('SELECT source, agent FROM bridge_jobs WHERE id=?').bind(id).first(); await reachChallenge(env, (j && j.source) || m[1], (bbody.result || {}).detail, (j && j.agent) || bbody.agent || ''); } catch (e) {} }
+            // X search does not work on that machine: it stops counting as an X collector now (it will say so itself on
+            // its next poll), and the X jobs still waiting are failed in words rather than handed to it one by one
+            if (String((bbody.result || {}).error || '') === 'x_unavailable') {
+              try {
+                const j = await env.MIND_DB.prepare('SELECT agent FROM bridge_jobs WHERE id=?').bind(id).first();
+                const who = String((j && j.agent) || bbody.agent || '');
+                const seen = (await agentsSeen(env)).find(a => a.agent === who.replace(/[^\w-]/g, '').slice(0, 40));
+                if (seen) await agentBeat(env, seen.agent, seen.sources, (seen.down || []).concat(['x']));
+                await bridgeExpire(env, { source: 'x', maxAgeMs: 0 });
+              } catch (e) {}
+            }
           }
           return took ? jsonResp({ ok: true }) : jsonResp({ ok: false, ignored: true, error: 'job_ended', detail: 'The job had already ended or was cancelled; this report was not filed.' }, 409);
         }
@@ -21827,6 +21909,7 @@ async function handleScheduled(env) {
   try { await socialCron(env); } catch (e) { console.log('social cron failed', String(e).slice(0, 120)); }
   // the signed-in layer's morning plan: jobs for the collectors that are connected; no model call, never gated
   try { await denReachCron(env); } catch (e) { console.log('reach plan failed', String(e).slice(0, 120)); }
+  try { await bridgeExpire(env, {}); } catch (e) { console.log('bridge expiry failed', String(e).slice(0, 120)); }
   try { await denDiscoverCron(env); } catch (e) { console.log('desk discovery failed', String(e).slice(0, 120)); }
   // Sentiment: the newest rows that mention an entity get their verdicts, within the day's budget (a model call per batch:
   // held outside the day's window).

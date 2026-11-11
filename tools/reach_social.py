@@ -8,8 +8,16 @@ has signed in to. This module asks it for what a signed-in member of the public
 can see and hands the posts to the worker's POST /signals/ingest, where the
 rules live (relevance, the Australian gate, one row a post, who may be named).
 
-What each channel can do through agent-reach, as its own documentation says
-(read 11 November 2026 - check `agent-reach channels` on the machine):
+READ THIS FIRST (11 November 2026, the first run on the owner's Mac): Agent Reach v1.5.0 as installed there has NO
+`facebook`, `instagram`, `youtube` or `login` command. Its commands are setup, install, configure, doctor, uninstall,
+skill, format, transcribe, check-update, watch and version: it checks and installs other tools, it does not search.
+So the command form this module was written to (`agent-reach <channel> <action>`, one line of JSON) was read from
+documentation and has never been seen to exist. `status()` now reads the real `agent-reach doctor` text and the real
+`agent-reach --help` (fixtures in tests/fixtures/den/), reports a channel with no command as `no_command`, and offers
+nothing. Until a backend that really answers is chosen by the owner, this layer collects nothing - by design.
+
+What each channel was expected to do through agent-reach, as its documentation was read
+(11 November 2026 - NOT confirmed by the installed tool):
   facebook   search posts by keyword              no comments, no page timeline
   instagram  a named account's recent posts       no comments, no post search, no hashtags
   youtube    search videos by keyword             comments and captions are read by the worker afterwards
@@ -230,11 +238,30 @@ def status(channel, runner=None, now=None):
     if not st:
         m = re.search(r'(?im)^.*\b%s\b.*?\b(not_added|needs_setup|needs_login|unverified|search_ready|ready|cooldown|broken)\b' % re.escape(channel), text)
         st = m.group(1) if m else ''
-    out['status'] = st or 'unknown'
+    # the tool as it really answers (v1.5.0): marks in text, and a help page that says which commands exist
+    cmds = commands(runner, now); marks = doctor_marks(text); mk = marks.get(channel)
+    why = ''
+    if cmds is not None and channel not in cmds:
+        st = 'no_command'
+        why = NO_COMMAND % {'channel': channel, 'have': ', '.join(sorted(cmds))}
+        if mk and mk['mark'] != 'ok': why += '. Its doctor also marks %s as %s%s' % (channel, {'needs_config': 'installed but needing configuration or sign-in', 'not_installed': 'not installed', 'locked': 'not unlocked'}[mk['mark']], (': ' + mk['detail']) if mk['detail'] else '')
+    elif not st and mk:
+        if mk['mark'] == 'ok':
+            # a tick is usable only with a command to run; help that cannot be read is not a yes
+            st = 'ready' if cmds is not None else 'unreadable_help'
+            if cmds is None: why = 'agent-reach doctor marks %s as usable, but `agent-reach --help` could not be read, so it is not known whether this version can search it' % channel
+        else:
+            st = {'needs_config': 'needs_config', 'not_installed': 'channel_not_installed', 'locked': 'channel_not_installed'}[mk['mark']]
+            why = 'agent-reach doctor marks %s as %s%s' % (channel, 'installed but needing configuration or sign-in' if mk['mark'] == 'needs_config' else 'not installed', (': ' + mk['detail']) if mk['detail'] else '')
+    elif not st:
+        st = 'unreadable' if not marks else 'not_listed'
+        why = ('the answer of `agent-reach doctor` could not be read: it is neither the marked text of v1.5.0 nor JSON. Run `agent-reach doctor` and `agent-reach --version` and send the output'
+               if not marks else '`agent-reach doctor` does not mention %s at all' % channel)
+    out['status'] = st
     out['usable'] = st in USABLE and cfg['enabled'] and not until
     if not cfg['enabled']: out['why'] = WHY['off'] % {'channel': channel}
     elif until: out['why'] = '%s is paused on this machine until %s: %s' % (channel, datetime.fromtimestamp(until).strftime('%d %b %H:%M'), reason)
-    elif st not in USABLE: out['why'] = (WHY.get(st) or 'agent-reach reports the %(channel)s channel as "' + (st or 'unknown') + '". Run: agent-reach doctor --text') % {'channel': channel}
+    elif st not in USABLE: out['why'] = why or (WHY.get(st) or 'agent-reach reports the %(channel)s channel as "' + st + '"') % {'channel': channel}
     return out
 
 
@@ -245,6 +272,57 @@ def assert_ready(channel, runner=None, now=None):
         return st
     why = 'not_installed' if not st['installed'] else 'off' if not st['enabled'] else 'paused' if st['paused_until'] else (st['status'] or 'unknown')
     raise Unavailable(channel, why, channel + ': ' + st.get('why', 'not usable'))
+
+
+# ---- agent-reach as it really answers ------------------------------------------------------------------------------
+# `agent-reach doctor` (v1.5.0) prints text, in Chinese, one line a channel:
+#     "  <mark>  <channel label> - <detail>"   with the mark one of  U+2705 (usable), [!] (installed, needs
+#     configuration or sign-in), [X] (not installed)
+# and, for channels not unlocked at all, one sentence listing them in brackets. `doctor --text` is not accepted.
+_DOCTOR_MARKS = (('\u2705', 'ok'), ('[!]', 'needs_config'), ('[X]', 'not_installed'))
+_HELP_CACHE = {}
+
+
+def doctor_marks(text):
+    """{channel: {mark: ok|needs_config|not_installed|locked, detail}} from the real doctor text. A channel is found
+    by its own name in the line's label; anything else on the page is ignored."""
+    out = {}
+    for line in str(text or '').split('\n'):
+        l = line.strip()
+        mark = next((m for sym, m in _DOCTOR_MARKS if l.startswith(sym)), None)
+        if mark:
+            sym = next(sym for sym, m in _DOCTOR_MARKS if l.startswith(sym))
+            body = l[len(sym):].strip()
+            label, _, detail = body.partition('\u2014')
+            if not _: label, _, detail = body.partition(' - ')
+            for c in CHANNELS:
+                if re.search(r'(?i)\b%s\b' % c, label) and c not in out: out[c] = {'mark': mark, 'detail': scrub(detail.strip())[:240]}
+        elif '\uff08' in l or '(' in l:
+            # the sentence that lists what is still to unlock: "... (Twitter/X ..., Facebook ..., Instagram ...)"
+            inner = re.search(r'[\uff08(](.+)[\uff09)]', l)
+            for c in CHANNELS:
+                if inner and re.search(r'(?i)\b%s\b' % c, inner.group(1)) and c not in out: out[c] = {'mark': 'locked', 'detail': ''}
+    return out
+
+
+def commands(runner=None, now=None):
+    """The subcommands this agent-reach has, read from `agent-reach --help` ("{setup,install,...}"), or None when the
+    help cannot be read. Asked once every ten minutes."""
+    now = time.time() if now is None else now
+    if runner is None and _HELP_CACHE.get('at') and now - _HELP_CACHE['at'] < 600: return _HELP_CACHE['v']
+    try:
+        code, text, err = (runner or _run)([BIN, '--help'], 30)
+        m = re.search(r'\{([a-z0-9_,-]+)\}', (text or '') + '\n' + (err or ''))
+        v = set(x for x in m.group(1).split(',') if x) if m else None
+    except Exception:
+        v = None
+    if runner is None: _HELP_CACHE['at'] = now; _HELP_CACHE['v'] = v
+    return v
+
+
+NO_COMMAND = ('the agent-reach on this machine has no `%(channel)s` command (it has: %(have)s). It checks and installs other tools; '
+              'it does not search %(channel)s, so nothing is collected here and nothing is offered to AXIOM. This is not something '
+              'to fix on the Mac: the collector was written to a command form this tool does not have (DEN.md s.3)')
 
 
 def offered(runner=None):
@@ -435,9 +513,13 @@ WARNING = '''
 '''
 
 
-def login(channel, ask=input, out=print, call=None, who=None):
+def login(channel, ask=input, out=print, call=None, who=None, runner=None):
     """Show what signing in means, ask the question that matters, then let agent-reach open its sign-in window."""
     if channel not in CHANNELS: raise SystemExit('unknown platform "%s": one of %s' % (channel, ', '.join(CHANNELS)))
+    cmds = commands(runner) if (runner is not None or installed()) else None
+    if cmds is not None and ('login' not in cmds or channel not in cmds):
+        out('  Stopped before anything was asked: the agent-reach on this machine has no `login` command and no `%s` command (it has: %s), so there is nothing to sign in to and nothing would be collected. Nothing was switched on.' % (channel, ', '.join(sorted(cmds))))
+        return False
     out(WARNING % {'channel': channel})
     if channel in ('facebook', 'instagram'):
         a = ask('  Does the profile you are about to use administer any client ad account, Page or Business asset? (yes/no): ').strip().lower()

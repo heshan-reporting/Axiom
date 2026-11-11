@@ -59,7 +59,7 @@ t('the agent would offer exactly the usable channels, under their job names', rs
 r2, _ = mk(doctor={'channels': [{'name': 'facebook', 'status': 'needs_login'}, {'name': 'instagram', 'status': 'broken'}]})
 e = raises(lambda: rs.assert_ready('facebook', runner=r2), rs.Unavailable)
 t('not signed in is said, with the command a person runs', bool(e) and e.why == 'needs_login' and '--login facebook' in str(e), e)
-t('a broken channel and one agent-reach does not list are not offered', rs.offered(runner=r2) == [] and rs.status('youtube', runner=r2)['status'] == 'unknown')
+t('a broken channel and one agent-reach does not list are not offered', rs.offered(runner=r2) == [] and rs.status('youtube', runner=r2)['status'] == 'unreadable')
 r3, _ = mk(doctor='facebook      ready\ninstagram     needs_login\nyoutube       cooldown\n')
 t('doctor\'s plain text is read when it is not JSON', rs.status('facebook', runner=r3)['usable'] and rs.status('instagram', runner=r3)['status'] == 'needs_login' and 'cooldown' in rs.status('youtube', runner=r3)['why'])
 rs._write('reach.json', {'facebook': {'enabled': False}, 'instagram': {'pace': 1, 'per_day': 5}})
@@ -219,6 +219,50 @@ t('signing in to a publisher stops unless it is the agency\'s own subscription',
 flat = ' '.join(said[0].split())
 t('the warning names the rules', 'Never a personal, borrowed or shared login' in flat and 'does not download the paper' in flat and 'never sees the password' in flat and 'no paywall-bypass' in flat, flat[:200])
 t('with yes, a visible window opens at the publisher and waits for the person', agent.login_news('afr', 'https://www.afr.com/', ask=lambda q: 'yes', out=said.append, render=lambda url, src, **kw: opened.append((url, src, kw)) or ('', url)) is True and opened[0][0] == 'https://www.afr.com/' and opened[0][2] == {'headless': False, 'wait_closed': True}, opened)
+
+
+# ---- agent-reach as it really answers (the owner's Mac, v1.5.0, 11 November 2026; tests/fixtures/den/) ----------------
+# Everything above uses a stand-in that answers as the documentation was read. These use the real output.
+FX = os.path.join(HERE, 'fixtures', 'den')
+REAL_DOCTOR = open(os.path.join(FX, 'agent-reach-doctor-1.5.0.txt'), encoding='utf-8').read()
+REAL_HELP = open(os.path.join(FX, 'agent-reach-help-1.5.0.txt'), encoding='utf-8').read()
+def real(doctor=REAL_DOCTOR, helptext=REAL_HELP, calls=None):
+    calls = calls if calls is not None else []
+    def runner(cmd, timeout):
+        calls.append(cmd[1:])
+        if cmd[1:] == ['doctor']: return (0, doctor, '')
+        if cmd[1:] == ['--help']: return (0, helptext, '')
+        if cmd[1] == 'doctor': return (2, '', 'usage: agent-reach ...\nagent-reach: error: unrecognized arguments: ' + ' '.join(cmd[2:]))
+        return (2, '', "usage: agent-reach ...\nagent-reach: error: argument command: invalid choice: '%s'" % cmd[1])
+    return runner, calls
+fresh()
+marks = rs.doctor_marks(REAL_DOCTOR)
+t('the real doctor text is read: YouTube is marked not installed, with the doctor\'s own reason', marks.get('youtube', {}).get('mark') == 'not_installed' and 'yt-dlp' in marks['youtube']['detail'], marks.get('youtube'))
+t('Facebook and Instagram are read from the list of channels still to unlock', marks.get('facebook', {}).get('mark') == 'locked' and marks.get('instagram', {}).get('mark') == 'locked', marks)
+t('a channel marked usable or needing sign-in is read as that', rs.doctor_marks('  ✅ YouTube 视频和字幕 — ok\n  [!]  Facebook 帖子 — login')['youtube']['mark'] == 'ok' and rs.doctor_marks('  [!]  Facebook 帖子 — login')['facebook']['mark'] == 'needs_config')
+t('the commands this agent-reach has are read from its help', rs.commands(real()[0]) == {'setup', 'install', 'configure', 'doctor', 'uninstall', 'skill', 'format', 'transcribe', 'check-update', 'watch', 'version'}, rs.commands(real()[0]))
+r, calls = real()
+for c in ('facebook', 'instagram', 'youtube'):
+    st = rs.status(c, runner=r)
+    t('%s on the real answers: not usable, and the reason is named, not "unknown"' % c, st['usable'] is False and st['status'] == 'no_command' and 'unknown' not in st['why'] and ('no `%s` command' % c) in st['why'], st)
+    t('  and it does not send anyone to a command that does not exist', 'doctor --text' not in st['why'] and 'agent-reach add' not in st['why'] and 'agent-reach check' not in st['why'], st['why'])
+t('the doctor is asked the way this version accepts', ['doctor'] in calls and not any(c[:1] == ['doctor'] and len(c) > 1 for c in calls), calls)
+st = rs.status('youtube', runner=r)
+t('YouTube says what the doctor said as well', 'yt-dlp' in st['why'], st['why'])
+t('nothing is offered to the worker on the real answers', rs.offered(runner=r) == [], rs.offered(runner=r))
+e = raises(lambda: rs.assert_ready('facebook', runner=r), rs.Unavailable)
+t('a sweep stops before it starts, as facebook_unavailable with that reason', bool(e) and e.why == 'no_command', e)
+# a doctor answer in neither shape is still a named failure, never usable
+r2, _ = real(doctor='something else entirely\n', helptext='no usage here\n')
+st = rs.status('facebook', runner=r2)
+t('a doctor answer that cannot be read is "unreadable", never usable', st['usable'] is False and st['status'] == 'unreadable' and 'could not be read' in st['why'], st)
+# usable on the real shape needs both: the doctor's tick and a command to run
+r3, _ = real(doctor='  ✅ YouTube 视频和字幕 — ok\n')
+t('a tick from the doctor is not enough without a command to search with', rs.status('youtube', runner=r3)['usable'] is False and rs.status('youtube', runner=r3)['status'] == 'no_command')
+r4, _ = real(doctor='  ✅ YouTube 视频和字幕 — ok\n', helptext=REAL_HELP.replace('{setup,', '{youtube,setup,'))
+t('a tick and a command together are usable', rs.status('youtube', runner=r4)['usable'] is True, rs.status('youtube', runner=r4))
+said = []; ran = []
+t('signing in is refused in words when this agent-reach has no login command, before any question', rs.login('facebook', ask=lambda q: said.append('ASKED') or 'no', out=said.append, call=lambda c: ran.append(c) or 0, runner=r) is False and ran == [] and 'ASKED' not in said and 'no `login` command' in said[-1], said)
 
 print('\n%d passed, %d failed' % (passed, failed))
 sys.exit(1 if failed else 0)

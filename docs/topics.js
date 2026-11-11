@@ -108,6 +108,7 @@
     const clientOpts = useMemo(() => [{ id: 'cmm', name: 'Curious Minds (shared)' }].concat(clients().filter(c => c.id !== 'cmm').map(c => ({ id: c.id, name: c.short || c.name }))), []);
     const agents = ((data && data.agents) || []).filter(a => a.live);
     const xAgent = agents.some(a => (a.sources || []).indexOf('x') >= 0);
+    const xDown = !xAgent && agents.some(a => a.live && (a.down || []).indexOf('x') >= 0);   // a collector is connected and says X search does not work there
 
     const run = async (t) => {
       if (!t) return;
@@ -173,7 +174,7 @@
         <${Chip} on=${sifa.inbound} title="SIFA can push keywords and read results with its own bearer key">${sifa.inbound ? 'inbound key set' : 'inbound key not set'}</${Chip}>
         <${Chip} on=${!!mps.total} title="Sitting MPs and senators with the accounts Wikidata records">${mps.total ? fmtN(mps.total) + ' MPs, ' + fmtN(mps.withX) + ' on X' : 'no MP register'}</${Chip}>
         <${Chip} on=${!!(data && data.hansard)} title="OpenAustralia Hansard search">${data && data.hansard ? 'Hansard on' : 'Hansard off (OPENAUSTRALIA_KEY)'}</${Chip}>
-        <${Chip} on=${xAgent} title=${agents.length ? 'Collectors: ' + agents.map(a => a.agent).join(', ') : 'Run tools/reach-agent.py on your Mac for the MP X sweep'}>${xAgent ? 'X collector connected' : 'no X collector'}</${Chip}>
+        <${Chip} on=${xAgent} title=${xDown ? 'A collector is connected, but X search does not work on it (twitter-cli). On the Mac: uv tool upgrade twitter-cli' : agents.length ? 'Collectors: ' + agents.map(a => a.agent).join(', ') : 'Run tools/reach-agent.py on your Mac for the MP X sweep'}>${xAgent ? 'X collector connected' : xDown ? 'X search down on the collector' : 'no X collector'}</${Chip}>
         ${canWrite ? html`<span style=${{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           <button class="btn sm ghost" disabled=${busy.sync} onClick=${sync} title="Pull the keyword list from SIFA now">${busy.sync ? 'Syncing...' : 'Sync from SIFA'}</button>
           <button class="btn sm ghost" disabled=${busy.probe} onClick=${doProbe} title="Show what SIFA answers, raw">${busy.probe ? '...' : 'Probe'}</button>
@@ -231,7 +232,7 @@
             ${(res.jobs || []).length ? html`<div class="tp-jobs">${res.jobs.slice(0, 6).map(j => html`<span key=${j.id} class=${'tp-job ' + j.status} title=${j.id}>${j.source} ${j.status}${j.agent ? ' on ' + j.agent : ''} - ${ago(j.created)} ago</span>`)}</div>` : null}
             <div class="tp-tabs">${TABS.map(([id, label]) => html`<button key=${id} class=${'tp-tab' + (tab === id ? ' on' : '')} onClick=${() => setTab(id)}>${label}${id !== 'brief' ? html`<span class="n">${fmtN(counts[id] || 0)}</span>` : null}</button>`)}</div>
             ${tab === 'brief' ? html`<${Brief} doc=${res.brief} />`
-              : tab === 'x' ? (res.x.length ? res.x.map((it, i) => html`<${Item} key=${i} it=${it} showMp=${true} />`) : html`<div class="empty">${xAgent ? 'No posts yet. The X job runs on the Mac collector after a Run; check back in a minute.' : 'The MP account sweep needs the collector on your Mac: cd ~/Axiom && python3 tools/reach-agent.py --key $AXIOM_KEY'}</div>`)
+              : tab === 'x' ? (res.x.length ? [res.xNote ? html`<div key="note" class="empty" style=${{ textAlign: 'left' }}>${res.xNote}</div>` : null].concat(res.x.map((it, i) => html`<${Item} key=${i} it=${it} showMp=${true} />`)) : html`<div class="empty">${xAgent ? 'No posts yet. The X job runs on the Mac collector after a Run; check back in a minute.' : xDown ? 'X search is not working on the connected collector, so no X job is queued. On the Mac: uv tool upgrade twitter-cli, then python3 tools/reach-agent.py --channels. MPs\' own posts still arrive through the worker\'s timeline reader and appear here when they carry the keyword.' : 'The MP account sweep needs the collector on your Mac: cd ~/Axiom && python3 tools/reach-agent.py --key $AXIOM_KEY'}</div>`)
               : tab === 'reddit' ? (res.reddit.length ? res.reddit.map((it, i) => html`<${Item} key=${i} it=${it} />`) : html`<div class="empty">No Reddit threads on file for this keyword in the window.</div>`)
               : (res[tab] || []).length ? res[tab].map((it, i) => html`<${Item} key=${i} it=${it} showMp=${tab === 'hansard'} />`)
               : html`<div class="empty">${tab === 'hansard' && !(data && data.hansard) ? 'Hansard search is off. Set OPENAUSTRALIA_KEY on the worker (free key from openaustralia.org.au).' : 'Nothing on file in this window. Press Run.'}</div>`}

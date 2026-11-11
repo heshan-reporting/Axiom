@@ -280,7 +280,14 @@ Decision D7, as the owner asked on 11 November 2026: the Mac collector reads soc
 signed-in session. **Nothing is switched on by this release.** A platform collects only after a person signs in to it
 on the Mac, having read the warning. Platforms the owner has switched on so far: none recorded.
 
-**What agent-reach can do, and so what this layer can do.** Read from its documentation and channel source on
+**Corrected by the first live run (11 November 2026, the owner's Mac; s.3.1 below).** Agent Reach v1.5.0 as installed
+has no `facebook`, `instagram`, `youtube` or `login` command at all: its commands are `setup, install, configure,
+doctor, uninstall, skill, format, transcribe, check-update, watch, version`. It checks and installs other tools; it
+does not search. The table below is what was *read from documentation* and is **not true of the installed tool**.
+Until the owner chooses a backend that really answers, layer 2 for Facebook, Instagram and YouTube collects nothing,
+and `--channels` says so as `no_command`.
+
+**What agent-reach was expected to do.** Read from its documentation and channel source on
 11 November 2026 (`agent-reach <channel> <action>`, one line of JSON, `NEED_LOGIN` / `PLATFORM_BLOCKED` /
 `RATE_LIMITED` as named errors):
 
@@ -347,6 +354,57 @@ python3 tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out 
 
 Read `/tmp/yt.json`: every row should have an address, words and counts. If the counts are missing, the field names
 in `_ALIASES` need the ones agent-reach uses. Then Facebook and Instagram, each with `--login` first.
+(Superseded: with v1.5.0 the second line reports `no_command` for all three and the rest cannot run.)
+
+### 3.1 The first live run of the Mac collector (11 November 2026; build `2026-11-11.studio-p59`, page `?v=r45`)
+
+What the owner saw, what was wrong, what changed. Proven against real output: only the `agent-reach doctor` and
+`agent-reach --help` shapes (the owner's paste, kept in `tests/fixtures/den/agent-reach-*-1.5.0.txt`). Everything
+about X below is proven against stand-ins only.
+
+- **A. The agent kept claiming X jobs it could not run.** `x` stayed in the offer after `x_unavailable`, so sixteen
+  queued X jobs were claimed and failed one by one. Now (`tools/reach-agent.py`: `X_DOWN`, `x_check`, `x_usable`,
+  `offering`, `serve`): twitter-cli is asked once at the start (`twitter status`, never a search) and X is not offered
+  when its search cannot work; one job that learns it takes X out of the offer at once and says so once; every poll
+  tells the worker (`/bridge/next?...&down=x`); twitter-cli is asked again every ten minutes and X is offered again
+  when it works; `--sources x` does not override it; `--channels` prints "search is unavailable" with the command.
+  **Queued X jobs, decided:** they are failed in words, not kept. A topic's X job is a week-window search that the
+  next run of the topic queues again, so a stale one has no value. The worker does it: `POST /bridge/done` with
+  `x_unavailable` removes X from that collector's offer and fails every X job still waiting
+  (`bridgeExpire {source:'x', maxAgeMs:0}`) unless another live collector offers X; a new X job fails at once
+  (`jobTail`, no three-minute wait when a live collector says the platform is down); result
+  `{error:'no_collector', why:'x_unavailable', detail}` with the command first. `/bridge/status` agents carry `down`.
+- **A, the wider hole.** `no_collector` was only ever decided when someone tailed the job. `bridgeExpire(env, {})`
+  now runs every tick: a job queued thirty minutes (`BRIDGE_STALE_MS`) with no live collector offering its source is
+  failed `no_collector`. The morning plan (`who='plan'`) keeps its own twelve-hour rule.
+- **B. The message was cut before the remedy.** `X_REMEDY` then `X_CAUSE` in `tools/reach-x.py`: what to do is
+  inside the first 300 characters; the report carries 1,100 and the console line 1,200 (the worker's line limit).
+- **C. Why the keywords came round twice.** Not a retry. Every topic run (`topicsCron`: the two stalest active topics
+  a window) queued one X job whatever was connected, and nothing ever removed an unserved one, so the queue held one
+  X job per keyword per run. Now `topicRun` queues an X job only when a live collector offers X, at most one waiting
+  job a topic (`already waiting`), and otherwise says once why not (`out.xSkipped`). **The stand-in:** the worker's
+  keyless timeline reader (`xSyndSweep`) already files MPs' own posts; `topicMpPosts()` finds those that carry every
+  word of the keyword (rows with `meta.mp` only) and `topicResults` returns them under `x` marked `held: true` with
+  an `xNote`. Nothing new is fetched; it is their own posts only - no replies, no search. A trade-off to know: a
+  topic researched while the Mac is asleep gets no X search that day (before, the job waited for the Mac).
+- **D. Upstream.** Checked on PyPI from the sandbox: twitter-cli 0.8.5 (17 March 2026) is the newest release; its
+  header generator is the package `xclienttransaction` (newest 1.0.3, 26 June 2026). **Both newest releases still
+  contain the unguarded `.search(...).group(1)`** (`x_client_transaction/utils.py` lines 59 and 61), and 1.0.2 is the
+  release that changed how the page is read. So `uv tool upgrade twitter-cli` can only help if the Mac is behind
+  those; if it is already on them there is no released fix. twitter-cli's GitHub repository could not be read from
+  the sandbox, so nothing is known here about unreleased fixes.
+- **E. agent-reach reported every channel as "unknown".** The parser looked for a JSON line or English status words;
+  the real answer is marked text in Chinese (U+2705 usable, `[!]` needs configuration or sign-in, `[X]` not
+  installed, plus one sentence listing the channels still to unlock), and `doctor --text` is not accepted.
+  `doctor_marks()` reads that; `commands()` reads the subcommands from `agent-reach --help`; a channel with no
+  command is `no_command` (never usable, whatever the doctor ticks); an answer in neither shape is `unreadable`;
+  `login()` stops before any question when there is no `login` command. On the real output all three channels are
+  `no_command` and nothing is offered. **The search and read commands in `CHANNELS` do not exist in v1.5.0.**
+  Not built, because it is the owner's decision (D7 names agent-reach as the backend): reading YouTube search through
+  `yt-dlp` directly, which is what agent-reach's own YouTube channel installs.
+
+Harnesses: `tests/reach-agent-test.py` (26, new), `tests/reach-channels-test.py` (80), `tests/den-reach-worker.mjs`
+(9), `tests/topics-worker.mjs` (4, new).
 
 ## 4. Release 4 - subscriber news, newsletters and monitoring exports (build `2026-11-11.studio-p56`, page `?v=r43`)
 
@@ -649,6 +707,20 @@ python3 tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out 
 python3 tools/reach-agent.py --key $AXIOM_KEY --install-launchd                                  # keeps the collector connected
 ```
 
+**After the first live run (s.3.1), in this order:**
+
+```
+git pull                                                  # the collector's fixes are in tools/
+uv tool upgrade twitter-cli                               # may not fix X search: see s.3.1 D
+uv pip list --python ~/.local/share/uv/tools/twitter-cli/bin/python | grep -i -E "twitter|xclient"   # which versions the Mac has
+python3 -m pip install playwright && python3 -m playwright install chromium                           # for render and subscriber reads
+python3 tools/reach-agent.py --channels                   # X: "usable" or "search is unavailable"; the three social channels: no_command
+python3 tools/reach-agent.py --key $AXIOM_KEY             # after the worker is deployed (tools/deploy-worker.sh)
+```
+
+The `--login youtube|facebook|instagram` lines above cannot work with Agent Reach v1.5.0 (no such commands) and now
+stop with that sentence.
+
 **Subscriber outlets.** In Sources, open the outlet, choose how it is read, write what covers reading it for
 monitoring, press Record. Then on the Mac:
 
@@ -677,7 +749,12 @@ against her own report for the same day. That comparison is the acceptance test 
 | The 28 seed source addresses | No egress | The first sweep in Sources |
 | The Meta permissions and limits (thirty hashtags a week, Business Discovery, Page Public Content Access) | Meta's documentation was unreachable from the sandbox; written as recalled | `/meta/status?probe=1` once a permission is granted |
 | The Supermetrics public-data field ids | The licence refused both reads | `tools/den-pull-plan.py` and one real answer, once licensed |
-| Every layer 2 channel against its live site, above all which fields carry the counts | No platform was contacted and nothing was signed in to | `reach_social.py <channel> --dry-run --out` on the Mac |
+| Every layer 2 channel against its live site, above all which fields carry the counts | No platform was contacted and nothing was signed in to; **and agent-reach v1.5.0 has no command for any of them (s.3.1 E)**, so there is nothing to run until a backend is chosen | The owner's decision on a backend; then `reach_social.py <channel> --dry-run --out` on the Mac |
+| **Verified against real output (11 November 2026):** the shape of `agent-reach doctor` and `agent-reach --help` for v1.5.0 | The owner's paste, kept as fixtures | `tests/reach-channels-test.py`; a newer agent-reach needs a new paste |
+| Whether `uv tool upgrade twitter-cli` repairs X search | Only the Mac can show it; the newest releases still carry the flaw | `python3 tools/reach-agent.py --channels` after the upgrade |
+| The agent's stop-and-recheck for X on the real twitter-cli (the "Failed to init ClientTransaction" line on stderr of `twitter status`) | A stand-in answers in the tests | Run the agent: one line "not offering X" at the start, no X job claimed; `/bridge/status` shows `down: ["x"]` |
+| The worker's side on the live queue: the X jobs already waiting are failed as `no_collector` within a tick | No live worker is contacted | After deploy, the Signals console or `GET /bridge/status` (queued falls) |
+| MPs' own posts appearing under a topic from the timeline reader | The embed service was never reached from the sandbox | Topics, a keyword an MP has posted on, the X tab's note |
 | Every subscriber read: the sign-in, the page shape, the wall detection | No publisher was contacted | `--login news:<id>`, then Read on one article and the job log |
 | Recall against her reports | Her reports stay outside the repository and the worker is not contacted | `tools/den-backtest.py ... --save` |
 | Pasting the copied brief into a real Google Doc | No Google Doc is written from here | Copy for the document, paste, look |

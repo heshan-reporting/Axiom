@@ -156,7 +156,7 @@ verifies each, and what was asked for and not built.
     a live collector offers (no model call, never gated); `xSyndSweep` reads the registers' X accounts.
   - **Comment text on Facebook and Instagram is collected by no layer**, and a Facebook page's own timeline only by
     the official route. `DEN.md` s.3 says what was assumed and what agent-reach actually offers.
-  - Harnesses: `tests/reach-channels-test.py` (62), `tests/den-reach-worker.mjs` (7).
+  - Harnesses: `tests/reach-channels-test.py` (62, now 80), `tests/den-reach-worker.mjs` (7, now 9).
 - **Release 4, subscriber news (build `2026-11-11.studio-p56`, page `?v=r43`). Decision D8, 11 November 2026, at the
   owner's request: a paid source may be read through a subscription the agency holds, signed in by a person on the
   Mac, and only after someone has recorded on that source what covers reading it for monitoring. Sources cleared so
@@ -279,6 +279,36 @@ verifies each, and what was asked for and not built.
     recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
+
+- **The first live run of the Mac collector (build `2026-11-11.studio-p59`, page `?v=r45`; `DEN.md` s.3.1).**
+  - **Agent Reach v1.5.0 has no `facebook`, `instagram`, `youtube` or `login` command** (its commands: setup, install,
+    configure, doctor, uninstall, skill, format, transcribe, check-update, watch, version). The release 3 command form
+    was read from documentation and does not exist in the installed tool, so layer 2 collects nothing for those three
+    until the owner chooses a backend. `reach_social.py` reads the real `agent-reach doctor` text (`doctor_marks()`:
+    U+2705 usable, `[!]` needs configuration, `[X]` not installed, and the sentence listing channels still to unlock;
+    `doctor --text` is not a command) and the real `--help` (`commands()`); a channel with no command is
+    `no_command`, an answer in neither shape `unreadable`, never usable; `login()` stops before any question. The
+    owner's paste is the fixture (`tests/fixtures/den/agent-reach-*-1.5.0.txt`) and the only real agent-reach answer
+    anything is tested against.
+  - **X search that does not work.** `tools/reach-x.py`: `X_REMEDY` (what to try: `uv tool upgrade twitter-cli`, then
+    `--channels`) comes before `X_CAUSE`, inside the first 300 characters. `tools/reach-agent.py`: `x_check()` at the
+    start and every ten minutes while down (`X_RECHECK`; one `twitter status`, never a search), `X_DOWN`,
+    `offering()`, `serve()` (the loop, drivable by a test); after `XUnavailable` X leaves the offer at once, said
+    once, and every poll carries `&down=x`. Upstream, checked on PyPI: twitter-cli 0.8.5 and xclienttransaction 1.0.3
+    are the newest and both still carry the unguarded `.group(1)`, so the upgrade is not promised to work.
+  - **Worker.** `agentBeat(env, agent, sources, down)` and `agentsSeen` carry `down`; `noCollector(source, agents)`
+    writes the reason (`why: 'x_unavailable'` with `X_DOWN_REMEDY` when a live collector says X is down);
+    `bridgeExpire(env, {source, maxAgeMs})` fails queued jobs nobody can serve - every tick after
+    `BRIDGE_STALE_MS` (30 minutes; the morning plan keeps its twelve hours), and at once for X when
+    `/bridge/done` reports `x_unavailable` (unless another live collector offers X); `jobTail` skips the
+    three-minute wait when a live collector reports the platform down.
+  - **Topics.** `topicRun` queues an X job only when a live collector offers X and none for that topic is still
+    waiting; otherwise it says once why (`xSkipped`). The keywords "came round twice" because every run queued one
+    and nothing removed an unserved one. `topicMpPosts()` is the stand-in for the MP accounts: posts already held
+    with `meta.mp` (the keyless timeline reader) that carry the keyword, returned by `topicResults` under `x` with
+    `held: true` and `xNote`. Nothing new is fetched.
+  - Harnesses: `tests/reach-agent-test.py` (26), `tests/reach-channels-test.py` (80), `tests/den-reach-worker.mjs`
+    (9), `tests/topics-worker.mjs` (4).
 
 ## The research agent
 

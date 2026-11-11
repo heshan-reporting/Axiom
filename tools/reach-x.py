@@ -38,15 +38,27 @@ PLATFORM = 'x'
 # it on `status`, so a broken generator looks exactly like a bad query: the
 # session authenticates, `twitter status` prints the account, and every search
 # returns a bare 404 with no message.
-TRANSACTION_HINT = (
-    '. X requires an x-client-transaction-id header on search and ignores it on status, '
-    'which is why the session authenticates and every search still 404s. twitter-cli builds '
-    'that header by scraping x.com, and its generator failed to start '
-    '(x_client_transaction/utils.py calls .search(...).group(1) without checking for a match, '
-    'so X changing the page raises "NoneType has no attribute group"). '
-    'No local flag or reinstall fixes it - the tool needs an upstream patch. '
-    'Until there is one, X search is unavailable; the paid X API and the Apify actor both still work.'
+# What a person can do about it comes first, the cause second: the first live run (11 November 2026) cut this message
+# at 400 characters, which was all cause and no remedy. Checked on PyPI that day: twitter-cli 0.8.5 (March 2026) is the
+# newest release and takes its header generator from the package xclienttransaction, whose newest release is 1.0.3
+# (June 2026); both still carry the unguarded .search(...).group(1). So the upgrade is worth trying only because this
+# machine may be behind those releases - it is not promised to work. twitter-cli's repository could not be read from
+# the build sandbox, so nothing is said here about unreleased fixes.
+X_REMEDY = (
+    'To try on this Mac: `uv tool upgrade twitter-cli` (with pipx: `pipx upgrade twitter-cli`), then '
+    '`python3 tools/reach-agent.py --channels` - X reads "usable" when search works. The upgrade helps only if this '
+    'machine is behind twitter-cli 0.8.5 / xclienttransaction 1.0.3 (the newest on 11 November 2026, and they may not '
+    'fix it); otherwise it waits on an upstream fix. The agent stops offering X and rechecks every ten minutes. '
+    'Meanwhile the worker still reads MP and registered account timelines itself.'
 )
+X_CAUSE = (
+    'Why: X requires an x-client-transaction-id header on search and ignores it on status, so the session signs in '
+    'and every search still 404s. twitter-cli builds that header by scraping x.com and its generator failed to start '
+    '(x_client_transaction/utils.py calls .search(...).group(1) without checking for a match; twitter-cli logs '
+    '"Failed to init ClientTransaction" and carries on).'
+)
+X_UNAVAILABLE = 'X search is unavailable on this machine. ' + X_REMEDY + ' ' + X_CAUSE
+TRANSACTION_HINT = '. ' + X_REMEDY + ' ' + X_CAUSE
 NOT_FOUND_HINT = (
     '. X answered 404. If `twitter status` works but every search 404s, it is the '
     'client-transaction generator rather than the query - run this again and read the '
@@ -70,7 +82,7 @@ class XUnavailable(RuntimeError):
 def assert_searchable():
     """Raise before a sweep that would return nothing and look successful."""
     if transaction_generator_broken():
-        raise XUnavailable('X search is unavailable' + TRANSACTION_HINT)
+        raise XUnavailable(X_UNAVAILABLE)
 
 
 def run_twitter(args, timeout=90):
@@ -280,7 +292,7 @@ def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1
             # Conditions that will not change between keywords: stop, rather
             # than log the same failure once per keyword and return nothing.
             if 'logged-in' in str(e) or 'not installed' in str(e): raise
-            if 'x-client-transaction-id' in str(e): raise XUnavailable(str(e))
+            if 'x-client-transaction-id' in str(e): raise XUnavailable(X_UNAVAILABLE)
             if 'rate-limiting' in str(e): break
         time.sleep(pace)
     posts = list(seen.values())
