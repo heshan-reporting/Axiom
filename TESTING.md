@@ -2,7 +2,7 @@
 
 This page is for the people running the team's test round of the AXIOM Creative Studio, and for the testers themselves. It
 says how the release goes live, who can do what, where to test, what to try, what costs money, what is known not to work yet,
-and how to report a problem. Release candidate: worker build `2026-11-05.studio-p52`, page release `?v=r39`. The findings and
+and how to report a problem. Release candidate: worker build `2026-11-11.studio-p53`, page release `?v=r40`. The findings and
 the evidence behind it are in `CREATIVE-STUDIO.md` s.54 to s.58 (s.56 the p46 audit fixed, s.57 the p47 audit fixed, s.58 the UI
 debt closed); the round's
 cases for people are Part B of `prompts/studio-rc-team-test.md`. Build ids carry the date the build was made; p46 and p47 were

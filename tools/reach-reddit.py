@@ -51,14 +51,17 @@ ISSUES = [
     ('ftc', re.compile(r'fuel tax credits?|fuel tax|diesel (fuel )?rebate|fuel excise|excise credit|hands off our fuel|\bhoof\b|off-?road diesel|diesel (tax|price|cost|subsid)|fuel (levy|subsid)', re.I)),
     ('cm', re.compile(r'critical minerals?|rare earths?|gallium|antimony|\blithium\b|\bnickel\b|\bcobalt\b|graphite|vanadium|\btungsten\b|strategic reserve|minerals? (strategy|processing|refinery|reserve|facility)|downstream processing|\blynas\b|\biluka\b|arafura|pilgangoora', re.I)),
     ('mining', re.compile(r'\bmining\b|\bminers?\b|minerals council|iron ore|coal (mine|mining|export|industry|seam)|royalt(y|ies)|resources (sector|industry|policy|tax|minister|company|state)|\bbhp\b|rio tinto|fortescue|glencore|whitehaven|yancoal|\bpilbara\b|bowen basin|hunter valley (coal|mine)|super ?profits tax|minerals? tax|mine (approval|closure|rehabilitation|site|worker)|same job,? same pay|nature positive|\bepbc\b|uranium|\bfifo\b|smelter|alumina|refinery closure', re.I)),
-    ('gas', re.compile(r'\bgas\b|\blng\b|gas (supply|reservation|shortfall|market|price|field|project|export|import|ban|connection|network|plant)|domestic gas|east coast gas|\bsantos\b|woodside|beach energy|\bshell\b|petroleum|offshore (gas|drilling|exploration)|north ?west shelf|scarborough|barossa|narrabri|beetaloo|browse basin|\baemo\b|gas-?fired|fracking|coal seam gas|\bcsg\b', re.I)),
-    ('energy', re.compile(r'energy (policy|prices?|bills?|transition|security|market|minister|crisis|rebate)|electricity (price|bill|market|grid|supply)|power (bills?|prices?|grid|station|outage)|net zero|renewables?|\bsolar\b|wind farm|offshore wind|nuclear (power|energy|plant|reactor|option)|coal-?fired|transmission (line|project)|capacity investment|safeguard mechanism|emissions? (target|reduction|trading|cut)|climate (policy|target|bill|wars)|eraring|yallourn|loy yang|batteries? (rollout|scheme)|home battery', re.I)),
+    ('gas', re.compile(r'\bgas\b|\blng\b|gas (supply|reservation|shortfall|market|price|field|project|export|import|ban|connection|network|plant)|domestic gas|east coast gas|\bsantos\b|woodside|beach energy|\bshell\b|petroleum|offshore (gas|drilling|exploration)|north ?west shelf|scarborough (gas|project|field|lng)|barossa (gas|project|field|pipeline)|narrabri|beetaloo|browse basin|\baemo\b|gas-?fired|fracking|coal seam gas|\bcsg\b', re.I)),
+    ('gastax', re.compile(r'windfall (profits? )?tax|super-?profits? tax[^.]{0,140}\b(gas|lng|petroleum|oil)\b|\b(gas|lng|petroleum)\b[^.]{0,140}super-?profits? tax|gas (exports? )?tax|export tax on (gas|lng)|\bprrt\b(?![^.]{0,60}(therap|treatment|lutetium|tumou?r|neuroendocrine))|petroleum resource rent|tax(ing|es)? (the |on )?(gas|lng)\b|gastax|taxthegas|stopgreed|\b(gas|lng) (giants?|companies|exporters?|producers?|industry|sector)[^.]{0,80}(fair share|pay (no|zero|little|more) tax|royalt)|fair share[^.]{0,80}\b(gas|lng)\b|gas (royalt(y|ies)|profits?)', re.I)),
+    ('gasprojects', re.compile(r'scott reef|browse (basin|project|gas|development|proposal|joint venture)|burrup|murujuga|golden beach (gas|energy|project|storage)|bass strait (gas|oil|reserves?|platforms?|decommission\w*)|otway (basin|gas|offshore|drilling)|scarborough (gas|project|field|lng)|pluto (lng|train)|north ?west shelf|barossa (gas|project|field|pipeline)|narrabri|beetaloo|\bnopsema\b|stopwoodside|savescottreef|seismic (blasting|testing|survey)|woodside|\bsantos\b|beach energy|amplitude energy|cooper energy|\binpex\b|offshore (gas|drilling|exploration|petroleum)|gas (projects?|fields?|hubs?|pipelines?|terminals?|exploration|expansion|developments?|basins?|storage)|new gas\b|fracking|coal seam gas|\bcsg\b|gas import terminal|carbon capture', re.I)),
+    ('electrify', re.compile(r'electrif(y|ies|ied|ication)|heat pumps?|induction (cooktops?|cooking|stoves?)|gas (appliances?|heaters?|heating|cooktops?|stoves?|hot water|network|connections?|disconnection|abolishment|substitution|ban|phase-?out)|household gas|\boff gas\b|gas-?free|phas(e|es|ed|ing) out gas|all-?electric|rewiring australia|environment victoria|smart energy council', re.I)),
+    ('energy', re.compile(r'energy (policy|prices?|bills?|transition|security|market|minister|crisis|rebate)|electricity (price|bill|market|grid|supply)|power (bills?|prices?|grid|station|outage)|net zero|renewables?|\bsolar\b|wind farm|offshore wind|nuclear (power|energy|plant|reactor|option)|coal-?fired|transmission (line|project)|capacity investment|safeguard mechanism|emissions? (target|reduction|trading|cut)|climate (policy|target|bill|wars)|eraring|yallourn|loy yang|batteries? (rollout|scheme)|home battery|\bcop ?3[01]\b|un climate (summit|conference|talks)|fossil fuel (exports?|expansion|phase-?out|projects?)|data cent(re|er)s?[^.]{0,100}\b(gas|energy|electricity|power|grid|emissions)\b|\b(gas|energy|electricity|power|grid)\b[^.]{0,100}data cent(re|er)s?|vni west|transmission (lines|towers?)', re.I)),
     ('vicelection', re.compile(r'victorian? (state )?election|victoria(n)? (government|premier|parliament|labor|liberals?|nationals|budget|opposition|treasurer|minister|debt|taxes?)|spring street|allan government|jacinta allan|brad battin|daniel andrews|premier of victoria|state election 2026|\bvic\b (politics|labor|libs|budget)|state of victoria|upper house region|preference deal', re.I)),
-    ('regional', re.compile(r'regional victoria|country victoria|regional (rail|road|health|hospital|service|town|jobs|communit|victorians?)|\bgippsland\b|\bmallee\b|\bwimmera\b|ballarat|bendigo|shepparton|mildura|wangaratta|warrnambool|latrobe valley|wodonga|horsham|v ?/ ?line|country roads?|native timber|duck (hunting|season)|\bfarmers?\b|agricultur|\bdrought\b|\bvff\b|dairy (farm|industry|price)|irrigat|murray[- ]darling|ambulance ramping|\bcfa\b|country fire|regional (uni|tafe)|freight rail', re.I)),
+    ('regional', re.compile(r'regional victoria|country victoria|regional (rail|road|health|hospital|service|town|jobs|communit|victorians?)|\bgippsland\b|\bmallee\b|\bwimmera\b|ballarat|bendigo|shepparton|mildura|wangaratta|warrnambool|latrobe valley|wodonga|horsham|v ?\/ ?line|country roads?|native timber|duck (hunting|season)|\bfarmers?\b|agricultur|\bdrought\b|\bvff\b|dairy (farm|industry|price)|irrigat|murray[- ]darling|ambulance ramping|\bcfa\b|country fire|regional (uni|tafe)|freight rail', re.I)),
     ('housing', re.compile(r'\bhousing\b|home ?buyers?|first home|\brents?\b|\brental\b|planning (reform|law|scheme|minister|approval|system)|build-?to-?rent|negative gearing|capital gains (tax )?discount|property (market|prices|council|developer|investor)|apartments?|\bmortgages?\b|housing (accord|target|australia future fund)|social housing|affordable housing|stamp duty|developer contributions|\bnimby\b|granny flat|rezoning|density|homelessness|construction of homes', re.I)),
     ('construction', re.compile(r'construction (industry|sector|union|cost|worker|site|company|firm|jobs)|\bcfmeu\b|building (industry|code|approvals|commission|sector|costs?|company|site)|tradies?|master builders|industrial relations|enterprise agreement|same job,? same pay|wage theft|right of entry|apprentic|subcontractor|builder (collapse|insolvenc)|insolvenc|infrastructure (project|spend|pipeline|cost)|big build|cost overrun|\bcbus\b|\bawu\b|\betu\b|labour shortage|building materials?', re.I)),
     ('pharmacy', re.compile(r'pharmac(y|ies|ist|ists|eutical)|\bchemist\b|chemist warehouse|\bpbs\b|pharmaceutical benefits|60-?day dispensing|dispensing (fee|error|incentive)|scope of practice|prescription (cost|price|charge|fee)|co-?payment|medicine (shortage|price|cost)|vaccination (at|in) pharmac|pharmacy (owner|ownership|location rules|agreement)|community pharmacy agreement|\b[78]cpa\b|opioid dependence|repeat prescription|\bgp\b (visit|shortage|bulk billing)|bulk billing|urgent care clinic', re.I)),
-    ('firearms', re.compile(r'firearms?|\bguns? (laws?|owners?|ownership|control|lobby|buy-?backs?|registry|register|licen[cs]es?|shops?|clubs?|amnesty|reform)|(gun|firearms?|weapons?) buy-?backs?|national firearms agreement|shooters (union|party)|sporting shooters|\bssaa\b|shooting industry|\bsifa\b|ammunition|\brifles?\b|shotguns?|semi-?automatic|pistol clubs?|shooting (clubs?|ranges?|sports?)|gun control australia|licensed (firearm|gun) owners?', re.I)),
+    ('firearms', re.compile(r'firearms?|\bguns? (laws?|owners?|ownership|control|lobby|buy-?backs?|registry|register|licen[cs]es?|shops?|clubs?|amnesty|reform)|(gun|firearms?|weapons?) buy-?backs?|national firearms agreement|shooters (union|party)|sporting shooters|\bssaa\b|shooting industry|\bsifa\b|ammunition|\brifles?\b|shotguns?|semi-?automatic|pistol clubs?|shooting (clubs?|ranges?|sports?)|gun control australia|licensed (firearm|gun) owners?|alannah (and|&) madeline|shooters,? fishers|ownership caps?|junior (shooting|shooters?)|legislated theft|\bgun (theft|storage|safes?|violence|crime)|illegal (guns|firearms)|3d-?printed (guns?|firearms?)', re.I)),
     ('hunting', re.compile(r'(recreational|deer|duck|pig|game|bow|spotlight|sambar) hunting|hunting (licen[cs]es?|permits?|season|ban|clubs?|trips?|rights)|duck (season|shooting)|deer (cull|culling|stalking|management)|feral (deer|pigs?|cats?|foxes|goats|horses|animals?)|pest animals?|\bbrumb(y|ies)\b|aerial (cull|culling|shooting)|game council|1080 bait', re.I)),
     ('col', re.compile(r'cost[- ]of[- ]living|inflation|interest rates?|\brba\b|reserve bank|rate (rise|cut|hold|hike)|cash rate|grocer(y|ies)|supermarkets?|\bcoles\b|woolworths|\bwages?\b|household budget|petrol price|\bcpi\b|price gouging|bill relief|insurance premium|childcare (cost|fee)', re.I)),
     ('econ', re.compile(r'\beconomy\b|economic (growth|outlook|data|policy|reform)|\bgdp\b|recession|unemployment|jobless|productivity|\bbudget\b|deficit|surplus|treasury|tax (reform|cuts?|hike|policy|system|break)|income tax|company tax|\bgst\b|superannuation|super (tax|cap|change)|tariffs?|trade (war|deal)|\basx\b|australian dollar|cost base|business (confidence|investment)', re.I)),
@@ -67,27 +70,47 @@ ISSUES = [
 ]
 # Which client owns each issue, and the keywords searched across Reddit for it -
 # both mirrored from the worker's CLIENT_ISSUES (ns and q).
-ISSUE_NS = {'ftc': 'mca', 'cm': 'mca', 'mining': 'mca', 'gas': 'aep', 'energy': 'aep',
-            'vicelection': 'vicnats', 'regional': 'vicnats', 'housing': 'pca', 'construction': 'mba',
-            'pharmacy': 'pharm', 'firearms': 'guns', 'hunting': 'guns', 'col': 'cmm', 'econ': 'cmm', 'gov': 'cmm', 'activism': 'cmm'}
+ISSUE_NS = {
+    'ftc': 'mca',
+    'cm': 'mca',
+    'mining': 'mca',
+    'gas': 'aep',
+    'gastax': 'aep',
+    'gasprojects': 'aep',
+    'electrify': 'aep',
+    'energy': 'aep',
+    'vicelection': 'vicnats',
+    'regional': 'vicnats',
+    'housing': 'pca',
+    'construction': 'mba',
+    'pharmacy': 'pharm',
+    'firearms': 'guns',
+    'hunting': 'guns',
+    'col': 'cmm',
+    'econ': 'cmm',
+    'gov': 'cmm',
+    'activism': 'cmm',
+}
 ISSUE_Q = {
     'ftc': ['fuel tax credit', 'diesel rebate', 'fuel excise', 'hands off our fuel'],
     'cm': ['critical minerals', 'rare earths', 'lithium mine', 'nickel industry', 'critical minerals strategic reserve'],
     'mining': ['mining royalties', 'iron ore', 'coal mine approval', 'minerals council', 'nature positive laws', 'same job same pay mining'],
-    'gas': ['gas reservation', 'gas prices', 'north west shelf', 'offshore gas project', 'gas shortfall', 'fracking beetaloo'],
-    'energy': ['electricity prices', 'energy transition', 'nuclear power australia', 'renewable energy target', 'power bills', 'safeguard mechanism'],
+    'gas': ['gas reservation', 'gas prices', 'north west shelf', 'offshore gas project', 'gas shortfall', 'fracking beetaloo', 'domestic gas reservation bill'],
+    'gastax': ['gas export tax', 'windfall tax gas australia', 'tax the gas', 'PRRT gas tax', 'gas tax australia institute', 'gas companies fair share australia'],
+    'gasprojects': ['scott reef', 'save scott reef', 'woodside browse', 'burrup hub', 'golden beach gas', 'bass strait gas', 'otway basin drilling'],
+    'electrify': ['gas ban victoria', 'electrify everything australia', 'phase out gas australia', 'rewiring australia', 'gas connections ban'],
+    'energy': ['electricity prices', 'energy transition', 'nuclear power australia', 'renewable energy target', 'power bills', 'safeguard mechanism', 'cop31 australia', 'data centres gas demand australia'],
     'vicelection': ['victorian election', 'jacinta allan', 'victorian budget', 'victorian government', 'victorian nationals'],
     'regional': ['regional victoria', 'gippsland', 'v/line regional rail', 'victorian farmers', 'native timber logging', 'duck hunting victoria'],
     'housing': ['housing crisis', 'housing supply', 'negative gearing', 'planning reform', 'build to rent', 'rental crisis'],
     'construction': ['cfmeu', 'construction costs', 'building approvals', 'tradies shortage', 'construction insolvency', 'master builders'],
     'pharmacy': ['pharmacy guild', '60 day dispensing', 'pharmacist prescribing', 'chemist warehouse', 'pbs co-payment', 'bulk billing'],
-    'firearms': ['gun laws australia', 'gun buyback australia', 'nsw gun buyback', 'shooters union', 'national firearms agreement', 'firearms registry australia'],
+    'firearms': ['gun laws australia', 'gun buyback australia', 'nsw gun buyback', 'shooters union', 'national firearms agreement', 'firearms registry australia', 'firearm ownership cap', 'gun control australia', 'shooters fishers and farmers'],
     'hunting': ['recreational hunting australia', 'feral deer cull', 'duck hunting victoria', 'brumby cull', 'feral cats australia'],
     'col': ['cost of living', 'interest rates', 'grocery prices', 'energy bill relief'],
     'econ': ['tax reform', 'productivity commission', 'federal budget', 'unemployment rate'],
     'gov': ['newspoll', 'federal election', 'question time', 'political donations'],
-    'activism': ['rising tide protest', 'market forces campaign', 'lock the gate', 'climate protest australia',
-                 'environmental defenders office', 'coal port blockade'],
+    'activism': ['rising tide protest', 'market forces campaign', 'lock the gate', 'climate protest australia', 'environmental defenders office', 'coal port blockade'],
 }
 
 
@@ -141,7 +164,7 @@ AU_RX = re.compile(
     # brands and mastheads
     r'|woolworths|\bwoolies\b|\bcoles\b|bunnings|\bqantas\b|\btelstra\b|\boptus\b|\bwestpac\b|commbank|commonwealth bank|\bafr\b|abc\.net\.au|abc news australia|sydney morning herald|news\.com\.au|sky news australia|the australian\b|guardian australia|newspoll|crikey|9news\.com\.au|7news\.com\.au'
     # our clients and their opponents, by their own names
-    r'|minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\bepbc\b|same job,? same pay|chemist warehouse|v/line|shooters union|sporting shooters association|\bssaa\b|shooting industry foundation|national firearms agreement|gun control australia|\bbrumb(y|ies)\b'
+    r'|minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\bepbc\b|same job,? same pay|chemist warehouse|v/line|shooters union|sporting shooters association|\bssaa\b|shooting industry foundation|national firearms agreement|gun control australia|\bbrumb(y|ies)\b|scott reef|burrup|murujuga|bass strait|otway basin|browse basin|woodside (energy|petroleum|shareholders?|ceo)|\bnopsema\b|petroleum resource rent|domestic gas reservation|alannah (and|&) madeline|shooters,? fishers|gun control australia|environment victoria'
     # the vernacular
     r'|\bservo\b|\barvo\b|\bmaccas\b|\bbogan\b|\btradies?\b|\butes?\b|fair dinkum', re.I)
 AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|geelong|goldcoast|wollongong)', re.I)
@@ -150,7 +173,7 @@ AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelai
 # English elsewhere, and AU_RX contains those very terms, so folding the query
 # into the checked text passed every American hit. A query vouches for a thread
 # only when the query itself names Australia.
-AU_QUERY_RX = re.compile(r'austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v/line|duck hunting|shooters union|national firearms agreement|brumby', re.I)
+AU_QUERY_RX = re.compile(r'austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v/line|duck hunting|shooters union|national firearms agreement|brumby|scott reef|burrup|bass strait|otway basin|browse basin|alannah', re.I)
 
 
 def au_relevant(sub, text, watched=(), q=''):

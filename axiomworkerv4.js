@@ -1938,7 +1938,7 @@ const AU_RX = new RegExp([
   // brands and mastheads
   'woolworths|\\bwoolies\\b|\\bcoles\\b|bunnings|\\bqantas\\b|\\btelstra\\b|\\boptus\\b|\\bwestpac\\b|commbank|commonwealth bank|\\bafr\\b|abc\\.net\\.au|abc news australia|sydney morning herald|news\\.com\\.au|sky news australia|the australian\\b|guardian australia|newspoll|crikey|9news\\.com\\.au|7news\\.com\\.au',
   // our clients and their opponents, by their own names
-  'minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\\bepbc\\b|same job,? same pay|chemist warehouse|v/line|shooters union|sporting shooters association|\\bssaa\\b|shooting industry foundation|national firearms agreement|gun control australia|\\bbrumb(y|ies)\\b',
+  'minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\\bepbc\\b|same job,? same pay|chemist warehouse|v/line|shooters union|sporting shooters association|\\bssaa\\b|shooting industry foundation|national firearms agreement|gun control australia|\\bbrumb(y|ies)\\b|scott reef|burrup|murujuga|bass strait|otway basin|browse basin|woodside (energy|petroleum|shareholders?|ceo)|\\bnopsema\\b|petroleum resource rent|domestic gas reservation|alannah (and|&) madeline|shooters,? fishers|gun control australia|environment victoria',
   // the vernacular
   '\\bservo\\b|\\barvo\\b|\\bmaccas\\b|\\bbogan\\b|\\btradies?\\b|\\butes?\\b|fair dinkum',
 ].join('|'), 'i');
@@ -1948,7 +1948,7 @@ const AU_SUB_RX = /^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|can
 // English elsewhere, and AU_RX contains those very terms, so folding the query
 // into the checked text passed every American hit. A query vouches for a thread
 // only when the query itself names Australia.
-const AU_QUERY_RX = /austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v\/line|duck hunting|shooters union|national firearms agreement|brumby/i;
+const AU_QUERY_RX = /austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v\/line|duck hunting|shooters union|national firearms agreement|brumby|scott reef|burrup|bass strait|otway basin|browse basin|alannah/i;
 /** Is this thread about Australia? Watched sub, Australian-looking sub, a marker
  *  in its own text, or a search term that itself names Australia. */
 function auRelevant(sub, text, q) {
@@ -4525,6 +4525,35 @@ const SOURCE_SEED_EXT = [
   ['newscomau_fin', 'news.com.au Finance', 'national', 'au', 'col,econ', { r: 'https://www.news.com.au/content-feeds/latest-news-finance/', s: 'news.com.au/finance' }],
   ['dailymailau', 'Daily Mail Australia', 'national', 'au', '', { r: 'https://www.dailymail.co.uk/auhome/index.rss', s: 'dailymail.co.uk/auhome' }],
   ['capitalbrief', 'Capital Brief', 'national', 'au', 'gov,econ', { s: 'capitalbrief.com' }],
+  // -- outlets, campaign sites and official sources the activist reports cite (addresses unverified until a sweep proves them) --
+  ['thepoint', 'The Point', 'independent', 'au', 'gastax,gas,energy,activism', { s: 'thepoint.com.au', h: 'https://thepoint.com.au/' }],
+  ['nationaltribune', 'The National Tribune', 'wire', 'au', 'gov', { s: 'nationaltribune.com.au', h: 'https://www.nationaltribune.com.au/' }],
+  ['yahoonews_au', 'Yahoo News Australia', 'national', 'au', '', { s: 'au.news.yahoo.com' }],
+  ['echo_nr', 'The Echo', 'regional', 'nsw', 'activism', { r: 'https://www.echo.net.au/feed/', w: 'https://www.echo.net.au', s: 'echo.net.au' }],
+  ['citynews_cbr', 'Canberra CityNews', 'regional', 'act', 'gov', { r: 'https://citynews.com.au/feed/', w: 'https://citynews.com.au', s: 'citynews.com.au' }],
+  ['region_au', 'Region', 'regional', 'act', 'gov', { s: 'region.com.au', h: 'https://region.com.au/' }],
+  ['regionriverina', 'Region Riverina', 'regional', 'nsw', 'firearms,hunting', { s: 'regionriverina.com.au' }],
+  ['aboutregional', 'About Regional', 'regional', 'nsw', '', { s: 'aboutregional.com.au' }],
+  ['qnews', 'QNews', 'independent', 'qld', '', { s: 'qnews.com.au' }],
+  ['tasmaniancountry', 'Tasmanian Country', 'regional', 'tas', 'firearms,hunting', { s: 'tasmaniancountry.com' }],
+  ['pulsetasmania', 'Pulse Tasmania', 'regional', 'tas', 'firearms', { s: 'pulsetasmania.com.au' }],
+  ['theenergy', 'The Energy', 'sector', 'au', 'energy,gas,electrify', { s: 'theenergy.co', h: 'https://theenergy.co/' }],
+  ['energymatters', 'Energy Matters', 'sector', 'au', 'energy,electrify', { s: 'energymatters.com.au' }],
+  ['foe_melb', 'Friends of the Earth Melbourne', 'thinktank', 'vic', 'activism,electrify,gasprojects', { s: 'melbournefoe.org.au', h: 'https://www.melbournefoe.org.au/news' }],
+  ['wilderness', 'The Wilderness Society', 'thinktank', 'au', 'activism,gasprojects', { s: 'wilderness.org.au', h: 'https://www.wilderness.org.au/news-events' }],
+  ['ccwa', 'Conservation Council of WA', 'thinktank', 'wa', 'activism,gasprojects', { s: 'ccwa.org.au', h: 'https://www.ccwa.org.au/media' }],
+  ['rewiring', 'Rewiring Australia', 'thinktank', 'au', 'electrify,energy', { s: 'rewiringaustralia.org', h: 'https://www.rewiringaustralia.org/media' }],
+  ['smartenergy', 'Smart Energy Council', 'sector', 'au', 'electrify,energy', { s: 'smartenergy.org.au' }],
+  ['a350', '350 Australia', 'thinktank', 'au', 'activism,gastax', { s: '350.org.au', h: 'https://350.org.au/press-release/' }],
+  ['amcs', 'Australian Marine Conservation Society', 'thinktank', 'au', 'activism,gasprojects', { s: 'marineconservation.org.au', h: 'https://www.marineconservation.org.au/news/' }],
+  ['gca_site', 'Gun Control Australia', 'thinktank', 'au', 'firearms', { s: 'guncontrolaustralia.org', h: 'https://www.guncontrolaustralia.org/' }],
+  ['amf_site', 'Alannah & Madeline Foundation', 'thinktank', 'au', 'firearms', { s: 'amf.org.au', h: 'https://www.amf.org.au/news-events/latest-news' }],
+  ['shootersunion_site', 'Shooters Union Australia', 'sector', 'au', 'firearms,hunting', { s: 'shootersunion.com.au', h: 'https://shootersunion.com.au/news/' }],
+  ['aph_senate_committees', 'Senate committees', 'official', 'au', 'gov,gas,gastax,firearms', { h: 'https://www.aph.gov.au/Parliamentary_Business/Committees/Senate', g: 'site:aph.gov.au Senate committee inquiry gas OR firearms OR "fuel tax"' }],
+  ['nopsema', 'NOPSEMA', 'official', 'au', 'gasprojects,gas', { s: 'nopsema.gov.au', h: 'https://www.nopsema.gov.au/news-and-media' }],
+  ['wa_epa', 'EPA Western Australia', 'official', 'wa', 'gasprojects', { s: 'epa.wa.gov.au', h: 'https://www.epa.wa.gov.au/media-statements' }],
+  ['vic_energy_minister', 'Victorian Minister for Energy', 'official', 'vic', 'electrify,energy,gas', { g: 'site:premier.vic.gov.au energy OR gas OR electrification' }],
+  ['nsw_parl_inquiries', 'NSW Parliament inquiries', 'official', 'nsw', 'firearms', { g: 'site:parliament.nsw.gov.au inquiry firearms OR buyback' }],
   ['geelongadv', 'Geelong Advertiser', 'regional', 'vic', 'regional', { r: 'https://www.geelongadvertiser.com.au/rss', s: 'geelongadvertiser.com.au' }],
   ['weeklytimes', 'The Weekly Times', 'regional', 'vic', 'regional', { r: 'https://www.weeklytimesnow.com.au/rss', s: 'weeklytimesnow.com.au' }],
   ['goldcoastbulletin', 'Gold Coast Bulletin', 'regional', 'qld', '', { r: 'https://www.goldcoastbulletin.com.au/rss', s: 'goldcoastbulletin.com.au' }],
@@ -4579,8 +4608,8 @@ const SOURCE_SEED_EXT = [
   ['parlinfo_pressrel', 'ParlInfo press releases', 'official', 'au', 'gov', { h: 'https://parlinfo.aph.gov.au/parlInfo/search/summary/summary.w3p;orderBy=date-eLast;query=Dataset%3Apressrel', g: 'site:parlinfo.aph.gov.au' }],
   ['treasury', 'Treasury', 'official', 'au', 'econ', { r: 'https://treasury.gov.au/rss.xml', h: 'https://treasury.gov.au/media-releases', s: 'treasury.gov.au' }],
   ['treasurer', 'Treasurer and Treasury ministers', 'official', 'au', 'econ,col', { r: 'https://ministers.treasury.gov.au/rss.xml', h: 'https://ministers.treasury.gov.au/media-releases', s: 'ministers.treasury.gov.au' }],
-  ['min_resources', 'Minister for Resources', 'official', 'au', 'mining,cm,gas', { h: 'https://www.minister.industry.gov.au/', s: 'minister.industry.gov.au' }],
-  ['min_energy', 'Minister for Climate Change and Energy', 'official', 'au', 'energy,gas', { h: 'https://minister.dcceew.gov.au/', s: 'minister.dcceew.gov.au' }],
+  ['min_resources', 'Minister for Resources', 'official', 'au', 'mining,cm,gas,gasprojects,gastax', { h: 'https://www.minister.industry.gov.au/', s: 'minister.industry.gov.au' }],
+  ['min_energy', 'Minister for Climate Change and Energy', 'official', 'au', 'energy,gas,electrify', { h: 'https://minister.dcceew.gov.au/', s: 'minister.dcceew.gov.au' }],
   ['min_health', 'Health ministers', 'official', 'au', 'pharmacy', { h: 'https://www.health.gov.au/ministers', g: 'site:health.gov.au/ministers' }],
   ['min_ir', 'Minister for Employment and Workplace Relations', 'official', 'au', 'construction', { h: 'https://ministers.dewr.gov.au/', s: 'ministers.dewr.gov.au' }],
   ['min_infrastructure', 'Infrastructure and Housing ministers', 'official', 'au', 'housing,construction', { h: 'https://minister.infrastructure.gov.au/', s: 'minister.infrastructure.gov.au' }],
@@ -4598,7 +4627,7 @@ const SOURCE_SEED_EXT = [
   ['fwc', 'Fair Work Commission', 'official', 'au', 'construction', { s: 'fwc.gov.au' }],
   ['fwo', 'Fair Work Ombudsman', 'official', 'au', 'construction', { h: 'https://www.fairwork.gov.au/newsroom/media-releases', s: 'fairwork.gov.au' }],
   ['aemo', 'AEMO', 'official', 'au', 'energy,gas', { h: 'https://aemo.com.au/newsroom', s: 'aemo.com.au' }],
-  ['aer', 'Australian Energy Regulator', 'official', 'au', 'energy', { s: 'aer.gov.au' }],
+  ['aer', 'Australian Energy Regulator', 'official', 'au', 'energy,gas', { s: 'aer.gov.au' }],
   ['cer', 'Clean Energy Regulator', 'official', 'au', 'energy', { s: 'cleanenergyregulator.gov.au' }],
   ['dcceew', 'DCCEEW', 'official', 'au', 'energy', { r: 'https://www.dcceew.gov.au/about/news/rss.xml', s: 'dcceew.gov.au' }],
   ['tga', 'Therapeutic Goods Administration', 'official', 'au', 'pharmacy', { s: 'tga.gov.au' }],
@@ -6306,6 +6335,11 @@ const ENTITY_SEED = [
   ['grn', 'party', 'Australian Greens', 'the Greens|Australian Greens|Greens party|Greens senator|Greens MP', 'grn', 'Crossbench', 'neutral', ''],
   ['on', 'party', 'One Nation', 'One Nation|PHON', 'on', 'Crossbench', 'neutral', ''],
   ['teal', 'party', 'Teal independents', 'teals|teal independents|teal MPs|Climate 200 independents|community independents', 'ind', 'Crossbench', 'neutral', ''],
+  ['vicgreens', 'party', 'Victorian Greens', 'Victorian Greens|Greens Victoria|Vic Greens', 'grn', 'Victorian crossbench', 'neutral', ''],
+  ['wagreens', 'party', 'WA Greens', 'WA Greens|Greens WA|Greens (WA)|Western Australian Greens', 'grn', 'WA crossbench', 'neutral', ''],
+  ['sff', 'party', 'Shooters, Fishers and Farmers Party', 'Shooters, Fishers and Farmers|Shooters Fishers and Farmers|Shooters Fishers Farmers|SFF Party', 'sff', 'NSW crossbench', 'neutral', 'guns'],
+  ['ajp', 'party', 'Animal Justice Party', 'Animal Justice Party', 'ajp', 'Minor party', 'neutral', ''],
+  ['libertarians', 'party', 'Libertarian Party', 'Libertarian Party|Libertarians NSW|the Libertarians', 'lbt', 'Minor party', 'neutral', ''],
   ['vicnats', 'party', 'The Nationals Victoria', 'Victorian Nationals|Nationals Victoria|Vic Nats|Victorian National Party', 'nat', 'Victorian opposition (Coalition)', 'client', 'vicnats'],
   ['viclib', 'party', 'Liberal Victoria', 'Victorian Liberals|Vic Libs|Victorian Liberal Party|Victorian opposition', 'lib', 'Victorian opposition', 'neutral', ''],
   ['viclabor', 'party', 'Victorian Labor', 'Victorian Labor|Allan government|Victorian government|Andrews government', 'alp', 'Victorian government', 'neutral', ''],
@@ -6335,7 +6369,25 @@ const ENTITY_SEED = [
   ['ruston', 'person', 'Anne Ruston', 'Anne Ruston|Senator Ruston', 'lib', 'Shadow Health', 'neutral', ''],
   ['katter', 'person', 'Bob Katter', 'Bob Katter|Katter', 'ind', 'Member for Kennedy', 'neutral', ''],
   ['lambie', 'person', 'Jacqui Lambie', 'Jacqui Lambie|Lambie', 'ind', 'Senator for Tasmania', 'neutral', ''],
-  ['pocock', 'person', 'David Pocock', 'David Pocock|Pocock|Senator Pocock', 'ind', 'Senator for the ACT', 'neutral', ''],
+  // two senators share the surname, in different parties: neither answers to it alone
+  ['pocock', 'person', 'David Pocock', 'David Pocock|Senator David Pocock', 'ind', 'Senator for the ACT', 'neutral', ''],
+  ['bpocock', 'person', 'Barbara Pocock', 'Barbara Pocock|Senator Barbara Pocock', 'grn', 'Greens senator for South Australia', 'neutral', ''],
+  ['hansonyoung', 'person', 'Sarah Hanson-Young', 'Sarah Hanson-Young|Hanson-Young|Senator Hanson-Young', 'grn', 'Greens senator for South Australia', 'neutral', ''],
+  // the Greens and crossbench voices the activist reports cite on gas, tax and firearms
+  ['shoebridge', 'person', 'David Shoebridge', 'David Shoebridge|Shoebridge|Senator Shoebridge', 'grn', 'Greens senator for New South Wales', 'neutral', ''],
+  ['hodginsmay', 'person', 'Steph Hodgins-May', 'Steph Hodgins-May|Hodgins-May|Senator Hodgins-May', 'grn', 'Greens senator for Victoria', 'neutral', ''],
+  ['mckim', 'person', 'Nick McKim', 'Nick McKim|McKim|Senator McKim', 'grn', 'Greens senator for Tasmania', 'neutral', ''],
+  ['steelejohn', 'person', 'Jordon Steele-John', 'Jordon Steele-John|Steele-John', 'grn', 'Greens senator for Western Australia', 'neutral', ''],
+  ['mryan', 'person', 'Monique Ryan', 'Monique Ryan', 'ind', 'Member for Kooyong', 'neutral', ''],
+  ['scamps', 'person', 'Sophie Scamps', 'Sophie Scamps', 'ind', 'Member for Mackellar', 'neutral', ''],
+  ['haines', 'person', 'Helen Haines', 'Helen Haines', 'ind', 'Member for Indi', 'neutral', ''],
+  ['mckenzie', 'person', 'Bridget McKenzie', 'Bridget McKenzie|Senator McKenzie', 'nat', 'Nationals senator for Victoria', 'neutral', ''],
+  ['canavan', 'person', 'Matt Canavan', 'Matt Canavan|Canavan|Senator Canavan', 'nat', 'Nationals senator for Queensland', 'neutral', ''],
+  ['sandell', 'person', 'Ellen Sandell', 'Ellen Sandell', 'grn', 'Leader of the Victorian Greens', 'neutral', ''],
+  ['sloane', 'person', 'Kellie Sloane', 'Kellie Sloane', 'lib', 'NSW Opposition Leader', 'neutral', ''],
+  ['catley', 'person', 'Yasmin Catley', 'Yasmin Catley', 'alp', 'NSW Minister for Police', 'neutral', ''],
+  ['donato', 'person', 'Philip Donato', 'Philip Donato', 'ind', 'NSW Member for Orange', 'neutral', ''],
+  ['rbutler', 'person', 'Roy Butler', 'Roy Butler', 'ind', 'NSW Member for Barwon', 'neutral', ''],
   // premiers, chief ministers, state leaders
   ['minns', 'person', 'Chris Minns', 'Minns|Premier Minns|the NSW Premier', 'alp', 'Premier of New South Wales', 'neutral', ''],
   ['allan', 'person', 'Jacinta Allan', 'Jacinta Allan|Premier Allan|the Victorian Premier', 'alp', 'Premier of Victoria', 'neutral', ''],
@@ -6369,6 +6421,14 @@ const ENTITY_SEED = [
   ['greenpeace', 'org', 'Greenpeace Australia Pacific', 'Greenpeace', '', 'Environment group', 'opponent', ''],
   ['getup', 'org', 'GetUp', 'GetUp', '', 'Campaign organisation', 'opponent', ''],
   ['tai', 'org', 'The Australia Institute', 'Australia Institute', '', 'Progressive think tank', 'opponent', ''],
+  ['envvic', 'org', 'Environment Victoria', 'Environment Victoria', '', 'Victorian environment group', 'opponent', 'aep'],
+  ['foe', 'org', 'Friends of the Earth', 'Friends of the Earth|FoE Melbourne', '', 'Environment group', 'opponent', 'aep'],
+  ['wilderness', 'org', 'The Wilderness Society', 'Wilderness Society', '', 'Environment group', 'opponent', ''],
+  ['ccwa', 'org', 'Conservation Council of WA', 'Conservation Council of WA|Conservation Council of Western Australia|CCWA', '', 'WA environment group', 'opponent', 'aep'],
+  ['amcs', 'org', 'Australian Marine Conservation Society', 'Australian Marine Conservation Society|AMCS', '', 'Marine conservation group', 'opponent', 'aep'],
+  ['rewiring', 'org', 'Rewiring Australia', 'Rewiring Australia', '', 'Electrification advocates', 'opponent', 'aep'],
+  ['sec', 'org', 'Smart Energy Council', 'Smart Energy Council', '', 'Renewables industry body', 'opponent', 'aep'],
+  ['climateintegrity', 'org', 'Climate Integrity', 'Climate Integrity', '', 'Climate advocacy', 'opponent', 'aep'],
   ['edo', 'org', 'Environmental Defenders Office', 'Environmental Defenders Office|EDO', '', 'Environmental law centre', 'opponent', ''],
   ['extinctionrebellion', 'org', 'Extinction Rebellion', 'Extinction Rebellion', '', 'Protest group', 'opponent', ''],
   ['blockade', 'org', 'Blockade Australia', 'Blockade Australia', '', 'Protest group', 'opponent', ''],
@@ -6383,6 +6443,11 @@ const ENTITY_SEED = [
   ['aemo', 'org', 'AEMO', 'AEMO|Australian Energy Market Operator', '', 'Energy market operator', 'neutral', ''],
   ['woodside', 'org', 'Woodside', 'Woodside|Woodside Energy', '', 'Gas producer', 'neutral', 'aep'],
   ['santos', 'org', 'Santos', 'Santos', '', 'Gas producer', 'neutral', 'aep'],
+  ['beach', 'org', 'Beach Energy', 'Beach Energy', '', 'Gas producer', 'neutral', 'aep'],
+  ['amplitude', 'org', 'Amplitude Energy', 'Amplitude Energy|Cooper Energy', '', 'Gas producer', 'neutral', 'aep'],
+  ['origin', 'org', 'Origin Energy', 'Origin Energy', '', 'Energy retailer and gas producer', 'neutral', 'aep'],
+  ['eca', 'org', 'Energy Consumers Australia', 'Energy Consumers Australia', '', 'Consumer body', 'neutral', ''],
+  ['nopsema_org', 'org', 'NOPSEMA', 'NOPSEMA|the offshore regulator', '', 'Offshore petroleum regulator', 'neutral', 'aep'],
   ['bhp', 'org', 'BHP', 'BHP', '', 'Miner', 'neutral', 'mca'],
   ['riotinto', 'org', 'Rio Tinto', 'Rio Tinto', '', 'Miner', 'neutral', 'mca'],
   ['fortescue', 'org', 'Fortescue', 'Fortescue|FMG|Andrew Forrest|Twiggy Forrest', '', 'Miner', 'neutral', 'mca'],
@@ -6401,6 +6466,10 @@ const ENTITY_SEED = [
   ['t_immig', 'topic', 'Immigration', 'immigration|migration intake|net overseas migration|migrant intake', '', 'Policy debate', 'neutral', ''],
   ['t_cost', 'topic', 'Cost of living', 'cost of living|cost-of-living', '', 'Public mood', 'neutral', ''],
   ['t_rates', 'topic', 'Interest rates', 'interest rate|rate cut|rate rise|rate hike|cash rate', '', 'Public mood', 'neutral', ''],
+  ['t_gastax', 'topic', 'Gas export and windfall taxes', 'gas export tax|tax on gas exports|windfall tax on gas|gas windfall tax|super-profits tax on gas|PRRT|petroleum resource rent tax', '', 'Client fight', 'client', 'aep'],
+  ['t_gasres', 'topic', 'Gas reservation', 'gas reservation|domestic gas reservation|gas reservation scheme|domestic gas reserve', '', 'Client fight', 'client', 'aep'],
+  ['t_scottreef', 'topic', 'Scott Reef and Browse', 'Scott Reef|Browse Basin|Browse project', '', 'Project campaign', 'client', 'aep'],
+  ['t_cop31', 'topic', 'COP31', 'COP31|COP 31', '', 'Climate summit', 'neutral', 'aep'],
   ['t_ducks', 'topic', 'Duck hunting', 'duck hunting|duck season|duck shooting', '', 'Victorian debate', 'client', 'vicnats'],
   ['t_vline', 'topic', 'Regional rail', 'V/Line|regional rail|country trains', '', 'Victorian debate', 'client', 'vicnats'],
   // firearms clients (SIFA, Shooters Union), their opponents and the debate
@@ -6408,6 +6477,10 @@ const ENTITY_SEED = [
   ['shooters_union', 'org', 'Shooters Union Australia', 'Shooters Union', '', 'Firearms owners lobby', 'client', 'guns'],
   ['ssaa', 'org', 'Sporting Shooters Association of Australia', 'Sporting Shooters Association|SSAA', '', 'Firearms owners association', 'neutral', 'guns'],
   ['gca', 'org', 'Gun Control Australia', 'Gun Control Australia', '', 'Gun control advocates', 'opponent', 'guns'],
+  ['amf', 'org', 'Alannah & Madeline Foundation', 'Alannah and Madeline Foundation|Alannah & Madeline Foundation|Alannah and Madeline', '', 'Gun control advocates', 'opponent', 'guns'],
+  ['shootingaus', 'org', 'Shooting Australia', 'Shooting Australia', '', 'Sport shooting body', 'neutral', 'guns'],
+  ['nswfarmers', 'org', 'NSW Farmers', 'NSW Farmers', '', 'Farm lobby', 'neutral', ''],
+  ['t_owncaps', 'topic', 'Firearm ownership caps', 'ownership cap|firearm ownership cap|firearms ownership cap|gun ownership limit|firearm ownership limit|cap on firearms', '', 'Firearms debate', 'client', 'guns'],
   ['t_buyback', 'topic', 'Gun buyback', 'gun buyback|firearms buyback|firearm buyback', '', 'Firearms debate', 'client', 'guns'],
   ['t_gunlaws', 'topic', 'Gun laws', 'gun law|firearms law|firearm law|gun reform|firearms reform|National Firearms Agreement|firearms registry', '', 'Firearms debate', 'client', 'guns'],
 ];
@@ -6484,7 +6557,16 @@ async function entityMatcher(env) {
   const m = {
     entities: list,
     byId: Object.fromEntries(list.map(e => [e.id, e])),
-    match: text => { const t = String(text || '').replace(/[\u2018\u2019]/g, "'"); const out = []; for (const e of list) if (e.rx.test(t)) out.push(e.id); return out; },
+    /* The longest name wins: "Hanson" inside "Hanson-Young" is not Pauline Hanson, and "the Greens" inside a longer name that
+     * is its own entity is not the federal party. An entity is dropped only when EVERY place it matched lies inside a longer
+     * match of another entity; a second mention on its own keeps it. */
+    match: text => {
+      const t = String(text || '').replace(/[\u2018\u2019]/g, "'"); const hit = [];
+      for (const e of list) if (e.rx.test(t)) hit.push(e);
+      if (hit.length < 2) return hit.map(e => e.id);
+      const spans = hit.map(e => { const g = new RegExp(e.rx.source, 'gi'); const out = []; let m; while ((m = g.exec(t)) && out.length < 40) { out.push([m.index, m.index + m[0].length]); if (!m[0].length) g.lastIndex++; } return out; });
+      return hit.filter((e, i) => !spans[i].length || !spans[i].every(a => spans.some((o, j) => j !== i && o.some(b => b[0] <= a[0] && b[1] >= a[1] && (b[1] - b[0]) > (a[1] - a[0]))))).map(e => e.id);
+    },
   };
   ENTITY_CACHE = { at: Date.now(), m };
   return m;
@@ -7501,7 +7583,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-05.studio-p52';
+const AXIOM_BUILD = '2026-11-11.studio-p53';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -14824,12 +14906,28 @@ const CLIENT_ISSUES = [
     q: ['mining royalties', 'iron ore', 'coal mine approval', 'minerals council', 'nature positive laws', 'same job same pay mining'] },
   { ns: 'aep', client: 'Australian Energy Producers', id: 'gas', label: 'Gas supply and reservation',
     rx: /gas (supply|reservation|shortfall|market|price)|domestic gas|\blng\b/i,
-    wide: /\bgas\b|\blng\b|gas (supply|reservation|shortfall|market|price|field|project|export|import|ban|connection|network|plant)|domestic gas|east coast gas|\bsantos\b|woodside|beach energy|\bshell\b|petroleum|offshore (gas|drilling|exploration)|north ?west shelf|scarborough|barossa|narrabri|beetaloo|browse basin|\baemo\b|gas-?fired|fracking|coal seam gas|\bcsg\b/i,
-    q: ['gas reservation', 'gas prices', 'north west shelf', 'offshore gas project', 'gas shortfall', 'fracking beetaloo'] },
+    wide: /\bgas\b|\blng\b|gas (supply|reservation|shortfall|market|price|field|project|export|import|ban|connection|network|plant)|domestic gas|east coast gas|\bsantos\b|woodside|beach energy|\bshell\b|petroleum|offshore (gas|drilling|exploration)|north ?west shelf|scarborough (gas|project|field|lng)|barossa (gas|project|field|pipeline)|narrabri|beetaloo|browse basin|\baemo\b|gas-?fired|fracking|coal seam gas|\bcsg\b/i,
+    q: ['gas reservation', 'gas prices', 'north west shelf', 'offshore gas project', 'gas shortfall', 'fracking beetaloo', 'domestic gas reservation bill'] },
+  // Gas taxation is the campaign the activist reports lead with. It is an issue of its own so it has its own baseline, its own
+  // trigger and its own search terms. "gas tax" alone is a petrol tax in the United States and "windfall tax" is British as
+  // often as not: the trigger wants the Australian forms, or a windfall or super-profits tax beside gas with no North Sea in
+  // the sentence. PRRT is also a cancer therapy, so it never counts beside the words of one.
+  { ns: 'aep', client: 'Australian Energy Producers', id: 'gastax', label: 'Gas taxation',
+    rx: /gas exports? tax|export tax on (gas|lng)|\bprrt\b(?![^.]{0,60}(therap|treatment|lutetium|tumou?r|neuroendocrine))|petroleum resource rent tax|gas ?tax ?now|gastax\b|taxthegas\b|tax the gas\b|(windfall|super-?profits?) (profits? )?tax(es|ation)?(?![^.]{0,140}(north sea|\buk\b|britain|british))[^.]{0,140}\b(gas|lng|petroleum|woodside|santos)\b|\b(gas|lng)\b((?!north sea|\buk\b|britain|british)[^.]){0,140}(windfall|super-?profits?) (profits? )?tax/i,
+    wide: /windfall (profits? )?tax|super-?profits? tax[^.]{0,140}\b(gas|lng|petroleum|oil)\b|\b(gas|lng|petroleum)\b[^.]{0,140}super-?profits? tax|gas (exports? )?tax|export tax on (gas|lng)|\bprrt\b(?![^.]{0,60}(therap|treatment|lutetium|tumou?r|neuroendocrine))|petroleum resource rent|tax(ing|es)? (the |on )?(gas|lng)\b|gastax|taxthegas|stopgreed|\b(gas|lng) (giants?|companies|exporters?|producers?|industry|sector)[^.]{0,80}(fair share|pay (no|zero|little|more) tax|royalt)|fair share[^.]{0,80}\b(gas|lng)\b|gas (royalt(y|ies)|profits?)/i,
+    q: ['gas export tax', 'windfall tax gas australia', 'tax the gas', 'PRRT gas tax', 'gas tax australia institute', 'gas companies fair share australia'] },
+  { ns: 'aep', client: 'Australian Energy Producers', id: 'gasprojects', label: 'Gas projects and approvals',
+    rx: /scott reef|browse (basin|project|gas|development|proposal|joint venture)|burrup hub|golden beach (gas|energy|project|storage)|bass strait (gas|oil|reserves?|platforms?|decommission\w*)|otway (basin|gas|offshore|drilling)|scarborough (gas|project|field|lng)|pluto (lng|train)|north ?west shelf (extension|approval|project)|barossa (gas|project|field|pipeline)|narrabri gas|beetaloo|nopsema (approv\w*|accept\w*|decision|rejects?)|stopwoodside|savescottreef|seismic (blasting|testing|survey)/i,
+    wide: /scott reef|browse (basin|project|gas|development|proposal|joint venture)|burrup|murujuga|golden beach (gas|energy|project|storage)|bass strait (gas|oil|reserves?|platforms?|decommission\w*)|otway (basin|gas|offshore|drilling)|scarborough (gas|project|field|lng)|pluto (lng|train)|north ?west shelf|barossa (gas|project|field|pipeline)|narrabri|beetaloo|\bnopsema\b|stopwoodside|savescottreef|seismic (blasting|testing|survey)|woodside|\bsantos\b|beach energy|amplitude energy|cooper energy|\binpex\b|offshore (gas|drilling|exploration|petroleum)|gas (projects?|fields?|hubs?|pipelines?|terminals?|exploration|expansion|developments?|basins?|storage)|new gas\b|fracking|coal seam gas|\bcsg\b|gas import terminal|carbon capture/i,
+    q: ['scott reef', 'save scott reef', 'woodside browse', 'burrup hub', 'golden beach gas', 'bass strait gas', 'otway basin drilling'] },
+  { ns: 'aep', client: 'Australian Energy Producers', id: 'electrify', label: 'Electrification and the gas phase-out',
+    rx: /(ban(s|ned|ning)?|phas(e|es|ed|ing) out) (on |of )?(new )?gas (connections?|appliances?|heaters?|cooktops?|stoves?|hot water|in (new )?homes)|gas (connections?|appliances?) ban|phase-?out of gas|phas(e|ing) out gas|gas phase-?out|electrify everything|electrification (of|plan|roadmap|target|push|campaign)|gas substitution roadmap|get(ting)? off gas|all-?electric (homes?|buildings?|suburbs?)|rewiring australia|electrifyvictoria/i,
+    wide: /electrif(y|ies|ied|ication)|heat pumps?|induction (cooktops?|cooking|stoves?)|gas (appliances?|heaters?|heating|cooktops?|stoves?|hot water|network|connections?|disconnection|abolishment|substitution|ban|phase-?out)|household gas|\boff gas\b|gas-?free|phas(e|es|ed|ing) out gas|all-?electric|rewiring australia|environment victoria|smart energy council/i,
+    q: ['gas ban victoria', 'electrify everything australia', 'phase out gas australia', 'rewiring australia', 'gas connections ban'] },
   { ns: 'aep', client: 'Australian Energy Producers', id: 'energy', label: 'Energy and climate policy',
-    rx: /energy (policy|prices|bills|transition|security)|electricity price|power bill/i,
-    wide: /energy (policy|prices?|bills?|transition|security|market|minister|crisis|rebate)|electricity (price|bill|market|grid|supply)|power (bills?|prices?|grid|station|outage)|net zero|renewables?|\bsolar\b|wind farm|offshore wind|nuclear (power|energy|plant|reactor|option)|coal-?fired|transmission (line|project)|capacity investment|safeguard mechanism|emissions? (target|reduction|trading|cut)|climate (policy|target|bill|wars)|eraring|yallourn|loy yang|batteries? (rollout|scheme)|home battery/i,
-    q: ['electricity prices', 'energy transition', 'nuclear power australia', 'renewable energy target', 'power bills', 'safeguard mechanism'] },
+    rx: /energy (policy|prices|bills|transition|security)|electricity price|power bill|\bcop ?31\b|fossil fuel exports?|data cent(re|er)s?[^.]{0,80}(gas|power|energy|electricity) (demand|use|supply|consumption)/i,
+    wide: /energy (policy|prices?|bills?|transition|security|market|minister|crisis|rebate)|electricity (price|bill|market|grid|supply)|power (bills?|prices?|grid|station|outage)|net zero|renewables?|\bsolar\b|wind farm|offshore wind|nuclear (power|energy|plant|reactor|option)|coal-?fired|transmission (line|project)|capacity investment|safeguard mechanism|emissions? (target|reduction|trading|cut)|climate (policy|target|bill|wars)|eraring|yallourn|loy yang|batteries? (rollout|scheme)|home battery|\bcop ?3[01]\b|un climate (summit|conference|talks)|fossil fuel (exports?|expansion|phase-?out|projects?)|data cent(re|er)s?[^.]{0,100}\b(gas|energy|electricity|power|grid|emissions)\b|\b(gas|energy|electricity|power|grid)\b[^.]{0,100}data cent(re|er)s?|vni west|transmission (lines|towers?)/i,
+    q: ['electricity prices', 'energy transition', 'nuclear power australia', 'renewable energy target', 'power bills', 'safeguard mechanism', 'cop31 australia', 'data centres gas demand australia'] },
   { ns: 'vicnats', client: 'The Nationals Victoria', id: 'vicelection', label: 'Victorian election',
     rx: /victorian? (state )?election|victorian (government|premier|parliament)|spring street/i,
     wide: /victorian? (state )?election|victoria(n)? (government|premier|parliament|labor|liberals?|nationals|budget|opposition|treasurer|minister|debt|taxes?)|spring street|allan government|jacinta allan|brad battin|daniel andrews|premier of victoria|state election 2026|\bvic\b (politics|labor|libs|budget)|state of victoria|upper house region|preference deal/i,
@@ -14851,9 +14949,9 @@ const CLIENT_ISSUES = [
     wide: /pharmac(y|ies|ist|ists|eutical)|\bchemist\b|chemist warehouse|\bpbs\b|pharmaceutical benefits|60-?day dispensing|dispensing (fee|error|incentive)|scope of practice|prescription (cost|price|charge|fee)|co-?payment|medicine (shortage|price|cost)|vaccination (at|in) pharmac|pharmacy (owner|ownership|location rules|agreement)|community pharmacy agreement|\b[78]cpa\b|opioid dependence|repeat prescription|\bgp\b (visit|shortage|bulk billing)|bulk billing|urgent care clinic/i,
     q: ['pharmacy guild', '60 day dispensing', 'pharmacist prescribing', 'chemist warehouse', 'pbs co-payment', 'bulk billing'] },
   { ns: 'guns', client: 'Firearms clients (SIFA, Shooters Union)', id: 'firearms', label: 'Firearms laws and buyback',
-    rx: /gun (laws?|reform|control|buy-?back|registry|register|ban|amnesty)|firearms? (laws?|act|reform|registry|register|amnesty|licen[cs]es?|ban|buy-?back)|national firearms agreement|semi-?automatic (ban|rifles?|weapons?)|shooters union/i,
-    wide: /firearms?|\bguns? (laws?|owners?|ownership|control|lobby|buy-?backs?|registry|register|licen[cs]es?|shops?|clubs?|amnesty|reform)|(gun|firearms?|weapons?) buy-?backs?|national firearms agreement|shooters (union|party)|sporting shooters|\bssaa\b|shooting industry|\bsifa\b|ammunition|\brifles?\b|shotguns?|semi-?automatic|pistol clubs?|shooting (clubs?|ranges?|sports?)|gun control australia|licensed (firearm|gun) owners?/i,
-    q: ['gun laws australia', 'gun buyback australia', 'nsw gun buyback', 'shooters union', 'national firearms agreement', 'firearms registry australia'] },
+    rx: /gun (laws?|reform|control|buy-?back|registry|register|ban|amnesty)|firearms? (laws?|act|reform|registry|register|amnesty|licen[cs]es?|ban|buy-?back)|national firearms agreement|semi-?automatic (ban|rifles?|weapons?)|shooters union|(firearms?|gun) ownership (caps?|limits?)|ownership caps? on (firearms?|guns)|caps? on (firearms?|gun) (ownership|numbers)|gun control australia|alannah (and|&) madeline/i,
+    wide: /firearms?|\bguns? (laws?|owners?|ownership|control|lobby|buy-?backs?|registry|register|licen[cs]es?|shops?|clubs?|amnesty|reform)|(gun|firearms?|weapons?) buy-?backs?|national firearms agreement|shooters (union|party)|sporting shooters|\bssaa\b|shooting industry|\bsifa\b|ammunition|\brifles?\b|shotguns?|semi-?automatic|pistol clubs?|shooting (clubs?|ranges?|sports?)|gun control australia|licensed (firearm|gun) owners?|alannah (and|&) madeline|shooters,? fishers|ownership caps?|junior (shooting|shooters?)|legislated theft|\bgun (theft|storage|safes?|violence|crime)|illegal (guns|firearms)|3d-?printed (guns?|firearms?)/i,
+    q: ['gun laws australia', 'gun buyback australia', 'nsw gun buyback', 'shooters union', 'national firearms agreement', 'firearms registry australia', 'firearm ownership cap', 'gun control australia', 'shooters fishers and farmers'] },
   { ns: 'guns', client: 'Firearms clients (SIFA, Shooters Union)', id: 'hunting', label: 'Hunting and pest control',
     rx: /recreational hunting|hunting (ban|licen[cs]e|permit|season)|duck (hunting|season)|(deer|pig|fox|cat|goat|brumby) (cull|culling)|feral (deer|pigs?|cats?|foxes|goats|animals?) (cull|control|plague|problem)/i,
     wide: /(recreational|deer|duck|pig|game|bow|spotlight|sambar) hunting|hunting (licen[cs]es?|permits?|season|ban|clubs?|trips?|rights)|duck (season|shooting)|deer (cull|culling|stalking|management)|feral (deer|pigs?|cats?|foxes|goats|horses|animals?)|pest animals?|\bbrumb(y|ies)\b|aerial (cull|culling|shooting)|game council|1080 bait/i,
@@ -15466,7 +15564,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { issueTag, auRelevant, CLIENT_ISSUES, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 

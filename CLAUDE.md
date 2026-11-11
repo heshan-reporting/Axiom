@@ -43,7 +43,8 @@ Ad Lab and Studio record approved/killed verdicts to the Mind as
 
 `CLIENT_ISSUES` in the worker is the one lexicon everything tags with: it maps
 each client namespace to the issues they own (mca: fuel tax credits / critical
-minerals / mining and resources; aep: gas / energy and climate; vicnats: VIC
+minerals / mining and resources; aep: gas supply and reservation / gas taxation / gas projects and
+approvals / electrification and the gas phase-out / energy and climate; vicnats: VIC
 election + regional Victoria; pca: housing; mba: construction and IR; pharm:
 community pharmacy; guns: firearms laws and buyback / hunting and pest control,
 for SIFA and Shooters Union together, at Kai's request on 20 October 2026; cmm:
@@ -69,6 +70,35 @@ with the lifecycle stamps that measure speed to respond: detected ->
 notified -> acked -> drafted. Routes: `/sentinel/alerts|scan|ack|metrics`.
 In-app: the Sentinel view (nav badge counts what is unactioned) with
 Acknowledge (stops the clock) and Draft in Ad Lab (seeds the brief).
+
+## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; release 1 of 7 built)
+
+The agency's monitoring analyst files daily and weekly activist-activity briefs per client. `DEN.md` holds what her
+reports are made of (counts and public names only: the reports themselves are client material and never enter the
+repo), the gap list, which collection layer can reach what, and the decisions in force. Built so far:
+
+- **Release 1, coverage (build `2026-11-11.studio-p53`).** `CLIENT_ISSUES` grew three `aep` issues, each with its
+  own tight trigger, wide matcher and search terms: `gastax` (windfall tax, gas export tax, PRRT - the trigger wants the
+  Australian forms, or a windfall or super-profits tax beside gas with no North Sea in the sentence; PRRT beside the
+  words of the cancer therapy never counts), `gasprojects` (Scott Reef, Browse, Burrup, Golden Beach, Bass Strait,
+  Otway, NOPSEMA decisions - a place named alone is tagged, a holiday park is not) and `electrify` (gas connection
+  bans, the phase-out, Rewiring Australia). `energy` reaches COP31 and data centres with an energy angle; `firearms`
+  reaches ownership caps, the Alannah & Madeline Foundation and the Shooters, Fishers and Farmers Party; `gas` no
+  longer tags a bare "Scarborough" or "Barossa". The Australian gate knows the new Australian-only markers, and a
+  search term that names Scott Reef, Burrup, Bass Strait, the Otway or Browse basins vouches for its thread.
+- **One source for the lexicon.** `node tools/lexicon-sync.mjs` writes the page's `AX_ISSUES` and the Mac collector's
+  fallback (`ISSUES`, `ISSUE_NS`, `ISSUE_Q` in `tools/reach-reddit.py`) from the worker; `--check` fails when a copy
+  has drifted (the page's copy had: it is in `tests/den-lexicon-worker.mjs`, so the gate holds it). Run it after any
+  change to `CLIENT_ISSUES`. The gate markers (`AU_RX`, `AU_QUERY_RX`) are still mirrored by hand.
+- **The entity matcher: the longest name wins.** "Hanson" inside "Hanson-Young" was counted as Pauline Hanson, and both
+  senators Pocock resolved to one entity. `entityMatcher().match` now drops an entity only when every place it matched
+  lies inside a longer match of another entity; the two senators are two entities and neither answers to the surname
+  alone. The register grew the Greens and crossbench voices, state figures, environment and gun-control groups, gas
+  producers and five topics the reports name.
+- **Sources.** 28 seeds: The Point, National Tribune, regional and sector outlets, the campaign sites of the groups
+  the reports cite, and official sources (Senate committees, NOPSEMA, the WA EPA, the Victorian energy minister, NSW
+  Parliament inquiries). Seed addresses are unverified until a sweep proves them.
+- Harness: `tests/den-lexicon-worker.mjs` (12).
 
 ## The research agent
 
@@ -468,7 +498,7 @@ archive item it came from; nothing is a model's impression of the whole.
 
 - **The register.** D1 `entities(id, kind party|person|org|topic, name,
   aliases json, party, role, side client|opponent|neutral, ns, active,
-  edited, source seed|mps|operator, note)`. `ENTITY_SEED` (98 rows: parties,
+  edited, source seed|mps|operator, note)`. `ENTITY_SEED` (146 rows: parties,
   federal leaders and ministers, shadow ministers, premiers and chief
   ministers, the clients and their spokespeople, their opponents,
   institutions and industry, and topics such as fuel tax credits, gas

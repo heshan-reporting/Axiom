@@ -168,3 +168,34 @@ morning draft off; D5 copy as rich text, `.md`, `.html`, Slack summary; D6 read 
 approves; D7 every reach channel built switched off, started only by a person signing in on the Mac; D8 subscriber
 outlets only through the agency's own subscription and only once clearance is recorded on the source; D9 the
 monitoring-export importer built.
+
+## 1. Release 1 - coverage (build `2026-11-11.studio-p53`)
+
+What changed, each proven by a case in `tests/den-lexicon-worker.mjs` that failed on p52:
+
+| Change | Where | Case |
+|---|---|---|
+| Gas taxation is an issue (`gastax`) with its own trigger, matcher and six search terms | `CLIENT_ISSUES` | LX1, LX5 |
+| Gas projects and approvals (`gasprojects`): a place named alone is tagged; a holiday park, a beach and a wine region are not | `CLIENT_ISSUES`; `gas` no longer matches a bare "Scarborough" or "Barossa" | LX2, LX5 |
+| Electrification and the gas phase-out (`electrify`) | `CLIENT_ISSUES` | LX3, LX5 |
+| COP31, fossil fuel exports, data centres with an energy angle, VNI West | `energy` | LX3 |
+| Ownership caps, the foundation, the party, junior shooting, the slogan | `firearms` | LX4 |
+| An American gas tax, a British windfall tax and a Virginian data centre are refused at the gate; a term naming an Australian place vouches | `AU_RX`, `AU_QUERY_RX`, mirrored in `tools/reach-reddit.py` | LX6, SR2 |
+| The page and the Mac collector carry the worker's lexicon exactly | `tools/lexicon-sync.mjs` | LX8, SR2 |
+| "Hanson-Young" is not Hanson; two senators Pocock are two people | `entityMatcher()` | EN1 |
+| 42 actors and topics added to the register (104 to 146) | `ENTITY_SEED` | EN2 |
+| 28 outlets, campaign sites and official sources added (235 to 263 seeds) | `SOURCE_SEED_EXT` | SR1 |
+
+Two things found on the way that were already wrong and are now held by a test: the page's copy of the lexicon had
+drifted from the worker (the `gas` and `econ` matchers differed), and "super profits tax on gas exporters" was tagged
+for the Minerals Council only.
+
+The search terms for the keyword pass went from 85 to 109. On the Mac collector that is twenty-four more X and Reddit
+searches a sweep; `--issue aep` narrows a sweep to one client.
+
+Not verifiable here, for the owner's first run after deploying:
+- **The 28 seed addresses.** `POST /sources/sweep {ids:[...]}` or the Sources view; a seed that fails shows its reason.
+- **The triggers on real traffic.** The Sentinel's `gastax`, `gasprojects` and `electrify` baselines build over
+  fourteen days; an alert before then is measured against a thin baseline.
+- **The X keyword pass with the new terms**, on the Mac: `python3 tools/reach-x.py --key $AXIOM_KEY --issue aep`.
+- **The entity seed** refreshes rows nobody has edited; an edited row keeps the operator's aliases.
