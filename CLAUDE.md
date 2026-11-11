@@ -279,7 +279,7 @@ verifies each, and what was asked for and not built.
     recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
-- **Release 7, public-record routes (build `2026-11-11.studio-p59`, page `den.js?v=r46`; `DEN.md` s.8 is the hand-over).**
+- **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
     robots.txt obeyed (`robotsAllows`, cached a day in KV `pub_robots_<host>`), an honest user agent (`pubUA`:

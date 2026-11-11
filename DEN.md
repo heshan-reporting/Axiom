@@ -774,7 +774,7 @@ against her own report for the same day. That comparison is the acceptance test 
 - **Re-tagging rows collected before a term was approved.** A term tags from its approval onwards.
 
 
-## 8. Release 7 - public-record routes (build `2026-11-11.studio-p59`, page `den.js?v=r46`)
+## 8. Release 7 - public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`)
 
 Keyless public routes that a research pass on 11 November 2026 found productive. No signed-in route was added and no
 decision in 7.3 changed. The research report itself is client intelligence and is not in the repository.
@@ -820,7 +820,7 @@ live registry shows (edited rows, failing addresses) was not seen**: read `/sour
   gave three desks a register of their own accord, which changed when keyword discovery runs.
 - **The stricter rules apply to the new routes only.** Sources that were already seeded keep their existing methods
   (`html`, `rss`, `gnews`) and the existing fetch. Moving one to the public reader is a change of its `urls.public`.
-- **Adding a watched bill or a counter** is in Anne's Den, Collection (follow-up, `den.js?v=r46`): the watched pages
+- **Adding a watched bill or a counter** is in Anne's Den, Collection (follow-up, `den.js?v=r47`): the watched pages
   with stage, next date and the last read or its failure in words, Watch this page, Stop (`POST /den/process/remove`:
   the source is switched off and its records leave the calendar); the desk's counters with Add and Remove; and
   Propose campaign names.
