@@ -1,4 +1,4 @@
-# Claude Code prompt: Anne's Den - a total interface upgrade (after release 6: worker `studio-p58`, page `?v=r44`)
+# Claude Code prompt: Anne's Den - a total interface upgrade (first pass built: page `?v=r45`; worker unchanged at `studio-p58`)
 
 Paste everything below the line into Claude Code, opened at the root of the `Axiom` repository.
 
@@ -35,26 +35,30 @@ copy of these as the "before" set. What they show at 1366 x 768:
 5. **No sense of source.** A masthead story, a Facebook post and a Senate committee notice look identical.
 6. **Dark only**, although the report she writes ends up in a white document.
 
-## The reference, and how to use it
+The first pass (below) answers 1, 3 and 6 and part of 2 and 4; 5 is still open.
 
-Open https://www.meltwater.com/en and the product pages under it and study them yourself (the hero, the product
-dashboard screenshots, the navigation, how figures and feeds are framed). **If your sandbox cannot reach the site, say
-so and ask the owner for screenshots; do not describe it from memory as if you had looked.** The session that wrote this
-prompt could not reach it, and could confirm only that the site was rebuilt in 2026 around plain pages that say what the
-product does, with a new design system and an AI assistant ("Mira") given a visible place.
+## The reference (the owner chose it)
 
-Take the qualities of that class of product, not its brand:
+After the first version of this prompt the owner sent a reference image and said: "follow the following reference UI
+style ... and proceed with the build". The reference is a light analytics dashboard (a generic "Visiora" concept shot,
+not a product to copy). What it is made of, and what the Den takes from it:
 
-- a calm ground, generous spacing and one confident accent; hierarchy carried by size and space, not by borders;
-- the day told in a handful of large figures with their change, and a chart beside them;
-- a feed of readable mention cards (source mark, outlet, time, headline, excerpt, reach or interactions, tone) instead
-  of a grid of cells, with a compact table still one switch away;
-- one persistent, uncluttered navigation and a workspace that fills the screen;
-- the assistant's work (here, the drafted brief) shown as a first-class panel with its evidence beside it;
-- restrained motion, soft elevation, rounded corners, real empty and loading states.
+- a soft grey ground with one large white workspace card, hairline borders, 10-14 px corners and a faint shadow;
+- a left side menu: an account card on top, grouped menu items with small line icons, the current item a white raised
+  pill, a card at the foot;
+- a header line with the title and a one-line subtitle on the left and controls on the right;
+- segmented controls (a grey track, the chosen item a white pill) and white buttons with a hairline; the one primary
+  action is near-black;
+- a row of joined figure tiles: a small coloured tick and a label, a large figure with its change in green or red, and
+  a grey footer line of context;
+- a stacked bar chart with dashed gridlines, pale bars, and the hovered bar striped with a dark tooltip listing each
+  series;
+- lower cards in a grid: striped horizontal bars with the figure at the right, a segmented share bar with a legend of
+  figures, small charts;
+- one geometric sans throughout, sentence case, no uppercase mono labels.
 
-Do not copy Meltwater's logo, name, colours, typeface, illustrations, copy or page layouts. AXIOM keeps its own
-identity. The result must be recognisably AXIOM and must not be mistakable for their product.
+Take the layout, density, surfaces and controls. Do not take its name, logo, sample data or emoji. An earlier request
+named meltwater.com as inspiration; that site could not be reached from the sandbox and nothing here is taken from it.
 
 ## A decision this overturns (record it)
 
@@ -86,92 +90,60 @@ and an empty table is never read as a quiet day. Do not restyle any other view i
 - **Privacy rules in the data.** Commenters and unregistered accounts are never named; subscriber text shows thirty
   words. A card layout must not surface a field a table row did not.
 
-## The design to build
+## Built in the first pass (page `?v=r45`; `DEN.md` s.8)
 
-Work to 1366 x 768 first (her screen), then 1440, 1920 and a usable 1024. Light and dark themes, both first-class,
-scoped to the Den (`#den-root[data-theme]`), default following the system, switchable in Options and remembered per
-person.
+- **Light theme while the Den is open.** `docs/den.css` re-declares the app's tokens on `body:has(#v-den.on)`, so the
+  masthead and navigation turn light with the Den and return to dark on leaving it. The Den's own tokens (`--den-*`:
+  surfaces, inks, status tints, chart series, radii, shadows) are declared on `#den-root`.
+- **The frame.** A side menu (desk card, Today / Brief / Watch / Collection / Options as a vertical tablist with icons,
+  the model-call meter) and one white workspace card. The scope bar is hidden in the Den. Below 1100 px the menu
+  becomes a row.
+- **The day in figures** (`Overview` in `docs/den.js`, on Today): five joined tiles (stories, social posts,
+  interactions with the change since yesterday's read, narratives moving, rows in the report), each a button that
+  jumps to its table; a stacked bar chart of the window by channel in twelve steps with a legend, a striped hover state
+  and a tooltip; and three cards: by channel, most carried stories, tone under the posts. Everything is counted in
+  the browser from `/den/board`: no route, no model call, and no figure the tables do not hold. A missing count says
+  why and is never drawn as zero.
+- **Chart colours** are a fixed order, one hue a channel, checked for colour-vision separation; three of them are under
+  3:1 on white, so the legend, the tooltip and the tables carry the same facts in words.
+- **Restyled, same markup:** the strip (two columns of cards), tables (a grey header band, sentence-case headings),
+  tinted status chips, white and near-black buttons, segmented tabs in Watch, the brief's sections and editors,
+  notices, dialogs.
+- Every selector, role, label and shortcut the harnesses use is unchanged. `tests/den-browser.mjs` 24,
+  `tests/den-inject-browser.mjs` 60, `tests/den-worker.mjs` 17, `tests/studio-tokens-test.mjs` 4, `node tests/run.mjs
+  check` 26: all pass. One contrast failure (a green chip at 4.48:1) was found by axe and fixed.
 
-**1. The frame.** In the Den, the scope bar is hidden and the app's two-line navigation collapses to one compact line
-(or a slim rail, your call after the prototypes), so the desk header sits within the first 110 px. A sticky desk header
-carries: client and desk (a proper menu, not a native select), the reporting window in words, the brief's state
-(not started / drafting / draft / edited / filed, with the time), the model-call allowance, Refresh, and one primary
-action that changes with state (Draft the brief - 1 call, Continue the brief, Mark as filed, Reopen).
+## What is left to build, in this order
 
-**2. The day in figures.** Under the header, four to six tiles, each a large tabular figure, a plain label, the change
-against the desk's own baseline, and a sparkline where a series exists: items in the window, stories after folding,
-social interactions, needs attention, channels delivering out of channels relied on, and tone where held. Each tile
-opens the rows behind it. A tile with no data says why; it never shows a zero that means "not collected".
+Work to 1366 x 768 first, then 1440, 1920 and a usable 1024. Keep every rule under "What must not change".
 
-**3. Needs attention** (the "Nothing critical missed" strip, renamed only on screen if the owner agrees; the
-`aria-label` and the logic stay). A compact band of severity-ordered cards with an icon, one sentence and one action.
-Collection gaps lead and are visually distinct from signals: a gap is about the desk's eyesight, a spike is about the
-world. Collapsed, it is one line with counts by kind; it must never push Today below the fold again.
+1. **Tests for the first pass.** Browser cases for the overview: each tile opens its table; the chart's columns sum to
+   the rows on the board; a board with nothing collected says so and draws no zero; the menu works by keyboard; no
+   horizontal scroll at 1024.
+2. **Today as a feed.** Mention cards (channel glyph, outlet monogram, time, headline, two-line excerpt, figures, tone,
+   layer, Pin / Set aside / Open) with a Cards / Table switch; the tables stay, and both give the same rows in the
+   same order. No third-party logos fetched or bundled.
+3. **Brief as a document.** A centred page in a readable measure, ratings as segmented controls, citation ids as
+   numbered chips that show the cited row on hover or focus and open it in a panel beside the page, the two checks as
+   inline marks with the reason in the margin, History and Compare in a side sheet, one "Get it out" menu. If the
+   editors move off plain textareas, the working copy, save on blur, the conflict flow and every existing case still
+   hold; if that cannot be guaranteed, keep textareas.
+4. **Collection as a health board.** One card per channel with its state in words, how it is read, the last delivery,
+   a seven-day sparkline and Collect now; the job console as a docked drawer; the recall result as the headline figure
+   when it exists.
+5. **Watch.** Proposals as review cards with their evidence and a score meter; Preview in a side sheet with counts by
+   channel.
+6. **Options.** A settings page with a section index, switches, a keyboard-operable order for the report's sections
+   and a Save bar that appears only when something changed.
+7. **Controls.** A proper desk menu in place of the native select (keep a labelled select for the harness or change the
+   harness and say so), a tooltip component, skeletons with an `aria-live` sentence in place of "Loading ...".
+8. **A dark theme for the Den**, chosen in Options and remembered per person, with dark steps of the chart colours
+   checked against the dark surface. Today the Den is light only.
+9. **The styleguide.** A Den section in `docs/styleguide.html` showing every component.
 
-**4. Today.** Two columns at 1366 and up: the feed, and a rail. The feed is the report's own sections as anchored groups
-with a sticky section index and counts. Rows become mention cards: source mark (a small glyph per channel and a
-monogram for the outlet - no third-party logos fetched or bundled), outlet and time, headline, a two-line excerpt,
-figures (outlets that carried it, Facebook reach, interactions and growth since yesterday), tone, the layer that
-collected it, and Pin / Set aside / Open as icon buttons with text labels available to assistive technology and on
-hover. Pinned cards carry a clear mark and gather in a "In the report" tray. A Cards / Table switch keeps today's dense
-tables for people who want them, and the density setting still applies. The rail holds: volume over the window by
-channel (stacked bars), the desk's issues against their baseline (bars with the baseline marked), tone split, and
-Upcoming as a short dated list. Charts have a text alternative and a table view, and no chart uses colour alone.
-
-**5. Brief.** A document, not a form. A centred page-like surface in a readable measure (about 70 characters), section
-headings as headings, the ratings as labelled segmented controls at the top, and each section an editor that grows
-with its text. Citation ids render as small numbered chips; hovering or focusing one shows the cited row, and clicking
-opens it in an evidence panel beside the page. "No evidence behind" and "figure not in the cited row" become inline
-marks on the sentence with the explanation in the margin, never colour alone. A quiet status line says saved / unsaved
-/ saving / conflict at all times. History and Compare open in a side sheet; Compare is a readable two-colour diff with
-insertions and deletions also marked by underline and strike. The export actions sit together as one "Get it out" menu
-with the Copy for the document action as the default. If you move the brief off plain textareas, the localStorage
-working copy, save on blur, the conflict flow and every case in `tests/den-browser.mjs` and
-`tests/den-inject-browser.mjs` still hold; if you cannot guarantee that, keep textareas and style them as a page.
-
-**6. Watch.** Proposals as review cards: the candidate, why it was proposed, its evidence rows, its score as a small
-meter, and Preview / Approve under an issue / Dismiss with a reason. Preview opens in a side sheet with the counts by
-channel as a chart and the sample rows. The register is a searchable, filterable table with state shown as a status
-dot and a word.
-
-**7. Collection.** A health board: one card per channel with a status (delivering / nothing delivered and why / off /
-paused at a verification / not granted), how it is read, the last delivery, the last day and seven days with a
-sparkline, and Collect now. The job console becomes a docked drawer that survives switching areas. The recall result
-from the back-test, when present, is the headline figure of the area; when absent it says that it has not been run
-and what runs it.
-
-**8. Options.** A settings page with a section index, grouped fields with help text, proper switches, a drag-and-drop
-(and keyboard-operable) order for the report's sections, and an explicit Save bar that appears only when something
-changed.
-
-**9. The system underneath.** Build these once in `docs/den.js` / `docs/den.css` and use them everywhere: Button
-(primary, secondary, quiet, danger, icon), Menu, Select, Segmented, Switch, Tabs, Card, StatTile, Badge, Tag, Meter,
-Sparkline, BarChart, StackedBar, Table, Sheet, Dialog, Toast, Tooltip, Skeleton, EmptyState, ErrorState, Banner. An
-icon set drawn as inline SVG in one file. A type scale of five sizes with body at 14 px, a 4 px spacing scale, three
-elevation steps, radii of 6 / 10 / 14, motion of 120-200 ms with one easing and `prefers-reduced-motion` honoured.
-Skeletons replace "Loading the checks" text but keep an `aria-live` sentence. Add a Den section to
-`docs/styleguide.html` showing every component in both themes.
-
-## How to run the work
-
-**Phase 0 - look.** Take the "before" screenshots. Study the reference. Write, at the top of `DEN.md` s.8, what you
-saw in the reference, what you are taking and what you are leaving.
-
-**Phase 1 - three directions, then stop.** In `design/prototypes/annes-den-concepts/` (the convention of
-`design/prototypes/creative-studio-concepts/`: static HTML on invented rows, a shared stylesheet, an index page,
-screenshots in `shots/`), build the Today and Brief screens three ways that really differ - for example a light
-editorial workspace, a dark command desk, and a rail-and-feed product layout - each at 1366 x 768 in both themes where
-it has both. **Show the owner the screenshots and stop for a choice.** Taste is theirs; do not build the whole page on
-a guess.
-
-**Phase 2 - tokens and components.** Tokens, the component set and the styleguide section, with no change to the
-live page yet.
-
-**Phase 3 - the page, one area at a time.** Frame and header, the figures and Needs attention, Today, Brief, Watch,
-Collection, Options. After each area run the Den harnesses and retake that area's screenshots.
-
-**Phase 4 - finish.** Bump the page release query for `den.js` and `den.css` in `docs/index.html`, update `DEN.md`,
-`CLAUDE.md` and the header comment of `den.css`, and save the "after" set beside the "before" set.
+After each item run the Den harnesses and retake that area with `node --experimental-sqlite tests/den-shots.mjs`.
+Bump the `?v=` of `den.js` and `den.css` in `docs/index.html` on every page release and run
+`node tests/asset-versions.mjs --write`.
 
 ## Proving it
 
@@ -179,9 +151,8 @@ Collection, Options. After each area run the Den harnesses and retake that area'
   `tests/den-browser.mjs` (24), `tests/den-inject-browser.mjs` (60), `tests/den-tools-test.py` (54). A test is changed
   only because the markup it reads changed, never to make a failure go away, and each such change is listed in your
   report. Prefer keeping the roles, labels and ids the harnesses select on.
-- New browser cases: both themes; Cards and Table give the same rows in the same order; every tile opens its rows;
-  each chart has its table; the section order can be changed by keyboard; the first row of Today is visible without
-  scrolling at 1366 x 768 with the attention band collapsed and with it open; no horizontal scroll at 1024.
+- New browser cases as each item lands: Cards and Table give the same rows in the same order; every tile opens its
+  rows; the section order can be changed by keyboard; both themes once the dark one exists; no horizontal scroll at 1024.
 - Accessibility: axe clean at 1366, 1440 and 1920 for a full and a read-only key in both themes; text contrast 4.5:1
   and interface contrast 3:1; every action reachable and operable by keyboard with a visible focus ring; focus is
   trapped in and returned from sheets and dialogs; reduced motion honoured.

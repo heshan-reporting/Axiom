@@ -86,6 +86,65 @@
     </section>`;
   }
 
+  /* ---- The day in figures (DEN.md s.8). Everything here is counted from the board's own rows: no route, no model, and
+     no figure the tables below do not hold. A channel keeps its colour whatever else is on the board. ---- */
+  const ICON = { today: 'M3 11.5 12 4l9 7.5M5.5 10v10h13V10', brief: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6', watch: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z', collection: 'M4 19v-5M9 19V8M14 19v-8M19 19V5', options: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4' };
+  const Ico = ({ n }) => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d=${ICON[n]} /></svg>`;
+  const MENU = [['Workspace', ['today', 'brief']], ['Desk', ['watch', 'collection']], ['Settings', ['options']]];
+  const SER = { news: 1, x: 2, facebook: 3, instagram: 4, youtube: 5, reddit: 6, bluesky: 7 };
+  const serKey = ch => (SER[ch] ? ch : 'other'); const serCol = k => 'var(--den-s' + (SER[k] || 0) + ')'; const serName = k => (k === 'other' ? 'Other channels' : CH[k] || k);
+  const fmtHour = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', hour: 'numeric', hour12: true });
+  const fmtDate = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short' });
+  function Overview({ d, desk, jump, setTab }) {
+    const [hot, setHot] = useState(-1); const c = d.counts;
+    const m = useMemo(() => {
+      const pts = d.media.map(x => ({ ts: +x.ts, ch: 'news' })).concat(d.social.map(x => ({ ts: +x.ts, ch: x.platform })), d.actors.map(x => ({ ts: +x.ts, ch: x.platform }))).filter(x => x.ts > 0);
+      const win = d.window || {}; const to = +win.to || Date.now(); const hours = +win.hours || desk.window_h || 24; const from = +win.from || to - hours * 3600000; const N = 12, step = (to - from) / N;
+      const lab = t => (hours <= 48 ? fmtHour.format(new Date(t)).replace(/\s/g, '') : fmtDate.format(new Date(t)));
+      const cols = Array.from({ length: N }, (_, i) => ({ at: from + i * step, label: lab(from + i * step), range: lab(from + i * step) + ' to ' + lab(from + (i + 1) * step), by: {}, n: 0 }));
+      const byCh = {}; pts.forEach(x => { const col = cols[Math.min(N - 1, Math.max(0, Math.floor((x.ts - from) / step)))]; const k = serKey(x.ch); col.by[k] = (col.by[k] || 0) + 1; col.n++; byCh[x.ch] = (byCh[x.ch] || 0) + 1; });
+      const keys = Object.keys(SER).concat(['other']).filter(k => cols.some(col => col.by[k])); const top = Math.max(4, Math.ceil(Math.max.apply(null, cols.map(col => col.n)) / 4) * 4);
+      const eng = d.social.concat(d.actors); const total = eng.reduce((a, x) => a + (+x.total || 0), 0); const held = eng.some(x => +x.total > 0); const gs = d.social.filter(x => x.growth != null); const growth = gs.reduce((a, x) => a + (+x.growth || 0), 0);
+      const tone = { neg: 0, mix: 0, pos: 0, n: 0 }; d.social.forEach(x => { if (!x.held) return; tone.n += +x.held.n || 0; tone[x.held.tone < -0.2 ? 'neg' : x.held.tone > 0.2 ? 'pos' : 'mix']++; });
+      return { pts, cols, keys, top, total, held, growth, hasGrowth: gs.length > 0, tone, byCh: Object.keys(byCh).map(k => [k, byCh[k]]).sort((a, b) => b[1] - a[1]).slice(0, 6), carried: d.media.slice().sort((a, b) => (b.n || 1) - (a.n || 1)).slice(0, 5), hostile: d.narratives.filter(x => x.side === 'hostile').length };
+    }, [d, desk.window_h]);
+    const tile = (n, label, value, foot, to, delta) => html`<button type="button" class="den-kpi" onClick=${() => jump(to)} aria-label=${label + ': ' + value + (delta ? ', ' + delta.text : '') + '. ' + foot + '. Go to ' + to + '.'}>
+      <span class="k"><i style=${{ background: 'var(--den-s' + n + ')' }}></i>${label}</span><span class="v">${value}${delta ? html`<small class=${delta.up ? 'up' : 'down'}>${delta.text}</small>` : null}</span><span class="f">${foot}</span></button>`;
+    const tones = m.tone.neg + m.tone.mix + m.tone.pos; const mostCh = m.byCh.length ? m.byCh[0][1] : 1; const mostN = m.carried.length ? m.carried[0].n || 1 : 1;
+    return html`<div>
+      <div class="den-kpis" role="group" aria-label="The window in figures">
+        ${tile(1, 'Stories', fmtN(c.media), c.news === c.media ? 'none carried by a second outlet' : fmtN(c.news) + ' filed, counting syndicated copies', 'Traditional media')}
+        ${tile(2, 'Social posts', fmtN(c.social), c.underMinimum ? fmtN(c.underMinimum) + ' more under the desk minimum' : 'on this desk\'s terms and accounts', 'Social')}
+        ${tile(3, 'Interactions', m.held ? fmtN(m.total) : '-', !m.held ? 'no counts are held for these posts' : m.hasGrowth ? 'against yesterday\'s read' : 'no read from yesterday to compare', 'Social', m.held && m.hasGrowth && m.growth ? { up: m.growth > 0, text: (m.growth > 0 ? '+' : '-') + fmtN(Math.abs(m.growth)) } : null)}
+        ${tile(7, 'Narratives moving', fmtN(c.narratives), m.hostile ? m.hostile + ' read as hostile to the client' : 'none read as hostile', 'Key narratives')}
+        ${tile(5, 'In the report', fmtN((d.pinned || []).length), fmtN(c.aside) + ' set aside' + (c.muted ? ', ' + fmtN(c.muted) + ' muted' : ''), 'Traditional media')}
+      </div>
+      <div class="den-card" role="group" aria-label="Volume through the window">
+        <header><h3>Volume through the window</h3><span class="den-note">${(d.window && d.window.label) || ''} - stories and posts by channel</span><span class="den-spacer"></span>
+          <span class="den-legend">${m.keys.map(k => html`<span key=${k}><i style=${{ background: serCol(k) }}></i>${serName(k)}</span>`)}</span></header>
+        <div class="den-body">${m.pts.length ? html`<div class="den-chart">
+          <div class="den-yax" aria-hidden="true">${[1, 0.75, 0.5, 0.25, 0].map(f => html`<span key=${f} style=${{ bottom: 'calc(22px + ' + f + ' * (100% - 22px))' }}>${Math.round(m.top * f)}</span>`)}</div>
+          <div class=${'den-plot' + (hot >= 0 ? ' hot' : '')}>${[1, 0.75, 0.5, 0.25].map(f => html`<span key=${f} class="g" style=${{ bottom: f * 100 + '%' }}></span>`)}
+            ${m.cols.map((col, i) => html`<div key=${i} class=${'den-col' + (hot === i ? ' on' : '')} tabIndex="0" role="img" aria-label=${col.range + ': ' + (col.n ? m.keys.filter(k => col.by[k]).map(k => col.by[k] + ' ' + serName(k)).join(', ') : 'nothing collected')}
+              onMouseEnter=${() => setHot(i)} onMouseLeave=${() => setHot(-1)} onFocus=${() => setHot(i)} onBlur=${() => setHot(-1)}>
+              ${m.keys.slice().reverse().filter(k => col.by[k]).map(k => html`<span key=${k} class="s" style=${{ height: (col.by[k] / m.top) * 100 + '%', backgroundColor: serCol(k) }}></span>`)}
+              <span class="x" aria-hidden="true">${i % 2 ? '' : col.label}</span>
+              ${hot === i && col.n ? html`<div class="den-tip" style=${i > 7 ? { right: 0 } : { left: 0 }}><b>${col.range}</b>${m.keys.filter(k => col.by[k]).map(k => html`<div key=${k}><i style=${{ background: serCol(k) }}></i>${serName(k)}<em>${col.by[k]}</em></div>`)}</div>` : null}</div>`)}</div></div>`
+          : html`<p class="den-quiet">Nothing on this desk was collected in this window, so there is nothing to chart. That is not the same as a quiet day. <button class="den-link" onClick=${() => setTab('collection')}>See what was collected, and why not</button></p>`}</div>
+      </div>
+      <div class="den-grid3">
+        <div class="den-card" role="group" aria-label="By channel"><header><h3>By channel</h3><span class="den-note">stories and posts</span></header><div class="den-body">
+          ${m.byCh.length ? html`<ul class="den-bars">${m.byCh.map(x => html`<li key=${x[0]}><span>${CH[x[0]] || x[0]}</span><b>${fmtN(x[1])}</b><span class="t"><i style=${{ width: (x[1] / mostCh) * 100 + '%', backgroundColor: serCol(serKey(x[0])) }}></i></span></li>`)}</ul>` : html`<p class="den-quiet">No channel delivered a row for this desk in this window.</p>`}</div></div>
+        <div class="den-card" role="group" aria-label="Most carried stories"><header><h3>Most carried stories</h3><span class="den-note">outlets that ran it</span></header><div class="den-body">
+          ${m.carried.length ? html`<ul class="den-bars">${m.carried.map(x => html`<li key=${x.id}><span title=${x.title}>${x.title}</span><b>${fmtN(x.n || 1)}</b><span class="t"><i style=${{ width: ((x.n || 1) / mostN) * 100 + '%' }}></i></span></li>`)}</ul>` : html`<p class="den-quiet">No story on this desk's issues was filed in this window.</p>`}</div></div>
+        <div class="den-card" role="group" aria-label="Tone under the posts"><header><h3>Tone under the posts</h3><span class="den-note">${tones ? fmtN(m.tone.n) + ' comments held' : ''}</span></header><div class="den-body">
+          ${tones ? html`<div class="den-split" aria-hidden="true">${['neg', 'mix', 'pos'].filter(k => m.tone[k]).map(k => html`<i key=${k} class=${k} style=${{ flex: m.tone[k] }}></i>`)}</div>
+            <ul class="den-keys">${[['neg', 'Hostile'], ['mix', 'Mixed'], ['pos', 'Warm']].map(k => html`<li key=${k[0]}><b>${m.tone[k[0]]}</b><i class=${'den-key ' + k[0]}></i>${k[1]}</li>`)}</ul><p class="den-quiet">Posts, by the tone of the comments held under them. A post with no comment held is not counted.</p>`
+          : html`<p class="den-quiet">No comment under this window's posts is held, so there is no tone to show. Comment text on Facebook and Instagram is collected by no layer.</p>`}</div></div>
+      </div>
+    </div>`;
+  }
+
   /* ---- Today: the evidence board ---- */
   function RowActions({ r, kind, desk, canWrite, onDone }) {
     const [ask, setAsk] = useState(false); const [why, setWhy] = useState(ASIDE[0]); const [own_, setOwn] = useState(''); const [busy, setBusy] = useState(false);
@@ -121,6 +180,7 @@
       ${b.err ? html`<div class="den-notice bad" role="alert">The board could not be refreshed: ${b.err} What is shown is the last read. <button class="den-mini" onClick=${b.reload}>Try again</button></div>` : null}
       ${d.capped ? html`<div class="den-notice">This window holds more rows than one board reads (${fmtN(4000)}). The newest are shown; shorten the window in Options to see all of a busy day.</div>` : null}
       ${offer ? html`<div class="den-notice" role="alert">${offer.text} A mute hides its rows on this desk only, and can be removed in Options. <div><button class="den-mini primary" onClick=${() => mute(true)}>Mute it on this desk</button><button class="den-mini" onClick=${() => mute(false)}>Not now</button></div></div>` : null}
+      <${Overview} d=${d} desk=${desk} setTab=${setTab} jump=${name => { const p = root.current && root.current.querySelector('section.den-panel[aria-label="' + name + '"]'); if (p) { p.scrollIntoView({ block: 'start', behavior: 'auto' }); const r = p.querySelector('tr.den-row'); if (r) r.focus({ preventScroll: true }); } }} />
       <${Panel} title="Key narratives" note=${c.narratives ? c.narratives + ' moving on this desk\'s issues' : ''} flush=${true}>
         ${d.narratives.length ? html`<table class="den-table"><thead><tr><th>Narrative</th><th>Toward the client</th><th class="num">Rows</th><th class="num">Last day</th><th>Taken up by</th><th></th></tr></thead><tbody>
           ${d.narratives.map(n => html`<tr key=${n.id} class="den-row" tabIndex="0" aria-label=${'Narrative: ' + n.label}><td><span class="den-t">${n.label}</span>${n.claim ? html`<span class="den-sub">${n.claim}</span>` : null}</td><td><span class=${'den-chip ' + (n.side === 'hostile' ? 'neg' : n.side === 'supportive' ? 'pos' : '')}>${n.side || 'not read yet'}</span> ${n.status ? html`<span class="den-chip">${n.status}</span>` : null}</td>
@@ -453,16 +513,21 @@
     if (!desk) return html`<${Empty}><b>No desk is set up.</b> A desk is a client, a region and a report format. Ask an admin to add one.<//>`;
     const pickDesk = id => { setDeskId(id); ls.set('ax_den_desk', id); setTick(t => t + 1); };
     return html`<div data-density=${desk.options.density || 'regular'} id="den-app">
+      <aside class="den-side" aria-label="Desk and sections">
+        <div class="den-deskcard"><span class="den-av" aria-hidden="true">${String(desk.client || desk.name || 'A').charAt(0).toUpperCase()}</span><span><b>${desk.client}</b><span>${desk.name}</span></span></div>
+        <div class="den-tabs den-menu" role="tablist" aria-orientation="vertical" aria-label="Anne's Den">${MENU.map(g => [html`<span key=${g[0]} class="den-menu-h" aria-hidden="true">${g[0]}</span>`].concat(g[1].map(id => html`<button key=${id} role="tab" id=${'den-tab-' + id} class="den-tab" aria-selected=${tab === id ? 'true' : 'false'} aria-controls="den-tabpanel" onClick=${() => setTab(id)}><${Ico} n=${id} />${TABS.find(t => t[0] === id)[1]}</button>`)))}</div>
+        ${budget ? html`<div class="den-sidefoot"><b>Model calls today</b><div class="den-meter" aria-hidden="true"><i style=${{ width: Math.min(100, (budget.used / Math.max(1, budget.cap)) * 100) + '%' }}></i></div>${budget.used} of ${budget.cap} used. Only a draft spends one.</div>` : null}
+      </aside>
+      <div class="den-main">
       <div class="den-head">
-        <label class="den-lab">Desk<select value=${desk.id} aria-label="Desk" onChange=${e => pickDesk(e.target.value)}>${desks.map(d => html`<option key=${d.id} value=${d.id}>${d.name}</option>`)}</select></label>
         <div><h2>${desk.client}</h2><span class="den-win">${desk.name} - ${desk.cadence}, the last ${desk.window_h} hours${desk.region !== 'au' ? ', ' + desk.region.toUpperCase() + ' only' : ''} - Australian Eastern time</span></div>
         <span class="den-spacer"></span>
         ${budget ? html`<span class="den-chip" title="A brief draft or one section written again is one model call, started by a person. Nothing else on this page spends.">model calls today: ${budget.used} of ${budget.cap}</span>` : null}
         ${canWrite ? null : html`<span class="den-chip warn">read-only key</span>`}
+        <label class="den-lab">Desk<select value=${desk.id} aria-label="Desk" onChange=${e => pickDesk(e.target.value)}>${desks.map(d => html`<option key=${d.id} value=${d.id}>${d.name}</option>`)}</select></label>
         <button class="den-mini" onClick=${() => setTick(t => t + 1)} title="Read the archive again">Refresh</button><button class="den-mini" aria-label="Keyboard shortcuts" onClick=${() => setKeys(true)}>?</button>
       </div>
       <${Boundary} name="The strip" resetKey=${desk.id + tick}><${Strip} deskId=${desk.id} setTab=${setTab} tick=${tick} /><//>
-      <div class="den-tabs" role="tablist" aria-label="Anne's Den">${TABS.map(t => html`<button key=${t[0]} role="tab" id=${'den-tab-' + t[0]} class="den-tab" aria-selected=${tab === t[0] ? 'true' : 'false'} aria-controls="den-tabpanel" onClick=${() => setTab(t[0])}>${t[1]}</button>`)}</div>
       <div role="tabpanel" id="den-tabpanel" aria-labelledby=${'den-tab-' + tab}>
         <${Boundary} name=${TABS.find(t => t[0] === tab)[1]} resetKey=${desk.id + tab}>
           ${tab === 'today' ? html`<${Board} desk=${desk} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} />` : null}
@@ -471,6 +536,7 @@
           ${tab === 'collection' ? html`<${CollectionPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} />` : null}
           ${tab === 'options' ? html`<${OptionsPanel} desk=${desk} canWrite=${canWrite} onSaved=${d => D.set(Object.assign({}, D.data, { desks: desks.map(x => (x.id === d.id ? d : x)) }))} onCreated=${d => { D.set(Object.assign({}, D.data, { desks: desks.concat([d]) })); pickDesk(d.id); toastMsg(d.name + ' is ready') ; }} />` : null}
         <//>
+      </div>
       </div>
       ${keys ? html`<${Shortcuts} onClose=${() => setKeys(false)} />` : null}
     </div>`;

@@ -696,3 +696,38 @@ against her own report for the same day. That comparison is the acceptance test 
   small and separable; each is named where it would have been.
 - **Re-tagging rows collected before a term was approved.** A term tags from its approval onwards.
 
+
+## 8. The interface, redesigned (12 November 2026; page `?v=r45`, worker unchanged)
+
+**The decision.** The owner, of release 6's page: "The current UI looks primitive and boring ... a total UI upgrade to
+look professional, production grade and reliable", and then, with a reference image of a light analytics dashboard:
+"follow the following reference UI style ... and proceed with the build". For Anne's Den only, this overturns the
+Phase 5 shell rules (flat panels, tables not cards, one hairline strip of figures, no elevation). What still holds:
+semantic colour carries meaning only; numbers are tabular; every figure is a count of rows the page shows; a missing
+count says why and is never drawn as zero; an empty table is never read as a quiet day. No other view was restyled.
+
+**What was built (first pass).**
+- While the Den is the open view the whole page is light: `docs/den.css` re-declares the app's tokens on
+  `body:has(#v-den.on)`. Leaving the Den restores the dark shell. The scope bar is hidden there (a desk is the scope).
+- The frame: a side menu (desk card, the five areas as a vertical tablist with icons, the model-call meter) beside one
+  white workspace card. The desk select, the chips, Refresh and `?` sit at the right of the header.
+- Today opens with `Overview` (`docs/den.js`): five figure tiles that jump to their tables, a stacked bar chart of
+  the window by channel (twelve steps, legend, tooltip on hover and focus, each column labelled in words for a screen
+  reader), and three cards - by channel, most carried stories, tone under the posts. All of it is counted in the
+  browser from `GET /den/board`; no route and no model call were added.
+- Chart colours are tokens `--den-s1..7` in a fixed order (news, X, Facebook, Instagram, YouTube, Reddit, Bluesky;
+  anything else is grey "Other channels"), checked for colour-vision separation on white.
+- Tables, chips, buttons, the strip, the brief's editors, notices and dialogs were restyled on the same markup.
+
+**Proved here.** `tests/den-browser.mjs` 24 (axe at 1366, 1440 and 1920, full and read-only keys),
+`tests/den-inject-browser.mjs` 60, `tests/den-worker.mjs` 17, `tests/studio-tokens-test.mjs` 4, `node tests/run.mjs
+check` 26. No test was changed. Screenshots of every tab were retaken with `tests/den-shots.mjs` and looked at.
+
+**Not built yet** (the order is in `prompts/annes-den-ui.md`): tests of the overview itself; mention cards with a
+Cards / Table switch; the brief as a document with citation chips and an evidence panel; Collection as a health board;
+review cards in Watch; Options as a settings page; a desk menu in place of the native select; skeletons; a dark theme
+for the Den (it is light only); the styleguide section.
+
+**Not verifiable here.** The page was seen only on the fixture's invented rows. `:has()` carries the theme switch:
+it needs a browser from 2023 or later (Chrome 105, Safari 15.4, Firefox 121); an older one shows the Den's cards
+light inside the dark shell.

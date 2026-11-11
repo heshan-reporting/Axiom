@@ -1,89 +1,254 @@
-/* Anne's Den (docs/den.js). The Phase 5 shell rules: flat 8px panels, tables not cards, one hairline strip of figures,
-   tabular mono numbers, small uppercase mono labels. Colours are the app's semantic tokens only; corners are the two
-   radius tokens declared here. Desktop first (1366 wide and up); it stays usable below that, without a design of its own. */
-#den-root{--den-r:8px;--den-r-pill:999px;--den-pad:9px;--den-gap:14px;display:block;color:var(--t1);font-size:13px;line-height:1.5}
-#den-app[data-density="compact"]{--den-pad:5px}
-#den-app[data-density="roomy"]{--den-pad:13px}
-.den-head{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;margin:0 0 12px}
-.den-head h2{font-family:var(--fd);font-size:20px;font-weight:600;color:var(--t0);margin:0;letter-spacing:-.01em}
-.den-head .den-win{font-family:var(--fm);font-size:11px;color:var(--t2)}
-.den-lab{display:flex;flex-direction:column;gap:3px;font-family:var(--fm);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--t2)}
-.den-lab select,.den-lab input,.den-lab textarea,.den-in{font-family:var(--fb);font-size:12.5px;letter-spacing:0;text-transform:none;color:var(--t0);background:var(--x-bg1);border:1px solid var(--line);border-radius:var(--den-r);padding:6px 8px;min-height:32px}
-.den-lab select:focus-visible,.den-lab input:focus-visible,.den-in:focus-visible,.den-ta:focus-visible,.den-row:focus-visible,.den-tab:focus-visible,.den-link:focus-visible{outline:2px solid var(--x-ac-hi);outline-offset:1px}
-.den-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 14px;flex-wrap:wrap}
-.den-tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--t2);font-family:var(--fb);font-size:13px;padding:8px 12px;cursor:pointer;margin-bottom:-1px}
-.den-tab:hover{color:var(--t0)}
-.den-tab[aria-selected="true"]{color:var(--t0);border-bottom-color:var(--x-ac-hi)}
-.den-tab .n{font-family:var(--fm);font-size:10.5px;color:var(--t2);margin-left:6px;font-variant-numeric:tabular-nums}
+/* Anne's Den (docs/den.js). A light product workspace, at the owner's request (DEN.md s.8): a ground of soft grey, white
+   cards with a hairline and a soft shadow, a side menu, the day in large figures, charts beside the tables. This
+   overturns the Phase 5 shell rules (flat panels, tables only) for this view alone. What still holds: semantic colour
+   carries meaning only, numbers are tabular, and every colour and corner is a token declared here. While the Den is
+   open the whole page takes the light tokens, so the masthead and navigation match it; leaving the Den restores them.
+   Desktop first (1366 wide and up); below 1100 the side menu becomes a row. */
+
+/* ---- the light theme: the app's own tokens, re-declared while the Den is the open view ---- */
+body:has(#v-den.on){
+  --x-bg0:#ECEEF2; --x-bg1:#F4F5F7; --x-bg2:#FFFFFF; --x-bg3:#FFFFFF;
+  --x-sur1:rgba(15,23,42,.03); --x-sur2:rgba(15,23,42,.055); --x-sur3:rgba(15,23,42,.09);
+  --x-line1:rgba(15,23,42,.09); --x-line2:rgba(15,23,42,.16); --x-line3:rgba(15,23,42,.26);
+  --x-ink0:#0E121B; --x-ink1:#2A3040; --x-ink2:#555E6E; --x-ink3:#636C7B;
+  --x-ac:#2563EB; --x-ac-hi:#1D4ED8; --x-ac-lo:#1E40AF; --x-ac-ink:#FFFFFF;
+  --x-ac-dim:rgba(37,99,235,.10); --x-ac-line:rgba(37,99,235,.35);
+  --x-cy:#0E7490; --x-cy-lo:#155E75; --x-vio:#6D4FC2;
+  --x-pos:#116B33; --x-neg:#B91C1C; --x-warn:#B45309; --x-info:#3B5B8C;
+  --x-pos-dim:rgba(21,128,61,.10); --x-neg-dim:rgba(185,28,28,.09); --x-warn-dim:rgba(180,83,9,.10);
+  --bg:var(--x-bg1); --bg1:var(--x-bg2); --bg2:var(--x-bg3); --bg0:rgba(15,23,42,.02);
+  --sur:var(--x-sur1); --sur2:var(--x-sur2); --sur3:var(--x-sur3);
+  --line:var(--x-line1); --line2:var(--x-line2); --hair:rgba(15,23,42,.06);
+  --t0:var(--x-ink0); --t1:var(--x-ink1); --t2:var(--x-ink2); --t3:var(--x-ink3);
+  --ac:var(--x-ac); --ac2:var(--x-ac-lo); --cy:var(--x-cy); --cy2:var(--x-cy-lo); --vio:var(--x-vio);
+  --pos:var(--x-pos); --neg:var(--x-neg); --amb:var(--x-warn);
+  background:var(--x-bg1); color:var(--x-ink0);
+}
+body:has(#v-den.on) .main,body:has(#v-den.on) .rail,body:has(#v-den.on) .top{background:var(--x-bg1)}
+body:has(#v-den.on) .rail{border-bottom:1px solid var(--x-line1)}
+body:has(#v-den.on) .rbtn-studio,body:has(#v-den.on) .rbtn-studio svg,body:has(#v-den.on) .rbtn-studio.on{color:var(--x-cy)}
+/* the scope bar does not drive the Den (a desk is the scope), so it is not shown here */
+body:has(#v-den.on) #scope-root{display:none}
+body:has(#v-den.on) .content{padding-top:6px}
+#v-den{max-width:1680px}
+#v-den>.note-toggle{margin:0 0 6px auto;text-align:right}
+
+/* ---- the Den's own tokens ---- */
+#den-root{
+  --den-ground:#F4F5F7; --den-card:#FFFFFF; --den-soft:#F7F8FA; --den-hover:#F1F3F6;
+  --den-line:#E4E7EC; --den-line2:#D3D8E0;
+  --den-ink:#0E121B; --den-ink1:#2A3040; --den-ink2:#555E6E; --den-ink3:#636C7B;
+  --den-btn:#12161F; --den-btn-ink:#FFFFFF;
+  --den-ac:#1D4ED8; --den-ac-bg:#EAF0FE;
+  --den-pos:#116B33; --den-pos-bg:#E7F6EC; --den-neg:#B91C1C; --den-neg-bg:#FCEBEA; --den-warn:#A8500A; --den-warn-bg:#FDF1E1;
+  --den-tip:#12161F; --den-tip-ink:#FFFFFF; --den-tip-sub:#B9C0CC;
+  /* chart series: a fixed order, one hue a channel, validated for colour-vision separation on white */
+  --den-s1:#2A78D6; --den-s2:#EB6834; --den-s3:#1BAF7A; --den-s4:#EDA100; --den-s5:#E87BA4; --den-s6:#008300; --den-s7:#6250D6; --den-s0:#8A93A3;
+  --den-r:10px; --den-r-sm:7px; --den-r-lg:14px; --den-r-xs:4px; --den-r-pill:999px;
+  --den-sh1:0 1px 2px rgba(15,23,42,.06); --den-sh2:0 1px 2px rgba(15,23,42,.05),0 4px 14px rgba(15,23,42,.05); --den-sh3:0 12px 40px rgba(15,23,42,.18);
+  --den-pad:11px; --den-gap:14px;
+  --den-font:'DM Sans','Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --den-num:'Manrope','DM Sans',system-ui,sans-serif;
+  display:block;color:var(--den-ink1);font-family:var(--den-font);font-size:13.5px;line-height:1.5;
+}
+#den-app[data-density="compact"]{--den-pad:7px}
+#den-app[data-density="roomy"]{--den-pad:15px}
+
+/* ---- the frame: side menu and workspace ---- */
+#den-app{display:grid;grid-template-columns:228px minmax(0,1fr);gap:16px;align-items:start}
+.den-side{position:sticky;top:0;display:flex;flex-direction:column;gap:12px;min-width:0}
+.den-main{min-width:0;background:var(--den-card);border:1px solid var(--den-line);border-radius:var(--den-r-lg);box-shadow:var(--den-sh1);padding:16px 16px 6px}
+.den-deskcard{display:flex;gap:10px;align-items:center;background:var(--den-card);border:1px solid var(--den-line);border-radius:var(--den-r);box-shadow:var(--den-sh1);padding:10px 12px;min-width:0}
+.den-av{flex:none;width:34px;height:34px;border-radius:var(--den-r-sm);background:var(--den-s1);color:var(--den-btn-ink);display:grid;place-items:center;font-family:var(--den-num);font-weight:800;font-size:15px}
+.den-deskcard b{display:block;color:var(--den-ink);font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.den-deskcard span span{display:block;color:var(--den-ink2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.den-deskcard>span:last-child{min-width:0}
+.den-menu-h{display:block;font-size:11.5px;color:var(--den-ink3);padding:10px 10px 4px;border-bottom:1px solid var(--den-line);margin:0 0 4px}
+.den-tabs.den-menu{display:flex;flex-direction:column;gap:2px;border:0;background:none;padding:0;margin:0}
+.den-tabs.den-menu .den-tab{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:1px solid transparent;border-radius:var(--den-r-sm);padding:7px 10px;font-size:13.5px;color:var(--den-ink1);background:none;margin:0;box-shadow:none}
+.den-tabs.den-menu .den-tab svg{width:16px;height:16px;flex:none;color:var(--den-ink2)}
+.den-tabs.den-menu .den-tab:hover{background:var(--den-hover);color:var(--den-ink)}
+.den-tabs.den-menu .den-tab[aria-selected="true"]{background:var(--den-card);border-color:var(--den-line);box-shadow:var(--den-sh1);color:var(--den-ink);font-weight:600}
+.den-tabs.den-menu .den-tab[aria-selected="true"] svg{color:var(--den-ink)}
+.den-sidefoot{background:var(--den-card);border:1px solid var(--den-line);border-radius:var(--den-r);box-shadow:var(--den-sh1);padding:10px 12px;font-size:12px;color:var(--den-ink2)}
+.den-sidefoot b{display:block;color:var(--den-ink);font-weight:600;font-size:12.5px}
+.den-meter{height:6px;border-radius:var(--den-r-pill);background:var(--den-hover);margin:7px 0 5px;overflow:hidden}
+.den-meter i{display:block;height:100%;border-radius:var(--den-r-pill);background:var(--den-s1)}
+
+/* ---- header ---- */
+.den-head{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin:0 0 14px}
+.den-head h2{font-family:var(--den-num);font-size:21px;font-weight:700;color:var(--den-ink);margin:0;letter-spacing:-.02em;line-height:1.25}
+.den-head .den-win{font-size:12.5px;color:var(--den-ink2)}
+.den-head .den-lab{flex-direction:row;align-items:center;gap:8px}
+.den-lab{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--den-ink2)}
+.den-lab select,.den-lab input,.den-lab textarea,.den-in{font-family:var(--den-font);font-size:13px;color:var(--den-ink);background:var(--den-card);border:1px solid var(--den-line2);border-radius:var(--den-r-sm);padding:6px 9px;min-height:32px;box-shadow:var(--den-sh1)}
+.den-lab select:hover,.den-in:hover{border-color:var(--den-ink3)}
+.den-lab select:focus-visible,.den-lab input:focus-visible,.den-in:focus-visible,.den-ta:focus-visible,.den-row:focus-visible,.den-tab:focus-visible,.den-link:focus-visible,.den-mini:focus-visible,.den-kpi:focus-visible,.den-col:focus-visible{outline:2px solid var(--den-ac);outline-offset:1px}
 .den-spacer{flex:1}
-.den-chip{display:inline-block;font-family:var(--fm);font-size:10px;letter-spacing:.04em;padding:2px 7px;border-radius:var(--den-r-pill);border:1px solid var(--line);color:var(--t2);white-space:nowrap}
-.den-chip.pos{color:var(--x-pos);border-color:var(--x-pos)}
-.den-chip.neg{color:var(--x-neg);border-color:var(--x-neg)}
-.den-chip.warn{color:var(--x-warn);border-color:var(--x-warn)}
-.den-chip.acc{color:var(--x-ac-hi);border-color:var(--x-ac-hi)}
-.den-panel{border:1px solid var(--line);border-radius:var(--den-r);background:var(--sur);margin:0 0 var(--den-gap)}
-.den-panel>header{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line)}
-.den-panel>header h3{font-family:var(--fm);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t1);margin:0;font-weight:600}
-.den-panel>header .den-note{font-size:12px;color:var(--t2)}
-.den-panel>.den-body{padding:10px 12px}
-.den-panel>.den-body.flush{padding:0}
-.den-table{width:100%;border-collapse:collapse;font-size:12.5px}
-.den-table th{text-align:left;font-family:var(--fm);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t2);font-weight:500;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
-.den-table td{padding:var(--den-pad) 10px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--t1)}
+
+/* ---- segmented tabs (inside a panel) ---- */
+.den-tabs{display:inline-flex;gap:2px;flex-wrap:wrap;background:var(--den-hover);border:1px solid var(--den-line);border-radius:var(--den-r);padding:3px;margin:0 0 14px}
+.den-tab{background:none;border:0;border-radius:var(--den-r-sm);color:var(--den-ink2);font-family:var(--den-font);font-size:13px;padding:5px 12px;cursor:pointer}
+.den-tab:hover{color:var(--den-ink)}
+.den-tab[aria-selected="true"]{color:var(--den-ink);background:var(--den-card);box-shadow:var(--den-sh1);font-weight:600}
+.den-tab .n{font-size:11.5px;color:var(--den-ink2);margin-left:6px;font-variant-numeric:tabular-nums}
+
+/* ---- chips ---- */
+.den-chip{display:inline-block;font-size:11.5px;font-weight:500;line-height:1.5;padding:1px 8px;border-radius:var(--den-r-pill);border:1px solid var(--den-line);background:var(--den-soft);color:var(--den-ink2);white-space:nowrap}
+.den-chip.pos{color:var(--den-pos);background:var(--den-pos-bg);border-color:transparent}
+.den-chip.neg{color:var(--den-neg);background:var(--den-neg-bg);border-color:transparent}
+.den-chip.warn{color:var(--den-warn);background:var(--den-warn-bg);border-color:transparent}
+.den-chip.acc{color:var(--den-ac);background:var(--den-ac-bg);border-color:transparent}
+
+/* ---- cards and panels ---- */
+.den-panel,.den-card{border:1px solid var(--den-line);border-radius:var(--den-r);background:var(--den-card);margin:0 0 var(--den-gap);box-shadow:var(--den-sh1);min-width:0}
+.den-panel>header,.den-card>header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:11px 14px 9px}
+.den-panel>header h3,.den-card>header h3{font-family:var(--den-font);font-size:14.5px;color:var(--den-ink);margin:0;font-weight:600;letter-spacing:-.005em}
+.den-panel>header .den-note,.den-card>header .den-note{font-size:12.5px;color:var(--den-ink2)}
+.den-panel>.den-body{padding:4px 14px 13px}
+.den-panel>.den-body.flush{padding:0;overflow-x:auto;border-top:1px solid var(--den-line);border-radius:0 0 var(--den-r) var(--den-r)}
+.den-card>.den-body{padding:2px 14px 14px}
+
+/* ---- tables ---- */
+.den-table{width:100%;border-collapse:collapse;font-size:13px}
+.den-table th{text-align:left;font-size:12px;color:var(--den-ink2);font-weight:500;padding:8px 14px;background:var(--den-soft);border-bottom:1px solid var(--den-line);white-space:nowrap}
+.den-table td{padding:var(--den-pad) 14px;border-bottom:1px solid var(--den-line);vertical-align:top;color:var(--den-ink1)}
 .den-table tr:last-child td{border-bottom:0}
-.den-table td.num,.den-table th.num{text-align:right;font-family:var(--fm);font-variant-numeric:tabular-nums;white-space:nowrap}
+.den-table td.num,.den-table th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.den-table td.num{font-family:var(--den-num);font-weight:600;color:var(--den-ink)}
 .den-table td.act{white-space:nowrap;text-align:right}
-.den-row.pinned td:first-child{box-shadow:inset 2px 0 0 var(--x-ac-hi)}
-.den-row:hover td{background:var(--sur2)}
-.den-t{color:var(--t0)}
-.den-sub{display:block;font-size:11.5px;color:var(--t2);margin-top:2px}
-.den-mono{font-family:var(--fm);font-size:11px;font-variant-numeric:tabular-nums;color:var(--t2)}
-.den-link{color:var(--x-ac-hi);text-decoration:underline;text-underline-offset:2px;background:none;border:0;padding:0;font:inherit;cursor:pointer}
-.den-link:hover{color:var(--t0)}
-.den-mini{font-family:var(--fb);font-size:11.5px;padding:3px 8px;min-height:26px;border-radius:var(--den-r);border:1px solid var(--line);background:var(--sur2);color:var(--t1);cursor:pointer}
-.den-mini:hover:not(:disabled){color:var(--t0);border-color:var(--line2)}
-.den-mini:disabled{opacity:.5;cursor:not-allowed}
-.den-mini.on{color:var(--x-ac-hi);border-color:var(--x-ac-hi)}
-.den-mini.primary{background:var(--x-ac-hi);border-color:var(--x-ac-hi);color:var(--x-bg1);font-weight:600}
-.den-mini.danger{color:var(--x-neg);border-color:var(--x-neg)}
-.den-strip{border:1px solid var(--line);border-radius:var(--den-r);margin:0 0 var(--den-gap);background:var(--sur)}
-.den-strip>header{display:flex;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
-.den-strip>header h3{font-family:var(--fm);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;margin:0;color:var(--t1);font-weight:600}
-.den-strip ul{list-style:none;margin:0;padding:0}
-.den-strip li{display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:7px 12px;border-bottom:1px solid var(--line)}
-.den-strip li:last-child{border-bottom:0}
-.den-strip .d{color:var(--t2);font-size:12px;display:block}
-.den-state{padding:18px 14px;color:var(--t2);font-size:12.5px;line-height:1.6}
-.den-state b{color:var(--t0);font-weight:600}
-.den-state.err{color:var(--t1);border-left:2px solid var(--x-neg)}
+.den-row.pinned td:first-child{box-shadow:inset 3px 0 0 var(--den-s1)}
+.den-row.pinned td{background:var(--den-ac-bg)}
+.den-row:hover td{background:var(--den-soft)}
+.den-row.pinned:hover td{background:var(--den-ac-bg)}
+.den-t{color:var(--den-ink);font-weight:500}
+.den-sub{display:block;font-size:12px;color:var(--den-ink2);margin-top:2px}
+.den-mono{font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--den-ink2)}
+.den-link{color:var(--den-ac);font-weight:500;text-decoration:underline;text-decoration-color:var(--den-line2);text-underline-offset:3px;background:none;border:0;padding:0;font-family:inherit;font-size:inherit;cursor:pointer}
+.den-link:hover{color:var(--den-ink);text-decoration-color:currentColor}
+
+/* ---- buttons ---- */
+.den-mini{font-family:var(--den-font);font-size:12.5px;font-weight:500;padding:4px 11px;min-height:30px;border-radius:var(--den-r-sm);border:1px solid var(--den-line2);background:var(--den-card);color:var(--den-ink);cursor:pointer;box-shadow:var(--den-sh1);transition:background .12s,border-color .12s}
+.den-mini:hover:not(:disabled){background:var(--den-hover);border-color:var(--den-ink3)}
+.den-mini:disabled{color:var(--den-ink3);background:var(--den-soft);box-shadow:none;cursor:not-allowed}
+.den-mini.on{color:var(--den-ac);background:var(--den-ac-bg);border-color:var(--den-ac)}
+.den-mini.primary{background:var(--den-btn);border-color:var(--den-btn);color:var(--den-btn-ink);font-weight:600}
+.den-mini.primary:hover:not(:disabled){background:var(--den-ink1);border-color:var(--den-ink1)}
+.den-mini.primary:disabled{background:var(--den-ink3);border-color:var(--den-ink3);color:var(--den-btn-ink)}
+.den-mini.danger{color:var(--den-neg);border-color:var(--den-neg)}
+.den-table .den-mini{min-height:26px;padding:2px 9px}
+
+/* ---- the day in figures ---- */
+.den-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid var(--den-line);border-radius:var(--den-r);background:var(--den-card);box-shadow:var(--den-sh1);margin:0 0 var(--den-gap);overflow:hidden}
+.den-kpi{display:flex;flex-direction:column;text-align:left;font-family:var(--den-font);background:none;border:0;border-left:1px solid var(--den-line);padding:0;cursor:pointer;color:var(--den-ink1);min-width:0}
+.den-kpi:first-child{border-left:0}
+.den-kpi:hover{background:var(--den-soft)}
+.den-kpi .k{display:flex;align-items:center;gap:7px;padding:12px 14px 0;font-size:13px;color:var(--den-ink1);font-weight:500}
+.den-kpi .k i{flex:none;width:4px;height:14px;border-radius:var(--den-r-xs);background:var(--den-s0)}
+.den-kpi .v{display:flex;align-items:baseline;gap:8px;padding:4px 14px 10px;font-family:var(--den-num);font-size:26px;font-weight:700;letter-spacing:-.03em;color:var(--den-ink);font-variant-numeric:tabular-nums;line-height:1.2}
+.den-kpi .v small{font-family:var(--den-font);font-size:12.5px;font-weight:600;letter-spacing:0}
+.den-kpi .v small.up{color:var(--den-pos)}.den-kpi .v small.down{color:var(--den-neg)}
+.den-kpi .f{margin-top:auto;padding:7px 14px;border-top:1px solid var(--den-line);background:var(--den-soft);font-size:12px;color:var(--den-ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---- charts ---- */
+.den-legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--den-ink2)}
+.den-legend span{display:inline-flex;align-items:center;gap:6px}
+.den-legend i,.den-tip i{flex:none;width:9px;height:9px;border-radius:var(--den-r-xs)}
+.den-chart{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr);height:188px;margin:4px 0 0}
+.den-yax{position:relative;font-size:11.5px;color:var(--den-ink3);font-variant-numeric:tabular-nums}
+.den-yax span{position:absolute;right:8px;transform:translateY(50%)}
+.den-plot{position:relative;display:flex;align-items:flex-end;gap:6px;height:calc(100% - 22px);border-bottom:1px solid var(--den-line2)}
+.den-plot .g{position:absolute;left:0;right:0;border-top:1px dashed var(--den-line);pointer-events:none}
+.den-col{position:relative;flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:2px;min-width:0;cursor:default;border-radius:var(--den-r-xs)}
+.den-col .s{width:min(100%,34px);border-radius:0;min-height:2px;transition:opacity .12s}
+.den-col .s:first-child{border-radius:var(--den-r-xs) var(--den-r-xs) 0 0}
+.den-plot.hot .den-col:not(.on) .s{opacity:.28}
+.den-col.on .s{background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.28) 0 3px,rgba(255,255,255,0) 3px 7px)}
+.den-col .x{position:absolute;top:100%;margin-top:5px;font-size:11.5px;color:var(--den-ink3);white-space:nowrap}
+.den-col.on .x{color:var(--den-ink);font-weight:600}
+.den-tip{position:absolute;bottom:calc(100% - 30px);z-index:5;min-width:150px;background:var(--den-tip);color:var(--den-tip-ink);border-radius:var(--den-r-sm);padding:8px 10px;box-shadow:var(--den-sh3);font-size:12px;pointer-events:none;text-align:left}
+.den-tip b{display:block;font-weight:600;margin:0 0 5px}
+.den-tip div{display:flex;align-items:center;gap:7px;color:var(--den-tip-sub);line-height:1.7}
+.den-tip div em{margin-left:auto;font-style:normal;color:var(--den-tip-ink);font-weight:600;font-variant-numeric:tabular-nums;padding-left:14px}
+.den-grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--den-gap)}
+.den-grid3>.den-card{margin-bottom:var(--den-gap)}
+.den-bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px}
+.den-bars li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;font-size:13px;color:var(--den-ink1)}
+.den-bars li span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.den-bars li b{font-family:var(--den-num);font-weight:700;color:var(--den-ink);font-variant-numeric:tabular-nums}
+.den-bars .t{grid-column:1/-1;height:12px;border-radius:var(--den-r-xs);background:var(--den-hover);overflow:hidden}
+.den-bars .t i{display:block;height:100%;min-width:3px;border-radius:var(--den-r-xs);background-color:var(--den-s1);background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.26) 0 3px,rgba(255,255,255,0) 3px 7px)}
+.den-split{display:flex;gap:2px;height:14px;margin:2px 0 12px}
+.den-split i{display:block;min-width:4px;border-radius:var(--den-r-xs);background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.26) 0 3px,rgba(255,255,255,0) 3px 7px)}
+.den-split .neg,.den-key .neg{background-color:var(--den-neg)}.den-split .mix,.den-key .mix{background-color:var(--den-s0)}.den-split .pos,.den-key .pos{background-color:var(--den-pos)}
+.den-keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0;padding:0;list-style:none}
+.den-keys li{font-size:12px;color:var(--den-ink2)}
+.den-keys li b{display:block;font-family:var(--den-num);font-size:18px;font-weight:700;color:var(--den-ink);font-variant-numeric:tabular-nums}
+.den-key{display:inline-block;width:4px;height:11px;border-radius:var(--den-r-xs);margin-right:6px;vertical-align:-1px}
+.den-quiet{font-size:12.5px;color:var(--den-ink2);padding:6px 0 0;line-height:1.55}
+
+/* ---- nothing critical missed ---- */
+.den-strip{border:1px solid var(--den-line);border-radius:var(--den-r);margin:0 0 var(--den-gap);background:var(--den-card);box-shadow:var(--den-sh1)}
+.den-strip>header{display:flex;gap:10px;align-items:center;padding:9px 14px}
+.den-strip>header h3{font-family:var(--den-font);font-size:14.5px;margin:0;color:var(--den-ink);font-weight:600}
+.den-strip ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid var(--den-line)}
+.den-strip li{display:grid;grid-template-columns:118px minmax(0,1fr);gap:2px 10px;align-items:start;padding:9px 14px;border-bottom:1px solid var(--den-line);border-right:1px solid var(--den-line)}
+.den-strip li:nth-child(2n){border-right:0}
+.den-strip li:last-child,.den-strip li:nth-last-child(2):nth-child(odd){border-bottom:0}
+.den-strip .d{color:var(--den-ink2);font-size:12.5px;display:block}
+.den-strip li>span:last-child{grid-column:2}
+.den-strip li>span:last-child:empty{display:none}
+.den-strip li .den-link{font-size:12.5px;white-space:nowrap}
+
+/* ---- states ---- */
+.den-state{padding:20px 16px;color:var(--den-ink2);font-size:13px;line-height:1.6}
+.den-state b{color:var(--den-ink);font-weight:600}
+.den-state.err{color:var(--den-ink1);border-left:3px solid var(--den-neg);background:var(--den-neg-bg);border-radius:var(--den-r-sm)}
 .den-state .den-mini{margin-left:8px}
-.den-notice{border:1px solid var(--line2);border-left:2px solid var(--x-warn);border-radius:var(--den-r);padding:9px 12px;margin:0 0 var(--den-gap);font-size:12.5px;color:var(--t1);background:var(--sur)}
-.den-notice.bad{border-left-color:var(--x-neg)}
-.den-notice.good{border-left-color:var(--x-pos)}
+.den-notice{border:1px solid var(--den-line);border-left:3px solid var(--den-warn);border-radius:var(--den-r-sm);padding:10px 14px;margin:0 0 var(--den-gap);font-size:13px;color:var(--den-ink1);background:var(--den-warn-bg)}
+.den-notice.bad{border-left-color:var(--den-neg);background:var(--den-neg-bg)}
+.den-notice.good{border-left-color:var(--den-pos);background:var(--den-pos-bg)}
 .den-notice .den-mini{margin:6px 6px 0 0}
-.den-sec{border-top:1px solid var(--line);padding:12px}
+
+/* ---- the brief ---- */
+.den-sec{border-top:1px solid var(--den-line);padding:16px 14px}
 .den-sec:first-child{border-top:0}
-.den-sec h4{font-family:var(--fd);font-size:14.5px;font-weight:600;color:var(--t0);margin:0 0 6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.den-ta{width:100%;min-height:120px;resize:vertical;font-family:var(--fb);font-size:13.5px;line-height:1.6;color:var(--t0);background:var(--x-bg1);border:1px solid var(--line);border-radius:var(--den-r);padding:9px 10px;box-sizing:border-box}
-.den-ta[readonly]{color:var(--t1);background:transparent}
-.den-flags{margin:6px 0 0;padding:0;list-style:none;font-size:12px;color:var(--t2)}
+.den-sec h4{font-family:var(--den-num);font-size:16px;font-weight:700;letter-spacing:-.01em;color:var(--den-ink);margin:0 0 8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.den-ta{width:100%;min-height:128px;resize:vertical;font-family:var(--den-font);font-size:14.5px;line-height:1.65;color:var(--den-ink);background:var(--den-soft);border:1px solid var(--den-line);border-radius:var(--den-r);padding:12px 14px;box-sizing:border-box;transition:background .12s,border-color .12s}
+.den-ta:hover{border-color:var(--den-line2)}
+.den-ta:focus{background:var(--den-card);border-color:var(--den-ac)}
+.den-ta[readonly]{color:var(--den-ink1);background:var(--den-card)}
+.den-flags{margin:8px 0 0;padding:0;list-style:none;font-size:12.5px;color:var(--den-ink2)}
 .den-flags li{padding:2px 0}
-.den-flags .w{color:var(--x-warn)}
-.den-cites{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0 0}
-.den-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 12px;border-top:1px solid var(--line)}
-.den-save{font-family:var(--fm);font-size:11px;color:var(--t2)}
-.den-save.dirty{color:var(--x-warn)}
-.den-save.bad{color:var(--x-neg)}
-.den-save.ok{color:var(--x-pos)}
+.den-flags .w{color:var(--den-warn);font-weight:600}
+.den-cites{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 0}
+.den-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:11px 14px;border-top:1px solid var(--den-line);background:var(--den-soft);border-radius:0 0 var(--den-r) var(--den-r)}
+.den-save{font-size:12.5px;color:var(--den-ink2)}
+.den-save.dirty{color:var(--den-warn)}
+.den-save.bad{color:var(--den-neg)}
+.den-save.ok{color:var(--den-pos)}
 .den-form{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end}
-.den-ev{margin:6px 0 0;padding:0 0 0 14px;font-size:12px;color:var(--t2)}
+.den-ev{margin:6px 0 0;padding:0 0 0 16px;font-size:12.5px;color:var(--den-ink2)}
 .den-ev li{margin:2px 0}
-.den-diff ins{background:transparent;color:var(--x-pos);text-decoration:underline}
-.den-diff del{color:var(--x-neg)}
-.den-kbd{font-family:var(--fm);font-size:11px;border:1px solid var(--line2);border-radius:var(--den-r);padding:1px 6px;color:var(--t0)}
-.den-dialog{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:60}
-.den-dialog>div{background:var(--x-bg2,var(--bg1));border:1px solid var(--line2);border-radius:var(--den-r);padding:16px 18px;max-width:560px;width:calc(100% - 32px);max-height:80vh;overflow:auto}
-.den-dialog h3{margin:0 0 10px;font-family:var(--fd);font-size:16px;color:var(--t0)}
+.den-diff ins{background:var(--den-pos-bg);color:var(--den-pos);text-decoration:underline}
+.den-diff del{background:var(--den-neg-bg);color:var(--den-neg)}
+.den-kbd{font-family:var(--den-font);font-size:12px;font-weight:600;border:1px solid var(--den-line2);border-bottom-width:2px;border-radius:var(--den-r-xs);padding:1px 7px;color:var(--den-ink);background:var(--den-soft)}
+.den-dialog{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.42);z-index:60}
+.den-dialog>div{background:var(--den-card);border:1px solid var(--den-line);border-radius:var(--den-r-lg);box-shadow:var(--den-sh3);padding:18px 20px;max-width:560px;width:calc(100% - 32px);max-height:80vh;overflow:auto}
+.den-dialog h3{margin:0 0 12px;font-family:var(--den-num);font-size:17px;font-weight:700;color:var(--den-ink)}
 .den-grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--den-gap)}
 .den-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-@media(max-width:1100px){.den-grid2{grid-template-columns:1fr}.den-strip li{grid-template-columns:1fr}}
+
+@media(max-width:1280px){.den-strip ul{grid-template-columns:1fr}.den-strip li{border-right:0}.den-strip li:nth-last-child(2):nth-child(odd){border-bottom:1px solid var(--den-line)}}
+@media(max-width:1100px){
+  #den-app{grid-template-columns:1fr}
+  .den-side{position:static;flex-direction:row;flex-wrap:wrap;align-items:center}
+  .den-tabs.den-menu{flex-direction:row;flex-wrap:wrap;flex:1}
+  .den-tabs.den-menu .den-tab{width:auto}
+  .den-menu-h,.den-sidefoot{display:none}
+  .den-grid2,.den-grid3{grid-template-columns:1fr}
+  .den-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .den-kpi{border-top:1px solid var(--den-line)}
+}
+@media(prefers-reduced-motion:reduce){.den-mini,.den-ta,.den-col .s{transition:none}}
+.den-table input.den-in:not([type="number"]):not([type="checkbox"]){width:100%;max-width:360px}
