@@ -2318,7 +2318,7 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook', 'ytsearch', 'gated'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook', 'ytsearch', 'gated', 'hansard', 'blueskyaccounts'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
 const BRIDGE_DESKTOP_ONLY = ['x', 'ytsearch', 'gated'];      // no server-side path exists for these (ytsearch: YouTube keyword search through a collector)
 /* The signed-in layer (DEN.md, layer 2): what a Mac collector may be asked to read, and the switch that stops it. */
 const REACH_SOURCES = ['facebook', 'instagram', 'ytsearch', 'x', 'reddit', 'gated'];
@@ -2881,7 +2881,7 @@ async function hansardSearch(env, kw, max) {
     return { ok: true, items: rows.map(x => ({
       speaker: (((x.speaker || {}).first_name || '') + ' ' + ((x.speaker || {}).last_name || '')).trim(), party: (x.speaker || {}).party || '',
       house: x.major === 1 ? 'representatives' : x.major === 101 ? 'senate' : '', date: x.hdate || '',
-      text: stripHtml(x.body || x.extract || '').slice(0, 1500), url: x.listurl ? 'https://www.openaustralia.org.au' + x.listurl : '', id: String(x.gid || ''),
+      text: stripHtml(x.body || x.extract || '').slice(0, 1500), url: x.listurl ? 'https://www.openaustralia.org.au' + x.listurl : '', id: String(x.gid || ''), debate: stripHtml(String((x.parent || {}).body || '')).slice(0, 160),
     })).filter(x => x.text) };
   } catch (e) { return { ok: false, items: [], detail: String((e && e.message) || e).slice(0, 120) }; }
 }
@@ -4612,7 +4612,7 @@ function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) +
 let SOURCES_READY = false;
 const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'wire', 'independent', 'official', 'party', 'polling', 'thinktank', 'sector', 'podcast', 'video', 'newsletter', 'sweep'];
 const SOURCE_JURIS = ['au', 'nsw', 'vic', 'qld', 'wa', 'sa', 'tas', 'act', 'nt'];
-const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render'];
+const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render', 'public', 'process'];
 const SOURCES_PER_TICK = 50;        // registry sources swept per cron tick (the core is fetched separately)
 const SOURCE_DEAD_FAILS = 6;        // consecutive failed sweeps before a source is reported dead
 const SOURCE_WINDOW_H = 72;         // dated items older than this are not filed
@@ -4690,6 +4690,37 @@ const SOURCE_SEED_EXT = [
   ['aph_senate_committees', 'Senate committees', 'official', 'au', 'gov,gas,gastax,firearms', { h: 'https://www.aph.gov.au/Parliamentary_Business/Committees/Senate', g: 'site:aph.gov.au Senate committee inquiry gas OR firearms OR "fuel tax"' }],
   ['nopsema', 'NOPSEMA', 'official', 'au', 'gasprojects,gas', { s: 'nopsema.gov.au', h: 'https://www.nopsema.gov.au/news-and-media' }],
   ['wa_epa', 'EPA Western Australia', 'official', 'wa', 'gasprojects', { s: 'epa.wa.gov.au', h: 'https://www.epa.wa.gov.au/media-statements' }],
+  // -- release 7: public-record routes. Each is read by the `public` method (robots.txt obeyed, an honest user agent, a
+  //    headline and a link only), with Google News as the fallback. Every address is unverified until a sweep proves it. --
+  ['medianet', 'Medianet Newshub', 'wire', 'au', 'gov,gas,gastax,ftc,firearms,activism', { b: 'https://newshub.medianet.com.au/', s: 'newshub.medianet.com.au' }],
+  ['treasury_foi', 'Treasury FOI disclosure log', 'official', 'au', 'ftc,gastax,econ', { b: 'https://treasury.gov.au/the-department/accountability-reporting/foi', g: 'site:treasury.gov.au foi "fuel tax credit" OR "gas"' }],
+  ['hcourt', 'High Court of Australia judgments', 'official', 'au', 'mining,gov', { b: 'https://www.hcourt.gov.au/cases-and-judgments/judgments/judgments-2000-current', s: 'hcourt.gov.au' }],
+  ['fedcourt', 'Federal Court of Australia judgments', 'official', 'au', 'mining,gasprojects', { b: 'https://www.fedcourt.gov.au/digital-law-library/judgments/latest', s: 'fedcourt.gov.au' }],
+  ['nopsema_decisions', 'NOPSEMA decisions', 'official', 'au', 'gasprojects', { b: 'https://www.nopsema.gov.au/environmental-management/assessment-and-decisions', g: 'site:docs.nopsema.gov.au OR site:nopsema.gov.au "statement of reasons" OR "acceptance"' }],
+  ['stopthebuyback', 'Stop the Buyback', 'sector', 'au', 'firearms', { b: 'https://stopthebuyback.com.au/', s: 'stopthebuyback.com.au' }],
+  ['handsoffourfuel', 'Hands Off Our Fuel', 'sector', 'au', 'ftc', { b: 'https://handsoffourfuel.com.au/', s: 'handsoffourfuel.com.au' }],
+  ['ourgas', 'Our Gas', 'sector', 'au', 'gastax', { b: 'https://www.ourgas.com.au/', s: 'ourgas.com.au' }],
+  ['aep_members', 'Australian Energy Producers member updates', 'sector', 'au', 'gas,gastax', { b: 'https://member.energyproducers.au/explore' }],
+  ['ssaa_nsw', 'SSAA NSW', 'sector', 'nsw', 'firearms,hunting', { b: 'https://ssaansw.org.au/', s: 'ssaansw.org.au' }],
+  ['ssaa_act', 'SSAA ACT', 'sector', 'act', 'firearms', { b: 'https://www.ssaaact.org.au/media-releases/', s: 'ssaaact.org.au' }],
+  ['ssaa_vic', 'SSAA Victoria', 'sector', 'vic', 'firearms,hunting', { b: 'https://ssaavic.com.au/', s: 'ssaavic.com.au' }],
+  ['australianhunter', 'Australian Hunter', 'sector', 'au', 'firearms,hunting', { b: 'https://australianhunter.com.au/', s: 'australianhunter.com.au' }],
+  ['fieldandgame', 'Field & Game Australia', 'sector', 'au', 'hunting,firearms', { b: 'https://www.fieldandgame.com.au/news', s: 'fieldandgame.com.au' }],
+  ['austdeer', 'Australian Deer Association', 'sector', 'au', 'hunting,firearms', { b: 'https://www.austdeer.com.au/news', s: 'austdeer.com.au' }],
+  ['agsa', 'Australian Gun Safety Alliance', 'sector', 'au', 'firearms', { b: 'https://www.gunsafetyalliance.org.au/', s: 'gunsafetyalliance.org.au' }],
+  ['environskimberley', 'Environs Kimberley', 'sector', 'wa', 'gasprojects,activism', { b: 'https://www.environskimberley.org.au/news', s: 'environskimberley.org.au' }],
+  ['fara', 'Friends of Australian Rock Art', 'sector', 'wa', 'gasprojects', { b: 'https://www.fara.com.au/', s: 'fara.com.au' }],
+  ['envirojustice', 'Environmental Justice Australia', 'sector', 'au', 'gasprojects,mining', { b: 'https://envirojustice.org.au/', s: 'envirojustice.org.au' }],
+  ['ieefa', 'IEEFA Australia', 'thinktank', 'au', 'gas,gastax,ftc', { b: 'https://ieefa.org/regions/australia', s: 'ieefa.org' }],
+  ['climateenergyfinance', 'Climate Energy Finance', 'thinktank', 'au', 'ftc,cm', { b: 'https://climateenergyfinance.org/', s: 'climateenergyfinance.org' }],
+  ['amnesty_au', 'Amnesty International Australia', 'sector', 'au', 'energy,activism', { b: 'https://www.amnesty.org.au/news/', s: 'amnesty.org.au' }],
+  ['nit', 'National Indigenous Times', 'independent', 'au', 'gasprojects,mining', { b: 'https://nit.com.au/', s: 'nit.com.au' }],
+  ['miningweekly', 'Mining Weekly (Australasia)', 'sector', 'au', 'mining,cm', { b: 'https://www.miningweekly.com/page/australasia-home', s: 'miningweekly.com' }],
+  ['energytoday', 'Energy Today', 'sector', 'au', 'gas,gasprojects', { b: 'https://www.energytodaymag.com.au/', s: 'energytodaymag.com.au' }],
+  ['cityhub', 'City Hub', 'regional', 'nsw', 'firearms,gov', { b: 'https://cityhub.com.au/', s: 'cityhub.com.au' }],
+  ['greenleft', 'Green Left', 'independent', 'au', 'activism,mining,gas', { b: 'https://www.greenleft.org.au/', s: 'greenleft.org.au' }],
+  ['tasmaniantimes', 'Tasmanian Times', 'regional', 'tas', 'firearms,gov', { b: 'https://tasmaniantimes.com/', s: 'tasmaniantimes.com' }],
+  ['boilingcold', 'Boiling Cold', 'independent', 'wa', 'gasprojects,gas', { b: 'https://www.boilingcold.com.au/', s: 'boilingcold.com.au' }],
   ['vic_energy_minister', 'Victorian Minister for Energy', 'official', 'vic', 'electrify,energy,gas', { g: 'site:premier.vic.gov.au energy OR gas OR electrification' }],
   ['nsw_parl_inquiries', 'NSW Parliament inquiries', 'official', 'nsw', 'firearms', { g: 'site:parliament.nsw.gov.au inquiry firearms OR buyback' }],
   ['geelongadv', 'Geelong Advertiser', 'regional', 'vic', 'regional', { r: 'https://www.geelongadvertiser.com.au/rss', s: 'geelongadvertiser.com.au' }],
@@ -4934,6 +4965,8 @@ function sourceMethods(urls, explicit) {
   urls = urls || {};
   if (Array.isArray(explicit) && explicit.length) { const e = explicit.map(String).filter(m => SOURCE_METHODS.indexOf(m) >= 0); if (e.length) return e; }
   const m = [];
+  if (urls.process) m.push('process');
+  if (urls.public) m.push('public');
   if (urls.rss) m.push('rss');
   if (urls.wp) m.push('wp');
   if (urls.json) m.push('json');
@@ -4960,9 +4993,10 @@ function sourceSeed() {
     const u = r[5] || {}; const urls = {};
     if (u.r) urls.rss = u.r; if (u.w) urls.wp = u.w; if (u.j) urls.json = u.j; if (u.m) urls.sitemap = u.m;
     if (u.p) urls.podcast = u.p; if (u.h) urls.home = u.h; if (u.s) urls.site = u.s; if (u.g) urls.gnews = u.g;
-    if (u.y) urls.youtube = u.y; if (u.n) urls.substack = u.n;
+    if (u.y) urls.youtube = u.y; if (u.n) urls.substack = u.n; if (u.b) urls.public = u.b;
     out.push({ id: r[0], name: r[1], tier: r[2], juris: r[3], issues: String(r[4] || '').split(/[,\s]+/).filter(Boolean), methods: sourceMethods(urls, null), urls, schedule: r[6] || SOURCE_SCHED[r[2]] || 60, core: false });
   });
+  PROCESS_SEED.forEach(r => out.push({ id: r[0], name: r[1], tier: 'official', juris: r[2], issues: String(r[6] || '').split(',').filter(Boolean), methods: ['process'], urls: { process: r[5], ptype: r[4], house: r[3] }, schedule: 360, core: false }));
   return out;
 }
 async function ensureSources(env) {
@@ -5074,11 +5108,12 @@ function sourceSanitize(b, cur) {
   let urls = cur ? Object.assign({}, cur.urls) : {};
   if (u) {
     urls = {};
-    ['rss', 'wp', 'json', 'sitemap', 'home', 'substack'].forEach(k => { const v = String(u[k] || '').trim(); if (/^https?:\/\/\S+$/.test(v)) urls[k] = v.slice(0, 400); });
+    ['rss', 'wp', 'json', 'sitemap', 'home', 'substack', 'public', 'process'].forEach(k => { const v = String(u[k] || '').trim(); if (/^https?:\/\/\S+$/.test(v)) urls[k] = v.slice(0, 400); });
     if (u.youtube) { const y = String(u.youtube).trim(); const idm = y.match(/(UC[\w-]{22})/); if (idm) urls.youtube = idm[1]; else if (/^@?[\w.-]{2,60}$/.test(y.replace(/^https?:\/\/(www\.)?youtube\.com\//, ''))) urls.youtube = y.replace(/^https?:\/\/(www\.)?youtube\.com\//, '').replace(/^@?/, '@').slice(0, 64); }
     if (u.site) urls.site = String(u.site).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '').slice(0, 120);
     if (u.gnews) urls.gnews = String(u.gnews).trim().slice(0, 200);
     if (u.podcast) urls.podcast = String(u.podcast).trim().slice(0, 120);
+    if (urls.process) { if (PROCESS_TYPES.indexOf(String(u.ptype)) >= 0) urls.ptype = String(u.ptype); if (u.house && PROCESS_HOUSES.indexOf(String(u.house)) >= 0) urls.house = String(u.house); }
   }
   const name = String(b.name || (cur && cur.name) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const id = sourceIdClean(b.id || (cur && cur.id) || name.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
@@ -5320,6 +5355,8 @@ async function srcMethod(env, m, src) {
   if (m === 'html') return u.home ? srcHtml(env, src) : { ok: false, items: [], skipped: true, detail: 'no listing page' };
   if (m === 'gnews') return (u.gnews || u.site) ? srcGnews(env, src) : { ok: false, items: [], skipped: true, detail: 'no site or query for Google News' };
   if (m === 'render') return u.home ? srcRender(env, src) : { ok: false, items: [], skipped: true, detail: 'no page to render' };
+  if (m === 'public') return u.public ? srcPublic(env, src) : { ok: false, items: [], skipped: true, detail: 'no public page' };
+  if (m === 'process') return u.process ? srcProcess(env, src) : { ok: false, items: [], skipped: true, detail: 'no parliament page' };
   return { ok: false, items: [], skipped: true, detail: 'unknown method ' + m };
 }
 function srcTarget(src, m) {
@@ -5327,7 +5364,7 @@ function srcTarget(src, m) {
   if (m === 'rss') return u.rss || ''; if (m === 'wp') return String(u.wp || '').replace(/\/+$/, '') + '/wp-json/wp/v2/posts'; if (m === 'json') return u.json || '';
   if (m === 'youtube') return 'youtube.com/feeds/videos.xml ' + (u.youtube || ''); if (m === 'substack') return String(u.substack || '').replace(/\/+$/, '') + '/feed';
   if (m === 'sitemap') return u.sitemap || ('https://' + siteHost(u.site) + '/robots.txt'); if (m === 'podcast') return 'itunes.apple.com/search "' + (u.podcast || '') + '"';
-  if (m === 'html' || m === 'render') return u.home || ''; if (m === 'gnews') return 'news.google.com/rss/search ' + (u.gnews || ('site:' + siteHost(u.site)));
+  if (m === 'html' || m === 'render') return u.home || ''; if (m === 'public') return u.public || ''; if (m === 'process') return u.process || ''; if (m === 'gnews') return 'news.google.com/rss/search ' + (u.gnews || ('site:' + siteHost(u.site)));
   return '';
 }
 /** Run one source through its method chain. Normally stops at the first method
@@ -5342,10 +5379,11 @@ async function sourceRun(env, src, opts) {
   for (const m of chain) {
     const t0 = Date.now();
     await log('cmd', src.id + ': ' + m + ' ' + srcTarget(src, m));
-    let r; try { r = await srcMethod(env, m, src); } catch (e) { r = { ok: false, items: [], detail: String((e && e.message) || e).slice(0, 120) }; }
-    const n = (r.items || []).length, ok = !!(r.ok && n), ms = r.ms || (Date.now() - t0);
+    let r; try { r = await srcMethod(env, m, opts.all ? Object.assign({}, src, { probe: true }) : src); } catch (e) { r = { ok: false, items: [], detail: String((e && e.message) || e).slice(0, 120) }; }
+    const n = (r.items || []).length, ok = !!(r.ok && (n || r.quiet)), ms = r.ms || (Date.now() - t0);
     const t = { method: m, ok, n, ms, status: r.status || 0, skipped: !!r.skipped, detail: ok ? '' : String(r.detail || 'failed').slice(0, 160) };
     if (ok && r.full) t.full = true;
+    if (r.refused) t.refused = true;
     if (opts.all) t.sample = (r.items || []).slice(0, 3).map(i => ({ title: String(i.title || '').slice(0, 140), link: String(i.link || '').slice(0, 200), date: i.date || '' }));
     tried.push(t);
     if (ok) { await log('out', src.id + ': ' + n + ' items via ' + m + ' (' + ms + 'ms)'); if (!hit) { hit = r; hit.method = m; } if (!opts.all) break; }
@@ -5372,6 +5410,7 @@ function sourceRows(src, hit, now) {
     const meta = { reg: 1, source: src.id, tier: src.tier, juris: src.juris, method: hit.method, issues: issueTag(title + ' ' + (it.desc || '') + ' ' + text.slice(0, 1500)), dated: dated ? 1 : 0 };
     if (e.parties) meta.parties = e.parties;
     if (it.outlet) meta.outlet = String(it.outlet).slice(0, 60);
+    const claim = claimOf(title + '. ' + (it.desc || '') + ' ' + text.slice(0, 3000)); if (claim) meta.claim = claim;
     if (text.length > 600) { meta.full = 1; meta.ft = hit.method; }
     rows.push({ src: src.id, title: title.slice(0, 500), body: (text.length > (it.desc || '').length ? text : String(it.desc || '')).slice(0, 6000), url: link, tone: e.tone, meta, ts: dated ? t : now });
   }
@@ -5379,7 +5418,8 @@ function sourceRows(src, hit, now) {
 }
 function sourceStmts(env, run, added, now) {
   const s = run.src; const stmts = [];
-  const next = now + Math.max(15, Number(s.schedule) || 60) * 60000;
+  // a host that refused the public reader is not due again for a day: the refusal is its health, and it backs off
+  const next = now + (run.tried.some(t => t.refused) ? PUB_BACKOFF_S * 1000 : Math.max(15, Number(s.schedule) || 60) * 60000);
   const short = run.tried.map(t => t.method + ':' + (t.ok ? t.n : (t.skipped ? 'skip' : 'x' + (t.status || '')))).join(' ');
   const detail = run.ok ? short : (short + ' | ' + run.tried.filter(t => !t.skipped).map(t => t.method + ' ' + t.detail).join('; ')).slice(0, 400);
   if (run.ok) {
@@ -5797,7 +5837,7 @@ async function renderJob(env, job, log) {
 // their own posts. What each platform needs, what it can and cannot reach and
 // how it fared last time is one table: socialCoverage().
 // ==============================================================================
-const SOCIAL_PLATFORMS = ['bluesky', 'mastodon', 'youtube', 'petitions', 'instagram', 'facebook'];   // worker-side sweeps the Signals view can start as jobs
+const SOCIAL_PLATFORMS = ['bluesky', 'mastodon', 'youtube', 'petitions', 'instagram', 'facebook', 'hansard', 'blueskyaccounts'];   // worker-side sweeps the Signals view can start as jobs
 const BSKY_API = 'https://public.api.bsky.app/xrpc/';
 const MASTO_INSTANCES = ['aus.social', 'mastodon.au', 'theblower.au', 'mastodon.social'];
 const MASTO_TAGS = ['auspol', 'springst', 'nswpol', 'qldpol', 'wapol', 'sapol', 'taspol', 'ntpol', 'actpol', 'ausvotes', 'insiders', 'qanda'];
@@ -6284,7 +6324,8 @@ async function petitionsSweep(env, opts) {
   for (let i = 0; i < canon.length; i += 150) out.rows += await archiveItems(env, 'petition', canon.slice(i, i + 150));
   for (let i = 0; i < snaps.length; i += 150) out.snapshots += await archiveItems(env, 'petition', snaps.slice(i, i + 150));
   for (let i = 0; i < upd.length; i += 50) { try { await env.MIND_DB.batch(upd.slice(i, i + 50)); } catch (e) {} }
-  out.threads = canon.length; out.threadRows = out.rows;
+  if (!opts.site) { try { const c = await petitionCountersSweep(env, { log }); out.counters = c.read || 0; out.read += c.read || 0; out.rows += c.rows || 0; out.snapshots += c.snapshots || 0; (c.errors || []).forEach(e => out.errors.push(e)); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 100)); } }
+  out.threads = canon.length + (out.counters || 0); out.threadRows = out.rows;
   await log('info', out.read + ' petitions read, ' + out.rows + ' new, ' + out.snapshots + ' signature snapshots for ' + day);
   if (!out.read && out.errors.length) { out.ok = false; out.detail = 'Nothing was read. ' + out.errors[0]; }
   return out;
@@ -6306,7 +6347,7 @@ async function petitionsList(env, opts) {
     let m = {}; try { m = JSON.parse(r.meta || '{}') || {}; } catch (e) { m = {}; }
     const h = hist[r.url] || []; const sigs = Number(m.signatures) || 0;
     const y = at(h, dayKey(1)), wk = at(h, dayKey(7));
-    return { title: r.title, url: r.url, site: m.site || '', juris: m.juris || '', issues: Array.isArray(m.issues) ? m.issues : [], signatures: sigs, closes: m.closes || '', seen: m.seen || r.ts, first: r.ts,
+    return { title: r.title, url: r.url, site: m.site || '', juris: m.juris || '', issues: Array.isArray(m.issues) ? m.issues : [], signatures: sigs, self_reported: !!m.self_reported, campaign: m.campaign || '', closes: m.closes || '', seen: m.seen || r.ts, first: r.ts,
       growth24: y == null ? null : sigs - y, growth7: wk == null ? null : sigs - wk, excerpt: String(r.body || '').slice(0, 300), points: h.slice(-10) };
   }).sort((a, b) => ((b.growth24 || 0) - (a.growth24 || 0)) || (b.signatures - a.signatures));
   return { ok: true, days, petitions: list, sites: PETITION_SITES.map(s => ({ id: s.id, name: s.name, juris: s.juris, url: s.list })) };
@@ -6360,7 +6401,7 @@ async function socialCoverage(env, probe) {
   if (db) {
     try {
       await ensureArchive(env);
-      const rows = (await db.prepare("SELECT COALESCE(json_extract(meta,'$.platform'), src) p, kind, SUM(ts>?) d1, COUNT(*) d7, MAX(ts) newest FROM arc_items WHERE ts>? AND kind IN ('sig_thread','sig_comment','petition','transcript','reddit_thread','reddit_comment','forum','oppads') GROUP BY p, kind").bind(now - 86400000, now - 7 * 86400000).all()).results || [];
+      const rows = (await db.prepare("SELECT COALESCE(json_extract(meta,'$.platform'), src) p, kind, SUM(ts>?) d1, COUNT(*) d7, MAX(ts) newest FROM arc_items WHERE ts>? AND kind IN ('sig_thread','sig_comment','petition','transcript','reddit_thread','reddit_comment','forum','oppads','hansard') GROUP BY p, kind").bind(now - 86400000, now - 7 * 86400000).all()).results || [];
       rows.forEach(r => {
         const p = /^reddit_/.test(r.kind) ? 'reddit' : r.kind === 'forum' ? 'forums' : r.kind === 'oppads' ? 'adlibrary' : (r.p || 'unknown');
         const c = counts[p] = counts[p] || { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 };
@@ -6375,7 +6416,9 @@ async function socialCoverage(env, probe) {
   const mac = agents.some(a => a.live);
   const P = [
     { id: 'reddit', label: 'Reddit', method: 'JSON API with app credentials from the worker, or rdt on a signed-in Mac', keys: 'REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET (optional; registration is closed)', configured: redditAuthed(env) || mac, where: redditAuthed(env) ? 'worker' : 'mac', reach: 'watched subs, keyword search across Reddit, full comment trees, scores', unreachable: '' },
-    { id: 'bluesky', label: 'Bluesky', method: 'public AppView API (searchPosts, getPostThread)', keys: 'none', configured: true, where: 'worker', reach: 'keyword search, threads, replies, likes/reposts/quotes; the Australian gate applies', unreachable: '' },
+    { id: 'bluesky', label: 'Bluesky', method: 'public AppView API (searchPosts, getPostThread, getAuthorFeed)', keys: 'none', configured: true, where: 'worker', reach: 'keyword search, threads, replies, likes/reposts/quotes; the Australian gate applies; the own posts of register accounts marked as public actors', unreachable: '' },
+    { id: 'parliament', label: 'Parliamentary record', method: 'bill, inquiry and notice pages on the parliaments\' own sites, as Source Registry sources (method process), under the public reader\'s rules', keys: 'none', configured: true, where: 'worker', reach: 'stage, hearing dates, submissions closing, report date and the number of submissions; a stage change files one row; dates feed the desks\' Upcoming list', unreachable: 'a page whose robots.txt disallows it or that refuses the reader; submitters\' names are never read' },
+    { id: 'hansard', label: 'Hansard', method: 'OpenAustralia getHansard, the desks\' terms, once a sitting day', keys: 'OPENAUSTRALIA_KEY (free, openaustralia.org.au/api)', configured: !!env.OPENAUSTRALIA_KEY, where: 'worker', reach: 'speeches in both houses on the desks\' issues; the speaker named only when the MP register holds them', unreachable: 'state parliaments\' Hansard' },
     { id: 'mastodon', label: 'Mastodon', method: 'tag timelines and reply contexts on ' + MASTO_INSTANCES.join(', '), keys: 'none', configured: true, where: 'worker', reach: 'the Australian political tags (' + MASTO_TAGS.slice(0, 5).join(', ') + '...), replies, favourites/boosts', unreachable: 'full-text search needs an instance token' },
     { id: 'x', label: 'X', method: 'account timelines through X\'s embed service from the worker; keyword search and replies through twitter-cli on a signed-in Mac', keys: 'none for timelines; a signed-in Mac for search', configured: true, where: 'both', reach: 'MP register and watch-list timelines with likes/reposts/replies counts; search and reply threads from the Mac', unreachable: 'keyword search and reply text from the cloud (X requires a session and a transaction id)' },
     { id: 'youtube', label: 'YouTube', method: 'channel feeds as Source Registry sources; comments through the Data API or YouTube\'s web endpoint; captions', keys: 'YOUTUBE_KEY optional (free, 10,000 units a day)', configured: true, apiKey: !!env.YOUTUBE_KEY, where: 'worker', reach: 'every video of a listed channel, its comments with likes, its captions as a transcript', unreachable: 'keyword search without YOUTUBE_KEY' },
@@ -6387,7 +6430,7 @@ async function socialCoverage(env, probe) {
     { id: 'threads', label: 'Threads', method: 'none available', keys: 'Threads API is for the account\'s own posts; keyword search needs the threads_keyword_search permission (app review)', configured: false, where: 'none', reach: '', unreachable: 'no public route to others\' posts; the web pages are built client-side behind a login prompt' },
     { id: 'tiktok', label: 'TikTok', method: 'oEmbed for a single post url', keys: 'none; the Research API needs approval', configured: true, where: 'worker', reach: 'title and thumbnail of a given post', unreachable: 'profiles, search and comments: signed requests from a browser session (a Mac render job could read a profile; the Research API is approval-gated)' },
     { id: 'forums', label: 'Forums', method: 'RSS, Discourse JSON and listing pages (AU_FORUMS)', keys: 'none', configured: true, where: 'worker', reach: 'new threads on Whirlpool, OzBargain, BigFooty, HotCopper, PropertyChat and Discourse boards', unreachable: 'reply text on most boards' },
-    { id: 'petitions', label: 'Petitions', method: 'the parliaments\' e-petition pages, daily', keys: 'none', configured: true, where: 'worker', reach: PETITION_SITES.map(s => s.name).join(', ') + ': title, text, signatures a day, closing date', unreachable: 'change.org (bot-walled from servers; add a petition url as a source to try)' },
+    { id: 'petitions', label: 'Petitions', method: 'the parliaments\' e-petition pages, daily', keys: 'none', configured: true, where: 'worker', reach: PETITION_SITES.map(s => s.name).join(', ') + ': title, text, signatures a day, closing date; campaigns\' own counters, marked self-reported', unreachable: 'change.org (bot-walled from servers; add a petition url as a source to try)' },
     { id: 'substack', label: 'Substack', method: 'publication feed plus the comments API, as Source Registry sources (urls.substack)', keys: 'none', configured: true, where: 'worker', reach: 'posts and comment threads of any listed publication; discovery through /social/substack/search', unreachable: '' },
   ];
   P.forEach(p => { p.counts = counts[p.id] || { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 }; p.last = last[p.id] || null; });
@@ -6417,7 +6460,9 @@ async function socialSweep(env, params, log) {
     case 'x': return xSyndSweep(env, p);
     case 'instagram': return instagramSweep(env, p);
     case 'facebook': return fbPublicSweep(env, p);
-    default: return { ok: false, error: 'unknown_platform', detail: 'platform must be one of bluesky, mastodon, youtube, petitions, x, instagram, facebook.' };
+    case 'hansard': return hansardSweep(env, Object.assign({ force: true }, p));
+    case 'blueskyaccounts': return bskyActorSweep(env, p);
+    default: return { ok: false, error: 'unknown_platform', detail: 'platform must be one of bluesky, blueskyaccounts, mastodon, youtube, petitions, hansard, x, instagram, facebook.' };
   }
 }
 function socialSummary(r) {
@@ -6444,6 +6489,8 @@ async function socialCron(env) {
   const qs = all.slice(cur, cur + slice).concat(cur + slice > all.length ? all.slice(0, cur + slice - all.length) : []);
   await kvPut(env.AXIOM_KV, 'bsky_q_cursor', String((cur + slice) % Math.max(1, all.length)), 7 * 86400);
   await run('bluesky', () => bskySweep(env, { queries: qs, threads: 15, days: 3 }));
+  await run('bluesky_accounts', () => bskyActorSweep(env, { max: 20 }));
+  if (env.OPENAUSTRALIA_KEY) { const hz = await hansardSweep(env, {}); if (!hz.skipped) res.hansard = Object.assign({ at: now }, socialSummary(hz)); }
   await run('mastodon', () => mastodonSweep(env, { threads: 15, days: 3 }));
   await run('x', () => xSyndSweep(env, { max: 30, days: 3 }));
   await run('youtube', () => youtubeEnrich(env, { max: 6 }));
@@ -6473,7 +6520,7 @@ const DEN_PLATFORMS = ['x', 'facebook', 'instagram', 'youtube', 'tiktok', 'threa
 const DEN_STATUS = ['proposed', 'active', 'off', 'dismissed'];
 const DEN_ACTOR_KINDS = ['org', 'official', 'media'];
 const DEN_SOURCES = ['operator', 'reports', 'discovery', 'seed'];
-const DEN_INGEST_PLATFORMS = ['facebook', 'instagram', 'x', 'youtube', 'tiktok', 'threads'];
+const DEN_INGEST_PLATFORMS = ['facebook', 'instagram', 'x', 'youtube', 'tiktok', 'threads', 'bluesky'];
 const DEN_INGEST_MAX = 500;
 const DEN_CAPS = { facebook: 40, instagram: 40, x: 60, youtube: 30, hashtags: 10, urls: 25 };
 const IG_HASHTAG_LIMIT = 30, IG_HASHTAG_WINDOW_MS = 7 * 86400000;
@@ -6532,6 +6579,10 @@ function canonPermalink(platform, url) {
     if (host !== 'x.com' && host !== 'twitter.com') return '';
     const i = seg.indexOf('status'); const id = i >= 0 ? seg[i + 1] : '';
     return num(id) ? 'https://x.com/i/web/status/' + id : '';
+  }
+  if (platform === 'bluesky') {
+    if (host !== 'bsky.app') return '';
+    return seg[0] === 'profile' && seg[2] === 'post' && /^(did:[a-z0-9:.-]+|[a-z0-9.-]{3,120})$/i.test(seg[1] || '') && /^[a-z0-9]{6,20}$/i.test(seg[3] || '') ? 'https://bsky.app/profile/' + seg[1].toLowerCase() + '/post/' + seg[3] : '';
   }
   if (platform === 'instagram') {
     if (host !== 'instagram.com') return '';
@@ -7541,7 +7592,7 @@ async function denBoard(env, deskId, opts) {
     if (!f) folds.set(k, { head: r, outlets: [outlet], ids: [r.id], pinned: r.pinned, gated: !!r.meta.gated, fb: r.meta.fb || null }); else { if (f.outlets.indexOf(outlet) < 0) f.outlets.push(outlet); f.ids.push(r.id); f.pinned = f.pinned || r.pinned; f.gated = f.gated || !!r.meta.gated; if (!f.fb && r.meta.fb) f.fb = r.meta.fb; } });
   const fbTotal = fb => (fb ? (Number(fb.reactions) || 0) + (Number(fb.comments) || 0) + (Number(fb.shares) || 0) : 0);
   const media = Array.from(folds.values()).map(f => ({ id: f.head.id, title: f.head.title.slice(0, 300), url: link(f.head), outlet: f.outlets[0], outlets: f.outlets.slice(0, 12), n: f.outlets.length, copies: f.ids.slice(0, 40), ts: f.head.ts, tier: f.head.meta.tier || '', juris: f.head.meta.juris || '',
-    gated: f.gated, access: f.head.meta.access || '', full: !!(f.head.meta.full || (f.head.meta.ft && f.head.meta.ft !== 'none' && f.head.meta.ft !== 'retry')), fb: f.fb, issues: f.head.issues, tone: f.head.tone, pinned: f.pinned, summary: f.head.body.slice(0, 260) }))
+    gated: f.gated, access: f.head.meta.access || '', full: !!(f.head.meta.full || (f.head.meta.ft && f.head.meta.ft !== 'none' && f.head.meta.ft !== 'retry')), fb: f.fb, issues: f.head.issues, tone: f.head.tone, pinned: f.pinned, summary: f.head.body.slice(0, 260), claim: f.head.meta.claim || null }))
     .sort((a, b) => (b.pinned - a.pinned) || (b.n - a.n) || (fbTotal(b.fb) - fbTotal(a.fb)) || (b.ts - a.ts)).slice(0, 150);
   // social: what the register's accounts posted and what the terms found; public actors and MPs go to their own table
   const soc = live.filter(r => r.kind === 'sig_thread' || r.kind === 'reddit_thread' || r.kind === 'transcript'); const isActor = r => !!(r.meta.actor || r.meta.mp);
@@ -7562,7 +7613,9 @@ async function denBoard(env, deskId, opts) {
       .map(n => Object.assign(n, { issues: denJ(n.issues, []), spread: denJ(n.spread, []) })).filter(n => n.issues.some(i => mine.indexOf(i) >= 0)).slice(0, 25)
       .map(n => ({ id: n.id, label: n.label || 'A narrative not yet named', claim: n.claim || '', counter: n.counter_claim || '', issues: n.issues.filter(i => mine.indexOf(i) >= 0), n: n.n, n24: n.n24, pace: n.velocity, side: n.side || '', status: n.status || '', spread: (Array.isArray(n.spread) ? n.spread : []).slice(0, 6).map(s => (s && s.platform) || s).filter(Boolean), first: n.first_ts, last: n.last_ts }));
   } catch (e) { narratives = []; }
-  const upcoming = denUpcoming(live, now);
+  // recorded dates (read from a parliament's own page) lead; a stage row's own sentence is not read again as a guess
+  let recorded = []; try { recorded = await processUpcoming(env, mine, now); } catch (e) { recorded = []; }
+  const upcoming = recorded.concat(denUpcoming(live.filter(r => !(r.meta && r.meta.process)), now)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(0, 40);
   return { ok: true, desk, window: win, narratives, media, social, actors, upcoming, aside, pinned: live.filter(r => r.pinned).map(r => r.id),
     counts: { rows: live.length, news: news.length, media: media.length, social: social.length, actors: actors.length, narratives: narratives.length, upcoming: upcoming.length, aside: aside.length, muted: nMuted, underMinimum: nLow, otherRegions: nRegion }, capped: raw.length >= DEN_BOARD_ROWS,
     byChannel: live.reduce((a, r) => { a[r.ch] = (a[r.ch] || 0) + 1; return a; }, {}), _rows: opts.keepRows ? live : undefined };
@@ -7665,14 +7718,14 @@ async function denEvidence(env, desk, board, missed, pins) {
   const med = board.media.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
   L.push('', 'TRADITIONAL MEDIA (' + board.counts.news + ' stories, ' + board.media.length + ' after folding syndicated copies; ' + med.length + ' shown)');
   med.forEach(m => put('M:' + m.id, { k: 'media', label: m.outlet + ' - ' + m.title, url: m.url, gated: m.gated, item: m.id }, (pinned.has(m.id) ? 'PINNED | ' : '') + m.outlet + (m.tier ? ' (' + m.tier + (m.juris && m.juris !== 'au' ? ', ' + m.juris : '') + ')' : '') + ' | ' + when(m.ts) + ' | ' + one(m.title) + (m.n > 1 ? ' | also carried by ' + (m.n - 1) + ' other outlet' + (m.n === 2 ? '' : 's') : '')
-    + (m.fb ? ' | Facebook: ' + (Number(m.fb.reactions) || 0) + ' reactions, ' + (Number(m.fb.comments) || 0) + ' comments, ' + (Number(m.fb.shares) || 0) + ' shares' : '') + (m.gated ? ' | SUBSCRIBER TEXT, QUOTE AT MOST THIRTY WORDS: ' + gatedExcerpt(gt[m.id] || m.summary) : m.summary ? ' | ' + one(m.summary).slice(0, 220) : '')));
+    + (m.claim ? ' | ' + claimLine(m.claim) : '') + (m.fb ? ' | Facebook: ' + (Number(m.fb.reactions) || 0) + ' reactions, ' + (Number(m.fb.comments) || 0) + ' comments, ' + (Number(m.fb.shares) || 0) + ' shares' : '') + (m.gated ? ' | SUBSCRIBER TEXT, QUOTE AT MOST THIRTY WORDS: ' + gatedExcerpt(gt[m.id] || m.summary) : m.summary ? ' | ' + one(m.summary).slice(0, 220) : '')));
   const engLine = s => (s.eng ? [['likes', 'likes'], ['comments', 'comments'], ['shares', 'shares'], ['reposts', 'reposts'], ['replies', 'replies'], ['views', 'views']].filter(k => Number(s.eng[k[0]]) > 0).map(k => s.eng[k[0]] + ' ' + k[1]).join(', ') : (s.total ? s.total + ' interactions' : '')) || 'no counts held';
   const soc = board.social.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
   L.push('', 'SOCIAL (' + board.social.length + ' posts held; ' + soc.length + ' shown; authors are not recorded and must not be guessed)');
   soc.forEach(s => put('S:' + s.id, { k: 'social', label: s.platform + ' post', url: s.url, item: s.id, platform: s.platform }, (pinned.has(s.id) ? 'PINNED | ' : '') + s.platform + (s.sub ? ' r/' + s.sub : '') + ' | ' + when(s.ts) + ' | ' + one(s.text).slice(0, 240) + ' | ' + engLine(s) + (s.growth != null && s.growth > 0 ? ' | +' + s.growth + ' since yesterday\'s read' : '') + (s.held ? ' | ' + s.held.n + ' comments held, tone ' + s.held.tone : '')));
   L.push('', 'INFLUENCER AND POLITICAL (registered public actors and MPs, on their own posts; these may be named)');
   board.actors.slice(0, 20).forEach(a => put('P:' + a.id, { k: 'actor', label: a.who + ' on ' + a.platform, url: a.url, item: a.id, who: a.who, platform: a.platform }, (pinned.has(a.id) ? 'PINNED | ' : '') + a.who + ' (' + (a.role === 'mp' ? 'MP' + (a.party ? ', ' + a.party : '') : a.role) + ') on ' + a.platform + ' | ' + when(a.ts) + ' | ' + one(a.text).slice(0, 240) + ' | ' + engLine(a)));
-  if (board.upcoming.length) { L.push('', 'UPCOMING (dates as written in the rows)'); board.upcoming.slice(0, 15).forEach((u, i) => put('U:' + (i + 1), { k: 'upcoming', label: u.date + ' ' + u.event, url: u.url, item: u.item }, u.weekday + ' ' + u.date + ' | ' + u.event + ' | ' + one(u.what))); }
+  if (board.upcoming.length) { L.push('', 'UPCOMING (dates as written in the rows; RECORDED marks a date read from a parliament\'s own page)'); board.upcoming.slice(0, 15).forEach((u, i) => put('U:' + (i + 1), { k: 'upcoming', label: u.date + ' ' + u.event, url: u.url, item: u.item }, u.weekday + ' ' + u.date + ' | ' + (u.recorded ? 'RECORDED | ' : '') + u.event + ' | ' + one(u.what))); }
   try { await ensureSentiment(env); const mine = desk.issues.map(i => i.id);
     for (const id of mine) { const r = await env.MIND_DB.prepare('SELECT COUNT(*) n, AVG(tone) a, SUM(tone<0) neg, SUM(tone>0) pos FROM sent_items WHERE ts>? AND ts<=? AND issues LIKE ?').bind(board.window.from, board.window.to, '%"' + id + '"%').first();
       if (r && r.n) { if (!ev.size || !L.some(x => x === 'TONE (rows a model has judged, by issue)')) L.push('', 'TONE (rows a model has judged, by issue)'); put('T:' + id, { k: 'tone', label: (desk.issues.find(i => i.id === id) || {}).label || id }, ((desk.issues.find(i => i.id === id) || {}).label || id) + ': ' + r.n + ' rows judged, mean tone ' + (Math.round((Number(r.a) || 0) * 100) / 100) + ', ' + (r.neg || 0) + ' negative, ' + (r.pos || 0) + ' positive'); } }
@@ -7872,6 +7925,7 @@ async function denCollection(env, deskId) {
   const reach = await reachView(env); const act = await denActive(env, desk.ns); const rp = s => (reach.platforms || []).find(x => x.source === s) || null;
   const got = {}; const wIds = new Set(act.filter(r => r.kind === 'account').map(r => r.id));
   (((await env.MIND_DB.prepare('SELECT kind, ts, meta FROM arc_items WHERE ts>? AND kind IN (' + DEN_BOARD_KINDS.map(() => '?').join(',') + ') ORDER BY ts DESC LIMIT 6000').bind(now - 7 * 86400000, ...DEN_BOARD_KINDS).all()).results) || []).forEach(r => { const m = denJ(r.meta, {}); if (!((Array.isArray(m.issues) ? m.issues : []).some(i => mine.indexOf(i) >= 0) || (m.watch && wIds.has(m.watch)))) return; const ch = platformOf(r.kind, m); const g = got[ch] = got[ch] || { d1: 0, d7: 0, last: 0, layers: {} }; g.d7++; if (r.ts > now - 86400000) g.d1++; if (r.ts > g.last) g.last = r.ts; (Array.isArray(m.layers) ? m.layers : (m.via === 'reach' ? [2] : [])).forEach(l => { g.layers[l] = 1; }); });
+  const pub = await publicDelivered(env, desk);
   const n = p => act.filter(r => r.kind === 'account' && r.platform === p).length; const st = (src) => { const x = rp(src); return x ? { source: src, offered: x.offered, off: x.off, challenge: x.challenge } : null; };
   const CH = [
     { id: 'news', label: 'News and official sources', how: 'Layer 3: the Source Registry, every tick. Subscriber outlets: layer 2, on the Mac, once cleared.', collect: 'sources', collector: null, worker: true },
@@ -7880,8 +7934,11 @@ async function denCollection(env, deskId) {
     { id: 'instagram', label: 'Instagram', how: (igConfigured(env) ? 'Layer 1: registered accounts and hashtags through the Graph API.' : 'Layer 1 is not set (META_IG_USER).') + ' Layer 2: registered accounts\' posts on the Mac.', collect: 'instagram', collector: st('instagram'), accounts: n('instagram'), worker: igConfigured(env), cannot: 'Comment text; keyword search.' },
     { id: 'youtube', label: 'YouTube', how: 'Layer 2: keyword search on the Mac. Layer 3: registered channels\' feeds, comments and captions from the worker.', collect: 'ytsearch', collector: st('ytsearch'), accounts: n('youtube'), worker: true },
     { id: 'reddit', label: 'Reddit', how: 'Layer 2 on the Mac (Reddit refuses cloud networks), or the worker with app credentials.', collect: 'reddit', collector: st('reddit'), worker: !!(env.REDDIT_CLIENT_ID && env.REDDIT_CLIENT_SECRET) },
-    { id: 'bluesky', label: 'Bluesky', how: 'Layer 3: public search from the worker.', collect: 'bluesky', collector: null, worker: true },
-  ].map(c => Object.assign(c, { delivered: got[c.id] || { d1: 0, d7: 0, last: 0, layers: {} } })).map(c => Object.assign(c, { delivered: Object.assign({}, c.delivered, { layers: Object.keys(c.delivered.layers).map(Number).sort() }) }));
+    { id: 'bluesky', label: 'Bluesky', how: 'Layer 3: public search from the worker, and the own posts of registered accounts marked as public actors.', collect: 'bluesky', collector: null, accounts: n('bluesky'), worker: true },
+    { id: 'parliament', label: 'Parliamentary record', how: 'Layer 3: bill, inquiry and notice pages on the parliaments\' own sites, read under robots.txt at one request every ten seconds a host. A stage change files one row; recorded dates lead Upcoming.', collect: '', collector: null, worker: true, watched: pub.parliament.watched || 0, cannot: 'Submitters\' names; a page that refuses the reader.' },
+    { id: 'hansard', label: 'Hansard', how: env.OPENAUSTRALIA_KEY ? 'Layer 3: OpenAustralia, the desk\'s terms in both houses, once a sitting day.' : 'Layer 3 is not set: add the secret OPENAUSTRALIA_KEY (free, openaustralia.org.au/api).', collect: '', collector: null, worker: !!env.OPENAUSTRALIA_KEY, cannot: 'State parliaments\' Hansard.' },
+    { id: 'counters', label: 'Campaign petition counters', how: 'Layer 3: the count a campaign prints on its own page, once a day. Self-reported by the campaign, and said so wherever it is shown.', collect: '', collector: null, worker: true, cannot: 'change.org (it refuses automated readers).' },
+  ].map(c => Object.assign(c, { delivered: pub[c.id] ? Object.assign({ layers: {} }, pub[c.id], { layers: { 3: 1 } }) : (got[c.id] || { d1: 0, d7: 0, last: 0, layers: {} }) })).map(c => Object.assign(c, { delivered: Object.assign({}, c.delivered, { layers: Object.keys(c.delivered.layers).map(Number).sort() }) }));
   let gated = []; try { await ensureSources(env); await ensureGated(env); gated = (((await env.MIND_DB.prepare('SELECT id, name, tier, access, cleared_by, cleared_at FROM sources ORDER BY name LIMIT 1000').all()).results) || []).map(s => ({ id: s.id, name: s.name, access: sourceAccessOf(s), cleared: Number(s.cleared_at) > 0, cleared_by: s.cleared_by || '', cleared_at: Number(s.cleared_at) || 0 })).filter(s => GATED_NEEDS_CLEARANCE.indexOf(s.access) >= 0).slice(0, 80); } catch (e) { gated = []; }
   let backtest = null; try { backtest = JSON.parse((await kvGet(env.AXIOM_KV, 'den_backtest_' + desk.id)) || 'null'); } catch (e) { backtest = null; }
   return { ok: true, desk: desk.id, channels: CH, reach: { off: reach.off, agents: reach.agents, challenges: reach.challenges }, hashtags: await igHashtagLedger(env), gated, backtest, notBuilt: ['TikTok, Threads and LinkedIn are not collected: no usable route, and no link to any of them in the reports read.', 'Today\'s reads against each platform\'s cap are counted on the Mac (its settings file), not here.'] };
@@ -7936,6 +7993,391 @@ async function denHeartbeat(env, work) {
   put(' '); const tick = setInterval(() => { put(' '); }, beat);
   p.then(() => { clearInterval(tick); const body = shape(settled); if (body && body.status) { body.httpStatus = body.status; delete body.status; } put(JSON.stringify(body)); chain = chain.then(() => w.close()).catch(() => {}); });
   return new Response(ts.readable, { status: 200, headers: Object.assign({}, CORS, { 'Cache-Control': 'no-store, no-transform' }) });
+}
+
+// ==============================================================================
+// PUBLIC-RECORD ROUTES (monitoring desk, release 7). Keyless, public pages only:
+// parliaments' own bill, inquiry and notice pages (the process calendar),
+// Hansard as a standing sweep, release wires and campaign pages as headlines,
+// campaigns' own petition counters, and registered actors' Bluesky feeds. The
+// rules live in pubFetch(), so no reader here can skip them: robots.txt is
+// obeyed, the user agent says what it is, one request every ten seconds a host,
+// and a refusal (401, 403, 429, a challenge page) is recorded for the host and
+// not asked again for a day. Nothing here signs in, reads past a paywall,
+// solves a challenge, uses a proxy or calls a model.
+// ==============================================================================
+const PUB_UA_DEFAULT = 'AxiomPublicRecord/1.0 (monitoring reader; obeys robots.txt)';
+const PUB_PACE_MS = 10000;        // between two requests to one host; not a setting
+const PUB_BACKOFF_S = 86400;      // a host that refused is left alone for a day
+const PUB_LAST = new Map();       // host -> the time its next request may start (this isolate)
+const PUB_PAYWALL_RX = /isAccessibleForFree["']?\s*:\s*["']?false|class=["'][^"']*paywall|subscribe to (read|continue)|subscriber[- ]only|piano\.io|tp\.push\(|meter-?wall/i;
+function pubUA(env) { const s = String((env && env.PUBLIC_UA) || '').replace(/[^\x20-\x7e]/g, '').trim(); return s.length >= 8 ? s.slice(0, 160) : PUB_UA_DEFAULT; }
+function pubWait(env, ms) { if (env && typeof env.__pubSleep === 'function') return env.__pubSleep(ms); return new Promise(r => setTimeout(r, ms)); }
+/** The slot is taken before the wait, so readers running side by side still queue behind one another for a host. */
+async function pubPace(env, host) {
+  const now = Date.now(); let shared = 0;
+  // another isolate may have asked this host a moment ago: the next free slot is also kept in KV (a minute, KV's shortest life)
+  try { shared = Number(await kvGet(env.AXIOM_KV, 'pub_next_' + host)) || 0; } catch (e) { shared = 0; }
+  const at = Math.max(now, PUB_LAST.get(host) || 0, shared <= now + 6 * PUB_PACE_MS ? shared : 0); PUB_LAST.set(host, at + PUB_PACE_MS);
+  try { await kvPut(env.AXIOM_KV, 'pub_next_' + host, String(at + PUB_PACE_MS), 60); } catch (e) {}
+  if (at > now) await pubWait(env, at - now);
+}
+function robotsMatch(pat, path) {
+  const end = /\$$/.test(pat); const parts = pat.replace(/\$$/, '').split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'));
+  try { return new RegExp('^' + parts.join('.*') + (end ? '$' : '')).test(path); } catch (e) { return false; }
+}
+/** robots.txt as RFC 9309 reads it: the group that names this reader, else the * group; the longest matching rule
+ *  decides, and Allow wins a tie. An empty Disallow allows everything. */
+function robotsAllows(txt, path, ua) {
+  const groups = []; let cur = null; let lastUA = false;
+  String(txt || '').split(/\r?\n/).forEach(l0 => { const l = l0.replace(/#.*$/, '').trim(); const m = l.match(/^([A-Za-z-]+)\s*:\s*(.*)$/); if (!m) return; const k = m[1].toLowerCase(); const v = m[2].trim();
+    if (k === 'user-agent') { if (!cur || !lastUA) { cur = { agents: [], rules: [] }; groups.push(cur); } cur.agents.push(v.toLowerCase()); lastUA = true; }
+    else { lastUA = false; if (cur && (k === 'allow' || k === 'disallow')) cur.rules.push({ allow: k === 'allow', path: v }); } });
+  const tok = String(ua || '').split('/')[0].toLowerCase();
+  const mine = groups.filter(g => g.agents.some(a => a !== '*' && a.length > 1 && tok.indexOf(a) >= 0)); const use = mine.length ? mine : groups.filter(g => g.agents.indexOf('*') >= 0);
+  let best = null;
+  use.forEach(g => g.rules.forEach(r => { if (!r.path || !robotsMatch(r.path, path)) return; if (!best || r.path.length > best.path.length || (r.path.length === best.path.length && r.allow)) best = r; }));
+  return !best || best.allow;
+}
+async function pubRefuse(env, host, status, why) {
+  await kvPut(env.AXIOM_KV, 'pub_refused_' + host, JSON.stringify({ status, why, at: Date.now() }), PUB_BACKOFF_S);
+  return { ok: false, status, text: '', refused: true, code: 'refused', error: 'refused: ' + host + ' answered ' + why + '. Not retried; not asked again for a day.' };
+}
+async function pubRaw(env, url, accept, ms) {
+  const u = new URL(url); await pubPace(env, u.hostname.toLowerCase());
+  try { const r = await fetch(url, { headers: { 'User-Agent': pubUA(env), 'Accept': accept || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'en-AU,en;q=0.8' }, signal: abortAfter(ms || 15000), redirect: 'follow' });
+    const text = r.status === 200 ? (await r.text()).slice(0, 1500000) : ''; return { status: r.status, text };
+  } catch (e) { const s = String((e && e.name) || '') + ' ' + String((e && e.message) || e); return { status: 0, text: '', error: /timeout|abort/i.test(s) ? 'timed out' : s.trim().slice(0, 90) }; }
+}
+/** One public page, under the rules above. { ok, status, text, paywall } or { ok:false, code, error, refused? }. Never throws. */
+async function pubFetch(env, url, opts) {
+  opts = opts || {}; const u = denUrl(url);
+  if (!u || axUrlProblem(u.toString())) return { ok: false, status: 0, text: '', code: 'bad_url', error: 'not a public http(s) address' };
+  const host = u.hostname.toLowerCase(); let back = null;
+  try { back = JSON.parse((await kvGet(env.AXIOM_KV, 'pub_refused_' + host)) || 'null'); } catch (e) { back = null; }
+  if (back) return { ok: false, status: back.status || 0, text: '', refused: true, code: 'refused_backoff', error: 'refused: ' + host + ' answered ' + back.why + ' on ' + auDayKey(back.at) + '. Not asked again for a day.' };
+  let robots = await kvGet(env.AXIOM_KV, 'pub_robots_' + host);
+  if (robots == null) {
+    const r = await pubRaw(env, u.protocol + '//' + u.host + '/robots.txt', 'text/plain,*/*', 10000);
+    if (r.status === 429) return pubRefuse(env, host, 429, 'HTTP 429 to robots.txt');
+    if (r.status === 0 || r.status >= 500) return { ok: false, status: r.status, text: '', code: 'robots_unreachable', error: 'robots.txt of ' + host + ' could not be read (' + (r.error || ('HTTP ' + r.status)) + '), so the page was not requested' };
+    robots = r.status === 200 ? r.text.slice(0, 60000) : '';      // no robots.txt (4xx): nothing is disallowed
+    await kvPut(env.AXIOM_KV, 'pub_robots_' + host, robots || ' ', PUB_BACKOFF_S);
+  }
+  if (!robotsAllows(robots, u.pathname + (u.search || ''), pubUA(env))) return { ok: false, status: 0, text: '', code: 'robots_disallowed', error: 'robots.txt of ' + host + ' disallows this page, so it was not requested' };
+  const r = await pubRaw(env, u.toString(), opts.accept, opts.ms);
+  if (r.status === 401 || r.status === 403 || r.status === 407 || r.status === 429) return pubRefuse(env, host, r.status, 'HTTP ' + r.status);
+  if (r.status !== 200) return { ok: false, status: r.status, text: '', code: r.status ? 'http_' + r.status : 'unreachable', error: r.error || ('HTTP ' + r.status) };
+  const head = r.text.slice(0, 20000); const title = stripHtml((head.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
+  if (/just a moment|attention required|access denied|are you a (robot|human)|security check|captcha|verify you are human/i.test(title) || (r.text.length < 20000 && /cf-chl|challenge-platform|g-recaptcha|h-captcha|px-captcha/i.test(head))) return pubRefuse(env, host, 200, 'a challenge page');
+  if (r.text.length < 30000 && /<input[^>]+type=["']?password/i.test(r.text)) return { ok: false, status: 200, text: '', code: 'login_required', error: 'the page asks for a sign-in (login): it is not a public source' };
+  return { ok: true, status: 200, text: r.text, paywall: PUB_PAYWALL_RX.test(r.text), url: u.toString() };
+}
+/** Source Registry method `public`: a listing page read under the public rules. A headline and a link, never a body,
+ *  whether or not the page shows a paywall. */
+async function srcPublic(env, src) {
+  const f = await pubFetch(env, (src.urls || {}).public);
+  if (!f.ok) return { ok: false, items: [], status: f.status || 0, detail: f.error, refused: !!f.refused };
+  const items = listingLinks(f.text, src.urls.public).map(i => ({ title: i.title, link: i.link, date: '', desc: '' }));
+  return items.length ? { ok: true, items, status: 200, undated: true } : { ok: false, items: [], status: 200, detail: 'the page had no article-shaped links' };
+}
+
+// -- who paid for the number: rules only ----------------------------------------
+const CLAIM_POLLSTERS = ['YouGov', 'Essential', 'Resolve', 'Newspoll', 'RedBridge', 'uComms', 'Freshwater', 'Roy Morgan', 'Ipsos', 'DemosAU', 'JWS Research', 'Lonergan', 'Talbot Mills', 'Accent Research', 'Pyxis'];
+/** A poll or an economic estimate reported in a row: who commissioned it, who ran it, how many were asked - where the
+ *  text says so, and "sponsor not stated" where it does not. null when the text reports neither. */
+function claimOf(text) {
+  const s = String(text || '').replace(/\s+/g, ' ').slice(0, 4000);
+  const poll = /\b(poll(?:s|ing|ed)?|survey(?:s|ed)?)\b/i.test(s) && /\b\d{1,3}(?:\.\d)?\s?(?:%|per ?cent)/i.test(s);
+  const est = !poll && /\b(modell?ing|economic (?:analysis|report|modell?ing|impact)|cost[- ]benefit|costing)\b/i.test(s) && /\$\s?\d[\d,.]*\s?(?:m|b|bn|million|billion)\b/i.test(s);
+  if (!poll && !est) return null;
+  const NAME = "((?:the\\s+)?[A-Z][\\w&'.-]*(?:\\s+(?:and|of|for|the|&|[A-Z][\\w&'.-]*))*)";
+  const m = s.match(new RegExp('\\b(?:commissioned|paid for|funded|sponsored)\\s+by\\s+' + NAME)) || s.match(new RegExp('\\b(?:poll(?:ing)?|survey|research|modell?ing|report)\\s+(?:conducted\\s+|prepared\\s+)?for\\s+' + NAME));
+  let sponsor = m ? m[1].replace(/\s+(?:and|of|for|the|&)$/i, '').replace(/[.,;:]+$/, '').trim() : '';
+  if (sponsor.length < 3 || /^(the|a|an)$/i.test(sponsor)) sponsor = '';
+  const pollster = CLAIM_POLLSTERS.find(p => new RegExp('\\b' + p.replace(/ /g, '\\s+') + '\\b', 'i').test(s)) || '';
+  const nm = s.match(/\b(?:of|n\s?=)\s?(\d{1,2},?\d{3})(?:\s+(?:\w+\s+){0,2}(?:voters|people|respondents|australians|adults|residents))?/i);
+  return { kind: poll ? 'poll' : 'estimate', sponsor: sponsor.slice(0, 120) || 'sponsor not stated', pollster, n: nm && (/n\s?=/.test(nm[0]) || /voters|people|respondents|australians|adults|residents/i.test(nm[0])) ? parseInt(nm[1].replace(/,/g, ''), 10) : 0 };
+}
+function claimLine(c) { return c ? (c.kind === 'poll' ? 'POLL' : 'ESTIMATE') + ', ' + (c.sponsor === 'sponsor not stated' ? 'sponsor not stated' : 'commissioned by ' + c.sponsor) + (c.pollster ? ', ' + c.pollster : '') + (c.n ? ', n=' + c.n : '') : ''; }
+
+// -- the process calendar ---------------------------------------------------------
+const PROCESS_TYPES = ['bill', 'inquiry', 'motion', 'disallowance', 'regulation', 'decision'];
+const PROCESS_HOUSES = ['senate', 'reps', 'upper', 'lower', 'joint', ''];
+let PROCESS_READY = false;
+async function ensureProcess(env) {
+  if (!env.MIND_DB) return false;
+  if (PROCESS_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare("CREATE TABLE IF NOT EXISTS den_process(id TEXT PRIMARY KEY, juris TEXT DEFAULT 'au', house TEXT DEFAULT '', type TEXT NOT NULL, title TEXT, stage TEXT DEFAULT '', url TEXT, issues TEXT DEFAULT '[]', next_date TEXT DEFAULT '', next_what TEXT DEFAULT '', dates TEXT DEFAULT '{}', submissions INTEGER DEFAULT 0, src TEXT DEFAULT '', seen INTEGER, updated INTEGER)"),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS den_process_next ON den_process(next_date)'),
+  ]);
+  PROCESS_READY = true; return true;
+}
+function procLines(html) {
+  return String(html || '').replace(/<(script|style|nav|footer|noscript|svg|form)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<\/(p|div|li|tr|td|th|dt|dd|h[1-6]|section|article|table|ul|ol|dl)>|<br\s*\/?>/gi, '\n')
+    .split('\n').map(l => stripHtml(l).replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+/** Every date written in a line, as YYYY-MM-DD: "13 November 2026", "November 13, 2026", "13/11/2026". A date with no year is not read. */
+function procDates(s) {
+  const out = []; const MN = DEN_MONTHS.join('|'); const iso = (y, m, d) => { const t = new Date(Date.UTC(y, m, d)); return t.getUTCDate() === d && t.getUTCMonth() === m ? y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0') : ''; };
+  const mon = w => { const k = String(w).toLowerCase(); const i = DEN_MONTHS.findIndex(x => x === k || x.slice(0, 3) === k.slice(0, 3)); return i; };
+  let m; const A = new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(' + MN + '|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?,?\\s+(20\\d\\d)\\b', 'gi');
+  while ((m = A.exec(s))) { const d = iso(Number(m[3]), mon(m[2]), Number(m[1])); if (d) out.push(d); }
+  const B = new RegExp('\\b(' + MN + ')\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(20\\d\\d)\\b', 'gi');
+  while ((m = B.exec(s))) { const d = iso(Number(m[3]), mon(m[1]), Number(m[2])); if (d) out.push(d); }
+  const C = /\b(\d{1,2})\/(\d{1,2})\/(20\d\d)\b/g;
+  while ((m = C.exec(s))) { const d = iso(Number(m[3]), Number(m[2]) - 1, Number(m[1])); if (d) out.push(d); }
+  return out;
+}
+const PROC_STAGE_RX = [['Assented', /\b(royal )?assent(ed)?( given)?\b/i], ['Passed both Houses', /passed (by )?both houses|finally passed/i], ['Report tabled', /report (was |has been )?(tabled|presented|published)|final report/i],
+  ['Passed one House', /passed (by |in )?(the )?(house|senate|assembly|council|lower house|upper house)|third reading (agreed|passed)/i], ['Before committee', /referred to (a |the )?[\w ]{0,40}committee/i],
+  ['Second reading', /second reading/i], ['Introduced', /introduced|first reading|notice given/i]];
+/** One bill or inquiry page as a record. A labelled status line is taken as written; without one the stage is the latest
+ *  the page's words support, and for an inquiry it follows from its dates. The dates are the labelled ones only. */
+function processParse(html, url, type, fallbackTitle, now) {
+  now = now || Date.now(); const lines = procLines(html); const today = auDayKey(now);
+  const h1 = stripHtml((String(html).match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '').replace(/\s+/g, ' ').trim();
+  const title = (fallbackTitle || h1 || stripHtml((String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '')).slice(0, 200);
+  const dates = { referred: '', hearings: [], submissions_close: '', report: '' }; let stage = ''; let subs = 0;
+  const after = (i, re) => { const own = lines[i].replace(re, ' '); const d = procDates(own); return d.length ? d : procDates(lines[i + 1] || ''); };
+  const val = (i, re) => { const own = lines[i].replace(re, '').replace(/^[\s:.-]+/, '').trim(); return own || (lines[i + 1] || ''); };
+  for (let i = 0; i < lines.length; i++) { const l = lines[i]; if (l.length > 400) continue;
+    if (!stage && /^(current )?(status|stage|progress)\b/i.test(l)) { const v = val(i, /^(current )?(status|stage|progress)\b/i); if (v && v.length <= 80 && !/^(of|report)\b/i.test(v)) stage = v.replace(/[.;]+$/, ''); }
+    if (/\b(date )?referr(ed|al)\b/i.test(l) && !dates.referred) dates.referred = after(i, /x^/)[0] || '';
+    if (/\bhearings?\b/i.test(l)) procDates(l).forEach(d => { if (dates.hearings.indexOf(d) < 0) dates.hearings.push(d); });
+    if (/submissions?\s+(close[ds]?|closing|due)|closing date for submissions/i.test(l) && !dates.submissions_close) dates.submissions_close = after(i, /x^/)[0] || '';
+    if (/\breport(ing)?\s+(date|due)|due to report|to report by|date of report/i.test(l) && !dates.report) dates.report = after(i, /x^/)[0] || '';
+    const sm = l.match(/\b(\d[\d,]{0,6})\s+submissions?\b/i) || l.match(/submissions?\s+(?:received|published)\s*:?\s*(\d[\d,]{0,6})/i); if (sm && !subs) subs = parseInt(sm[1].replace(/,/g, ''), 10) || 0;
+  }
+  dates.hearings.sort();
+  if (!stage) { const all = lines.filter(l => l.length <= 400).join(' | '); const hit = PROC_STAGE_RX.find(x => x[1].test(all)); stage = hit ? hit[0] : '';
+    if (type === 'inquiry') stage = dates.report && dates.report < today ? 'Reporting date passed' : dates.submissions_close && dates.submissions_close >= today ? 'Accepting submissions' : dates.hearings.some(d => d >= today) ? 'Hearings' : (stage || 'Inquiry under way'); }
+  const cand = dates.hearings.filter(d => d >= today).map(d => [d, 'hearing']).concat(dates.submissions_close >= today ? [[dates.submissions_close, 'submissions close']] : []).concat(dates.report >= today ? [[dates.report, 'report due']] : []).filter(c => c[0]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  return { title, stage: stage || 'Listed', url, dates, submissions: subs, next_date: cand.length ? cand[0][0] : '', next_what: cand.length ? cand[0][1] : '' };
+}
+/** A notice paper or a disallowance list: each notice that speaks to a client issue, one record each. */
+function processNotices(html, url, type) {
+  const seen = new Set(); const out = [];
+  procLines(html).forEach(l => { if (l.length < 60 || l.length > 1500 || !/\b(to move|that the (senate|house|council|assembly)|that a |disallow|be disallowed)\b/i.test(l)) return; const issues = issueTag(l).filter(i => CLIENT_ISSUES.some(ci => ci.id === i && ci.ns !== 'cmm')); if (!issues.length) return;   // every notice says "the Senate": the agency's own general issues do not make one a client's
+    const title = l.slice(0, 240); const k = arcHash(title); if (seen.has(k)) return; seen.add(k);
+    out.push({ id: 'pn' + k + arcHash(url), title, stage: type === 'disallowance' ? 'Disallowance notice given' : 'Notice given', url, issues, dates: {}, submissions: 0, next_date: '', next_what: '' }); });
+  return out.slice(0, 25);
+}
+/** Source Registry method `process`: one parliament page read under the public rules, kept as records in den_process.
+ *  A record seen for the first time, or whose stage has changed, files one news-shaped row; an unchanged page is a
+ *  success that files nothing. */
+async function srcProcess(env, src) {
+  if (!(await ensureProcess(env))) return { ok: false, items: [], detail: 'mind_unbound' };
+  const u = src.urls || {}; const type = PROCESS_TYPES.indexOf(u.ptype) >= 0 ? u.ptype : 'bill'; const now = Date.now();
+  const f = await pubFetch(env, u.process);
+  if (!f.ok) return { ok: false, items: [], status: f.status || 0, detail: f.error, refused: !!f.refused };
+  const list = type === 'motion' || type === 'disallowance';
+  const recs = list ? processNotices(f.text, u.process, type) : [Object.assign(processParse(f.text, u.process, type, src.name, now), { id: src.id })];
+  const items = [];
+  for (const r of recs) {
+    const issues = Array.from(new Set((r.issues || []).concat(src.issues || []).concat(issueTag(r.title))));
+    const prev = await env.MIND_DB.prepare('SELECT stage FROM den_process WHERE id=?').bind(r.id).first();
+    if (src.probe) { items.push({ title: (r.title + ': ' + r.stage).slice(0, 300), link: r.url, date: r.next_date || '', desc: '' }); continue; }   // the Probe reads and records nothing
+    await env.MIND_DB.prepare('INSERT INTO den_process(id, juris, house, type, title, stage, url, issues, next_date, next_what, dates, submissions, src, seen, updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, stage=excluded.stage, issues=excluded.issues, next_date=excluded.next_date, next_what=excluded.next_what, dates=excluded.dates, submissions=excluded.submissions, updated=excluded.updated')
+      .bind(r.id, src.juris || 'au', PROCESS_HOUSES.indexOf(u.house) >= 0 ? u.house : '', type, r.title, r.stage, r.url, JSON.stringify(issues), r.next_date, r.next_what, JSON.stringify(r.dates || {}), r.submissions || 0, src.id, now, now).run();
+    if (prev && prev.stage === r.stage) continue;
+    const d = r.dates || {}; const bits = [(d.hearings || []).length ? 'Hearings: ' + d.hearings.join(', ') : '', d.submissions_close ? 'Submissions close ' + d.submissions_close : '', d.report ? 'Report due ' + d.report : '', r.submissions ? r.submissions + ' submissions received' : ''].filter(Boolean);
+    items.push({ title: (list ? r.stage + ': ' + r.title : r.title + ': ' + r.stage).slice(0, 300), link: r.url + '#' + (list ? r.id : 'stage=' + r.stage.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50)), date: '', desc: bits.join('. '), process: r.id });
+  }
+  const rows = sourceRows(src, { items, method: 'process' }, now); rows.forEach((row, i) => { const it = items.find(x => x.link === row.url); if (it) { row.meta.process = it.process; row.meta.issues = Array.from(new Set(row.meta.issues.concat(src.issues || []))); } });
+  return { ok: true, quiet: true, items, rows, status: 200, undated: true };
+}
+function processView(r) { return { id: r.id, juris: r.juris, house: r.house, type: r.type, title: r.title, stage: r.stage, url: r.url, issues: denJ(r.issues, []), next_date: r.next_date || '', next_what: r.next_what || '', dates: denJ(r.dates, {}), submissions: Number(r.submissions) || 0, source: r.src || '', seen: r.seen, updated: r.updated }; }
+async function processList(env, f) {
+  if (!(await ensureProcess(env))) return { ok: false, status: 501, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  f = f || {}; let mine = null;
+  if (f.desk) { const desk = await deskGet(env, f.desk); if (!desk) return DESK_UNKNOWN; mine = desk.issues.map(i => i.id); }
+  else if (f.ns) { const ns = String(f.ns).toLowerCase(); if (!denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'Name the client (ns) or the desk whose calendar this is.' }; mine = denNsIssues(ns); }
+  else return { ok: false, status: 400, error: 'ns_required', detail: 'A calendar is one client\'s: say which with ns= or desk=.' };
+  const rows = (((await env.MIND_DB.prepare('SELECT * FROM den_process ORDER BY (next_date=\'\'), next_date, updated DESC LIMIT 400').all()).results) || []).map(processView).filter(p => p.issues.some(i => mine.indexOf(i) >= 0));
+  let pages = []; try { await ensureSources(env); pages = (((await env.MIND_DB.prepare("SELECT * FROM sources WHERE methods LIKE '%process%' ORDER BY name LIMIT 200").all()).results) || []).map(sourceRow).filter(x => x.methods.indexOf('process') >= 0 && (!x.issues.length || x.issues.some(i => mine.indexOf(i) >= 0)))
+    .map(x => ({ id: x.id, name: x.name, url: (x.urls || {}).process || '', type: (x.urls || {}).ptype || 'bill', juris: x.juris, enabled: !!x.enabled, last_ok: Number(x.last_ok) || 0, last_try: Number(x.last_try) || 0, error: x.last_ok && !x.fails ? '' : String(x.last_error || '').slice(0, 200) })); } catch (e) { pages = []; }
+  return { ok: true, process: rows, pages, types: PROCESS_TYPES, houses: PROCESS_HOUSES.filter(Boolean) };
+}
+/** Watch one parliament page: a Source Registry source whose method is `process`, so its health is recorded like any other. */
+async function processAdd(env, b, who) {
+  b = b || {}; const u = denUrl(b.url);
+  if (!u || axUrlProblem(u.toString())) return { ok: false, status: 400, error: 'bad_url', detail: 'Give the public address of the bill, inquiry or notice page (https://...).' };
+  const type = String(b.type || 'bill').toLowerCase(); if (PROCESS_TYPES.indexOf(type) < 0) return { ok: false, status: 400, error: 'bad_type', detail: 'type is one of ' + PROCESS_TYPES.join(', ') + '.' };
+  const title = String(b.title || '').replace(/\s+/g, ' ').trim().slice(0, 120); if (title.length < 4) return { ok: false, status: 400, error: 'missing_title', detail: 'Give the bill or inquiry its name, as the parliament writes it.' };
+  await ensureSources(env);
+  const s = sourceSanitize({ id: 'proc_' + arcHash(u.toString()), name: title, tier: 'official', juris: b.juris, issues: b.issues, schedule: 360, urls: { process: u.toString(), ptype: type, house: b.house }, note: 'process calendar; added by ' + String(who || '').slice(0, 40) }, null);
+  const had = await sourceGet(env, s.id); await sourceUpsert(env, s, Date.now());
+  return { ok: true, added: !had, source: await sourceGet(env, s.id) };
+}
+/** Stop watching one parliament page: its source is switched off and its records leave the calendar. Seeded pages can be switched back on in Sources. */
+async function processRemove(env, b) {
+  b = b || {}; const id = sourceIdClean(b.source || b.id || ''); await ensureSources(env); await ensureProcess(env);
+  const src = id ? await sourceGet(env, id) : null;
+  if (!src || (src.methods || []).indexOf('process') < 0) return { ok: false, status: 404, error: 'unknown_process', detail: 'No watched parliament page has that id.' };
+  await env.MIND_DB.batch([env.MIND_DB.prepare('UPDATE sources SET enabled=0, edited=1, updated=? WHERE id=?').bind(Date.now(), id), env.MIND_DB.prepare('DELETE FROM den_process WHERE src=?').bind(id)]);
+  return { ok: true, removed: id };
+}
+/** The recorded dates ahead for a desk: read from the parliaments' own pages, never worked out from a sentence. */
+async function processUpcoming(env, mine, now) {
+  if (!(await ensureProcess(env))) return [];
+  const today = auDayKey(now); const horizon = auDayKey(now + 120 * 86400000);
+  return (((await env.MIND_DB.prepare("SELECT * FROM den_process WHERE next_date>=? AND next_date<=? ORDER BY next_date LIMIT 120").bind(today, horizon).all()).results) || []).map(processView).filter(p => p.issues.some(i => mine.indexOf(i) >= 0))
+    .map(p => ({ date: p.next_date, weekday: DEN_DAYS[new Date(p.next_date + 'T00:00:00Z').getUTCDay()], event: p.next_what, what: (p.title + ' - ' + p.stage).slice(0, 240), item: 0, url: p.url, yearWritten: true, recorded: true, process: p.id }));
+}
+/* The pages a research pass on 11 November 2026 named. Every address is unverified until a sweep proves it: a page that
+ * has moved fails in words on its source, and its address is corrected in the Sources drawer. [id, name, juris, house, type, url, issues] */
+const PROCESS_SEED = [
+  ['proc_gasres_inquiry', 'Domestic Gas Reservation Bill 2026 inquiry', 'au', 'senate', 'inquiry', 'https://www.aph.gov.au/Parliamentary_Business/Committees/Senate/Economics/DomesticGasRes2026', 'gas,gastax'],
+  ['proc_gasres_bill', 'Domestic Gas Reservation Bill 2026', 'au', 'reps', 'bill', 'https://www.aph.gov.au/Parliamentary_Business/Bills_Legislation/Bills_Search_Results/Result?bId=r7559', 'gas'],
+  ['proc_nsw_pc5_firearms', 'NSW Portfolio Committee No. 5: firearms reforms repeal inquiry', 'nsw', 'upper', 'inquiry', 'https://www.parliament.nsw.gov.au/parliamentary-business/committees/committee-details?committeeId=203', 'firearms'],
+  ['proc_nsw_disallowance', 'NSW Legislative Council disallowance alerts', 'nsw', 'upper', 'disallowance', 'https://www.parliament.nsw.gov.au/parliamentary-business/legislative-council/disallowance-alerts', ''],
+  ['proc_vic_firearms_bill', 'Firearms Amendment Bill 2026 (Victoria)', 'vic', '', 'bill', 'https://www.legislation.vic.gov.au/bills/firearms-amendment-bill-2026', 'firearms'],
+  ['proc_act_firearms_bill', 'Firearms (Public Safety) Amendment Bill 2026 (ACT)', 'act', '', 'bill', 'https://www.legislation.act.gov.au/b/db_73940', 'firearms'],
+  // the bill id below was reported by an aggregator citing the Parliament of NSW record; the page itself was not seen
+  ['proc_nsw_mtpleasant_bill', 'Mount Pleasant Mine Bill 2026 (NSW)', 'nsw', 'lower', 'bill', 'https://www.parliament.nsw.gov.au/bills/Pages/bill-details.aspx?pk=18979', 'mining'],
+];
+
+// -- Hansard as a standing sweep --------------------------------------------------
+const HANSARD_TERMS = 12;
+/** Once a sitting day a client: the desk's issue terms and approved terms searched in both houses through OpenAustralia's
+ *  API. A speech is kept when it speaks to the client's issues; its speaker is named only when the MP register holds them. */
+async function hansardSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!env.OPENAUSTRALIA_KEY) return { ok: false, platform: 'hansard', error: 'openaustralia_key_missing', detail: 'Set the secret OPENAUSTRALIA_KEY (free, from openaustralia.org.au/api) to read Hansard for the desks.' };
+  if (!(await ensureArchive(env)) || !(await ensureDesks(env))) return { ok: false, platform: 'hansard', error: 'mind_unbound' };
+  const now = Date.now(); const day = auDayKey(now); const cut = now - 8 * 86400000;
+  let nss = Array.from(new Set(((((await env.MIND_DB.prepare('SELECT ns FROM den_desks').all()).results) || []).map(r => r.ns))));
+  if (opts.ns) nss = nss.filter(n => n === String(opts.ns).toLowerCase());
+  const mps = {}; try { await ensureTopics(env); (((await env.MIND_DB.prepare('SELECT name, party, house FROM mps LIMIT 400').all()).results) || []).forEach(m => { mps[String(m.name || '').toLowerCase().replace(/\s+/g, ' ').trim()] = m; }); } catch (e) {}
+  const out = { ok: true, platform: 'hansard', clients: 0, terms: 0, found: 0, threads: 0, threadRows: 0, comments: 0, commentRows: 0, errors: [], skipped: false };
+  const max = Math.min(Math.max(parseInt(opts.terms, 10) || HANSARD_TERMS, 1), HANSARD_TERMS);
+  for (const ns of nss) {
+    if (!opts.force && (await kvGet(env.AXIOM_KV, 'hansard_day_' + ns)) === day) continue;
+    await kvPut(env.AXIOM_KV, 'hansard_day_' + ns, day, 2 * 86400); out.clients++;
+    const mine = denNsIssues(ns); const act = await denActive(env, ns); const deskTerms = act.filter(r => r.kind === 'term').map(r => r.value);
+    const terms = Array.from(new Set(CLIENT_ISSUES.filter(ci => ci.ns === ns).map(ci => (ci.q || [])[0]).filter(Boolean).concat(deskTerms))).slice(0, max);
+    const rx = deskTerms.map(denTermRx).filter(Boolean); const rows = new Map();
+    for (const term of terms) {
+      await log('cmd', 'openaustralia getHansard search="' + term + '"');
+      const r = await hansardSearch(env, '"' + term + '"', 20); out.terms++;
+      if (!r.ok) { out.errors.push(term + ': ' + r.detail); await log('err', term + ': ' + r.detail); if (/HTTP (401|403|429)/.test(String(r.detail))) break; await rdSleep(1000); continue; }
+      r.items.forEach(h => { out.found++; const ts = Date.parse(h.date) || now; if (ts < cut || !h.url) return; const issues = issueTag(h.text); if (!issues.some(i => mine.indexOf(i) >= 0) && !rx.some(x => x.test(h.text))) return;
+        const mp = mps[String(h.speaker || '').toLowerCase().replace(/\s+/g, ' ').trim()]; const where = h.house === 'senate' ? 'the Senate' : h.house === 'representatives' ? 'the House' : 'Parliament';
+        const meta = { platform: 'hansard', house: h.house, debate: String(h.debate || '').slice(0, 160), issues, ns, term, layer: 3, layers: [3], via: 'openaustralia' }; if (mp) meta.mp = { name: mp.name, party: mp.party || '', house: mp.house || '' };
+        rows.set(h.url, { src: 'hansard', title: ((mp ? mp.name + ' in ' + where : 'Speech in ' + where) + (h.debate ? ' (' + h.debate + ')' : '') + ': ' + h.text.slice(0, 120)).slice(0, 300), body: h.text, url: h.url, author: '', ts, tone: commentTone(h.text), meta }); });
+      await rdSleep(1000);
+    }
+    const list = Array.from(rows.values()); out.threads += list.length;
+    for (let i = 0; i < list.length; i += 150) out.threadRows += await archiveItems(env, 'hansard', list.slice(i, i + 150));
+    await log('out', ns + ': ' + list.length + ' speeches on the desk\'s issues');
+  }
+  if (!out.clients) out.skipped = true;
+  return out;
+}
+
+// -- campaigns' own petition counters ----------------------------------------------
+/* A campaign page that prints its own signature count. The number is the campaign's claim: it is stored as self-reported
+ * and said so wherever it is shown. Addresses are unverified until a sweep proves them. change.org is left out: it
+ * refuses automated readers. */
+const PETITION_COUNTERS = [
+  { url: 'https://stopthebuyback.com.au/', name: 'Stop the Buyback', ns: 'guns' },
+  { url: 'https://handsoffourfuel.com.au/', name: 'Hands Off Our Fuel', ns: 'mca' },
+  { url: 'https://nb.australiainstitute.org.au/gas_export_tax_b', name: 'Tax the gas industry its fair share (The Australia Institute)', ns: 'aep' },
+  { url: 'https://www.climatecouncil.org.au/actions/end-the-free-ride-petition/', name: 'End the Free Ride (Climate Council)', ns: 'mca' },
+  { url: 'https://www.getup.org.au/campaigns/tax/cap-the-diesel-rort/will-you-share-the-petition', name: 'Cap the diesel rort (GetUp)', ns: 'mca' },
+  { url: 'https://act.350.org.au/petitions/cut-the-diesel-handout-to-big-mining', name: 'Cut the diesel handout to big mining (350 Australia)', ns: 'mca' },
+];
+async function petitionCounters(env) {
+  let extra = []; try { extra = JSON.parse((await kvGet(env.AXIOM_KV, 'petition_counters')) || '[]'); } catch (e) { extra = []; }
+  let off = []; try { off = JSON.parse((await kvGet(env.AXIOM_KV, 'petition_counters_off')) || '[]'); } catch (e) { off = []; }
+  const seen = new Set(); return PETITION_COUNTERS.map(c => Object.assign({ seed: true }, c)).concat(Array.isArray(extra) ? extra : []).filter(c => { if (!c || !c.url || seen.has(c.url) || off.indexOf(c.url) >= 0) return false; seen.add(c.url); return true; });
+}
+async function petitionCounterEdit(env, b, who) {
+  b = b || {}; let extra = []; try { extra = JSON.parse((await kvGet(env.AXIOM_KV, 'petition_counters')) || '[]'); } catch (e) { extra = []; }
+  let off = []; try { off = JSON.parse((await kvGet(env.AXIOM_KV, 'petition_counters_off')) || '[]'); } catch (e) { off = []; }
+  if (b.add) { const u = denUrl(b.add.url); const name = String(b.add.name || '').replace(/\s+/g, ' ').trim().slice(0, 120); const ns = String(b.add.ns || '').toLowerCase();
+    if (!u || axUrlProblem(u.toString())) return { ok: false, status: 400, error: 'bad_url', detail: 'Give the public address of the campaign page that shows the count.' };
+    if (/(^|\.)change\.org$/i.test(u.hostname)) return { ok: false, status: 400, error: 'not_readable', detail: 'change.org refuses automated readers, so its counts are not collected.' };
+    if (name.length < 3) return { ok: false, status: 400, error: 'missing_name', detail: 'Name the petition as the campaign does.' };
+    if (ns && !denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'ns is a client this desk knows, or left out.' };
+    if (extra.length >= 60) return { ok: false, status: 409, error: 'counter_cap', detail: 'Sixty counters are watched already. Remove one first.' };
+    extra = extra.filter(c => c.url !== u.toString()).concat([{ url: u.toString(), name, ns, by: String(who || '').slice(0, 40), at: Date.now() }]); off = off.filter(x => x !== u.toString()); }
+  if (b.remove) { const url = String(b.remove); extra = extra.filter(c => c.url !== url); if (PETITION_COUNTERS.some(c => c.url === url) && off.indexOf(url) < 0) off.push(url); }
+  await kvPut(env.AXIOM_KV, 'petition_counters', JSON.stringify(extra), 3650 * 86400); await kvPut(env.AXIOM_KV, 'petition_counters_off', JSON.stringify(off), 3650 * 86400);
+  return { ok: true, counters: await petitionCounters(env) };
+}
+function counterCount(html) {
+  const s = stripHtml(String(html).replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')).replace(/\s+/g, ' ');
+  const m = s.match(/(\d[\d,]{2,9})\s*(?:\+\s*)?(?:signatures?|people have signed|have signed|signers|supporters|signed so far|names)/i) || s.match(/(?:signatures?|signed|supporters?)\s*(?:so far|to date)?\s*:?\s*(\d[\d,]{2,9})\b/i);
+  return m ? (parseInt(m[1].replace(/[^\d]/g, ''), 10) || 0) : 0;
+}
+/** Read each counter once a day. A count that cannot be found is an error by name and files nothing. */
+async function petitionCountersSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
+  const now = Date.now(); const day = new Date(now).toISOString().slice(0, 10); const out = { ok: true, counters: 0, read: 0, rows: 0, snapshots: 0, errors: [] };
+  const list = (await petitionCounters(env)).filter(c => !opts.only || opts.only.some(h => c.url.indexOf(h) >= 0)); const canon = [], snaps = [], upd = [];
+  for (const c of list) { out.counters++; const id = (denUrl(c.url) || { hostname: 'counter' }).hostname.replace(/^www\./, '').replace(/[^a-z0-9]+/gi, '_');
+    await log('cmd', 'GET ' + c.url); const f = await pubFetch(env, c.url);
+    if (!f.ok) { out.errors.push(id + ': ' + f.error); await log('err', id + ': ' + f.error); continue; }
+    const sigs = counterCount(f.text);
+    if (!sigs) { out.errors.push(id + '_parse_failed: the page shows no signature count this reader can find'); await log('err', id + '_parse_failed'); continue; }
+    out.read++; const issues = Array.from(new Set(issueTag(c.name + ' ' + stripHtml(f.text).slice(0, 2000)).concat(c.ns ? denNsIssues(c.ns).slice(0, 1) : [])));
+    const meta = { platform: 'petitions', site: 'counter', campaign: c.name, juris: 'au', issues, signatures: sigs, self_reported: true, ns: c.ns || '', closes: '', seen: now, day };
+    canon.push({ src: 'counter', title: c.name.slice(0, 300), body: '', url: c.url, ts: now, tone: 0, meta });
+    snaps.push({ src: 'counter', title: c.name.slice(0, 300), body: '', url: 'x:pet:' + arcHash(c.url) + ':' + day, ts: now, meta: { platform: 'petitions', site: 'counter', juris: 'au', petition: c.url, signatures: sigs, self_reported: true, issues, day } });
+    upd.push(env.MIND_DB.prepare("UPDATE arc_items SET meta=json_set(COALESCE(meta,'{}'),'$.signatures',?,'$.seen',?,'$.self_reported',json('true')) WHERE kind='petition' AND url=?").bind(sigs, now, c.url));
+    await log('out', sigs + ' signatures, self-reported by the campaign - ' + c.name.slice(0, 70)); }
+  for (let i = 0; i < canon.length; i += 150) out.rows += await archiveItems(env, 'petition', canon.slice(i, i + 150));
+  for (let i = 0; i < snaps.length; i += 150) out.snapshots += await archiveItems(env, 'petition', snaps.slice(i, i + 150));
+  for (let i = 0; i < upd.length; i += 50) { try { await env.MIND_DB.batch(upd.slice(i, i + 50)); } catch (e) {} }
+  return out;
+}
+
+// -- registered public actors' own Bluesky posts ------------------------------------
+/** Each register account on Bluesky that a person marked as a public actor: its own posts from the public AppView,
+ *  filed through signalsIngest so the name comes from the register and the desk's relevance rules apply. Reposts are not read. */
+async function bskyActorSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!(await ensureDen(env))) return { ok: false, platform: 'bluesky', error: 'mind_unbound' };
+  const max = Math.min(Math.max(parseInt(opts.max, 10) || 20, 1), 40); const now = Date.now();
+  const acc = ((await env.MIND_DB.prepare("SELECT * FROM den_watch WHERE kind='account' AND platform='bluesky' AND status='active' AND COALESCE(actor_kind,'')!='' ORDER BY COALESCE(last_ok,0) LIMIT ?").bind(max).all()).results) || [];
+  const out = { ok: true, platform: 'bluesky', accounts: acc.length, threads: 0, threadRows: 0, comments: 0, commentRows: 0, errors: [] };
+  for (const w of acc) {
+    await log('cmd', 'GET app.bsky.feed.getAuthorFeed actor=' + w.value);
+    const r = await socialJson(BSKY_API + 'app.bsky.feed.getAuthorFeed?actor=' + encodeURIComponent(w.value) + '&limit=30&filter=posts_no_replies');
+    if (!r.ok || !r.json) { const why = String(r.error || ('HTTP ' + r.status)).slice(0, 120); out.errors.push(w.value + ': ' + why); try { await env.MIND_DB.prepare('UPDATE den_watch SET last_error=? WHERE id=?').bind(why, w.id).run(); } catch (e) {} await rdSleep(SOCIAL_PACE); continue; }
+    const rows = (r.json.feed || []).filter(f => f && f.post && !f.reason && String((f.post.author || {}).handle || '').toLowerCase() === w.value).map(f => bskyNorm(f.post, '')).filter(p => p.text && /^https:/.test(p.url))
+      .map(p => ({ platform: 'bluesky', url: p.url, text: p.text, ts: p.ts, eng: { likes: p.likes, reposts: p.reposts, replies: p.replies, quotes: p.quotes }, watch: w.id }));
+    const ing = rows.length ? await signalsIngest(env, { ns: w.ns, layer: 3, via: 'bsky_actor', rows }, 'worker') : { kept: 0, inserted: 0 };
+    out.threads += ing.kept || 0; out.threadRows += ing.inserted || 0;
+    try { await env.MIND_DB.prepare("UPDATE den_watch SET last_ok=?, last_error='', last_layer=3 WHERE id=?").bind(now, w.id).run(); } catch (e) {}
+    await log('out', w.value + ': ' + rows.length + ' own posts, ' + (ing.kept || 0) + ' on the desk\'s topics'); await rdSleep(SOCIAL_PACE);
+  }
+  return out;
+}
+
+/* Campaign names a research pass found in paid advertising. Nothing puts them in a register unasked: a person with a full
+ * key presses the step (POST /den/watch/seed), and each then waits as a proposal that nothing searches until it is approved.
+ * A name a person dismissed is never proposed again. */
+const DEN_SEED_R7 = [['mca', 'hands off our fuel', 'ftc'], ['aep', 'australia runs on natural gas', 'gas'], ['guns', 'stop the buyback', 'firearms']];
+async function denSeedR7(env, who) {
+  const out = { ok: true, proposed: 0, known: 0 };
+  for (const s of DEN_SEED_R7) { const r = await denWatchPropose(env, { ns: s[0], source: 'seed', items: [{ kind: 'term', value: s[1], issue: s[2], score: 5, evidence: [{ snippet: 'A campaign name reported in public coverage of paid political advertising (research pass, 11 November 2026). Approve it to search the Ad Library and the desk\'s channels for it.' }] }] }, who || 'seed'); out.proposed += r.proposed || 0; out.known += r.known || 0; }
+  return out;
+}
+/** What the public-record routes delivered for one desk: the collection view's rows. */
+async function publicDelivered(env, desk) {
+  const now = Date.now(); const mine = desk.issues.map(i => i.id); const z = () => ({ d1: 0, d7: 0, last: 0, layers: [3] }); const out = { parliament: z(), hansard: z(), counters: z() };
+  try { await ensureProcess(env);
+    (((await env.MIND_DB.prepare("SELECT kind, ts, meta FROM arc_items WHERE ts>? AND ((kind='news' AND json_extract(meta,'$.process') IS NOT NULL) OR kind='hansard' OR (kind='petition' AND json_extract(meta,'$.site')='counter' AND url NOT LIKE 'x:pet:%')) ORDER BY ts DESC LIMIT 2000").bind(now - 7 * 86400000).all()).results) || []).forEach(r => { const m = denJ(r.meta, {});
+      if (!(Array.isArray(m.issues) ? m.issues : []).some(i => mine.indexOf(i) >= 0) && m.ns !== desk.ns) return; const k = r.kind === 'hansard' ? 'hansard' : r.kind === 'petition' ? 'counters' : 'parliament'; const t = r.kind === 'petition' ? (Number(m.seen) || r.ts) : r.ts;
+      out[k].d7++; if (t > now - 86400000) out[k].d1++; out[k].last = Math.max(out[k].last, t); });
+    out.parliament.watched = (await processList(env, { desk: desk.id })).process.length;
+  } catch (e) {}
+  return out;
 }
 
 // ==============================================================================
@@ -8084,6 +8526,16 @@ const ENTITY_SEED = [
   ['origin', 'org', 'Origin Energy', 'Origin Energy', '', 'Energy retailer and gas producer', 'neutral', 'aep'],
   ['eca', 'org', 'Energy Consumers Australia', 'Energy Consumers Australia', '', 'Consumer body', 'neutral', ''],
   ['nopsema_org', 'org', 'NOPSEMA', 'NOPSEMA|the offshore regulator', '', 'Offshore petroleum regulator', 'neutral', 'aep'],
+  // release 7: organisations the public-record routes read
+  ['environskimberley', 'org', 'Environs Kimberley', 'Environs Kimberley', '', 'Kimberley conservation group', 'opponent', 'aep'],
+  ['fara', 'org', 'Friends of Australian Rock Art', 'Friends of Australian Rock Art', '', 'Murujuga rock art group', 'opponent', 'aep'],
+  ['envirojustice', 'org', 'Environmental Justice Australia', 'Environmental Justice Australia', '', 'Public interest legal centre', 'opponent', 'aep'],
+  ['ieefa', 'org', 'IEEFA', 'IEEFA|Institute for Energy Economics and Financial Analysis', '', 'Energy finance think tank', 'opponent', 'aep'],
+  ['cef', 'org', 'Climate Energy Finance', 'Climate Energy Finance', '', 'Think tank', 'opponent', 'mca'],
+  ['amnesty_au', 'org', 'Amnesty International Australia', 'Amnesty International Australia|Amnesty Australia', '', 'Human rights organisation', 'opponent', 'aep'],
+  ['fieldandgame', 'org', 'Field & Game Australia', 'Field & Game Australia|Field and Game Australia', '', 'Hunting and shooting organisation', 'neutral', 'guns'],
+  ['austdeer', 'org', 'Australian Deer Association', 'Australian Deer Association', '', 'Hunting organisation', 'neutral', 'guns'],
+  ['agsa', 'org', 'Australian Gun Safety Alliance', 'Australian Gun Safety Alliance', '', 'Gun-control alliance', 'opponent', 'guns'],
   ['bhp', 'org', 'BHP', 'BHP', '', 'Miner', 'neutral', 'mca'],
   ['riotinto', 'org', 'Rio Tinto', 'Rio Tinto', '', 'Miner', 'neutral', 'mca'],
   ['fortescue', 'org', 'Fortescue', 'Fortescue|FMG|Andrew Forrest|Twiggy Forrest', '', 'Miner', 'neutral', 'mca'],
@@ -9219,7 +9671,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-11.studio-p59';
+const AXIOM_BUILD = '2026-11-11.studio-p60';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -17208,7 +17660,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -19673,6 +20125,7 @@ const AXIOM_WORKER = {
           if (path === '/den/board') { const r = await denBoard(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to') }); if (r && r._rows) delete r._rows; return send(r); }
           if (path === '/den/missed') { const r = await denMissed(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to') }); return send(r); }
           if (path === '/den/collection') return send(await denCollection(env, sp.get('desk')));
+          if (path === '/den/process') return send(await processList(env, { ns: sp.get('ns'), desk: sp.get('desk') }));
           if (path === '/den/held') return send(await denHeld(env, sp.getAll('u')));
           if (path === '/den/briefs') { const d = await deskGet(env, sp.get('desk')); if (!d) return send(Object.assign({}, DESK_UNKNOWN));
             const rows = ((await env.MIND_DB.prepare('SELECT id, day, status, revision, by, filed_by, filed_at, updated FROM den_briefs WHERE desk=? ORDER BY day DESC LIMIT 90').bind(d.id).all()).results) || []; return jsonResp({ ok: true, desk: d.id, briefs: rows }); }
@@ -19722,6 +20175,9 @@ const AXIOM_WORKER = {
           if (path === '/den/brief/save') return send(await denBriefSave(env, ob, auth.name));
           if (path === '/den/brief/file') return send(await denBriefFile(env, ob, auth.name));
           if (path === '/den/backtest') return send(await denBacktestSave(env, ob, auth.name));
+          if (path === '/den/process/add') return send(await processAdd(env, ob, auth.name));
+          if (path === '/den/watch/seed') return send(await denSeedR7(env, auth.name));
+          if (path === '/den/process/remove') return send(await processRemove(env, ob));
           if (path === '/den/discover') return send(await denDiscover(env, ob.ns, { days: ob.days, dry: !!ob.dry }, auth.name));
           if (path === '/den/themes') return send(await denThemes(env, ob.ns));
         }
@@ -19735,6 +20191,7 @@ const AXIOM_WORKER = {
         await ensureArchive(env);
         if (path === '/social/coverage' && req.method === 'GET') return jsonResp(await socialCoverage(env, reqUrl.searchParams.get('probe') === '1'));
         if (path === '/social/petitions' && req.method === 'GET') return jsonResp(await petitionsList(env, { issue: reqUrl.searchParams.get('issue') || '', juris: reqUrl.searchParams.get('juris') || '', days: reqUrl.searchParams.get('days') || 30 }));
+        if (path === '/social/petitions/counters') { if (req.method === 'GET') return jsonResp({ ok: true, counters: await petitionCounters(env) }); const r = await petitionCounterEdit(env, ob, auth.name); const st = r.ok === false ? (r.status || 400) : 200; if (r.status) delete r.status; return jsonResp(r, st); }
         if (path === '/social/substack/search' && req.method === 'GET') {
           const q = String(reqUrl.searchParams.get('q') || '').trim().slice(0, 80);
           if (!q) return jsonResp({ error: 'missing_q', detail: 'Give q=, e.g. australian politics.' }, 400);
@@ -19761,6 +20218,7 @@ const AXIOM_WORKER = {
         if (path === '/social/sweep') {
           const platform = String(ob.platform || '').toLowerCase().replace(/[^a-z]/g, '');
           if (SOCIAL_PLATFORMS.indexOf(platform) < 0 && platform !== 'x') return jsonResp({ error: 'unknown_platform', detail: 'platform must be one of ' + SOCIAL_PLATFORMS.concat(['x']).join(', ') + '.' }, 400);
+          if (platform === 'hansard' && !env.OPENAUSTRALIA_KEY) return jsonResp({ ok: false, error: 'openaustralia_key_missing', detail: 'Set the secret OPENAUSTRALIA_KEY (free, from openaustralia.org.au/api) to read Hansard for the desks. Nothing was queued.' }, 400);
           const params = Object.assign({}, (ob.params && typeof ob.params === 'object') ? ob.params : {}, { where: 'worker' }, platform === 'x' ? { mode: 'timelines' } : {});
           const job = await jobCreate(env, platform, params, auth.name);
           ctx.waitUntil(jobRunLocal(env, { id: job.id, source: platform, params }));
@@ -19863,7 +20321,7 @@ const AXIOM_WORKER = {
         if (path === '/sources/add') {
           const s = sourceSanitize(sb, null);
           if (!s.id || !s.name) return jsonResp({ error: 'missing_name', detail: 'Give the source a name.' }, 400);
-          if (!s.methods.length) return jsonResp({ error: 'missing_urls', detail: 'Give at least one way in: urls.rss, urls.wp, urls.json, urls.sitemap, urls.home, urls.site, urls.gnews or urls.podcast.' }, 400);
+          if (!s.methods.length) return jsonResp({ error: 'missing_urls', detail: 'Give at least one way in: urls.rss, urls.wp, urls.json, urls.sitemap, urls.home, urls.public, urls.site, urls.gnews or urls.podcast.' }, 400);
           const had = await sourceGet(env, s.id);
           if (had && had.core) return jsonResp({ error: 'core_source', detail: s.id + ' is a core feed; edit it with /sources/update.' }, 400);
           await sourceUpsert(env, s, Date.now());

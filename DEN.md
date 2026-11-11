@@ -278,7 +278,8 @@ For the owner, to switch a route on:
 
 Decision D7, as the owner asked on 11 November 2026: the Mac collector reads social platforms through a person's
 signed-in session. **Nothing is switched on by this release.** A platform collects only after a person signs in to it
-on the Mac, having read the warning. Platforms the owner has switched on so far: none recorded.
+on the Mac, having read the warning. Platforms the owner has switched on so far: Facebook (the owner's Mac, user heshhomefolder,
+11 November 2026, through opencli; s.3.2).
 
 **Corrected by the first live run (11 November 2026, the owner's Mac; s.3.1 below).** Agent Reach v1.5.0 as installed
 has no `facebook`, `instagram`, `youtube` or `login` command at all: its commands are `setup, install, configure,
@@ -425,26 +426,68 @@ Changed after that, at the owner's word ("fix all"):
 - **The background agent runs with the Python that installed it** (`launchd_command`): install it with
   `~/.axiom-reach/venv/bin/python tools/reach-agent.py --install-launchd` and it sees Playwright and yt-dlp. It used
   a bare `python3`, which on this Mac has neither.
-- **YouTube keyword search reads through yt-dlp. Decision D7 amended, 11 November 2026, the owner:** agent-reach
-  cannot search YouTube, so `reach_social.py` uses yt-dlp directly for the `youtube` channel when agent-reach has no
-  such command (`backend()`): `yt-dlp "ytsearchN:<term>" --flat-playlist --dump-json --no-warnings --ignore-config`,
-  public search, no sign-in, no cookies. The rules are unchanged: the ten-second floor and the daily cap; "Sign in to
-  confirm you're not a bot" is a challenge (stop, 24 hours, no retry, no cookies handed over); a line that is not
-  JSON is `youtube_parse_failed`; a 429 ends the run; the channel's and uploader's names and ids are never carried.
-  A person still switches it on once: `--login youtube` asks for the platform's name and records who (there is
-  nothing to sign in to); until then the status is `not_switched_on`. Facebook and Instagram are unchanged.
-  **Not proven on a real machine:** the field names (`id`, `title`, `description`, `view_count`, `timestamp`,
-  `upload_date`) are yt-dlp's as recalled. The dry run below is the test.
+- **YouTube through yt-dlp was built twice that evening**, here and in the session that wrote s.3.3. The two were
+  merged on 11 November 2026 and s.3.3's is the one kept (it also carries Facebook and Instagram through opencli);
+  this session's `backend()` / `run_ytsearch()` and its `not_switched_on` state are gone.
 
 ```
 ~/.axiom-reach/venv/bin/pip install -U "yt-dlp[default]"
-~/.axiom-reach/venv/bin/python tools/reach-agent.py --channels          # youtube: not_switched_on
-~/.axiom-reach/venv/bin/python tools/reach-agent.py --login youtube     # type: youtube
+~/.axiom-reach/venv/bin/python tools/reach-agent.py --channels
 ~/.axiom-reach/venv/bin/python tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out /tmp/yt.json
 ~/.axiom-reach/venv/bin/python tools/reach-agent.py --install-launchd   # the background agent, with this Python
 ```
 
-Harnesses: `tests/reach-agent-test.py` (37), `tests/reach-channels-test.py` (96).
+
+### 3.3 The tools underneath agent-reach, called directly (11 November 2026, at the owner's request; no worker or page change)
+
+Section 3.1 left Facebook, Instagram and YouTube with nothing to run, pending the owner's choice of a backend. The owner
+chose: the tools agent-reach itself installs for those channels. Read from agent-reach 1.5.0's own channel files on the
+owner's Mac: Facebook and Instagram are `opencli <site> ...` (it drives the Chrome a person is already signed in to),
+YouTube is `yt-dlp`. Decision D7 is unchanged - a person signs in by hand, public content only, the pace, the caps, the
+24-hour pause - and only the command the collector runs is new.
+
+- **When it applies.** `use_native(channel)`: agent-reach is absent or has no command for the channel, and the tool is
+  on the machine (`NATIVE`, found through `_which`). An agent-reach that one day has the commands is still used first.
+- **YouTube keyword search**: `yt-dlp "ytsearch<N>:<term>" --flat-playlist --dump-json --skip-download
+  --no-warnings --ignore-config --no-cookies`. Public results, no account, never a cookie. Usable as soon as yt-dlp is
+  installed. The channel's and uploader's names are not read. **Corrected on the first real run (the owner's Mac,
+  yt-dlp 2026.10.26, 11 November 2026):** this was `ytsearchdate<N>:`, which that yt-dlp refuses outright
+  ("Unsupported url scheme"), so three searches failed and YouTube was paused for 24 hours by a wrong command. The
+  plain form answered: one JSON object a video with `id`, `url`, `title`, `description`, `view_count`; `timestamp` and
+  `release_timestamp` are null in search results, **so a YouTube row found by search carries no publish date and
+  results are in YouTube's own order, not newest first**. A line of that real answer, with the names changed, is the
+  fixture `tests/fixtures/den/yt-dlp-search-2026.10.26.jsonl`. The same evening a dry run on that Mac (the plain form, this
+  session's earlier implementation on `main`) read 311 videos in 33 searches with no refusal and sent nothing. The
+  merged implementation here has not itself been run on the Mac: `reach_social.py youtube --dry-run` is its test.
+- **Facebook keyword search**: `opencli facebook search <term> --limit N -f json --window background`. Its columns are
+  index, title, text, url. `title` can be a person's or a page's name and is never read; a result whose address is not
+  a post (a page, a person) is dropped. **It returns no counts and no date**, so a Facebook row from this route has
+  words and an address only.
+- **Instagram, registered accounts' posts**: `opencli instagram user <account> --limit N -f json --window background`.
+  Its documented columns are index, caption, likes, comments, type, date - **no address**. The collector takes `url`,
+  `link`, `permalink` or a `shortcode` when the JSON carries one; when no post carries any, the sweep fails as
+  `instagram_no_address` in words. It is never guessed and never an empty success.
+- **Only reads.** opencli can also like, follow, comment, post, add a friend and join a group. `OPENCLI_READS` is the
+  whole list of what this collector may run (`facebook search`, `facebook whoami`, `instagram user`,
+  `instagram whoami`); anything else raises before a process starts. `login` runs only inside `login()`, typed for by a
+  person.
+- **Switching on.** `python3 tools/reach-agent.py --login facebook` (or `instagram`): the warning, the client-admin
+  question, the platform's name typed, then `opencli <site> login`; it is recorded as switched on only when
+  `opencli <site> whoami` then reports someone signed in. Until then the channel is `needs_login` and is not offered.
+  Each job asks `whoami` once before it sweeps; the account's name is never logged or stored.
+- **Refusals** are read from what the tool said (its error stream; its output only when that is not data, so a post
+  that says "checkpoint" is a post): a verification stops the sweep and pauses the platform 24 hours, a slow-down stops
+  it, signed out is `needs_login`, a disconnected browser bridge says to run `opencli doctor`.
+- **Not verified.** No real answer of `yt-dlp` or `opencli` has been seen: the Mac's sandbox would not install yt-dlp,
+  and nobody has signed in. The command forms are from each tool's own `--help` on the owner's Mac; the answers in
+  `tests/reach-channels-test.py` (47 new cases, 127 in all) are stand-ins. The first `--channels` and the first sweep
+  on the Mac verify them; the Instagram address is the likeliest thing to fail.
+- **Not collected still:** comment text on Facebook and Instagram, a Facebook page's own timeline, Instagram keyword
+  search.
+
+Owner's steps: `uv tool install yt-dlp`; `python3 tools/reach-agent.py --channels` (YouTube should read usable);
+with Chrome open and `opencli doctor` green, `--login facebook` and `--login instagram` on a profile that administers
+no client asset; record each under D7 with who and when; restart the agent.
 
 ## 4. Release 4 - subscriber news, newsletters and monitoring exports (build `2026-11-11.studio-p56`, page `?v=r43`)
 
@@ -813,3 +856,82 @@ against her own report for the same day. That comparison is the acceptance test 
   small and separable; each is named where it would have been.
 - **Re-tagging rows collected before a term was approved.** A term tags from its approval onwards.
 
+
+## 8. Release 7 - public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`)
+
+Keyless public routes that a research pass on 11 November 2026 found productive. No signed-in route was added and no
+decision in 7.3 changed. The research report itself is client intelligence and is not in the repository.
+
+### 8.1 What exists
+
+| Route | What it is | Where |
+|---|---|---|
+| The public reader | `pubFetch()`: robots.txt obeyed (RFC 9309: this reader's group, else `*`; longest rule; Allow wins a tie), a user agent that says what it is (`AxiomPublicRecord/1.0`, or the var `PUBLIC_UA`), ten seconds between requests to one host, and a refusal (401, 403, 407, 429, a challenge page) recorded for the host in KV `pub_refused_<host>` and not asked again for a day. A sign-in page is `login_required`. No retry, no proxy, no challenge solved | worker |
+| Source method `public` | A listing page read through the public reader: a headline and a link, never a body, paywall or not. A refused source's `last_error` says so and its `next_due` is a day away | Source Registry |
+| The process calendar | Source method `process` and D1 `den_process`: a bill or inquiry page as one record (stage, referral, hearings, submissions closing, report date, number of submissions); a notice paper or disallowance list as one record a notice on a client issue. First sight and each stage change file one news row (`meta.process`); an unchanged page is a success that files nothing. `GET /den/process?ns=|desk=` (read), `POST /den/process/add {url, type, juris, house, title, issues}` (full) | worker |
+| Upcoming | `denBoard` puts recorded dates first, marked `recorded`, with the parliament's page as the link; the page shows a "recorded" chip | worker, `docs/den.js` |
+| Hansard | `hansardSweep()`: once a Sydney day a client, the first search term of each of its issues plus its approved terms (twelve at most) through OpenAustralia; kind `hansard`; the speaker named only when the MP register holds them. Needs the secret `OPENAUSTRALIA_KEY` | worker, `socialCron` |
+| Petition counters | `petitionCountersSweep()` inside the daily petitions sweep: the count a campaign prints on its own page, stored with `meta.self_reported` and a daily snapshot; a count that cannot be found is `<host>_parse_failed` and files nothing. `GET/POST /social/petitions/counters {add:{url,name,ns} | remove}` | worker; Signals shows "self-reported by the campaign" |
+| Sponsor on polls and estimates | `claimOf()` in `sourceRows`: `meta.claim {kind, sponsor, pollster, n}` by rules, "sponsor not stated" otherwise; the brief's evidence line carries it | worker |
+| Registered actors on Bluesky | `bskyActorSweep()`: register accounts on Bluesky marked as public actors, their own posts (no reposts) through the public AppView, filed through `signalsIngest` as layer 3 so the name comes from the register. `canonPermalink` knows Bluesky (mirrored in `tools/den_permalink.py`) | worker, `socialCron` |
+| Campaign names for the Ad Library | `POST /den/watch/seed` (full) proposes three campaign names as terms. Nothing is proposed unasked and nothing searches a proposal until a person approves it | worker |
+| Seeds | 29 sources (release wire, court lists, Treasury's FOI log, NOPSEMA decisions, campaign and member pages of both sides, trade and community press), 7 watched parliament pages, 6 petition counters, 9 organisations in the entity register | worker |
+
+`GET /den/collection` lists Parliamentary record, Hansard and Campaign petition counters with what each delivered;
+`GET /social/coverage` lists Parliamentary record and Hansard. Harness: `tests/den-public-worker.mjs` (12).
+
+### 8.2 Step 0 as it was done, and what it could not do
+
+The prompt asked for `GET /sources` first. This session had no network route to the live worker and no key, so the
+check was made against the seed list in the worker source instead. Already seeded, and so not added again: the
+Parliamentary Budget Office, APO (a core feed), Australian Energy Producers (news), SSAA national, SIFA, Shooters Union, Sporting Shooter,
+the Environmental Defenders Office, Beef Central, Gun Control Australia, the Alannah & Madeline Foundation. **What the
+live registry shows (edited rows, failing addresses) was not seen**: read `/sources?status=unverified` after deploy.
+
+### 8.3 Where this differs from the prompt
+
+- **No archive kind `process`.** The record is the table; a stage change is a `news` row carrying `meta.process`, so it
+  appears in the desk's media and the brief's evidence without a new kind in every reader.
+- **One of the five pages named for seeding is not seeded**: the Tasmanian firearms bill. A second search found the
+  parliament's list of 2026 bills (it is Bill No. 30 of 2026) but not the bill's own page. Add it in Anne's Den,
+  Collection, once its address is known. Seeded since the follow-up: the ACT bill (its page on the ACT Legislation
+  Register surfaced in search) and the Mount Pleasant Mine Bill (**its address is built from a bill id an aggregator
+  reported; the page itself was not seen**, so expect it to need correcting).
+- **"Once a sitting day" is once a Sydney day.** There is no sitting calendar in the worker; on a non-sitting day the
+  sweep finds nothing new and files nothing.
+- **Campaign names are proposed by a step a person presses**, not by the release itself: proposing them automatically
+  gave three desks a register of their own accord, which changed when keyword discovery runs.
+- **The stricter rules apply to the new routes only.** Sources that were already seeded keep their existing methods
+  (`html`, `rss`, `gnews`) and the existing fetch. Moving one to the public reader is a change of its `urls.public`.
+- **Adding a watched bill or a counter** is in Anne's Den, Collection (follow-up, `den.js?v=r47`): the watched pages
+  with stage, next date and the last read or its failure in words, Watch this page, Stop (`POST /den/process/remove`:
+  the source is switched off and its records leave the calendar); the desk's counters with Add and Remove; and
+  Propose campaign names.
+- **The ten-second pace** is kept in the isolate and, since the follow-up, shared through KV (`pub_next_<host>`, a
+  minute). KV is eventually consistent, so two isolates asking one host in the same second could still both go; each
+  source also runs on its own schedule (a watched parliament page every six hours), which is the wider spacing.
+
+### 8.4 Not verified here, and what verifies each
+
+| Not verified | Why | What verifies it |
+|---|---|---|
+| Every address in the new seeds | No egress; the addresses came from search results, none was opened | The first sweep: Sources, filter Untried, Sweep. A page that has moved fails in words on its source |
+| The parsers against real pages (`processParse`, `processNotices`, `counterCount`) | The fixtures in `tests/fixtures/public/` are invented stand-ins shaped like such pages, because nothing could be saved from a real one | `GET /sources/probe?id=proc_gasres_inquiry`, then `GET /den/process?ns=aep`: the stage and dates against the page itself. Each counter: its number in Signals, Petitions, against the campaign's page |
+| What each site's robots.txt allows this reader | Not read | The source's `last_error` after the first sweep (`robots.txt ... disallows this page`) |
+| Hansard rows on real speeches | No key, no egress | Set `OPENAUSTRALIA_KEY`; `POST /social/sweep {platform:'hansard'}` and the job log |
+| The Bluesky author feed's field names | The public AppView was not contacted | Add one organisation's Bluesky account as a public actor; `POST /social/sweep {platform:'blueskyaccounts'}` |
+| The Ad Library on the campaign names | Needs `META_USER_TOKEN` and a person's approval of each term | `POST /den/watch/seed`, approve in Watch, `/meta/status?probe=1` |
+| Recall against the filed reports, before and after | The reports are outside the repository and the worker was not contacted | `tools/den-backtest.py <folder> --desk aep_au --key --save` before deploy and a week after. **That number is the measure of this release, and it has not been taken** |
+| The page in Firefox and WebKit | Not installed here | CI |
+
+### 8.5 The owner's steps for this release
+
+```
+tools/deploy-worker.sh                                   # then the page from main
+npx wrangler secret put OPENAUSTRALIA_KEY --name newsaus # free, openaustralia.org.au/api; Hansard stays off without it
+# optional: a contact in the reader's user agent, e.g. "AxiomPublicRecord/1.0 (+https://<a page that says who runs it>)"
+#   set the var PUBLIC_UA in the Cloudflare dashboard
+```
+
+Then: Sources, Untried, Sweep (the 29 sources and 7 parliament pages); `POST /den/watch/seed` and approve what is
+wanted in Watch; add the three missing bills once their addresses are known.

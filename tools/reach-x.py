@@ -163,16 +163,35 @@ def run_twitter(args, timeout=90):
 
 
 def transaction_generator_broken():
-    """True when twitter-cli cannot build the header X requires on search.
+    """True when X search cannot work on this machine, by evidence.
 
-    Checked separately from the payload because twitter-cli treats it as a
-    warning: it authenticates, returns ok, and only search fails, much later.
+    twitter-cli treats the failed header generator as a warning: it authenticates, returns ok, and only search fails.
+    The warning alone is not proof, though - it has been seen on calls that then succeed - so when it is there one small
+    search is run to settle it. X is unusable only when that search fails too; a search that answers means X is offered.
     """
     try:
         p = subprocess.run(['twitter', 'status', '--json'], capture_output=True, text=True, timeout=45)
     except Exception:
         return False
-    return TRANSACTION_BROKEN in (p.stderr or '')
+    if TRANSACTION_BROKEN not in (p.stderr or ''):
+        return False
+    return not search_probe()
+
+
+def search_probe():
+    """One real search, the smallest there is. True when X answered it."""
+    try:
+        p = subprocess.run(['twitter', 'search', 'auspol', '-t', 'Latest', '-n', '1', '--exclude', 'retweets', '--json'], capture_output=True, text=True, timeout=60)
+    except Exception:
+        return False
+    out = (p.stdout or '').strip(); starts = [i for i in (out.find('{'), out.find('[')) if i >= 0]
+    try:
+        d = json.loads(out[min(starts):]) if starts else None
+    except Exception:
+        d = None
+    if isinstance(d, list):
+        return True
+    return isinstance(d, dict) and d.get('ok', True) is not False and 'error' not in d
 
 
 def status():
