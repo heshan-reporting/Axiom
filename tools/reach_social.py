@@ -255,7 +255,12 @@ def run_native(channel, action, arg, limit, runner=None, timeout=150):
         # also returns people and pages: only an address that is a post is kept.
         if rows and not any(r.get('url') for r in rows):
             raise ParseFailed(channel, 'opencli facebook search answered %d results with no address on any of them - its columns have changed' % len(rows))
-        return [{'url': r.get('url'), 'text': str(r.get('text') or '')} for r in rows if canon_permalink('facebook', r.get('url') or '')]
+        posts = [{'url': r.get('url'), 'text': str(r.get('text') or '')} for r in rows if canon_permalink('facebook', r.get('url') or '')]
+        if rows and not posts:
+            # seen on the owner's Mac, 11 November 2026 (opencli 1.8.6): the search answers groups and pages, never a post
+            groups = sum(1 for r in rows if '/groups/' in str(r.get('url') or ''))
+            raise ParseFailed(channel, 'facebook_no_posts: opencli facebook search answered %d results for "%s" and none is a post (%d groups, %d pages or people). This opencli searches for pages and groups, not posts, so nothing can be filed from it' % (len(rows), str(arg)[:60], groups, len(rows) - groups))
+        return posts
     # instagram user: columns index, caption, likes, comments, type, date. The address of a post is not among the
     # documented columns; it is taken when the JSON carries one, and its absence is said by name, never guessed.
     out_ = []

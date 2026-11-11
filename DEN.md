@@ -486,6 +486,13 @@ YouTube is `yt-dlp`. Decision D7 is unchanged - a person signs in by hand, publi
   Graph route because the collector on the Mac was the `main` copy, which had no Facebook path. The answers of
   `opencli facebook search` and `opencli instagram user` in `tests/reach-channels-test.py` are stand-ins; the
   Instagram address is the likeliest thing to fail.
+- **The first Facebook sweep (the owner's Mac, 11 November 2026, opencli 1.8.6): no posts.** The job ran on the Mac
+  and `opencli facebook search "fuel tax credit"` answered two results - a group and a page - and no post; "diesel
+  rebate" the same way. opencli's Facebook commands are add-friend, events, feed, friends, groups, join-group, login,
+  marketplace-*, memories, notifications, profile, search and whoami: its search has no posts filter and nothing reads
+  a page's own posts. **So this backend cannot collect public Facebook posts by keyword.** The collector now says so
+  (`facebook_no_posts`, three in a row pause the platform) instead of "0 items, 0 posts". Open for the owner: whether
+  opencli 2.x searches posts (not checked), the official routes, or leaving Facebook to the news rows' reach counts.
 - **Not collected still:** comment text on Facebook and Instagram, a Facebook page's own timeline, Instagram keyword
   search.
 

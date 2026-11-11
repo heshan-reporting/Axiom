@@ -384,6 +384,9 @@ r1, _ = nat({('facebook', 'search'): (0, 'opencli v1.8.6 - update available\n' +
 t('a banner before the JSON does not hide it', len(rs.run_native('facebook', 'search', 'q', 5, runner=r1)) == 1)
 r1, _ = nat({('facebook', 'search'): (0, json.dumps([dict(OC_FB[0], text='Police checkpoint protest: please sign in at the gate, 429 people came')]), '')})
 t('a post that says "checkpoint" or "sign in" is a post, not a refusal', len(rs.run_native('facebook', 'search', 'q', 5, runner=r1)) == 1)
+r1, _ = nat({('facebook', 'search'): (0, json.dumps([{'index': 1, 'title': 'A Group', 'text': 'x', 'url': 'https://www.facebook.com/groups/123456789012/'}, {'index': 2, 'title': 'A Page', 'text': 'y', 'url': 'https://www.facebook.com/somepage'}]), '')})
+e = raises(lambda: rs.run_native('facebook', 'search', 'fuel tax credit', 10, runner=r1), rs.ParseFailed)
+t('results that are only groups and pages (the real answer on the Mac) are a named failure, not "0 posts"', bool(e) and 'facebook_no_posts' in str(e) and '1 groups' in str(e) and 'A Group' not in str(e) and 'A Page' not in str(e), e)
 r1, _ = nat({('facebook', 'search'): (0, json.dumps([]), '')})
 t('no results is an empty answer, not a failure', rs.run_native('facebook', 'search', 'q', 5, runner=r1) == [])
 
