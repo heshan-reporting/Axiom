@@ -4626,7 +4626,6 @@ const SOURCE_SEED_EXT = [
   ['treasury_foi', 'Treasury FOI disclosure log', 'official', 'au', 'ftc,gastax,econ', { b: 'https://treasury.gov.au/the-department/accountability-reporting/foi', g: 'site:treasury.gov.au foi "fuel tax credit" OR "gas"' }],
   ['hcourt', 'High Court of Australia judgments', 'official', 'au', 'mining,gov', { b: 'https://www.hcourt.gov.au/cases-and-judgments/judgments/judgments-2000-current', s: 'hcourt.gov.au' }],
   ['fedcourt', 'Federal Court of Australia judgments', 'official', 'au', 'mining,gasprojects', { b: 'https://www.fedcourt.gov.au/digital-law-library/judgments/latest', s: 'fedcourt.gov.au' }],
-  ['apo', 'APO policy documents', 'thinktank', 'au', 'gov,gas,gastax,ftc,firearms', { b: 'https://apo.org.au/', s: 'apo.org.au' }],
   ['nopsema_decisions', 'NOPSEMA decisions', 'official', 'au', 'gasprojects', { b: 'https://www.nopsema.gov.au/environmental-management/assessment-and-decisions', g: 'site:docs.nopsema.gov.au OR site:nopsema.gov.au "statement of reasons" OR "acceptance"' }],
   ['stopthebuyback', 'Stop the Buyback', 'sector', 'au', 'firearms', { b: 'https://stopthebuyback.com.au/', s: 'stopthebuyback.com.au' }],
   ['handsoffourfuel', 'Hands Off Our Fuel', 'sector', 'au', 'ftc', { b: 'https://handsoffourfuel.com.au/', s: 'handsoffourfuel.com.au' }],
