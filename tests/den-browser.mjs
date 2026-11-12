@@ -306,7 +306,7 @@ await t('the dark theme is this person\'s choice, survives a reload, and passes 
   for (const name of ['today', 'brief', 'watch', 'collection', 'options']) { await tab(p, name); (await axeBad(p)).forEach(x => bad.push(name + ': ' + x)); }
   eq(bad, []); await p.getByRole('button', { name: 'Light', exact: true }).click(); eq(await bg(), light); await p.context().close();
 });
-await t('the side menu is a tablist a keyboard can use, and Collection shows every channel at a glance', async () => {
+await t('the side menu is a tablist a keyboard can use, and Collection shows every delivering channel at a glance', async () => {
   const w8 = await world(); const p = await open(w8, 'full-key', { width: 1024, height: 768 }); await tab(p, 'collection'); await p.waitForSelector('.den-health .den-hc');
   eq(await p.locator('.den-health .den-hc').count(), await panel(p, 'Channels').locator('tr.den-row').count()); eq(await p.getByRole('button', { name: 'Collect now' }).count() > 0, true);
   eq(await p.getAttribute('.den-menu', 'aria-orientation'), 'vertical'); await p.focus('#den-tab-watch'); await p.keyboard.press('Enter'); await p.waitForSelector('#den-tab-watch[aria-selected="true"]');
@@ -327,7 +327,8 @@ await t('the desk menu works by keyboard, the console stays docked across areas,
   const w10 = await world(); await w10.F('POST', '/den/discover', { ns: 'aep' }); const p = await open(w10); await p.waitForSelector('button.den-deskcard');
   await p.focus('button.den-deskcard'); await p.keyboard.press('Enter'); await p.waitForSelector('.den-deskmenu:not([hidden])'); await p.keyboard.press('Escape'); await p.waitForSelector('.den-deskmenu', { state: 'hidden' });
   await desk(p, 'aep_vic'); await p.waitForFunction(() => /AEP Victoria/.test(document.querySelector('.den-win').textContent)); eq(await p.getAttribute('.den-deskitem[aria-checked="true"]', 'data-desk'), 'aep_vic'); await desk(p, 'aep_au'); await p.waitForFunction(() => /AEP national/.test(document.querySelector('.den-win').textContent));
-  await tab(p, 'collection'); await panel(p, 'Channels').locator('tr.den-row', { hasText: 'Bluesky' }).getByRole('button', { name: 'Collect now' }).click(); await p.waitForSelector('.den-dock .sig-con', { timeout: 15000 }); await w10.settle();
+  await tab(p, 'collection'); await p.locator('details.den-more > summary').click();   // by default (D10) a channel with no rows for this desk is inside the one disclosure
+  await p.locator('details.den-more tr.den-row', { hasText: 'Bluesky' }).getByRole('button', { name: 'Collect now' }).click(); await p.waitForSelector('.den-dock .sig-con', { timeout: 15000 }); await w10.settle();
   await tab(p, 'today'); ok(await p.$('.den-dock .sig-con'), 'the console is still there on Today'); await p.getByRole('button', { name: 'Hide the console' }).click(); eq(await p.locator('.den-dock').count(), 0);
   await p.evaluate(s => { const e = document.createElement('script'); e.textContent = s; document.head.appendChild(e); }, AXE_SRC); const bad = [];
   for (const name of ['watch', 'options', 'collection']) { await tab(p, name); (await axeBad(p)).forEach(x => bad.push(name + ': ' + x)); } eq(bad, []);

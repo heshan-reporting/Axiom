@@ -425,3 +425,23 @@ button.den-deskcard:focus-visible,.den-deskitem:focus-visible{outline:2px solid 
 #den-tray-signals .d{font-size:12.5px;color:var(--den-ink2)}
 #den-tray-signals .a{display:flex;flex-wrap:wrap;gap:2px 12px;align-items:baseline;font-size:12.5px}
 @media(max-width:1100px){.den-guide{grid-template-columns:1fr}.den-rail ol{grid-template-columns:1fr}}
+
+/* ---- decision D10 on the page (DEN.md s.11): the channels in this window, Collection's one disclosure, the switch in
+   Options, and the Write and File marks of the brief. Tokens only; nothing here moves. ---- */
+.den-cover{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:-4px 0 12px;font-size:12.5px;color:var(--den-ink2)}
+.den-more{margin:0 0 var(--den-gap)}
+.den-more>summary{width:max-content;max-width:100%;padding:4px 2px;font-size:13.5px}
+.den-more[open]{border:1px solid var(--den-line);border-radius:var(--den-r);background:var(--den-soft);padding:8px 12px 2px}
+.den-more-b{margin-top:10px}
+.den-more-b>p.den-mono{margin:0 2px 10px}
+.den-switch{display:inline-flex;align-items:center;gap:10px;margin:6px 0 2px;font-size:13.5px;color:var(--den-ink);cursor:pointer}
+.den-stephead{display:flex;align-items:center;gap:8px;padding:12px 14px 0;border-top:1px solid var(--den-line);font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--den-ink2)}
+.den-stephead .n{width:20px;height:20px;border-radius:var(--den-r-pill);display:grid;place-items:center;font-family:var(--den-num);font-size:11.5px;font-weight:700;letter-spacing:0;background:var(--den-soft);border:1px solid var(--den-line2);color:var(--den-ink)}
+.den-body>.den-stephead:first-child,.den-bar+.den-stephead{border-top:0}
+.den-stephead+.den-sec{border-top:0;padding-top:10px}
+.den-sec+.den-file{border-top:1px solid var(--den-line)}
+.den-file>p.den-mono{margin:0;padding:8px 14px 10px}
+.den-sec+.den-file>p.den-mono{padding-top:12px}
+.den-file:focus{outline:0}
+.den-file:focus-visible,#den-older:focus-visible{outline:2px solid var(--den-ac);outline-offset:-2px}
+
