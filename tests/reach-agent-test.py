@@ -14,6 +14,9 @@ def load(name, fn):
     spec = importlib.util.spec_from_file_location(name, os.path.join(TOOLS, fn)); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 agent = load('reach_agent', 'reach-agent.py')
 rx = agent.rx
+# the remedy depends on which twitter-cli is installed. These cases are about a machine whose versions cannot be read (the
+# general advice); without this they read the real install where the test runs and failed on the owner's Mac, which has the newest
+real_x_versions = rx.x_versions; rx.x_versions = lambda: {}
 
 passed = failed = 0
 def t(name, cond, detail=''):
@@ -144,7 +147,7 @@ t('behind the newest, installed with uv: the uv command', '`uv tool upgrade twit
 t('when the versions cannot be read it falls back to the general advice', rx.x_remedy({}) == rx.X_REMEDY)
 full = rx.x_unavailable({'twitter-cli': '0.8.5', 'xclienttransaction': '1.0.3', 'via': 'pipx'})
 t('the whole message still fits a console line and keeps the cause', len(full) <= 1200 and 'x-client-transaction-id' in full and full.index('Nothing to do') < full.index('x-client-transaction-id'), len(full))
-t('reading the versions never raises when twitter-cli is absent', rx.x_versions() == {} or isinstance(rx.x_versions(), dict))
+t('reading the versions never raises when twitter-cli is absent', real_x_versions() == {} or isinstance(real_x_versions(), dict))
 
 # ---- the worker refuses a poll: the agent says why, not only the number ----------------------------------------------
 # (12 November 2026: the owner's agent printed "worker said HTTP 500; retrying in 15s" and nothing else)

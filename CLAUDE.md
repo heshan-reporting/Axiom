@@ -918,8 +918,21 @@ the documented shape; the two official datasets answered from the build machine,
   (429, 503), since a write whose answer was lost may have landed; `Retry-After` is waited, thirty seconds at most; the
   job claim (`/bridge/next`) is never asked twice. The signed-in channels' own rules are unchanged: a verification
   still stops the sweep and pauses the platform a day, and nothing retries past a refusal.
-- Harnesses: `tests/collect-hardening-worker.mjs` (17), `tests/reach-http-test.py` (24). `tests/worker-env.mjs` passes
-  the backoff at once (`__collectSleep`).
+- **A hold is not a failure, and is bounded.** A host with no shared record (every host but Meta, LinkedIn and Reddit
+  OAuth) is held `CF_LIMIT_PUBLIC_MAX_S` = fifteen minutes at most whatever its `Retry-After` says, so one answer from
+  a busy news index cannot silence every reader of that host for a day. A registry source whose request was held
+  (`srcFetch` answers `held`, the run is `held`) is **not counted toward dead**: `fails` is left alone, `last_error`
+  starts `held:`, and it is due again when the hold has passed; `sourceSweep` answers `held` beside `failed`.
+  `GET /social/limits` carries `counts` (`hits`: limits recorded, `held`: requests not sent, per isolate) and each
+  recorded limit is a `collector limit:` log line, which is how often it bites is seen live.
+- **The registry's retries are budgeted.** `SOURCE_RETRY_BUDGET` = 12 second asks a sweep (`SRC_RETRY_LEFT`, set by
+  `sourceSweep` for its run); past it a failing request is not asked again that sweep. The sweep's answer, its log
+  line and `lastSweep` on `GET /sources` carry `retries`, beside `ms`. The bound is reasoned (twelve short requests
+  across four lanes), **not timed on the live worker**: read `lastSweep.ms` after the first ticks.
+- Harnesses: `tests/collect-hardening-worker.mjs` (19), `tests/reach-http-test.py` (24). `tests/worker-env.mjs` passes
+  the backoff at once (`__collectSleep`). `tests/reach-agent-test.py` and `tests/reach-channels-test.py` no longer read
+  what is installed where they run (the real twitter-cli versions; the real agent-reach, whose `doctor` goes out to the
+  network): they failed on the owner's Mac for that reason alone.
 - **To switch on after a deploy** (none of it runs without these): `META_PAGES` with the Pages assigned to the token;
   instagram_basic on that token for the Instagram half; rw_organization_admin on the LinkedIn token for counts; and
   read `GET /social/limits` and each sweep's `capped` after the first run.

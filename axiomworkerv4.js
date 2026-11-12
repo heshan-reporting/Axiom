@@ -1622,6 +1622,10 @@ const CF_BACKOFF_MS = 500;          // first backoff; doubled a try, plus up to 
 const CF_WAIT_INLINE_MS = 3000;     // a Retry-After this short is waited inside the request, once
 const CF_LIMIT_DEFAULT_S = 300;     // a 429 that names no wait
 const CF_LIMIT_MAX_S = 86400;
+const CF_LIMIT_PUBLIC_MAX_S = 900;   // a site with no shared record (every host but Meta, LinkedIn, Reddit OAuth) is held fifteen minutes at most:
+                                    // one answer from a busy news index must not silence every reader of that host for a day
+const CF_COUNT = new Map();         // key -> { hits (limits recorded), held (requests not sent), last } since this isolate started
+function cfCount(key, what) { const c = CF_COUNT.get(key) || { hits: 0, held: 0, last: 0 }; c[what]++; c.last = Date.now(); CF_COUNT.set(key, c); }
 const CF_META_PAUSE_PCT = 95;       // Meta usage at which we stop asking before Meta stops answering
 const CF_LIMIT_429 = { 'api.linkedin.com': 3600 };   // LinkedIn sends no header; its limits are daily (midnight UTC)
 const CF_RATE = new Map();          // key (host, or host#object) -> { until, why, at }
@@ -1678,7 +1682,8 @@ function cfRead(host, url, r, now) {
 }
 /** Record that a service is not to be asked until a time. Shared across isolates (KV `rl_<host>`) when asked. */
 async function cfLimit(key, secs, why, shared) {
-  const s = Math.min(Math.max(Math.ceil(Number(secs) || CF_LIMIT_DEFAULT_S), 1), CF_LIMIT_MAX_S); const now = Date.now();
+  const s = Math.min(Math.max(Math.ceil(Number(secs) || CF_LIMIT_DEFAULT_S), 1), shared ? CF_LIMIT_MAX_S : CF_LIMIT_PUBLIC_MAX_S); const now = Date.now();
+  cfCount(key, 'hits'); try { console.log('collector limit: ' + key + ' held ' + s + 's - ' + String(why || '').slice(0, 120)); } catch (e) {}
   const cur = CF_RATE.get(key); const until = now + s * 1000;
   if (!cur || cur.until < until) CF_RATE.set(key, { until, why: String(why || '').slice(0, 200), at: now });
   if (shared && CF_ENV && CF_ENV.AXIOM_KV && s >= 30) {
@@ -1708,7 +1713,8 @@ function cfLimits() {
   const now = Date.now(); const limits = [];
   CF_RATE.forEach((v, k) => { if (v.until > now) limits.push({ key: k, until: v.until, untilText: cfClock(v.until), secondsLeft: Math.ceil((v.until - now) / 1000), why: v.why }); });
   const seen = []; CF_SEEN.forEach((v, k) => seen.push(Object.assign({ host: k }, v)));
-  return { limits, seen };
+  const counts = []; CF_COUNT.forEach((v, k) => counts.push(Object.assign({ key: k }, v)));
+  return { limits, seen, counts };
 }
 /** fetch() for collectors. o: { ms, retry (0|1), retryTimeout (false: a timeout is not retried), shared, noLimit, beforeRetry }. */
 async function cfetch(url, init, o) {
@@ -1717,7 +1723,7 @@ async function cfetch(url, init, o) {
   let left = o.retry != null ? Math.max(0, Math.min(1, Number(o.retry) || 0)) : (method === 'GET' || method === 'HEAD' ? 1 : 0);
   if (!o.noLimit) {
     const lim = await cfLimited(host, url, !!o.shared);
-    if (lim) { const e = new Error('rate_limited: ' + host + ' is not asked again until ' + cfClock(lim.until) + ' (' + lim.why + ')'); e.code = 'rate_limited'; e.until = lim.until; e.tries = 0; throw e; }
+    if (lim) { cfCount(host, 'held'); const e = new Error('rate_limited: ' + host + ' is not asked again until ' + cfClock(lim.until) + ' (' + lim.why + ')'); e.code = 'rate_limited'; e.until = lim.until; e.tries = 0; throw e; }
   }
   for (let n = 0; ; n++) {
     const opts = Object.assign({}, init);
@@ -5617,15 +5623,22 @@ async function sourcesCoreOffRefresh(env) {
 }
 
 // -- one fetch, never throws --------------------------------------------------
+const SOURCE_RETRY_BUDGET = 12;     // second asks a registry sweep may spend; past it a failing request is not asked again this sweep
+let SRC_RETRY_LEFT = Infinity;      // set by sourceSweep for its run; anything else that reads through srcFetch is not budgeted
+let SRC_RETRY_USED = 0;
 async function srcFetch(url, accept, ms) {
   const t0 = Date.now();
   try {
     // one more ask after a 5xx or a dropped connection; a timeout already spent its seven seconds and is not asked again
     const r = await cfetch(url, { headers: { 'User-Agent': BROWSER_UA, 'Accept': accept || '*/*', 'Accept-Language': 'en-AU,en;q=0.8' },
-      cf: { cacheTtl: 300, cacheEverything: true }, redirect: 'follow' }, { ms: ms || SOURCE_FETCH_MS, retryTimeout: false });
+      cf: { cacheTtl: 300, cacheEverything: true }, redirect: 'follow' }, { ms: ms || SOURCE_FETCH_MS, retryTimeout: false, retry: SRC_RETRY_LEFT > 0 ? 1 : 0 });
+    if (r.cfTries > 1) { SRC_RETRY_LEFT--; SRC_RETRY_USED++; }
     const text = r.ok ? (await r.text()).slice(0, 1500000) : '';
     return { ok: r.ok, status: r.status, text, ms: Date.now() - t0, ctype: (r.headers.get('content-type') || '').toLowerCase(), url: r.url || url };
   } catch (e) {
+    if (e && e.tries > 1) { SRC_RETRY_LEFT--; SRC_RETRY_USED++; }
+    // held by the limiter: nothing was sent. The reason is kept whole so the sweep can tell a hold from a failure
+    if (e && e.code === 'rate_limited') return { ok: false, status: 0, text: '', ms: Date.now() - t0, held: true, error: String(e.message).slice(0, 150) };
     const s = String((e && e.name) || '') + ' ' + String((e && e.message) || e);
     return { ok: false, status: 0, text: '', ms: Date.now() - t0, error: /timeout|abort/i.test(s) ? 'timed out after ' + Math.round((ms || SOURCE_FETCH_MS) / 1000) + 's' : s.trim().slice(0, 90) };
   }
@@ -6116,12 +6129,14 @@ async function sourceRun(env, src, opts) {
     const t = { method: m, ok, n, ms, status: r.status || 0, skipped: !!r.skipped, detail: ok ? '' : String(r.detail || 'failed').slice(0, 160) };
     if (ok && r.full) t.full = true;
     if (r.refused) t.refused = true;
+    if (!ok && /rate_limited: /.test(String(r.detail || ''))) t.held = true;   // the limiter held the request: the source was not asked
     if (opts.all) t.sample = (r.items || []).slice(0, 3).map(i => ({ title: String(i.title || '').slice(0, 140), link: String(i.link || '').slice(0, 200), date: i.date || '' }));
     tried.push(t);
     if (ok) { await log('out', src.id + ': ' + n + ' items via ' + m + ' (' + ms + 'ms)'); if (!hit) { hit = r; hit.method = m; } if (!opts.all) break; }
     else if (!r.skipped) await log('err', src.id + ': ' + m + ' - ' + t.detail);
   }
-  return { src, hit, tried, ok: !!hit, method: hit ? hit.method : '', items: hit ? hit.items : [] };
+  // a run that delivered nothing because a route was held is not a failure of the source: its chain was never finished
+  return { src, hit, tried, ok: !!hit, held: !hit && tried.some(t => t.held), method: hit ? hit.method : '', items: hit ? hit.items : [] };
 }
 /** Items -> archive rows of kind news. Every row carries the source, its tier
  *  and jurisdiction, the method that found it, the client issues it speaks to
@@ -6165,12 +6180,16 @@ function sourcesPerTick(env) { const n = parseInt(String((env && env.SOURCES_PER
 function sourceStmts(env, run, added, now) {
   const s = run.src; const stmts = [];
   // a host that refused the public reader is not due again for a day: the refusal is its health, and it backs off
-  const next = now + (run.tried.some(t => t.refused) ? PUB_BACKOFF_S * 1000 : sourceWaitMs(s, run.ok));
+  // a held source comes round again when the hold has passed (fifteen minutes at most), on its schedule if that is sooner
+  const next = now + (run.tried.some(t => t.refused) ? PUB_BACKOFF_S * 1000 : run.held ? Math.min(sourceWaitMs(s, true), CF_LIMIT_PUBLIC_MAX_S * 1000) : sourceWaitMs(s, run.ok));
   const short = run.tried.map(t => t.method + ':' + (t.ok ? t.n : (t.skipped ? 'skip' : 'x' + (t.status || '')))).join(' ');
   const detail = run.ok ? short : (short + ' | ' + run.tried.filter(t => !t.skipped).map(t => t.method + ' ' + t.detail).join('; ')).slice(0, 400);
   if (run.ok) {
     const latest = (run.items || []).reduce((a, i) => Math.max(a, Date.parse(i.date || '') || 0), 0);
     stmts.push(env.MIND_DB.prepare("UPDATE sources SET last_try=?, last_ok=?, next_due=?, fails=0, method_ok=?, last_error='', latest_ts=MAX(COALESCE(latest_ts,0),?), alerted=0, updated=? WHERE id=?").bind(now, now, next, run.method, latest, now, s.id));
+  } else if (run.held) {
+    // not counted toward dead: the source did not fail, the host asked every reader to wait
+    stmts.push(env.MIND_DB.prepare('UPDATE sources SET last_try=?, next_due=?, last_error=?, updated=? WHERE id=?').bind(now, next, ('held: ' + detail).slice(0, 300), now, s.id));
   } else {
     stmts.push(env.MIND_DB.prepare('UPDATE sources SET last_try=?, next_due=?, fails=COALESCE(fails,0)+1, last_error=?, updated=? WHERE id=?').bind(now, next, detail.slice(0, 300), now, s.id));
   }
@@ -6215,8 +6234,9 @@ async function sourceSweep(env, opts) {
   else rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE enabled=1 AND core=0 AND COALESCE(next_due,0)<=? ORDER BY COALESCE(next_due,0) LIMIT ?').bind(now, limit).all()).results || [];
   const srcs = rows.map(sourceRow).filter(s => s.methods.length);
   await log('info', 'sweeping ' + srcs.length + ' source' + (srcs.length === 1 ? '' : 's') + (ids.length ? '' : opts.all ? ' (every enabled registry source)' : ' (due now)'));
-  const out = { ok: true, ran: srcs.length, succeeded: 0, failed: 0, items: 0, added: 0, dead: [], results: [] };
-  const runs = await mapPool(srcs, 4, async (s) => {
+  const out = { ok: true, ran: srcs.length, succeeded: 0, failed: 0, held: 0, retries: 0, items: 0, added: 0, dead: [], results: [] };
+  SRC_RETRY_LEFT = SOURCE_RETRY_BUDGET; SRC_RETRY_USED = 0;
+  let runs; try { runs = await mapPool(srcs, 4, async (s) => {
     const run = await sourceRun(env, s, { log, all: !!opts.probe });
     let added = 0; run.rows = 0;
     if (run.ok) {
@@ -6231,12 +6251,12 @@ async function sourceSweep(env, opts) {
     }
     run.added = added;
     return run;
-  });
+  }); } finally { out.retries = SRC_RETRY_USED; SRC_RETRY_LEFT = Infinity; }
   const stmts = [];
   runs.forEach(run => {
     stmts.push(...sourceStmts(env, run, run.added, now));
-    if (run.ok) { out.succeeded++; out.items += run.rows; out.added += run.added; } else out.failed++;
-    const r = { id: run.src.id, name: run.src.name, ok: run.ok, method: run.method, items: run.rows, added: run.added };
+    if (run.ok) { out.succeeded++; out.items += run.rows; out.added += run.added; } else if (run.held) out.held++; else out.failed++;
+    const r = { id: run.src.id, name: run.src.name, ok: run.ok, method: run.method, items: run.rows, added: run.added }; if (run.held) r.held = true;
     if (opts.detail) r.tried = run.tried; else if (!run.ok) r.error = (run.tried.filter(t => !t.skipped).map(t => t.method + ': ' + t.detail).join('; ')).slice(0, 200);
     out.results.push(r);
   });
@@ -6244,8 +6264,8 @@ async function sourceSweep(env, opts) {
   try { out.dead = await sourcesAlertDead(env); } catch (e) {}
   try { await env.MIND_DB.prepare('DELETE FROM source_health WHERE id NOT IN (SELECT id FROM source_health ORDER BY id DESC LIMIT ?)').bind(SOURCE_HEALTH_KEEP).run(); } catch (e) {}
   out.ms = Date.now() - now;
-  await log('info', out.succeeded + ' of ' + out.ran + ' delivered, ' + out.items + ' items seen, ' + out.added + ' new in the archive' + (out.dead.length ? ', ' + out.dead.length + ' reported dead' : '') + ' (' + out.ms + 'ms)');
-  if (!ids.length) await kvPut(env.AXIOM_KV, 'sources_last_sweep', JSON.stringify({ at: now, ran: out.ran, succeeded: out.succeeded, failed: out.failed, items: out.items, added: out.added, ms: out.ms, all: !!opts.all }), 7 * 86400);
+  await log('info', out.succeeded + ' of ' + out.ran + ' delivered, ' + out.items + ' items seen, ' + out.added + ' new in the archive' + (out.dead.length ? ', ' + out.dead.length + ' reported dead' : '') + (out.held ? ', ' + out.held + ' held by a rate limit (not counted as failures)' : '') + (out.retries ? ', ' + out.retries + ' of ' + SOURCE_RETRY_BUDGET + ' second asks used' : '') + ' (' + out.ms + 'ms)');
+  if (!ids.length) await kvPut(env.AXIOM_KV, 'sources_last_sweep', JSON.stringify({ at: now, ran: out.ran, succeeded: out.succeeded, failed: out.failed, held: out.held, retries: out.retries, items: out.items, added: out.added, ms: out.ms, all: !!opts.all }), 7 * 86400);
   return out;
 }
 /** buildAllNews reports how each core feed fared; mirror that into the
@@ -18438,7 +18458,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 

@@ -18,6 +18,8 @@
  *   CH14 the Source Registry: a source that answers 500 then 200 delivers
  *   CH15 no collector calls fetch() directly
  *   CH16 the Federal Register of Legislation through its API: titles on a client issue, the cap said
+ *   CH18 a source held by a rate limit is not a failed source; a public site is held fifteen minutes at most; holds are counted
+ *   CH19 a registry sweep spends a fixed number of second asks and says how many
  *   CH17 AusTender's contract notices: on a client issue, nobody named, the next page followed, the cap said
  * Run: node --experimental-sqlite tests/collect-hardening-worker.mjs */
 import fs from 'node:fs';
@@ -265,6 +267,33 @@ await S.t('CH17 AusTender: contract notices on a client issue, nobody named, the
   const it = r.items[0]; ok(/community pharmacy/.test(it.title) && / - Department of Example$/.test(it.title) && /CN9000001/.test(it.link) && /supplier ACME CONSULTING/.test(it.desc) && /AUD 120,000/.test(it.desc), JSON.stringify(it));
   ok(!/Jo Citizen|Sam Officer|agency\.example/.test(JSON.stringify(r)), 'a contact person is never read');
   ok(w.sleeps.some(x => /^pace:/.test(String(x))), 'the second page waited the host\'s pace');
+  w.restore();
+});
+
+await S.t('CH18 a source held by a rate limit is not a failed source, and a public site is held fifteen minutes at most', async () => {
+  const w = await mk(); const src = id => w.env.MIND_DB.db.prepare('SELECT * FROM sources WHERE id=?').get(id);
+  w.answer(/busy\.example/, () => T('slow down', 429, { 'Retry-After': '86400' }));
+  for (const id of ['ch_h1', 'ch_h2', 'ch_h3']) eq((await w.call('POST', '/sources/add', { id, name: id, tier: 'sector', urls: { rss: 'https://busy.example/' + id + '.xml' } }, 'full-key')).status, 200);
+  const a = await w.t.sourceSweep(w.env, { ids: ['ch_h1'] }); eq([a.failed, a.held], [1, 0], 'the one that met the 429 failed: ' + JSON.stringify(a.results));
+  const lim = w.t.cfLimits().limits.find(l => l.key === 'busy.example'); ok(lim && lim.secondsLeft <= w.t.CF_LIMIT_PUBLIC_MAX_S && lim.secondsLeft > 800, 'a day asked for, fifteen minutes held: ' + JSON.stringify(lim));
+  const before = w.outbound.length; const b = await w.t.sourceSweep(w.env, { ids: ['ch_h2', 'ch_h3'] });
+  eq([b.failed, b.held, b.succeeded], [0, 2, 0], JSON.stringify(b.results)); eq(w.outbound.length, before, 'nothing was sent to the host while it is held');
+  const h2 = src('ch_h2'); eq(h2.fails || 0, 0, 'no failure is counted, so a held source never walks toward dead'); ok(/^held: /.test(h2.last_error) && /rate_limited/.test(h2.last_error), h2.last_error);
+  ok(h2.next_due - Date.now() <= w.t.CF_LIMIT_PUBLIC_MAX_S * 1000 + 1000 && h2.next_due > Date.now(), 'and it comes round again when the hold has passed');
+  eq(src('ch_h1').fails, 1, 'the source that was really refused does count');
+  const c = (await w.call('GET', '/social/limits', null, 'read-key')).body.counts.find(x => x.key === 'busy.example'); eq([c.hits, c.held], [1, 2], 'how often a limit bites is counted: ' + JSON.stringify(c));
+  w.restore();
+});
+
+await S.t('CH19 a registry sweep spends a fixed number of second asks, and says how many', async () => {
+  const w = await mk(); const n = w.t.SOURCE_RETRY_BUDGET + 6; const ids = [];
+  w.answer(/down\d+\.example/, () => T('err', 500));
+  for (let i = 0; i < n; i++) { ids.push('ch_d' + i); eq((await w.call('POST', '/sources/add', { id: 'ch_d' + i, name: 'd' + i, tier: 'sector', urls: { rss: 'https://down' + i + '.example/feed.xml' } }, 'full-key')).status, 200); }
+  w.outbound.length = 0; const r = await w.t.sourceSweep(w.env, { ids });
+  eq([r.ran, r.failed, r.retries], [n, n, w.t.SOURCE_RETRY_BUDGET], 'every source failed; the budget was spent and no more');
+  eq(hits(w, /down\d+\.example\/feed/).length, n + w.t.SOURCE_RETRY_BUDGET, 'one ask a source, plus the budget of second asks');
+  w.answer(/later\.example/, (() => { let i = 0; return () => (i++ ? T('<?xml version="1.0"?><rss><channel><title>f</title></channel></rss>', 200, { 'Content-Type': 'application/rss+xml' }) : T('err', 502)); })());
+  const f = await w.t.srcFetch('https://later.example/feed.xml'); eq([f.ok, hits(w, /later\.example/).length], [true, 2], 'outside a sweep the one retry is back');
   w.restore();
 });
 
