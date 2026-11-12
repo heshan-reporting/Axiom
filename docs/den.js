@@ -97,12 +97,13 @@
     if (!m.data && !m.err) return html`<section class="den-strip" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3></header><${Loading} what="the checks" /></section>`;
     if (m.err && !m.data) return html`<section class="den-strip" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3></header><${Failed} what="The checks" err=${m.err} onRetry=${m.reload} /></section>`;
     const s = m.data.signals || [];
+    const five = m.data.checks === 5;   // decision D10: the sixth check, collection gaps, runs only when the desk's showGaps is on; a worker that does not say ran all six
     return html`<section class="den-strip" aria-label="Nothing critical missed">
-      <header><h3>Nothing critical missed</h3><span class="den-mono">${s.length ? s.length + ' to read' : 'six checks, nothing found'}</span>${!open && s.some(x => x.sig === 'gap') ? html`<span class="den-chip warn">${s.filter(x => x.sig === 'gap').length} not collected</span>` : null}<span class="den-spacer"></span><span class="den-mono" title="Computed from the archive. No model is asked.">computed, no model</span>
+      <header><h3>Nothing critical missed</h3><span class="den-mono">${s.length ? s.length + ' to read' : five ? 'five checks, nothing found' : 'six checks, nothing found'}</span>${!open && s.some(x => x.sig === 'gap') ? html`<span class="den-chip warn">${s.filter(x => x.sig === 'gap').length} not collected</span>` : null}<span class="den-spacer"></span><span class="den-mono" title="Computed from the archive. No model is asked.">computed, no model</span>
         <button class="den-mini" aria-expanded=${open ? 'true' : 'false'} aria-controls="den-strip-list" onClick=${fold}>${open ? 'Fold' : 'Show'}</button></header>
       ${!open ? null : s.length ? html`<ul id="den-strip-list">${s.map(x => html`<li key=${x.key}><span><span class=${'den-chip ' + (SIG[x.sig] || ['', ''])[1]}>${(SIG[x.sig] || [x.sig])[0]}</span></span><span><span class="den-t">${x.title}</span><span class="d">${x.detail}</span></span>
         <span>${x.open && (x.open.tab || x.open.view || x.open.url) ? html`<button class="den-link" onClick=${() => openEvidence(x.open, setTab)} aria-label=${'Open the evidence for: ' + x.title}>${x.open.tab ? 'Open Collection' : x.open.view ? 'Open in ' + x.open.view.charAt(0).toUpperCase() + x.open.view.slice(1) : 'Open the post'}</button>` : null}</span></li>`)}</ul>`
-        : html`<${Empty}>None of the six checks found anything in this window: no spike, no emerging narrative, no first-seen actor, no issue above its baseline, no post far above its account's usual, and every channel this desk relies on delivered.<//>`}
+        : html`<${Empty}>${five ? "None of the five checks found anything in this window: no spike, no emerging narrative, no first-seen actor, no issue above its baseline, and no post far above its account's usual." : "None of the six checks found anything in this window: no spike, no emerging narrative, no first-seen actor, no issue above its baseline, no post far above its account's usual, and every channel this desk relies on delivered."}<//>`}
     </section>`;
   }
 

@@ -6,7 +6,8 @@
  *   DK3 region and window: a state desk, a Sydney midnight, a month's end and the daylight saving change
  *   DK4 upcoming: a date written beside an action, not yet passed; never a guess
  *   DK5 pins, set-asides with a reason, the mute offered after three and confirmed by a person; marks are one desk's
- *   DK6 nothing critical missed: the six signals, each with where its evidence opens
+ *   DK6 nothing critical missed: five checks by default and the sixth (collection gaps) when the desk's showGaps is on,
+ *       each signal with where its evidence opens
  *   DK7 the checks on a draft: an invented id, a figure the evidence does not carry, a long subscriber quotation, a rating
  *       outside the desk's words, and the Source List built from what is cited
  *   DK8 a draft: one call, written from evidence with ids and no author, stored, read back, and exported
@@ -22,6 +23,10 @@
  *   DK18 a busy database is said in words, with a status a page can retry on (found live, 11 November 2026)
  *   DK19 the strip's slow figures are read once in fifteen minutes, not on every open; what is urgent stays live
  *   DK20 the board asks the database only for this desk's rows, and the strip can be handed the board it needs
+ *   DK21 showGaps, the desk's option (decision D10): off by default, stored only as true, kept by a mute, a full key's to set
+ *   DK22 what follows the option: the prompt, the evidence, the nothing-to-draft words and the filing check, off and on
+ *   DK23 the day's run on the strip: progress over the board and where today's brief stands; never for a past window
+ *   DK24 a folded story is one decision: copies on /den/aside and /den/pin, one request, one count toward the mute offer
  * Run: node --experimental-sqlite tests/den-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 
@@ -36,6 +41,10 @@ const news = (o) => Object.assign({ src: 'pointpost', title: 'Crossbench renews 
 const post = (o) => Object.assign({ src: 'x', title: 'x post', body: 'The windfall tax on gas is overdue, sign the petition.', url: 'https://x.com/i/web/status/19' + String(++seq).padStart(12, '0'), ts: NOW - 3 * H, author: 'Jo Citizen', meta: { platform: 'x', issues: ['gastax'], id: 'p' + seq, eng: { likes: 40, replies: 6, reposts: 9 }, eng_at: NOW - H, score: 49, comments: 6, layers: [2] } }, o);
 const itemBy = (w, url) => w.env.MIND_DB.db.prepare('SELECT id FROM arc_items WHERE url=?').get(url).id;
 const board = async (w, desk, q) => (await F(w, 'GET', '/den/board?desk=' + desk + (q || ''))).body;
+// decision D10: a desk is told about collection gaps only when its showGaps is on. No revision is sent, so the worker uses the current one
+const gapsOn = async (w, id, on) => { const r = await F(w, 'POST', '/den/desk/update', { id, patch: { options: { showGaps: on !== false } } }); if (r.status !== 200) throw new Error('showGaps was not saved: ' + r.text.slice(0, 200)); return r.body.desk; };
+// a thread from before the window, on no client issue: all it does is make Reddit a channel that delivered in the week before
+const oldThread = () => ({ src: 'reddit', title: 'Weekend sport thread', body: 'Who is watching the game on Saturday?', url: 'https://www.reddit.com/r/australia/comments/old' + (++seq) + '/weekend_sport/', ts: NOW - 4 * D, meta: { sub: 'australia', id: 't3old' + seq, score: 4, comments: 1 } });
 // the stub model: writes a brief that cites what it was given
 const model = (w, make) => { const calls = []; w.answer(/api\.anthropic\.com/, (u, init) => { const b = JSON.parse(init.body); calls.push(b); const ev = b.messages[0].content; const ids = k => (ev.match(new RegExp('\\[' + k + ':[A-Za-z0-9_.-]+\\]', 'g')) || []).map(x => x.slice(1, -1));
   const j = make ? make(ev, ids, b) : { sections: { summary: 'Coverage of the gas taxation debate continued [' + (ids('M')[0] || 'M:0') + ']. A post on X drew attention [' + (ids('S')[0] || 'S:0') + '].', bottom: 'Activity is steady [' + (ids('M')[0] || 'M:0') + '].', posture: 'The client should continue monitoring.' }, ratings: { momentum: { level: 'moderate', trend: 'Stable' } } };
@@ -125,7 +134,9 @@ await S.t('DK5 pins, set-asides and mutes', async () => {
 
 await S.t('DK6 nothing critical missed', async () => {
   const w = await mk(); await seedDay(w); await F(w, 'GET', '/sentinel/alerts'); await F(w, 'GET', '/narratives/status'); await F(w, 'GET', '/sentiment/status'); const db = w.env.MIND_DB.db;
-  const quiet = (await F(w, 'GET', '/den/missed?desk=mca_vic', null, 'read-key')).body; eq(quiet.signals.map(s => s.key), ['G:news'], 'a desk with nothing collected is told so, not shown a clear strip'); ok(/before reading it as a quiet day/.test(quiet.signals[0].detail) && /in this region/.test(quiet.signals[0].detail));
+  const calm = (await F(w, 'GET', '/den/missed?desk=mca_vic', null, 'read-key')).body; eq([calm.signals, calm.clear, 'gap' in calm.counts, calm.checks], [[], true, false, 5], 'by default (D10) five checks run and a gap is not one of them');
+  await gapsOn(w, 'mca_vic');   // this case asserts gaps (D10)
+  const quiet = (await F(w, 'GET', '/den/missed?desk=mca_vic', null, 'read-key')).body; eq(quiet.signals.map(s => s.key), ['G:news'], 'a desk with nothing collected is told so, not shown a clear strip'); ok(/before reading it as a quiet day/.test(quiet.signals[0].detail) && /in this region/.test(quiet.signals[0].detail)); eq([quiet.checks, quiet.clear], [6, false]);
   db.prepare("INSERT INTO arc_alerts(ns,client,issue,label,severity,hot,baseline,ratio,srcs,detected_ts) VALUES('aep','AEP','gastax','Gas taxation','high',9,2.9,3.1,5,?)").run(NOW - 2 * H);
   db.prepare("INSERT INTO arc_alerts(ns,client,issue,label,severity,hot,baseline,ratio,srcs,detected_ts) VALUES('mca','MCA','ftc','Fuel tax credits','high',9,2,4,5,?)").run(NOW - 2 * H);
   db.prepare("INSERT INTO narratives(id,label,issues,n,n24,first_ts,last_ts,status,muted,side,spread) VALUES('n1','Gas giants dodge the levy',?,8,7,?,?,'emerging',0,'hostile','[]')").run(JSON.stringify(['gastax']), NOW - 20 * H, NOW - H);
@@ -139,7 +150,12 @@ await S.t('DK6 nothing critical missed', async () => {
   const it = itemBy(w, 'https://pointpost.example.com.au/a');
   db.prepare("INSERT INTO sent_items(item,kind,platform,src,ts,tone,issues) VALUES(?,?,?,?,?,?,?)").run(it, 'news', 'news', 'pointpost', NOW - 2 * H, -1, JSON.stringify(['gastax']));
   db.prepare("INSERT INTO sent_entities(item,entity,stance,intensity,ts,platform,kind) VALUES(?,?,?,?,?,?,?)").run(it, 'rewiring', -1, 2, NOW - 2 * H, 'news', 'org');
+  await push(w, 'reddit_thread', [oldThread()]);   // Reddit delivered three days before the window: a channel relied on only through the cached count
+  const m0 = (await F(w, 'GET', '/den/missed?desk=aep_au')).body; ok(!m0.signals.some(s => s.sig === 'gap') && !('gap' in m0.counts) && m0.checks === 5 && m0.signals.length >= 5 && m0.slow.cached === false, 'the default: every other signal and no gap: ' + JSON.stringify(m0.counts));
+  await gapsOn(w, 'aep_au');   // no fresh=1: what the desk relied on was counted and cached while the option was off
   const m = (await F(w, 'GET', '/den/missed?desk=aep_au')).body; const by = k => m.signals.find(s => s.key.indexOf(k) === 0); const sigs = m.signals.map(s => s.sig);
+  ok(m.slow.cached === true && m.checks === 6 && by('G:facebook') && by('G:reddit') && /Reddit delivered nothing/.test(by('G:reddit').title), 'switched on, the gaps are there at once, the one known only from the cached count too: ' + JSON.stringify(m.signals.filter(s => s.sig === 'gap').map(s => s.key)));
+  eq(m.signals.filter(s => s.sig !== 'gap').map(s => s.key), m0.signals.map(s => s.key), 'and nothing else moved');
   ok(by('A:') && /Sentinel spike: Gas taxation/.test(by('A:').title) && /3\.1 times/.test(by('A:').detail) && by('A:').open.view === 'sentinel', 'a spike on this desk\'s issue'); eq(m.signals.filter(s => s.sig === 'spike').length, 1, 'another client\'s spike is not here');
   ok(by('N:n1') && /Emerging narrative: Gas giants dodge the levy/.test(by('N:n1').title) && by('N:n1').open.params.id === 'n1', 'an emerging narrative');
   const fs = m.signals.filter(s => s.sig === 'first_seen'); ok(fs.some(s => s.key === 'W:' + priv.id && /^A registered X account posted/.test(s.title) && /in the window on X\./.test(s.detail)), 'a first-seen registered account, unnamed unless it is a public actor: ' + JSON.stringify(fs.map(s => s.title)));
@@ -231,11 +247,16 @@ await S.t('DK11 saving', async () => {
 
 await S.t('DK12 filing', async () => {
   const w = await mk({ ANTHROPIC_API_KEY: 'test-anthropic' }); await seedDay(w); await F(w, 'GET', '/sentinel/alerts');
+  await F(w, 'POST', '/den/watch/add', { ns: 'aep', kind: 'account', platform: 'facebook', value: 'harbourwatchpage', name: 'Harbour Watch' });   // a channel the desk relies on that delivered nothing
   w.env.MIND_DB.db.prepare("INSERT INTO arc_alerts(ns,client,issue,label,severity,hot,baseline,ratio,srcs,detected_ts) VALUES('aep','AEP','gastax','Gas taxation','high',9,2.9,3.1,5,?)").run(NOW - 2 * H);
   model(w, (ev, ids) => ({ sections: { summary: 'Coverage of the gas taxation debate continued through the window, led by regional outlets and carried by others [' + ids('M')[0] + ']. Producers answered the push in a subscriber outlet, and the conversation on X stayed small [' + ids('S')[0] + '].', bottom: 'Activity is steady and the client is not directly targeted [' + ids('M')[0] + '].' }, ratings: { momentum: { level: 'Moderate', trend: 'Stable' } } }));
   const br = (await F(w, 'POST', '/den/brief', { desk: 'aep_au' })).body.brief; ok(br.missed.some(s => s.key.indexOf('A:') === 0), 'what the strip held when it was drafted is kept with it');
   eq((await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 99 })).status, 409);
   const ask = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 1 }); eq([ask.status, ask.body.error], [409, 'uncited_signals']); ok(ask.body.signals.some(s => /Sentinel spike/.test(s.title)) && /file anyway or go back/.test(ask.body.detail)); eq((await F(w, 'GET', '/den/brief?id=' + br.id)).body.brief.status, 'draft');
+  ok(!ask.body.signals.some(s => s.sig === 'gap' || /delivered nothing/.test(s.title)) && !br.missed.some(s => s.sig === 'gap'), 'by default (D10) the list holds the spike and no channel: ' + JSON.stringify(ask.body.signals.map(s => s.key)));
+  await gapsOn(w, 'aep_au'); const ask2 = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 1 }); eq([ask2.status, ask2.body.error], [409, 'uncited_signals']);
+  ok(ask2.body.signals.some(s => s.key === 'G:facebook' && /Facebook delivered nothing/.test(s.title) && /not granted/.test(s.detail)) && ask2.body.signals.some(s => /Sentinel spike/.test(s.title)), 'with the desk\'s showGaps on, the same request lists the channel too: ' + JSON.stringify(ask2.body.signals.map(s => s.key)));
+  eq(ask2.body.signals.length, ask.body.signals.length + 1); await gapsOn(w, 'aep_au', false);
   const filed = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 1, acknowledge: true }); eq([filed.status, filed.body.brief.status, filed.body.brief.filed_by, filed.body.brief.revision], [200, 'filed', 'Anne', 2]); ok(filed.body.acknowledged.length >= 1 && filed.body.brief.acknowledged.length >= 1);
   eq((await F(w, 'POST', '/den/brief/save', { id: br.id, revision: 2, sections: { bottom: 'After filing.' } })).body.error, 'brief_filed'); eq((await F(w, 'POST', '/den/brief', { desk: 'aep_au', replace: true })).body.error, 'brief_filed'); eq((await F(w, 'POST', '/den/brief/section', { id: br.id, section: 'bottom', revision: 2 })).body.error, 'brief_filed');
   const md = (await F(w, 'GET', '/den/brief?id=' + br.id + '&format=md')).text; ok(!/DRAFT/.test(md), 'a filed brief is not labelled a draft');
@@ -285,6 +306,21 @@ await S.t('DK15 collection', async () => {
   eq(held.map(h => [h.channel, h.held]), [['news', false], ['news', true], ['news', false], ['x', true]], 'held by its canonical address; an address that is not one is not looked up'); ok(held[1].seen > 0 && held[3].layers[0] === 2);
   const bt = await F(w, 'POST', '/den/backtest', { desk: 'aep_au', result: { reports: 30, links: 200, held: 150, period: 'October 2026', byChannel: { news: { links: 120, held: 110 }, x: { links: 80, held: 40 } }, byLayer: { 2: 40, 3: 110 }, misses: [{ url: 'https://never.example.com/z', channel: 'news' }] } });
   eq([bt.status, bt.body.backtest.share, bt.body.backtest.by], [200, 75, 'Anne']); eq((await F(w, 'GET', '/den/collection?desk=aep_au')).body.backtest.byChannel.x, { links: 80, held: 40 }); eq((await F(w, 'POST', '/den/backtest', { desk: 'aep_au', result: {} })).body.error, 'bad_result');
+  // D10: which channels the default Collection lists (working), how each is read by the routes that are set (howOn), and the one thing that switches it on (setup)
+  eq(c.channels.filter(x => x.working).map(x => x.id), ['news', 'x'], 'working: delivered for this desk in seven days'); ok(c.channels.every(x => typeof x.working === 'boolean'));
+  const NEG = /not |never|cannot|refus|switched off/i; c.channels.forEach(x => ok(typeof x.howOn === 'string' && x.howOn.length > 10 && typeof x.setup === 'string' && x.setup.length > 10 && !NEG.test(x.howOn) && !NEG.test(x.setup), x.id + ': ' + x.howOn + ' // ' + x.setup));
+  eq([ch('facebook').howOn, ch('instagram').howOn, ch('reddit').howOn, ch('hansard').howOn], ['Layer 2: keyword search on the Mac.', 'Layer 2: registered accounts\' posts on the Mac.', 'Layer 2 on the Mac, or the worker with app credentials.', 'Layer 3: OpenAustralia, once the secret OPENAUSTRALIA_KEY is added (free, openaustralia.org.au/api).']);
+  eq([ch('news').howOn, ch('x').howOn], [ch('news').how, ch('x').how], 'a channel with nothing unset reads as it did'); ok(/not granted/.test(ch('facebook').how) && /refuses cloud networks/.test(ch('reddit').how), 'and how itself is unchanged');
+  eq(c.channels.map(x => x.setup), ['Add or repair feeds in Sources.', 'Sign in to X on the Mac collector and leave it running, then Collect now.', 'Sign in to Facebook on the Mac collector and leave it running, then Collect now. The official route opens with Page Public Content Access.',
+    'Sign in to Instagram on the Mac collector and leave it running, then Collect now. The official route opens when META_IG_USER is set.', 'Sign in to YouTube on the Mac collector and leave it running, then Collect now.', 'Sign in to Reddit on the Mac collector and leave it running, then Collect now. Or add app credentials to the worker.',
+    'Add an account or a term in Watch, then Collect now.', 'Watch a bill or inquiry page below.', 'Add the secret OPENAUSTRALIA_KEY (free, openaustralia.org.au/api).', 'Add a campaign counter below.']);
+  // Facebook delivered yesterday: listed, until its collector is switched off or stopped at a verification
+  await push(w, 'sig_thread', [post({ url: 'https://www.facebook.com/harbourwatchpage/posts/100', ts: NOW - 30 * H, body: 'The windfall tax on gas, from the page.', meta: { platform: 'facebook', issues: ['gastax'], id: 'fb100', layers: [2] } })]);
+  const fb = async () => (await F(w, 'GET', '/den/collection?desk=aep_au', null, 'read-key')).body.channels.find(x => x.id === 'facebook'); const f1 = await fb(); eq([f1.delivered.d7, f1.delivered.d1, f1.working], [1, 0, true], 'delivered in the week, not in the last day: still listed');
+  await F(w, 'POST', '/den/reach', { off: ['facebook'] }); const f2 = await fb(); eq([f2.delivered.d7, f2.collector.off, f2.working], [1, true, false], 'switched off, it is no longer a working channel');
+  await F(w, 'POST', '/den/reach', { off: [] }); eq((await fb()).working, true); w.kv.set('reach_challenges', JSON.stringify({ facebook: { at: NOW - 2 * H, agent: 'mac-1', error: 'facebook_challenge' } })); const f3 = await fb(); ok(f3.collector.challenge && f3.working === false, 'nor while it is paused at a verification: ' + JSON.stringify(f3.collector));
+  const set = await mk({ META_TOKEN: 't', META_PUBLIC_PAGES: '1', OPENAUSTRALIA_KEY: 'k', REDDIT_CLIENT_ID: 'a', REDDIT_CLIENT_SECRET: 'b' }); const cs = (await F(set, 'GET', '/den/collection?desk=aep_au')).body.channels; const cx = id => cs.find(x => x.id === id);
+  eq([cx('facebook').howOn, cx('hansard').howOn], ['Layer 1: public pages through the Graph API. Layer 2: keyword search on the Mac.', cx('hansard').how], 'a route that is set is said'); ok(!/Page Public Content Access/.test(cx('facebook').setup) && !/app credentials/.test(cx('reddit').setup) && !/^Add the secret/.test(cx('hansard').setup) && cs.every(x => !NEG.test(x.howOn) && !NEG.test(x.setup)), 'and setup does not ask for what is already there');
 });
 
 await S.t('DK16 the morning draft', async () => {
@@ -319,7 +355,7 @@ await S.t('DK18 a busy database', async () => {
 });
 
 await S.t('DK19 the strip\'s slow figures', async () => {
-  const w = await mk(); await seedDay(w); await F(w, 'GET', '/sentinel/alerts'); await F(w, 'GET', '/narratives/status'); await F(w, 'GET', '/sentiment/status'); const db = w.env.MIND_DB.db; const sp = spy(w);
+  const w = await mk(); await seedDay(w); await push(w, 'reddit_thread', [oldThread()]); await F(w, 'GET', '/sentinel/alerts'); await F(w, 'GET', '/narratives/status'); await F(w, 'GET', '/sentiment/status'); const db = w.env.MIND_DB.db; const sp = spy(w);
   const a = (await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key')).body; const first = sp.n(SLOW); ok(first >= 2, 'the first read does the fortnight\'s counting: ' + first); sp.clear();
   db.prepare("INSERT INTO arc_alerts(ns,client,issue,label,severity,hot,baseline,ratio,srcs,detected_ts) VALUES('aep','AEP','gastax','Gas taxation','high',9,2.9,3.1,5,?)").run(NOW - H);
   const b = (await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key')).body; eq(sp.n(SLOW), 0, 'the second open, a moment later, repeats none of it: ' + sp.seen.filter(q => SLOW.test(q)).map(q => q.slice(0, 60)).join(' | '));
@@ -327,6 +363,10 @@ await S.t('DK19 the strip\'s slow figures', async () => {
   ok(b.slow && b.slow.cached === true && b.slow.at > 0 && a.slow.cached === false, 'the answer says when the slow figures were counted: ' + JSON.stringify(b.slow)); sp.clear();
   await F(w, 'GET', '/den/missed?desk=aep_au&fresh=1', null, 'read-key'); ok(sp.n(SLOW) >= 2, 'asked for afresh, they are counted again'); sp.clear();
   await F(w, 'GET', '/den/missed?desk=mca_au', null, 'read-key'); ok(sp.n(SLOW) >= 1, 'another client\'s desk has its own');
+  // D10: what the desk relied on is counted and cached while showGaps is off, so switching it on asks the database for none of it again
+  ok(!a.signals.some(s => s.sig === 'gap'), 'off, no gap was said'); await gapsOn(w, 'aep_au'); await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key'); sp.clear();
+  const g = (await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key')).body; eq(sp.n(SLOW), 0, 'switched on, the reads still repeat none of the slow counting: ' + sp.seen.filter(q => SLOW.test(q)).map(q => q.slice(0, 60)).join(' | '));
+  ok(g.slow.cached === true && g.signals.some(s => s.key === 'G:reddit') && g.signals[0].sig === 'gap', 'and the gap known only from the cached count is there: ' + JSON.stringify(g.signals.map(s => s.key)));
 });
 
 await S.t('DK20 the board asks only for this desk\'s rows', async () => {
@@ -336,6 +376,106 @@ await S.t('DK20 the board asks only for this desk\'s rows', async () => {
   sp.clear(); const both = (await F(w, 'GET', '/den/board?desk=aep_au&missed=1', null, 'read-key')).body; eq(sp.n(/FROM arc_items WHERE ts>\? AND ts<=\?/), 1, 'the board and the strip in one answer read the window once, not twice');
   ok(both.counts && both.missed && both.missed.ok === true && Array.isArray(both.missed.signals) && !('_rows' in both), 'board and strip together: ' + Object.keys(both).join(','));
   const alone = (await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key')).body; eq(both.missed.signals.map(s => s.key), alone.signals.map(s => s.key), 'the same strip either way');
+});
+
+await S.t('DK21 the option that shows collection gaps', async () => {
+  const w = await mk(); const db = w.env.MIND_DB.db; const desks = async () => (await F(w, 'GET', '/den/desks', null, 'read-key')).body.desks; const opt = async id => (await desks()).find(d => d.id === id).options;
+  eq((await desks()).map(d => d.options.showGaps), [false, false, false, false, false], 'every desk reads off, with no migration');
+  const on = await F(w, 'POST', '/den/desk/update', { id: 'aep_au', revision: 1, patch: { options: { showGaps: true } } }); eq([on.status, on.body.desk.options.showGaps, on.body.desk.revision], [200, true, 2], 'true is stored and the revision moves');
+  eq([JSON.parse(db.prepare("SELECT options FROM den_desks WHERE id='aep_au'").get().options).showGaps, on.body.desk.options.fold, on.body.desk.options.density], [true, true, 'regular'], 'in the row, and nothing else changed');
+  for (const v of ['yes', 1, 'true', {}]) { const r = await F(w, 'POST', '/den/desk/update', { id: 'mca_au', patch: { options: { showGaps: v } } }); eq([r.status, r.body.desk.options.showGaps], [200, false], 'only true turns it on: ' + JSON.stringify(v)); }
+  const kept = await F(w, 'POST', '/den/desk/update', { id: 'aep_au', patch: { options: { density: 'compact' } } }); eq([kept.body.desk.options.showGaps, kept.body.desk.options.density], [true, 'compact'], 'a save that does not mention it leaves it');
+  const mu = await F(w, 'POST', '/den/mute', { desk: 'aep_au', kind: 'term', value: 'noise words' }); eq([mu.status, mu.body.desk.options.showGaps, mu.body.desk.options.mutes.length], [200, true, 1], 'a mute keeps it');
+  const rd = await F(w, 'POST', '/den/desk/update', { id: 'aep_au', patch: { options: { showGaps: false } } }, 'read-key'); eq([rd.status, rd.body.error], [403, 'read_only']); eq((await opt('aep_au')).showGaps, true, 'a read key cannot set it');
+  eq([(await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key')).body.checks, (await F(w, 'GET', '/den/missed?desk=mca_au', null, 'read-key')).body.checks], [6, 5], 'and the strip says how many checks ran');
+  const off = await F(w, 'POST', '/den/desk/update', { id: 'aep_au', patch: { options: { showGaps: false } } }); eq(off.body.desk.options.showGaps, false); eq((await F(w, 'GET', '/den/missed?desk=aep_au')).body.checks, 5);
+  db.prepare("UPDATE den_desks SET options='{\"showGaps\":\"yes\"}' WHERE id='guns_au'").run(); eq((await opt('guns_au')).showGaps, false, 'a row edited by hand to something that is not true reads off');
+});
+
+await S.t('DK22 what follows the option', async () => {
+  // a registered Facebook account that delivered nothing (so a gap exists), and a desk that holds news only
+  const w = await mk({ ANTHROPIC_API_KEY: 'test-anthropic' }); const T = w.mod.__test; await F(w, 'POST', '/den/watch/add', { ns: 'aep', kind: 'account', platform: 'facebook', value: 'harbourwatchpage', name: 'Harbour Watch' });
+  await push(w, 'news', [news({ title: 'Harbour levy divides the Senate', url: 'https://pointpost.example.com.au/a' }), news({ title: 'Producers answer the windfall tax push', url: 'https://pointpost.example.com.au/b' })]);
+  await push(w, 'sig_thread', [{ src: 'x', title: 'x post', body: 'A post on critical minerals that nobody has counted.', url: 'https://x.com/i/web/status/190000000000000077', ts: NOW - 3 * H, meta: { platform: 'x', issues: ['cm'], id: 'nc1' } }]);
+  const calls = model(w, (ev, ids) => ({ sections: { summary: 'Coverage of the levy continued through the window, led by a regional outlet and answered by producers in a second story the same day [' + ids('M')[0] + ']. Nothing else of weight was published on the desk\'s issues in the window, and the tone of the two stories was measured [' + ids('M')[1] + '].', bottom: 'Activity is steady and the client is not directly targeted in either story [' + ids('M')[0] + '].' }, ratings: { momentum: { level: 'Low', trend: 'Stable' } } }));
+  const evOf = async id => { const desk = await T.deskGet(w.env, id); const b = await T.denBoard(w.env, desk, { keepRows: true }); return (await T.denEvidence(w.env, desk, b, await T.denMissed(w.env, desk, { board: b }), [])).text; };
+  // off, the default
+  const d0 = await F(w, 'POST', '/den/brief', { desk: 'aep_au' }); eq([d0.status, calls.length], [200, 1], d0.text.slice(0, 200)); const sys0 = calls[0].system, ev0 = calls[0].messages[0].content;
+  ok(!/not read/.test(sys0) && !/silence as calm/.test(sys0) && /Write about what the evidence holds\. Do not write about a channel, a source or collection that is absent from it\. Leave a section short rather than saying nothing was collected for it\./.test(sys0), 'the prompt asks for what the evidence holds: ' + sys0.slice(sys0.indexOf('PINNED'), sys0.indexOf('SECTIONS')));
+  ok(/- social \("Social Media Activity"\): what moved on social channels: where, how much, in what register\n/.test(sys0), 'and the social section is not asked which channels were absent');
+  ok(!/SAY PLAINLY/.test(ev0) && !/delivered nothing/.test(ev0) && !/SOCIAL \(0/.test(ev0) && !/INFLUENCER AND POLITICAL/.test(ev0) && !/no counts held/.test(ev0) && /TRADITIONAL MEDIA \(2 stories/.test(ev0), 'the evidence holds what was collected and no heading for what was not: ' + ev0.slice(0, 400));
+  ok(!d0.body.brief.missed.some(s => s.sig === 'gap'), 'and no gap is kept with the draft');
+  const mca0 = await evOf('mca_au'); ok(/\[S:\d+\] x \| .* \| A post on critical minerals that nobody has counted\.$/m.test(mca0) && !/no counts held/.test(mca0) && !/TRADITIONAL MEDIA/.test(mca0), 'a post with no figure is given without one: ' + mca0);
+  const n0 = await F(w, 'POST', '/den/brief', { desk: 'guns_au' }); eq([n0.status, n0.body.error, n0.body.detail], [409, 'no_evidence', 'There is no story or post on this desk in this window yet, so there is nothing to draft from. A brief can still be written by hand.']); eq(calls.length, 1);
+  // on, the same world
+  for (const id of ['aep_au', 'mca_au', 'guns_au']) await gapsOn(w, id);
+  const d1 = await F(w, 'POST', '/den/brief', { desk: 'aep_au' }); eq([d1.status, calls.length], [200, 2], d1.text.slice(0, 200)); const sys1 = calls[1].system, ev1 = calls[1].messages[0].content;
+  ok(/If the evidence says a channel was not read, say so plainly in the section it belongs to\. Do not read silence as calm\./.test(sys1) && /in what register; say which channels were not read\n/.test(sys1) && !/Write about what the evidence holds/.test(sys1), 'the prompt reads as it did');
+  ok(/- Facebook delivered nothing in this window\. .*SAY PLAINLY THAT THIS CHANNEL WAS NOT READ: its absence is not evidence of quiet\./.test(ev1) && /SOCIAL \(0 posts held; 0 shown/.test(ev1) && /INFLUENCER AND POLITICAL \(registered/.test(ev1) && /TRADITIONAL MEDIA \(2 stories/.test(ev1), 'and so does the evidence: ' + ev1.slice(0, 600));
+  ok(d1.body.brief.missed.some(s => s.key === 'G:facebook')); ok(/ \| no counts held$/m.test(await evOf('mca_au')), 'a post with no figure says so');
+  const file = await F(w, 'POST', '/den/brief/file', { id: d1.body.brief.id, revision: d1.body.brief.revision }); eq([file.status, file.body.error], [409, 'uncited_signals'], file.text.slice(0, 200)); ok(file.body.signals.some(s => s.key === 'G:facebook'), 'the filing check lists the gap: ' + JSON.stringify(file.body.signals.map(s => s.key)));
+  const n1 = await F(w, 'POST', '/den/brief', { desk: 'guns_au' }); eq([n1.status, n1.body.error, n1.body.detail], [409, 'no_evidence', 'Nothing on this desk was collected in the window, so there is nothing to draft from. The Collection tab says which channels delivered and why not.']);
+  // and off again: the same draft request is back to the default, with nothing to clear
+  await gapsOn(w, 'aep_au', false); const file0 = await F(w, 'POST', '/den/brief/file', { id: d1.body.brief.id, revision: d1.body.brief.revision }); ok(file0.status === 200 || !file0.body.signals.some(s => s.sig === 'gap'), 'off again, the filing check asks about no channel: ' + file0.text.slice(0, 200));
+});
+
+await S.t('DK23 the day\'s run', async () => {
+  const w = await mk({ ANTHROPIC_API_KEY: 'test-anthropic' }); await seedDay(w); await F(w, 'GET', '/sentinel/alerts'); await F(w, 'GET', '/narratives/status'); const db = w.env.MIND_DB.db;
+  await push(w, 'news', [news({ title: 'Ferry levy splits the crossbench', url: 'https://pointpost.example.com.au/f1', ts: NOW - 6 * H }), news({ src: 'coastwire', title: 'Ferry levy splits the crossbench', url: 'https://coastwire.example.com.au/f1', ts: NOW - 5 * H, meta: { issues: ['gastax'], source: 'coastwire' } })]);
+  db.prepare("INSERT INTO arc_alerts(ns,client,issue,label,severity,hot,baseline,ratio,srcs,detected_ts) VALUES('aep','AEP','gastax','Gas taxation','high',9,2.9,3.1,5,?)").run(NOW - 2 * H);
+  db.prepare("INSERT INTO narratives(id,label,issues,n,n24,first_ts,last_ts,status,muted,side,spread) VALUES('n1','Gas giants dodge the levy',?,8,7,?,?,'emerging',0,'hostile','[]')").run(JSON.stringify(['gastax', 'ftc']), NOW - 20 * H, NOW - H);
+  const missed = async q => (await F(w, 'GET', '/den/missed?desk=aep_au' + (q || ''), null, 'read-key')).body; const run = async () => (await missed()).run;
+  const m = await missed(); const bm = (await F(w, 'GET', '/den/board?desk=aep_au&missed=1', null, 'read-key')).body;
+  eq(m.run, { day: m.window.day, progress: { total: 5, kept: 0, aside: 0, left: 5 }, brief: null }, 'three stories after folding and two posts, nothing decided, no brief'); eq(bm.missed.run, m.run, 'the same run on the board\'s answer'); eq(bm.progress, m.run.progress);
+  eq([bm.media.length, bm.social.length, bm.actors.length], [3, 2, 0]);
+  const past = await missed('&to=' + (NOW - D)); eq(['run' in past, past.run], [true, null], 'a past window has no run'); const pb = (await F(w, 'GET', '/den/board?desk=aep_au&missed=1&to=' + (NOW - D))).body; eq([pb.missed.run, typeof pb.progress.total], [null, 'number']);
+  eq(m.signals.find(s => s.sig === 'spike').issue, 'gastax', 'a spike says which issue'); eq(m.signals.find(s => s.key === 'N:n1').issues, ['gastax'], 'an emerging narrative says which of the desk\'s issues');
+  // progress follows the decisions
+  const lead = bm.media.find(x => /Producers answer/.test(x.title)); await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: lead.id }); eq((await run()).progress, { total: 5, kept: 1, aside: 0, left: 4 }, 'a pin is a decision');
+  const ferry = bm.media.find(x => /Ferry levy/.test(x.title)); eq(ferry.copies.length, 2);
+  await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: ferry.copies[0], reason: 'not relevant' }); eq((await run()).progress, { total: 5, kept: 1, aside: 0, left: 4 }, 'one copy of a two-copy story set aside: the story is still to decide');
+  await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: ferry.copies[1], reason: 'not relevant' }); eq((await run()).progress, { total: 5, kept: 1, aside: 1, left: 3 }, 'the second: one story set aside, not two rows');
+  await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: bm.social[1].id, reason: 'duplicate' }); const pr = (await run()).progress; eq(pr, { total: 5, kept: 1, aside: 2, left: 2 }, 'a post counts one'); eq(pr.total, pr.left + pr.kept + pr.aside);
+  await F(w, 'POST', '/den/desk/update', { id: 'aep_au', patch: { options: { fold: false } } }); eq((await run()).progress, { total: 8, kept: 1, aside: 3, left: 4 }, 'unfolded, each copy is its own row: four stories and a post listed, two copies and a post set aside'); await F(w, 'POST', '/den/desk/update', { id: 'aep_au', patch: { options: { fold: true } } });
+  // today's brief
+  let used = []; model(w, (ev, ids) => { used = [ids('M')[0], ids('S')[0]]; return { sections: { summary: 'The harbour levy story was carried by three outlets through the window and producers answered the push in a subscriber outlet the same morning [' + used[0] + ']. The conversation on X stayed small, with one post drawing a few dozen interactions and nothing gathering pace behind it [' + used[1] + '].', bottom: 'The debate is steady and the client is named in neither the stories nor the posts [' + used[0] + '].' }, ratings: { momentum: { level: 'Moderate', trend: 'Stable' } } }; });
+  const br = (await F(w, 'POST', '/den/brief', { desk: 'aep_au' })).body.brief; const b1 = (await run()).brief; const spike = m.signals.find(s => s.sig === 'spike').key;
+  eq([b1.id, b1.day, b1.status, b1.revision, b1.edited, b1.filed_by, b1.filed_at], [br.id, m.window.day, 'draft', 1, false, '', 0]); ok(b1.written > 200 && b1.written === Object.keys(br.sections).map(k => br.sections[k].text).join('\n').replace(/\s/g, '').length, 'written is the figure filing tests against 200: ' + b1.written);
+  eq(b1.cited.slice().sort(), used.map(x => Number(x.split(':')[1])).sort(), 'cited holds the ids of the rows the brief cites'); ok(used[0] === 'M:' + lead.id && bm.social.some(x => 'S:' + x.id === used[1]), 'which are the board\'s own row ids: ' + used.join(' '));
+  ok(b1.open.indexOf(spike) >= 0 && b1.open.indexOf('N:n1') >= 0, 'open holds what the strip has and the brief does not: ' + JSON.stringify(b1.open));
+  const ask = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 1 }); eq([ask.status, ask.body.signals.map(s => s.key)], [409, b1.open], 'and it is the list the filing check gives');
+  const sv = await F(w, 'POST', '/den/brief/save', { id: br.id, revision: 1, sections: { bottom: 'The Sentinel flagged a spike on gas taxation [' + spike + ']. The debate is steady and the client is named in neither the stories nor the posts.' } }); eq(sv.status, 200);
+  const b2 = (await run()).brief; eq([b2.edited, b2.revision, b2.status], [true, 2, 'draft'], 'a person\'s save shows as edited'); ok(b2.open.indexOf(spike) < 0 && b2.open.indexOf('N:n1') >= 0 && b2.cited.length === 2, 'a signal the brief now cites has left open: ' + JSON.stringify(b2));
+  const fl = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 2, acknowledge: true }); eq(fl.status, 200); const b3 = (await run()).brief; eq([b3.status, b3.filed_by, b3.revision], ['filed', 'Anne', 3]); ok(b3.filed_at > NOW - 60000);
+  eq((await F(w, 'GET', '/den/board?desk=aep_au&missed=1')).body.missed.run.brief, b3);
+  // a brief started by hand, and a desk's run is its own
+  eq((await F(w, 'GET', '/den/missed?desk=guns_au')).body.run, { day: m.window.day, progress: { total: 0, kept: 0, aside: 0, left: 0 }, brief: null });
+  const hand = (await F(w, 'POST', '/den/brief/save', { desk: 'guns_au' })).body.brief; const bh = (await F(w, 'GET', '/den/missed?desk=guns_au')).body.run.brief; eq([bh.id, bh.status, bh.edited, bh.written, bh.cited, bh.open], [hand.id, 'draft', false, 0, [], []], 'a brief started by hand has nothing written');
+});
+
+await S.t('DK24 a folded story is one decision', async () => {
+  const w = await mk(); const db = w.env.MIND_DB.db; const marks = () => db.prepare("SELECT item, mark, mkey FROM den_marks WHERE desk='aep_au' ORDER BY item").all().map(r => [r.item, r.mark, r.mkey]);
+  const story = (name, n) => ['pointpost', 'tribune', 'coastwire'].map((o, i) => news({ src: o, title: name + (i === 1 ? ' - Tribune' : ''), url: 'https://' + o + '.example.com.au/' + n, ts: NOW - (6 - i) * H, meta: { issues: ['gastax'], source: o, q: 'harbour levy' } }));
+  await push(w, 'news', story('Harbour levy divides the Senate', 'h1').concat(story('Harbour levy vote is delayed a week', 'h2'), story('Harbour levy talks resume on Monday', 'h3'), [news({ title: 'An unrelated story on the windfall tax', url: 'https://pointpost.example.com.au/u1' })]));
+  await push(w, 'sig_thread', [post({ url: 'https://x.com/i/web/status/190000000000000031' })]);
+  const b = await board(w, 'aep_au'); eq([b.media.length, b.counts.news, b.progress], [4, 10, { total: 5, kept: 0, aside: 0, left: 5 }]); const st = rx => b.media.find(x => rx.test(x.title)); const A = st(/divides/), B = st(/delayed/), C = st(/resume/), U = st(/unrelated/);
+  eq([A.copies.length, B.copies.length, C.copies.length, A.copies[0]], [3, 3, 3, A.id], 'three copies each, the head first');
+  const a1 = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: A.id, reason: 'not relevant', copies: A.copies }); eq([a1.status, a1.body.ok, a1.body.item, a1.body.copies.slice().sort(), 'offer' in a1.body], [200, true, A.id, A.copies.slice(1).sort(), false], 'one request sets the whole story aside and offers nothing');
+  eq(marks(), A.copies.slice().sort((x, y) => x - y).map(id => [id, 'aside', id === A.id ? 'term:harbour levy' : '']), 'every copy is marked; the mute key is on the head alone, so the story counts once');
+  const b1 = await board(w, 'aep_au'); eq([b1.media.length, b1.counts.aside, b1.progress], [3, 3, { total: 5, kept: 0, aside: 1, left: 4 }], 'and it does not come back as its next copy');
+  // a second story: a copy with another title, a post, a row not held and the head itself are not copies
+  const a2 = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: B.id, reason: 'duplicate', copies: B.copies.concat([U.id, b.social[0].id, 999999, 'x', B.id]) }); eq([a2.status, a2.body.copies.slice().sort(), 'offer' in a2.body], [200, B.copies.slice(1).sort(), false], 'the second decision on that term still offers nothing');
+  const b2 = await board(w, 'aep_au'); ok(b2.media.some(x => x.id === U.id) && b2.social.length === 1 && marks().length === 6, 'a row that is not a copy of the story is left alone: ' + JSON.stringify(marks())); eq(db.prepare("SELECT COUNT(*) n FROM den_marks WHERE desk='aep_au' AND mkey='term:harbour levy'").get().n, 2);
+  const a3 = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: C.id, reason: 'not relevant', copies: C.copies }); eq([a3.body.offer.kind, a3.body.offer.value, a3.body.offer.n], ['term', 'harbour levy', 3], 'the third decision, not the third row, offers the mute'); ok(/You have set aside 3 rows from harbour levy/.test(a3.body.offer.text));
+  // clear, on either route, takes every copy's mark
+  const c1 = await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: A.id, clear: true, copies: A.copies }); eq([c1.status, c1.body.mark, c1.body.copies.slice().sort()], [200, '', A.copies.slice(1).sort()]); ok(!marks().some(k => A.copies.indexOf(k[0]) >= 0) && marks().length === 6, 'clear with copies on /den/pin');
+  const c2 = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: B.id, clear: true, copies: B.copies }); eq(c2.status, 200); eq(marks().map(k => k[0]), C.copies.slice().sort((x, y) => x - y), 'and on /den/aside'); eq((await board(w, 'aep_au')).progress, { total: 5, kept: 0, aside: 1, left: 4 });
+  // without copies a clear is the one row, as before; a pin never takes copies
+  const c3 = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: C.id, clear: true }); eq(['copies' in c3.body, marks().length], [false, 2], 'no copies sent: the one row'); eq((await board(w, 'aep_au')).media.filter(x => /resume/.test(x.title)).map(x => x.copies.length), [1], 'so only the head comes back, which is why a folded story sends its copies');
+  await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: C.id, clear: true, copies: C.copies }); const p1 = await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: A.id, copies: A.copies }); eq([p1.status, p1.body.mark, 'copies' in p1.body, marks()], [200, 'pin', false, [[A.id, 'pin', '']]], 'a pin is the head\'s alone');
+  const many = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: U.id, reason: 'not relevant', copies: Array.from({ length: 200 }, (_, i) => 500000 + i) }); eq([many.status, many.body.copies], [200, []], 'a long list is cut at forty and none of it is held');
+  // a read key
+  const before = JSON.stringify(marks()); eq((await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: B.id, reason: 'not relevant', copies: B.copies }, 'read-key')).status, 403); eq((await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: A.id, clear: true, copies: A.copies }, 'read-key')).status, 403); eq(JSON.stringify(marks()), before, 'a read key writes and clears nothing');
 });
 
 const r = S.done(); process.exit(r.fail ? 1 : 0);

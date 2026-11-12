@@ -10,7 +10,12 @@ import fs from 'node:fs';
 import { world, open, browser, t, ok, eq, txt, all, tab, desk, toast, shot, panel, finish, H, D, NOW } from './den-fixture.mjs';
 
 console.log('den-browser harness');
-const w = await world(); let page = await open(w);
+const w = await world();
+// this journey asserts gaps (D10): by default a desk is not told which channels delivered nothing, so the main world turns the
+// desk's showGaps on, before the page opens (an update bumps the desk's revision, which the page reads when it loads)
+const gapsOn = async (wd, ids) => { for (const id of ids) { const r = await wd.F('POST', '/den/desk/update', { id, patch: { options: { showGaps: true } } }); if (r.status !== 200) throw new Error('showGaps was not saved for ' + id + ': ' + r.text.slice(0, 160)); } };
+await gapsOn(w, ['aep_au', 'guns_au']);
+let page = await open(w);
 
 await t('the Den opens from the navigation on a desk, in Australian Eastern time, with nothing spent', async () => {
   ok(await page.$('.rbtn[data-v="den"][aria-current="page"]'), 'the navigation button is current'); eq(await page.title() !== '', true); ok(/Anne's Den/.test(await txt(page, '#vtitle')));
@@ -31,7 +36,7 @@ await t('Today sorts the window into the report\'s sections: folded copies, the 
   const soc = await all(page, 'section.den-panel[aria-label="Social"] tr.den-row'); eq(soc.length, 1); ok(/\| X ?L2 \| 55 \|/.test(soc[0]), soc[0]);
   const act = await all(page, 'section.den-panel[aria-label="Influencer and political"] tr.den-row'); ok(act.length === 1 && /^Harbour Watch ?organisation \| Our position on the gas export tax, in full\. \| X \| 90 \|/.test(act[0]), act[0]);
   const upc = await all(page, 'section.den-panel[aria-label="Upcoming"] tr.den-row'); ok(upc.length === 1 && /-12-28.*\| rally \| .*Parliament on 28 December/.test(upc[0]), upc[0]);
-  ok(/No narrative on this desk's issues gained rows/.test(await txt(page, 'section.den-panel[aria-label="Key narratives"]')), 'an empty section says why'); await shot(page, '01-today');
+  ok(/No narrative on this desk's issues gained rows/.test(await txt(page, 'section.den-panel[aria-label="Key narratives"]')), 'an empty section says why'); await shot(page, '01-today-gaps-on');
 });
 await t('pin a row, set rows aside with a reason, and confirm the mute that is offered after three', async () => {
   const m = panel(page, 'Traditional media'); const row = m.locator('tr.den-row', { hasText: 'Producers answer' });
@@ -61,7 +66,7 @@ await t('Collect now starts a job and shows it working; a platform switched off 
   const sw = panel(page, 'Signed-in collection').locator('tr', { hasText: 'Facebook' }); await sw.getByRole('button', { name: 'Switch off' }).click(); await page.waitForFunction(() => /off/.test(Array.from(document.querySelectorAll('section.den-panel[aria-label="Signed-in collection"] tr')).find(r => /Facebook/.test(r.textContent)).querySelector('.den-chip').textContent));
   const fb = panel(page, 'Channels').locator('tr.den-row', { hasText: 'Facebook' }); ok(/switched off/.test(await fb.textContent())); ok(await fb.getByRole('button', { name: 'Collect now' }).isDisabled(), 'no collecting while it is off');
   await sw.getByRole('button', { name: 'Switch on' }).click(); ok(/Not measured yet/.test(await txt(page, 'section.den-panel[aria-label="Recall against the reports"]')) && /den-backtest\.py/.test(await txt(page, 'section.den-panel[aria-label="Recall against the reports"]')));
-  ok(/AFR|Australian Financial/.test(await txt(page, 'section.den-panel[aria-label="Subscriber outlets"]')) && /headlines only/.test(await txt(page, 'section.den-panel[aria-label="Subscriber outlets"]'))); await shot(page, '02-collection');
+  ok(/AFR|Australian Financial/.test(await txt(page, 'section.den-panel[aria-label="Subscriber outlets"]')) && /headlines only/.test(await txt(page, 'section.den-panel[aria-label="Subscriber outlets"]'))); await shot(page, '02-collection-gaps-on');
 });
 await t('a draft states its cost first, is one call, and comes back checked against its rows', async () => {
   await tab(page, 'brief'); await page.waitForSelector('#den-tabpanel .den-state'); const empty = await txt(page, '#den-tabpanel'); ok(/No brief has been started for this window/.test(empty) && /Draft the brief \(1 model call\)/.test(empty) && /One model call \(a second only if the first answer cannot be read\)\. 20 of 20 left today/.test(empty), empty.slice(0, 300));
@@ -275,7 +280,8 @@ await t('the figures are counts of the rows on the board, each tile opens its ta
   eq(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scroll at 1366'); await p.context().close();
 });
 await t('a desk with nothing collected draws no chart and no zero that reads as a quiet day', async () => {
-  const w5 = await world(); const p = await open(w5); await desk(p, 'mca_vic'); await p.waitForFunction(() => /MCA/.test(document.querySelector('.den-win').textContent)); await tab(p, 'today'); await p.waitForSelector('.den-kpis');
+  const w5 = await world(); await gapsOn(w5, ['mca_vic']);   // this journey asserts gaps (D10)
+  const p = await open(w5); await desk(p, 'mca_vic'); await p.waitForFunction(() => /MCA/.test(document.querySelector('.den-win').textContent)); await tab(p, 'today'); await p.waitForSelector('.den-kpis');
   eq(await p.locator('.den-col').count(), 0); ok(/not the same as a quiet day/.test(await txt(p, '.den-card[aria-label="Volume through the window"]'))); eq(await txt(p, '.den-kpi:nth-child(3) .v'), '-'); await p.context().close();
 });
 await t('cards and the table hold the same rows in the same order, with the same actions and keys; the choice is kept', async () => {
@@ -325,6 +331,16 @@ await t('the desk menu works by keyboard, the console stays docked across areas,
   for (const name of ['watch', 'options', 'collection']) { await tab(p, name); (await axeBad(p)).forEach(x => bad.push(name + ': ' + x)); } eq(bad, []);
   await tab(p, 'options'); await p.getByRole('button', { name: 'Mutes', exact: true }).click(); ok(await p.evaluate(() => !!document.activeElement.closest('#den-tabpanel')), 'the index moves into the page');
   await p.context().close();
+});
+
+await t('by default the strip runs five checks and says nothing about a channel (D10)', async () => {
+  const w11 = await world(); const p = await open(w11); await p.waitForSelector('.den-strip li');
+  const lines = await all(p, '.den-strip li'); ok(lines.some(l => /Sentinel spike: Gas taxation/.test(l)) && !lines.some(l => /delivered nothing|Not collected/.test(l)), 'the spike is there and no gap line: ' + lines.join(' | '));
+  ok(!/not collected/.test(await txt(p, '.den-strip header')) && !/six checks/.test(await txt(p, '.den-strip')));
+  await desk(p, 'mca_vic'); await p.waitForFunction(() => /MCA Victoria/.test(document.querySelector('.den-win').textContent)); await p.waitForFunction(() => /five checks, nothing found/.test((document.querySelector('.den-strip header') || {}).textContent || ''));
+  const strip = await txt(p, '.den-strip'); ok(/None of the five checks found anything in this window: no spike, no emerging narrative, no first-seen actor, no issue above its baseline, and no post far above its account's usual\./.test(strip), strip);
+  ok(!/every channel/.test(strip) && !/six checks/.test(strip) && !/delivered/.test(strip) && !(await p.$('.den-strip li')), 'and it does not say every channel delivered: ' + strip);
+  eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
 });
 
 await finish();

@@ -7773,7 +7773,9 @@ const DEN_DESK_SEED = [
   { id: 'mca_vic', ns: 'mca', name: 'MCA Victoria', region: 'vic', sections: denSections(DEN_FORMAT_A), ratings: DEN_RATINGS_A },
   { id: 'guns_au', ns: 'guns', name: 'Firearms', region: 'au', sections: denSections(DEN_FORMAT_B), ratings: DEN_RATINGS_B },
 ];
-const DEN_OPTIONS = { hidden: [], minEng: {}, fold: true, density: 'regular', mutes: [] };
+// showGaps (decision D10, 12 November 2026): off, a desk is shown only what delivered; on, the strip, the evidence and the
+// filing check also say which channels it relies on delivered nothing, and why
+const DEN_OPTIONS = { hidden: [], minEng: {}, fold: true, density: 'regular', mutes: [], showGaps: false };
 const DEN_BOARD_KINDS = ['news', 'sig_thread', 'reddit_thread', 'petition', 'transcript'];
 const DEN_BOARD_ROWS = 4000, DEN_DAILY_CALLS = 20, DEN_BRIEF_MAX = 120000, DEN_SECTION_MAX = 20000;
 /* The strip's counts over a fortnight and a month (an issue against its own baseline, who is named for the first time, a
@@ -7809,7 +7811,7 @@ async function ensureDesks(env) {
 }
 const denJ = (s, d) => { try { const v = JSON.parse(s || ''); return v == null ? d : v; } catch (e) { return d; } };
 function deskView(r) {
-  const o = Object.assign({}, DEN_OPTIONS, denJ(r.options, {})); if (!Array.isArray(o.mutes)) o.mutes = []; if (!Array.isArray(o.hidden)) o.hidden = [];
+  const o = Object.assign({}, DEN_OPTIONS, denJ(r.options, {})); if (!Array.isArray(o.mutes)) o.mutes = []; if (!Array.isArray(o.hidden)) o.hidden = []; o.showGaps = o.showGaps === true;
   const ci = CLIENT_ISSUES.filter(c => c.ns === r.ns);
   return { id: r.id, ns: r.ns, name: r.name, client: (ci[0] && ci[0].client) || r.ns, region: r.region || 'au', cadence: r.cadence || 'daily', window_h: Number(r.window_h) || 24, sections: denJ(r.sections, []), ratings: denJ(r.ratings, DEN_RATINGS_A),
     options: o, auto_draft: !!r.auto_draft, revision: Number(r.revision) || 1, updated: r.updated || 0, updated_by: r.updated_by || '', issues: ci.map(c => ({ id: c.id, label: c.label })) };
@@ -7839,6 +7841,7 @@ async function deskUpdate(env, b, who) {
     if (Array.isArray(v.hidden)) o.hidden = v.hidden.map(x => str(x, 24)).filter(Boolean).slice(0, 20);
     if (v.minEng && typeof v.minEng === 'object') { o.minEng = {}; Object.keys(v.minEng).slice(0, 12).forEach(k => { const n = Math.max(0, Math.min(100000, Math.round(Number(v.minEng[k]) || 0))); if (n && DEN_PLATFORMS.indexOf(k) >= 0) o.minEng[k] = n; }); }
     if (v.fold != null) o.fold = !!v.fold;
+    if (v.showGaps != null) o.showGaps = v.showGaps === true;
     if (v.density != null) o.density = ['compact', 'regular', 'roomy'].indexOf(String(v.density)) >= 0 ? String(v.density) : 'regular';
     return o; };
   if (!b.id) {   // a new desk: a client, a name, and the format of a desk like it
@@ -7963,16 +7966,27 @@ async function denBoard(env, deskId, opts) {
   // recorded dates (read from a parliament's own page) lead; a stage row's own sentence is not read again as a guess
   let recorded = []; try { recorded = await processUpcoming(env, mine, now); } catch (e) { recorded = []; }
   const upcoming = recorded.concat(denUpcoming(live.filter(r => !(r.meta && r.meta.process)), now)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(0, 40);
-  return { ok: true, desk, window: win, narratives, media, social, actors, upcoming, aside, pinned: live.filter(r => r.pinned).map(r => r.id),
+  // the day's run (D10): over the three lists as listed, what is kept, what is left, and what was set aside in row units -
+  // a post counts one, a story one for its fold key and only once no live copy of it is left
+  const listed = media.concat(social, actors); const kept = listed.filter(r => r.pinned).length; const goneNews = new Set(); let asidePosts = 0;
+  rows.forEach(r => { const k = marks.get(r.id); if (!k || k.mark !== 'aside') return;
+    if (r.kind === 'news') { const key = o.fold === false ? 'r' + r.id : (denFoldKey(r.title) || 'r' + r.id); if (!folds.has(key)) goneNews.add(key); }
+    else if (r.kind === 'sig_thread' || r.kind === 'reddit_thread' || r.kind === 'transcript') asidePosts++; });
+  const progress = { total: listed.length + goneNews.size + asidePosts, kept, aside: goneNews.size + asidePosts, left: listed.length - kept };
+  return { ok: true, desk, window: win, narratives, media, social, actors, upcoming, aside, progress, pinned: live.filter(r => r.pinned).map(r => r.id),
     counts: { rows: live.length, news: news.length, media: media.length, social: social.length, actors: actors.length, narratives: narratives.length, upcoming: upcoming.length, aside: aside.length, muted: nMuted, underMinimum: nLow, otherRegions: nRegion }, capped: raw.length >= DEN_BOARD_ROWS,
     byChannel: live.reduce((a, r) => { a[r.ch] = (a[r.ch] || 0) + 1; return a; }, {}), _rows: opts.keepRows ? live : undefined };
 }
-/** Pin a row to the report, set it aside with a reason, or clear the mark. Marks are one desk's. */
+/** Pin a row to the report, set it aside with a reason, or clear the mark. Marks are one desk's. copies (at most 40 row
+ *  ids): the other copies of a folded story, so setting it aside or clearing it is one request and one decision. */
 async function denMark(env, b, who, mark) {
   b = b || {}; const desk = await deskGet(env, b.desk); if (!desk) return DESK_UNKNOWN;
   const item = parseInt(b.item, 10); if (!(item > 0)) return { ok: false, status: 400, error: 'item_required', detail: 'Say which row (item).' };
-  if (b.clear) { await env.MIND_DB.prepare('DELETE FROM den_marks WHERE desk=? AND item=?').bind(desk.id, item).run(); return { ok: true, desk: desk.id, item, mark: '' }; }
-  const row = await env.MIND_DB.prepare('SELECT id, url, title, substr(body,1,400) body, meta FROM arc_items WHERE id=?').bind(item).first();
+  const hasCopies = Array.isArray(b.copies); const copies = hasCopies ? Array.from(new Set(b.copies.map(x => parseInt(x, 10)).filter(x => x > 0 && x !== item))).slice(0, 40) : [];
+  if (b.clear) { if (!copies.length) await env.MIND_DB.prepare('DELETE FROM den_marks WHERE desk=? AND item=?').bind(desk.id, item).run();
+    else await env.MIND_DB.prepare('DELETE FROM den_marks WHERE desk=? AND item IN (' + [item].concat(copies).map(() => '?').join(',') + ')').bind(desk.id, item, ...copies).run();
+    return Object.assign({ ok: true, desk: desk.id, item, mark: '' }, hasCopies ? { copies } : {}); }
+  const row = await env.MIND_DB.prepare('SELECT id, kind, url, title, substr(body,1,400) body, meta FROM arc_items WHERE id=?').bind(item).first();
   if (!row) return { ok: false, status: 404, error: 'unknown_item', detail: 'That row is no longer held.' };
   let reason = '', mkey = '';
   if (mark === 'aside') {
@@ -7980,9 +7994,15 @@ async function denMark(env, b, who, mark) {
     if (reason.length < 3) return { ok: false, status: 400, error: 'reason_required', detail: 'Say why it is set aside (not relevant, duplicate, foreign, or your own words): the reason is what a mute is later offered on.' };
     const m = denJ(row.meta, {}); const host = denHost(row.url); mkey = m.watch ? 'account:' + m.watch : (m.term || m.q) ? 'term:' + String(m.term || m.q).toLowerCase() : host && !DISC_SOCIAL_HOSTS.test(host) ? 'domain:' + host : '';
   }
-  await env.MIND_DB.prepare('INSERT INTO den_marks(desk,item,mark,reason,mkey,by,at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(desk,item) DO UPDATE SET mark=excluded.mark, reason=excluded.reason, mkey=excluded.mkey, by=excluded.by, at=excluded.at')
-    .bind(desk.id, item, mark, reason, mkey, String(who || '').slice(0, 60), Date.now()).run();
-  const out = { ok: true, desk: desk.id, item, mark };
+  // a folded story set aside: its other copies are marked in the same batch. Only a copy that is held, is a story and folds
+  // under the head's own key is taken; the mute key stays on the head alone, so one decision counts once toward the offer
+  let also = [];
+  if (mark === 'aside' && copies.length && row.kind === 'news') { const key = denFoldKey(row.title);
+    if (key) also = (((await env.MIND_DB.prepare('SELECT id, kind, title FROM arc_items WHERE id IN (' + copies.map(() => '?').join(',') + ')').bind(...copies).all()).results) || []).filter(c => c.kind === 'news' && denFoldKey(c.title) === key).map(c => c.id); }
+  const put = (id, mk) => env.MIND_DB.prepare('INSERT INTO den_marks(desk,item,mark,reason,mkey,by,at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(desk,item) DO UPDATE SET mark=excluded.mark, reason=excluded.reason, mkey=excluded.mkey, by=excluded.by, at=excluded.at')
+    .bind(desk.id, id, mark, reason, mk, String(who || '').slice(0, 60), Date.now());
+  if (also.length) await env.MIND_DB.batch([put(item, mkey)].concat(also.map(id => put(id, '')))); else await put(item, mkey).run();
+  const out = { ok: true, desk: desk.id, item, mark }; if (mark === 'aside' && hasCopies) out.copies = also;
   if (mark === 'aside' && mkey) {   // three set-asides of the same account, site or term: offer the mute, which a person confirms
     const n = Number(((await env.MIND_DB.prepare("SELECT COUNT(*) n FROM den_marks WHERE desk=? AND mark='aside' AND mkey=?").bind(desk.id, mkey).first()) || {}).n || 0);
     const kind = mkey.split(':')[0], value = mkey.slice(kind.length + 1);
@@ -8003,8 +8023,18 @@ async function denMute(env, b, who) {
   if (!((u && u.meta && u.meta.changes) || 0)) return { ok: false, status: 409, error: 'conflict', detail: 'This desk\'s options changed while you were deciding. Nothing was saved: try again.' };
   return { ok: true, desk: await deskGet(env, desk.id) };
 }
-/** Nothing critical missed: six signals computed from the archive, no model. Each has a stable key, the ids that would
- *  show a brief covered it (cover) and words that would (words), and where its evidence opens. */
+/** A signal a brief covers: it cites one of the signal's rows, names one of its words, or (a gap) says in words that the
+ *  channel was not read. The filing check and the run's brief.open are this one test, so the two cannot disagree. */
+function denUncovered(signals, sections) {
+  sections = (sections && typeof sections === 'object') ? sections : {}; const body = Object.keys(sections).map(k => sections[k].text).join('\n'); const low = body.toLowerCase();
+  const cites = new Set(); Object.keys(sections).forEach(k => (sections[k].cites || []).forEach(c => cites.add(c)));
+  return (signals || []).filter(s => !(s.cover.some(c => cites.has(c)) || s.words.some(w => w && low.indexOf(String(w).toLowerCase()) >= 0) || (s.sig === 'gap' && new RegExp('\\b' + s.title.split(' ')[0] + '\\b[^.]{0,80}\\b(not (read|collected|available)|delivered nothing|no collector|was not)', 'i').test(body))));
+}
+/** Nothing critical missed: signals computed from the archive, no model. Five checks always (a spike, an emerging
+ *  narrative, a first-seen actor, an issue above its baseline, a post far above its account's usual); the sixth, a
+ *  collection gap, is reported only when the desk's showGaps is on (decision D10) and `checks` says which. Each signal has
+ *  a stable key, the ids that would show a brief covered it (cover) and words that would (words), and where its evidence
+ *  opens. `run` (today's window only) is the day's progress over the board and where today's brief stands. */
 async function denMissed(env, deskId, opts) {
   opts = opts || {}; const board = opts.board || await denBoard(env, deskId, Object.assign({}, opts, { keepRows: true })); if (!board.ok) return board;
   const desk = board.desk, win = board.window, mine = desk.issues.map(i => i.id); const out = []; const rows = board._rows || []; const label = id => (desk.issues.find(i => i.id === id) || {}).label || id;
@@ -8012,9 +8042,9 @@ async function denMissed(env, deskId, opts) {
   // 1 Sentinel spikes on this desk's issues
   await soft(async () => { await ensureSentinel(env);
     (((await env.MIND_DB.prepare('SELECT id, issue, label, ratio, hot, detected_ts, acked_ts FROM arc_alerts WHERE ns=? AND detected_ts>? AND detected_ts<=? ORDER BY detected_ts DESC LIMIT 20').bind(desk.ns, win.from, win.to).all()).results) || [])
-      .forEach(a => out.push({ sig: 'spike', key: 'A:' + a.id, title: 'Sentinel spike: ' + (a.label || label(a.issue)), detail: a.hot + ' stories in six hours, ' + (Math.round((Number(a.ratio) || 0) * 10) / 10) + ' times this issue\'s own baseline' + (a.acked_ts ? '. Acknowledged.' : '. Not yet acknowledged.'), cover: ['A:' + a.id], words: [], open: { view: 'sentinel' }, at: a.detected_ts })); });
+      .forEach(a => out.push({ sig: 'spike', key: 'A:' + a.id, title: 'Sentinel spike: ' + (a.label || label(a.issue)), detail: a.hot + ' stories in six hours, ' + (Math.round((Number(a.ratio) || 0) * 10) / 10) + ' times this issue\'s own baseline' + (a.acked_ts ? '. Acknowledged.' : '. Not yet acknowledged.'), cover: ['A:' + a.id], words: [], open: { view: 'sentinel' }, at: a.detected_ts, issue: a.issue })); });
   // 2 narratives that became emerging in the window
-  board.narratives.filter(n => n.status === 'emerging' && n.first >= win.from - 48 * 3600000).forEach(n => out.push({ sig: 'emerging', key: 'N:' + n.id, title: 'Emerging narrative: ' + n.label, detail: n.n + ' rows, ' + n.n24 + ' in the last day' + (n.side ? ', ' + n.side + ' toward the client' : ''), cover: ['N:' + n.id], words: [], open: { view: 'narratives', params: { id: n.id } }, at: n.first }));
+  board.narratives.filter(n => n.status === 'emerging' && n.first >= win.from - 48 * 3600000).forEach(n => out.push({ sig: 'emerging', key: 'N:' + n.id, title: 'Emerging narrative: ' + n.label, detail: n.n + ' rows, ' + n.n24 + ' in the last day' + (n.side ? ', ' + n.side + ' toward the client' : ''), cover: ['N:' + n.id], words: [], open: { view: 'narratives', params: { id: n.id } }, at: n.first, issues: n.issues }));
   // 3 first-seen actors: a registered account, or a register entity, on this desk's issues for the first time in fourteen days
   const wIds = Array.from(new Set(rows.filter(r => r.w).map(r => r.w.id)));
   // the slow figures (DEN_SLOW_TTL): counted once for this desk and window, read from the cache until then
@@ -8043,10 +8073,12 @@ async function denMissed(env, deskId, opts) {
       return hist; }); if (!usual) return; const hist = new Map(Object.keys(usual).map(k => [k, usual[k]]));
     rows.filter(r => r.w && hist.has(r.w.id) && hist.get(r.w.id).length >= 4).forEach(r => { const h = hist.get(r.w.id).slice().sort((a, b) => a - b); const med = h[Math.floor(h.length / 2)]; if (r.total >= Math.max(20, 4 * Math.max(1, med)))
       out.push({ sig: 'outlier', key: 'S:' + r.id, title: (r.w.actor_kind ? (r.w.name || r.w.value) : 'A registered ' + (DEN_CH_NAME[r.w.platform] || r.w.platform) + ' account') + ': one post is drawing far more than usual', detail: r.total + ' interactions against a usual ' + med + ' (the middle of its last ' + h.length + ' posts).', cover: ['S:' + r.id, 'P:' + r.id], words: [], open: { item: r.id, url: r.url }, at: r.ts }); }); });
-  // 6 collection gaps: a channel this desk relies on that delivered nothing, with why
-  await soft(async () => { const reach = await reachView(env); const act = await denActive(env, desk.ns); const relied = new Set(['news']);
+  // 6 collection gaps: a channel this desk relies on that delivered nothing, with why. Said only when the desk's showGaps
+  //   is on (D10). What the desk relied on is counted and cached either way, so the cache is whole when the option is switched on
+  await soft(async () => { const rel = await slowly('relied', async () => (((await env.MIND_DB.prepare("SELECT DISTINCT COALESCE(json_extract(meta,'$.platform'), 'reddit') p FROM arc_items WHERE kind IN ('sig_thread','reddit_thread') AND ts>? AND ts<=? LIMIT 20").bind(win.from - 7 * 86400000, win.from).all()).results) || []).map(x => x.p)); if (desk.options.showGaps !== true) return;
+    const reach = await reachView(env); const act = await denActive(env, desk.ns); const relied = new Set(['news']);
     act.filter(r => r.kind === 'account').forEach(r => relied.add(r.platform));
-    ((await slowly('relied', async () => (((await env.MIND_DB.prepare("SELECT DISTINCT COALESCE(json_extract(meta,'$.platform'), 'reddit') p FROM arc_items WHERE kind IN ('sig_thread','reddit_thread') AND ts>? AND ts<=? LIMIT 20").bind(win.from - 7 * 86400000, win.from).all()).results) || []).map(x => x.p))) || []).forEach(p => { if (['x', 'facebook', 'instagram', 'youtube', 'reddit', 'bluesky'].indexOf(p) >= 0) relied.add(p); });
+    (rel || []).forEach(p => { if (['x', 'facebook', 'instagram', 'youtube', 'reddit', 'bluesky'].indexOf(p) >= 0) relied.add(p); });
     const NAME = DEN_CH_NAME;
     Array.from(relied).filter(p => !(board.byChannel[p] > 0) && NAME[p]).forEach(p => { const src = p === 'youtube' ? 'ytsearch' : p; const rp = (reach.platforms || []).find(x => x.source === src) || null; const why = [];
       if (p === 'news') why.push('No story on this desk\'s issues' + (desk.region !== 'au' ? ' in this region' : '') + ' was filed in the window. Check Sources for failing feeds before reading it as a quiet day.');
@@ -8059,28 +8091,39 @@ async function denMissed(env, deskId, opts) {
   const order = { gap: 0, spike: 1, emerging: 2, outlier: 3, first_seen: 4, burst: 5 };
   out.sort((a, b) => (order[a.sig] - order[b.sig]) || (b.at - a.at));
   if (useCache && !cached && !slow.failed) { try { await kvPut(env.AXIOM_KV, sk, JSON.stringify(slow), DEN_SLOW_TTL); } catch (e) {} }
-  return { ok: true, desk: desk.id, window: win, signals: out, counts: out.reduce((a, s) => { a[s.sig] = (a[s.sig] || 0) + 1; return a; }, {}), clear: !out.length, slow: { cached, at: slow.at, every: DEN_SLOW_TTL } };
+  // the day's run: not for a past window. brief is today's, in the shape the page needs to say where the day stands
+  let run = null;
+  if (!opts.to) { let brief = null;
+    await soft(async () => { const r = await env.MIND_DB.prepare('SELECT id, day, status, revision, sections, filed_by, filed_at FROM den_briefs WHERE desk=? AND day=?').bind(desk.id, win.day).first(); if (!r) return;
+      const secs = denJ(r.sections, {}); const keys = Object.keys(secs); const cited = new Set();
+      keys.forEach(k => (secs[k].cites || []).forEach(c => { const m = /^[MSP]:(\d+)$/.exec(String(c)); if (m) cited.add(Number(m[1])); }));
+      brief = { id: r.id, day: r.day, status: r.status, revision: Number(r.revision) || 1, edited: keys.some(k => !!secs[k].edited), written: keys.map(k => secs[k].text).join('\n').replace(/\s/g, '').length,
+        cited: Array.from(cited), open: denUncovered(out, secs).map(s => s.key), filed_by: r.filed_by || '', filed_at: Number(r.filed_at) || 0 }; });
+    run = { day: win.day, progress: board.progress || null, brief }; }
+  return { ok: true, desk: desk.id, window: win, signals: out, counts: out.reduce((a, s) => { a[s.sig] = (a[s.sig] || 0) + 1; return a; }, {}), clear: !out.length, checks: desk.options.showGaps === true ? 6 : 5, run, slow: { cached, at: slow.at, every: DEN_SLOW_TTL } };
 }
 /** The evidence a draft is written from. Every line carries an id; the map says what each id is, for the checks and for
  *  the Source List. A subscriber row gives the model thirty words and no more. */
 async function denEvidence(env, desk, board, missed, pins) {
   const ev = new Map(); const L = []; const when = t => { const d = new Date(t + auOffsetMs(t)); return d.getUTCDate() + ' ' + DEN_MONTHS[d.getUTCMonth()].slice(0, 3) + ' ' + String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); };
   const pinned = new Set((pins || []).map(Number).concat(board.pinned || [])); const one = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const gaps = desk.options.showGaps === true;   // D10: off, the evidence holds what was collected and is silent about the rest
   const put = (id, rec, line) => { ev.set(id, Object.assign(rec, { line })); L.push('[' + id + '] ' + line); };
   L.push('DESK: ' + desk.name + ' (' + desk.client + '). REPORTING WINDOW: ' + board.window.label + ', ' + board.window.hours + ' hours. ISSUES: ' + desk.issues.map(i => i.label).join('; ') + '.');
   if (missed && missed.signals.length) { L.push('', 'SIGNALS NOT TO MISS (computed from the archive)'); missed.signals.forEach(s => { if (/^A:/.test(s.key)) put(s.key, { k: 'alert', label: s.title }, s.title + '. ' + s.detail); else L.push('- ' + s.title + '. ' + s.detail + (s.sig === 'gap' ? ' SAY PLAINLY THAT THIS CHANNEL WAS NOT READ: its absence is not evidence of quiet.' : '')); }); }
   L.push('', 'KEY NARRATIVES (' + board.narratives.length + ')'); board.narratives.slice(0, 10).forEach(n => put('N:' + n.id, { k: 'narrative', label: n.label }, '"' + one(n.label) + '" | claim: ' + one(n.claim).slice(0, 200) + ' | ' + n.n + ' rows, ' + n.n24 + ' in the last day, ' + (n.status || 'steady') + ' | toward the client: ' + (n.side || 'unknown') + ' | taken up by: ' + (n.spread.join(' > ') || 'unknown')));
   let gt = {}; const gIds = board.media.filter(m => m.gated).map(m => m.id); if (gIds.length) { try { gt = await gatedTexts(env, gIds.slice(0, 40)); } catch (e) { gt = {}; } }
   const med = board.media.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
-  L.push('', 'TRADITIONAL MEDIA (' + board.counts.news + ' stories, ' + board.media.length + ' after folding syndicated copies; ' + med.length + ' shown)');
+  if (gaps || med.length) L.push('', 'TRADITIONAL MEDIA (' + board.counts.news + ' stories, ' + board.media.length + ' after folding syndicated copies; ' + med.length + ' shown)');
   med.forEach(m => put('M:' + m.id, { k: 'media', label: m.outlet + ' - ' + m.title, url: m.url, gated: m.gated, item: m.id }, (pinned.has(m.id) ? 'PINNED | ' : '') + m.outlet + (m.tier ? ' (' + m.tier + (m.juris && m.juris !== 'au' ? ', ' + m.juris : '') + ')' : '') + ' | ' + when(m.ts) + ' | ' + one(m.title) + (m.n > 1 ? ' | also carried by ' + (m.n - 1) + ' other outlet' + (m.n === 2 ? '' : 's') : '')
     + (m.claim ? ' | ' + claimLine(m.claim) : '') + (m.fb ? ' | Facebook: ' + (Number(m.fb.reactions) || 0) + ' reactions, ' + (Number(m.fb.comments) || 0) + ' comments, ' + (Number(m.fb.shares) || 0) + ' shares' : '') + (m.gated ? ' | SUBSCRIBER TEXT, QUOTE AT MOST THIRTY WORDS: ' + gatedExcerpt(gt[m.id] || m.summary) : m.summary ? ' | ' + one(m.summary).slice(0, 220) : '')));
-  const engLine = s => (s.eng ? [['likes', 'likes'], ['comments', 'comments'], ['shares', 'shares'], ['reposts', 'reposts'], ['replies', 'replies'], ['views', 'views']].filter(k => Number(s.eng[k[0]]) > 0).map(k => s.eng[k[0]] + ' ' + k[1]).join(', ') : (s.total ? s.total + ' interactions' : '')) || 'no counts held';
+  const engLine = s => (s.eng ? [['likes', 'likes'], ['comments', 'comments'], ['shares', 'shares'], ['reposts', 'reposts'], ['replies', 'replies'], ['views', 'views']].filter(k => Number(s.eng[k[0]]) > 0).map(k => s.eng[k[0]] + ' ' + k[1]).join(', ') : (s.total ? s.total + ' interactions' : '')) || (gaps ? 'no counts held' : '');
+  const engBit = s => { const e = engLine(s); return e ? ' | ' + e : ''; };
   const soc = board.social.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
-  L.push('', 'SOCIAL (' + board.social.length + ' posts held; ' + soc.length + ' shown; authors are not recorded and must not be guessed)');
-  soc.forEach(s => put('S:' + s.id, { k: 'social', label: s.platform + ' post', url: s.url, item: s.id, platform: s.platform }, (pinned.has(s.id) ? 'PINNED | ' : '') + s.platform + (s.sub ? ' r/' + s.sub : '') + ' | ' + when(s.ts) + ' | ' + one(s.text).slice(0, 240) + ' | ' + engLine(s) + (s.growth != null && s.growth > 0 ? ' | +' + s.growth + ' since yesterday\'s read' : '') + (s.held ? ' | ' + s.held.n + ' comments held, tone ' + s.held.tone : '')));
-  L.push('', 'INFLUENCER AND POLITICAL (registered public actors and MPs, on their own posts; these may be named)');
-  board.actors.slice(0, 20).forEach(a => put('P:' + a.id, { k: 'actor', label: a.who + ' on ' + a.platform, url: a.url, item: a.id, who: a.who, platform: a.platform }, (pinned.has(a.id) ? 'PINNED | ' : '') + a.who + ' (' + (a.role === 'mp' ? 'MP' + (a.party ? ', ' + a.party : '') : a.role) + ') on ' + a.platform + ' | ' + when(a.ts) + ' | ' + one(a.text).slice(0, 240) + ' | ' + engLine(a)));
+  if (gaps || soc.length) L.push('', 'SOCIAL (' + board.social.length + ' posts held; ' + soc.length + ' shown; authors are not recorded and must not be guessed)');
+  soc.forEach(s => put('S:' + s.id, { k: 'social', label: s.platform + ' post', url: s.url, item: s.id, platform: s.platform }, (pinned.has(s.id) ? 'PINNED | ' : '') + s.platform + (s.sub ? ' r/' + s.sub : '') + ' | ' + when(s.ts) + ' | ' + one(s.text).slice(0, 240) + engBit(s) + (s.growth != null && s.growth > 0 ? ' | +' + s.growth + ' since yesterday\'s read' : '') + (s.held ? ' | ' + s.held.n + ' comments held, tone ' + s.held.tone : '')));
+  if (gaps || board.actors.length) L.push('', 'INFLUENCER AND POLITICAL (registered public actors and MPs, on their own posts; these may be named)');
+  board.actors.slice(0, 20).forEach(a => put('P:' + a.id, { k: 'actor', label: a.who + ' on ' + a.platform, url: a.url, item: a.id, who: a.who, platform: a.platform }, (pinned.has(a.id) ? 'PINNED | ' : '') + a.who + ' (' + (a.role === 'mp' ? 'MP' + (a.party ? ', ' + a.party : '') : a.role) + ') on ' + a.platform + ' | ' + when(a.ts) + ' | ' + one(a.text).slice(0, 240) + engBit(a)));
   if (board.upcoming.length) { L.push('', 'UPCOMING (dates as written in the rows; RECORDED marks a date read from a parliament\'s own page)'); board.upcoming.slice(0, 15).forEach((u, i) => put('U:' + (i + 1), { k: 'upcoming', label: u.date + ' ' + u.event, url: u.url, item: u.item }, u.weekday + ' ' + u.date + ' | ' + (u.recorded ? 'RECORDED | ' : '') + u.event + ' | ' + one(u.what))); }
   try { await ensureSentiment(env); const mine = desk.issues.map(i => i.id);
     for (const id of mine) { const r = await env.MIND_DB.prepare('SELECT COUNT(*) n, AVG(tone) a, SUM(tone<0) neg, SUM(tone>0) pos FROM sent_items WHERE ts>? AND ts<=? AND issues LIKE ?').bind(board.window.from, board.window.to, '%"' + id + '"%').first();
@@ -8098,11 +8141,13 @@ const DEN_KIND_GUIDE = { summary: 'four to six sentences: the day in order of im
   implications: 'what this means for the client, concretely', bottom: 'two or three sentences a director can repeat', posture: 'one paragraph on what the client should do now, opening with the client\'s name' };
 function denSys(desk, only) {
   const secs = desk.sections.filter(s => s.kind !== 'sources' && desk.options.hidden.indexOf(s.id) < 0 && (!only || s.id === only));
+  // D10: unless the desk's showGaps is on, the model is asked to write about what the evidence holds and nothing about what is absent
+  const gaps = desk.options.showGaps === true; const guide = k => { const g = DEN_KIND_GUIDE[k] || 'as its title says'; return gaps ? g : g.replace('; say which channels were not read', ''); };
   return 'You are a senior monitoring analyst at an Australian public affairs agency, writing the ' + desk.cadence + ' activist-activity brief for ' + desk.client + ' (' + desk.name + '). You are given the reporting window\'s evidence. Every line of evidence has an id in square brackets.\n\n'
     + 'RULES\n- Write only from the evidence. After every factual sentence put the id or ids it rests on, in square brackets exactly as given, e.g. [M:1234] or [S:88][N:abc]. Never invent an id.\n- Every figure you write must be in the evidence line you cite.\n'
     + '- Name a person or an organisation only when the evidence line names them. Social posts carry no author: never guess one, and never name a private individual.\n- A line marked SUBSCRIBER TEXT may be quoted for at most thirty words.\n- A line marked PINNED must be covered.\n'
-    + '- If the evidence says a channel was not read, say so plainly in the section it belongs to. Do not read silence as calm.\n- Plain, exact Australian English. No headings inside a section, no bullet symbols, no markdown. Separate paragraphs with a blank line.\n\n'
-    + 'SECTIONS (use these ids as the keys)\n' + secs.map(s => '- ' + s.id + ' ("' + s.title + '"): ' + (DEN_KIND_GUIDE[s.kind] || 'as its title says')).join('\n') + '\n\n'
+    + (gaps ? '- If the evidence says a channel was not read, say so plainly in the section it belongs to. Do not read silence as calm.' : '- Write about what the evidence holds. Do not write about a channel, a source or collection that is absent from it. Leave a section short rather than saying nothing was collected for it.') + '\n- Plain, exact Australian English. No headings inside a section, no bullet symbols, no markdown. Separate paragraphs with a blank line.\n\n'
+    + 'SECTIONS (use these ids as the keys)\n' + secs.map(s => '- ' + s.id + ' ("' + s.title + '"): ' + guide(s.kind)).join('\n') + '\n\n'
     + (only ? '' : 'RATINGS\n' + desk.ratings.items.map(i => '- ' + i.id + ' ("' + i.label + '"): level is one of ' + desk.ratings.levels.join(' | ') + (i.trend ? '; trend is one of ' + desk.ratings.trends.join(' | ') : '')).join('\n') + '\n\n')
     + 'Answer with strict JSON only: {"sections":{' + secs.map(s => '"' + s.id + '":"..."').join(',') + '}' + (only ? '' : ',"ratings":{' + desk.ratings.items.map(i => '"' + i.id + '":{"level":""' + (i.trend ? ',"trend":""' : '') + '}').join(',') + '}') + '}';
 }
@@ -8164,7 +8209,7 @@ async function denBriefDraft(env, b, who) {
   const old = await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE desk=? AND day=?').bind(desk.id, board.window.day).first();
   if (old && old.status === 'filed') return { ok: false, status: 409, error: 'brief_filed', detail: 'The brief for ' + board.window.day + ' is filed. A filed brief is not redrafted: reopen it first if it must change.', brief: denBriefView(old, desk) };
   if (old && !b.replace && Object.keys(denJ(old.sections, {})).some(k => denJ(old.sections, {})[k].edited)) return { ok: false, status: 409, error: 'edited_brief', detail: 'This draft has sections a person has edited. Drafting again would replace them: regenerate one section instead, or send replace to start over.', brief: denBriefView(old, desk) };
-  if (!board.counts.rows && !board.narratives.length) return { ok: false, status: 409, error: 'no_evidence', detail: 'Nothing on this desk was collected in the window, so there is nothing to draft from. The Collection tab says which channels delivered and why not.' };
+  if (!board.counts.rows && !board.narratives.length) return { ok: false, status: 409, error: 'no_evidence', detail: desk.options.showGaps === true ? 'Nothing on this desk was collected in the window, so there is nothing to draft from. The Collection tab says which channels delivered and why not.' : 'There is no story or post on this desk in this window yet, so there is nothing to draft from. A brief can still be written by hand.' };
   const budget = await denBudget(env); if (budget.left <= 0) return { ok: false, status: 429, error: 'budget_exhausted', detail: 'Today\'s ' + budget.cap + ' Den model calls are used (DEN_DAILY_CALLS). Nothing was sent.' };
   // one draft at a time for a desk's day: a second press, or a second person, does not pay for the same brief twice
   const lk = 'den_drafting_' + desk.id + '_' + board.window.day; let held = null; try { held = JSON.parse((await kvGet(env.AXIOM_KV, lk)) || 'null'); } catch (e) { held = null; }
@@ -8247,9 +8292,8 @@ async function denBriefFile(env, b, who) {
   if (row.status === 'filed') return { ok: true, brief: denBriefView(row, desk), already: true };
   if (Number(b.revision) !== Number(row.revision)) return denStale(row, desk);
   const sections = denJ(row.sections, {}); const body = Object.keys(sections).map(k => sections[k].text).join('\n'); if (body.replace(/\s/g, '').length < 200) return { ok: false, status: 409, error: 'brief_empty', detail: 'There is too little written to file. Draft it or write it first.' };
-  const cites = new Set(); Object.keys(sections).forEach(k => (sections[k].cites || []).forEach(c => cites.add(c))); const low = body.toLowerCase();
   const board = await denBoard(env, desk, { hours: row.window_h, to: row.to_ts, keepRows: true }); const missed = await denMissed(env, desk, { board });
-  const open = missed.signals.filter(s => !(s.cover.some(c => cites.has(c)) || s.words.some(w => w && low.indexOf(String(w).toLowerCase()) >= 0) || (s.sig === 'gap' && new RegExp('\\b' + s.title.split(' ')[0] + '\\b[^.]{0,80}\\b(not (read|collected|available)|delivered nothing|no collector|was not)', 'i').test(body))));
+  const open = denUncovered(missed.signals, sections);
   if (open.length && !b.acknowledge) return { ok: false, status: 409, error: 'uncited_signals', detail: open.length + ' thing' + (open.length === 1 ? '' : 's') + ' on the strip ' + (open.length === 1 ? 'is' : 'are') + ' not in this brief. Read the list, then file anyway or go back.', signals: open.map(s => ({ sig: s.sig, key: s.key, title: s.title, detail: s.detail })) };
   const u = await env.MIND_DB.prepare("UPDATE den_briefs SET status='filed', filed_by=?, filed_at=?, acknowledged=?, revision=revision+1, updated=? WHERE id=? AND revision=?").bind(String(who || '').slice(0, 60), Date.now(), JSON.stringify(open.map(s => s.key)), Date.now(), row.id, row.revision).run();
   if (!((u && u.meta && u.meta.changes) || 0)) return denStale(await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE id=?').bind(row.id).first(), desk);
@@ -8275,7 +8319,11 @@ function denBriefDoc(v, desk, fmt) {
   if (v.sourceList.length) md.push('## Source List\n\n' + v.sourceList.map(g => '### ' + g.group + '\n\n' + g.items.map((i, n) => (n + 1) + '. ' + i.label + ' - ' + i.url).join('\n')).join('\n\n') + '\n');
   return md.join('\n');
 }
-/** Which channels read for this desk, how, and what each delivered; the gated sources; the last recall result. */
+/** A channel the default Collection lists (D10): it delivered for this desk in seven days, and its signed-in collector is
+ *  neither switched off nor paused at a verification. A collector that is simply not connected now does not unlist it. */
+const denChWorking = c => !!(c && c.delivered && c.delivered.d7 > 0 && !(c.collector && (c.collector.off || c.collector.challenge)));
+/** Which channels read for this desk, how, and what each delivered; the gated sources; the last recall result. Each
+ *  channel also carries working (above), howOn (how, with only the routes that are set) and setup (what switches it on). */
 async function denCollection(env, deskId) {
   const desk = await deskGet(env, deskId); if (!desk) return DESK_UNKNOWN; await ensureArchive(env); const now = Date.now(); const mine = desk.issues.map(i => i.id);
   const reach = await reachView(env); const act = await denActive(env, desk.ns); const rp = s => (reach.platforms || []).find(x => x.source === s) || null;
@@ -8295,6 +8343,14 @@ async function denCollection(env, deskId) {
     { id: 'hansard', label: 'Hansard', how: env.OPENAUSTRALIA_KEY ? 'Layer 3: OpenAustralia, the desk\'s terms in both houses, once a sitting day.' : 'Layer 3 is not set: add the secret OPENAUSTRALIA_KEY (free, openaustralia.org.au/api).', collect: '', collector: null, worker: !!env.OPENAUSTRALIA_KEY, cannot: 'State parliaments\' Hansard.' },
     { id: 'counters', label: 'Campaign petition counters', how: 'Layer 3: the count a campaign prints on its own page, once a day. Self-reported by the campaign, and said so wherever it is shown.', collect: '', collector: null, worker: true, cannot: 'change.org (it refuses automated readers).' },
   ].map(c => Object.assign(c, { delivered: pub[c.id] ? Object.assign({ layers: {} }, pub[c.id], { layers: { 3: 1 } }) : (got[c.id] || { d1: 0, d7: 0, last: 0, layers: {}, days: [0, 0, 0, 0, 0, 0, 0] }) })).map(c => Object.assign(c, { delivered: Object.assign({}, c.delivered, { layers: Object.keys(c.delivered.layers).map(Number).sort() }) }));
+  const fbOn = !!(env.META_TOKEN && String(env.META_PUBLIC_PAGES || '') === '1'), igOn = !!igConfigured(env), rdOn = !!(env.REDDIT_CLIENT_ID && env.REDDIT_CLIENT_SECRET), haOn = !!env.OPENAUSTRALIA_KEY;
+  const HOW_ON = { facebook: (fbOn ? 'Layer 1: public pages through the Graph API. ' : '') + 'Layer 2: keyword search on the Mac.', instagram: (igOn ? 'Layer 1: registered accounts and hashtags through the Graph API. ' : '') + 'Layer 2: registered accounts\' posts on the Mac.',
+    reddit: 'Layer 2 on the Mac, or the worker with app credentials.', hansard: haOn ? '' : 'Layer 3: OpenAustralia, once the secret OPENAUSTRALIA_KEY is added (free, openaustralia.org.au/api).' };
+  const signIn = name => 'Sign in to ' + name + ' on the Mac collector and leave it running, then Collect now.';
+  const SETUP = { news: 'Add or repair feeds in Sources.', x: signIn('X'), facebook: signIn('Facebook') + (fbOn ? '' : ' The official route opens with Page Public Content Access.'), instagram: signIn('Instagram') + (igOn ? '' : ' The official route opens when META_IG_USER is set.'),
+    youtube: signIn('YouTube'), reddit: signIn('Reddit') + (rdOn ? '' : ' Or add app credentials to the worker.'), bluesky: 'Add an account or a term in Watch, then Collect now.', parliament: 'Watch a bill or inquiry page below.',
+    hansard: haOn ? 'The secret OPENAUSTRALIA_KEY is set: it reads the desk\'s terms once a sitting day.' : 'Add the secret OPENAUSTRALIA_KEY (free, openaustralia.org.au/api).', counters: 'Add a campaign counter below.' };
+  CH.forEach(c => { c.working = denChWorking(c); c.howOn = HOW_ON[c.id] || c.how; c.setup = SETUP[c.id] || ''; });
   let gated = []; try { await ensureSources(env); await ensureGated(env); gated = (((await env.MIND_DB.prepare('SELECT id, name, tier, access, cleared_by, cleared_at FROM sources ORDER BY name LIMIT 1000').all()).results) || []).map(s => ({ id: s.id, name: s.name, access: sourceAccessOf(s), cleared: Number(s.cleared_at) > 0, cleared_by: s.cleared_by || '', cleared_at: Number(s.cleared_at) || 0 })).filter(s => GATED_NEEDS_CLEARANCE.indexOf(s.access) >= 0).slice(0, 80); } catch (e) { gated = []; }
   let backtest = null; try { backtest = JSON.parse((await kvGet(env.AXIOM_KV, 'den_backtest_' + desk.id)) || 'null'); } catch (e) { backtest = null; }
   return { ok: true, desk: desk.id, channels: CH, reach: { off: reach.off, agents: reach.agents, challenges: reach.challenges }, hashtags: await igHashtagLedger(env), gated, backtest, notBuilt: ['TikTok, Threads and LinkedIn are not collected: no usable route, and no link to any of them in the reports read.', 'Today\'s reads against each platform\'s cap are counted on the Mac (its settings file), not here.'] };
@@ -10027,7 +10083,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-12.studio-p64';
+const AXIOM_BUILD = '2026-11-12.studio-p65';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
