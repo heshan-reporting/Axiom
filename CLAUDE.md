@@ -807,8 +807,8 @@ because it exists. **Every address and every answer shape below is unverified un
   already behind. `sourceWaitMs(s, ok)`: one failure changes nothing, from the second in a row the wait doubles, a dead
   source (six) is asked once a day, a success restores the schedule - a failing source walks every method it has and
   was retried at full pace forever. `sourcesPerTick(env)`: the var `SOURCES_PER_TICK` (1 to 150) raises what a tick
-  reads once `lastSweep.ms` on `GET /sources` shows there is time. **More rows make every archive scan dearer** (the
-  p61 overload): the tags-by-item table proposed in `DEN.md` s.6.9 is still the lasting fix and is not built.
+  reads once `lastSweep.ms` on `GET /sources` shows there is time. **More rows made every archive read dearer** (the
+  p61 overload) until the `(kind, ts)` index of p64, below; the tags-by-item table proposed in `DEN.md` s.6.9 is not built.
 - In the app: Signals tabs Lemmy, Hacker News, Forums and Web comments (one Sweep job, `community`); the Coverage
   table rows `lemmy`, `hn`, `web` and a rewritten `forums`; the Sources view labels the methods and the Community
   tier and has fields for a forum feed, a Lemmy instance and Hacker News words, so a person adds a community source
@@ -836,6 +836,23 @@ because it exists. **Every address and every answer shape below is unverified un
   the comment pass looks through `WP_COMMENT_SOURCES` = 12 WordPress sites a run, in turn (KV `wpc_cur`), since that
   read looks inside `meta`. Harnesses: the busy-database case in `tests/diagnostics-worker.mjs` (4), the refused-poll
   cases in `tests/reach-agent-test.py` (45), WN12 in `tests/widenet-worker.mjs` (12).
+- **Why the database was busy: the archive had no index for "this kind, since this time" (build
+  `2026-11-12.studio-p64`).** With p63 live the collector said it in words: the database is busy, poll after poll.
+  D1 runs one statement at a time. Of the 65 distinct statements a tick and the main screens run on `arc_items`, 59
+  filter on a kind and a time window, and with only `(kind, url)` and `(ts)` to choose from SQLite takes the first -
+  every row of that kind ever held (136,564 news rows on 12 November, article text included) - because an equality
+  looks cheaper to it than a range (`EXPLAIN QUERY PLAN` says `arc_items_kurl (kind=?)`). **`arc_items_kind_ts
+  (kind, ts)`** makes the same statements walk the window only. It is made apart from `ensureArchive`
+  (`archiveIndexEnsure`, `ARC_INDEXES`): at the top of the tick, once, remembered in KV `arc_idx_v2`; a refusal is soft
+  and tried again on the next tick; `POST /archive/index` (full) makes it now and says how long it took, `GET
+  /archive/index` (read) lists what exists and what is missing. **A new read of the archive must name its kind and its
+  window**, and a new statement that filters neither way needs its own reason. The public `/archive/stats`, asked by
+  every page load, is counted once in ten minutes (KV `arc_stats_v1`, `cached: true`), its by-source count is held to
+  the time index (`INDEXED BY arc_items_ts`; left alone the planner walked the whole table by source) and its four
+  issue counts are one pass. On a local copy shaped like the live archive (172,470 rows, 553 MB) four of the tick's
+  and screens' statements went from 156-187 ms to 1-26 ms and the index built in 0.2 s; **D1 itself was not timed.**
+  Still whole-kind by design, and small today: reads with no window (`/signals/status`, held comments by thread).
+  Harness: `tests/archive-index-worker.mjs` (4).
 
 ## Sentiment by party, person, organisation and topic (Phase 3)
 

@@ -4564,6 +4564,39 @@ async function ensureArchive(env) {
     of rows D1 actually wrote (falls back to the attempted count when the driver
     reports no change counts). `strict` rethrows instead of swallowing errors so
     bulk loaders hear about failures instead of a silent 0. */
+/* The archive's second-generation indexes. Nearly every read of the archive says "this kind, since this time", and with
+ * only (kind, url) and (ts) to choose from SQLite answers it through the first - every row of that kind ever held, article
+ * text and all - because an equality looks cheaper to it than a range. D1 runs one statement at a time, so one such read
+ * of 136,000 news rows made everything behind it wait and be refused as "overloaded" (12 November 2026). (kind, ts) makes
+ * the same reads walk the window only. It is made apart from ensureArchive, on purpose: building it on a large table
+ * takes seconds, and a setup batch that timed out would leave the archive unusable. */
+const ARC_INDEXES = [['arc_items_kind_ts', 'CREATE INDEX IF NOT EXISTS arc_items_kind_ts ON arc_items(kind, ts)']];
+async function archiveIndexList(env) {
+  const rows = ((await env.MIND_DB.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='arc_items'").all()).results) || [];
+  return rows.map(r => String(r.name || '')).filter(Boolean);
+}
+/** Make what is missing, once. `force` asks the database even when KV says it was done. A refusal changes nothing and is
+ *  not remembered, so the next tick tries again. */
+async function archiveIndexEnsure(env, opts) {
+  opts = opts || {};
+  if (!env.MIND_DB) return { ok: false, made: [], error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  if (!opts.force && (await kvGet(env.AXIOM_KV, 'arc_idx_v2'))) return { ok: true, known: true, made: [] };
+  const t0 = Date.now(); const made = [];
+  try {
+    await ensureArchive(env);
+    let have = null; try { have = await archiveIndexList(env); } catch (e) { have = null; }
+    for (const [name, sql] of ARC_INDEXES) {
+      if (have && have.indexOf(name) >= 0) continue;
+      await env.MIND_DB.prepare(sql).run(); made.push(name);
+    }
+  } catch (e) {
+    const busy = denBusy(e);
+    return { ok: false, made, ms: Date.now() - t0, error: busy ? 'db_busy' : 'index_failed',
+      detail: (busy ? 'The database is too busy to build the index right now; it will be tried again on the next tick. ' : 'The index was not made: ') + axRedact(String((e && e.message) || e)).slice(0, 160) };
+  }
+  await kvPut(env.AXIOM_KV, 'arc_idx_v2', String(Date.now()), 30 * 86400);
+  return { ok: true, made, ms: Date.now() - t0 };
+}
 async function archiveItems(env, kind, rows, strict) {
   try {
     if (!rows || !rows.length) return 0;
@@ -10027,7 +10060,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-12.studio-p63';
+const AXIOM_BUILD = '2026-11-12.studio-p64';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -18016,7 +18049,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -21225,9 +21258,21 @@ const AXIOM_WORKER = {
       } catch (e) { return jsonResp({ ok: false, error: 'perf_failed', detail: String(e).slice(0, 200) }, 500); }
     }
 
+    // GET /archive/index (read): which indexes the archive has and which it still wants. POST (full): make the missing ones
+    // now and say how long it took - the owner's way to do it at a quiet moment instead of waiting for the tick.
+    if (path === '/archive/index') {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      if (req.method === 'POST') { const r = await archiveIndexEnsure(env, { force: true }); return jsonResp(r, r.ok ? 200 : (r.error === 'db_busy' ? 503 : 500)); }
+      await ensureArchive(env); const have = await archiveIndexList(env);
+      return jsonResp({ ok: true, indexes: have, wanted: ARC_INDEXES.map(x => x[0]), missing: ARC_INDEXES.map(x => x[0]).filter(n => have.indexOf(n) < 0),
+        note: 'arc_items_kind_ts lets a read of one kind since a time walk that window only. Without it every such read walks every row of that kind.' });
+    }
     if (path === '/archive/stats') {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Create the D1 database and uncomment the MIND_DB binding in wrangler.toml.' }, 501);
       try {
+        // public, and asked by every page load: counted once in ten minutes
+        const held = await kvGet(env.AXIOM_KV, 'arc_stats_v1');
+        if (held) { try { const o = JSON.parse(held); if (o && o.ok) return jsonResp(Object.assign(o, { cached: true })); } catch (e) {} }
         await ensureArchive(env);
         const wk = Date.now() - 7 * 86400000;
         // issue relevance: how much of the last 7 days speaks to the fights our clients are in
@@ -21239,18 +21284,23 @@ const AXIOM_WORKER = {
         ];
         const stmts = [
           env.MIND_DB.prepare('SELECT kind, COUNT(*) c FROM arc_items GROUP BY kind'),
-          env.MIND_DB.prepare('SELECT src, COUNT(*) c FROM arc_items WHERE ts>? GROUP BY src ORDER BY c DESC LIMIT 200').bind(wk),
+          // by the time index: left to itself the planner walks the source index, which is every row of the table
+          env.MIND_DB.prepare('SELECT src, COUNT(*) c FROM arc_items INDEXED BY arc_items_ts WHERE ts>? GROUP BY src ORDER BY c DESC LIMIT 200').bind(wk),
           env.MIND_DB.prepare('SELECT COUNT(*) c, COUNT(DISTINCT sid) s FROM arc_convo'),
           env.MIND_DB.prepare("SELECT date(ts/1000,'unixepoch') d, COUNT(*) c FROM arc_items WHERE ts>? GROUP BY d ORDER BY d").bind(Date.now() - 14 * 86400000),
-        ].concat(ISS.map(([, a, b]) =>
-          env.MIND_DB.prepare('SELECT COUNT(*) c FROM arc_items WHERE ts>? AND (title LIKE ? OR title LIKE ?)').bind(wk, a, b)));
+          // the four issue counts in one pass over the week, not four
+          env.MIND_DB.prepare('SELECT ' + ISS.map((x, i) => 'SUM(title LIKE ? OR title LIKE ?) c' + i).join(', ') + ' FROM arc_items INDEXED BY arc_items_ts WHERE ts>?').bind(...ISS.reduce((a, x) => a.concat([x[1], x[2]]), []), wk),
+        ];
         const out2 = await env.MIND_DB.batch(stmts);
         const byKind = {}; (out2[0].results || []).forEach(r => { byKind[r.kind] = r.c; });
         const bySrc = {}; (out2[1].results || []).forEach(r => { bySrc[r.src] = r.c; });
         const cv = (out2[2].results || [])[0] || {};
         const byDay = (out2[3].results || []).map(r => ({ d: r.d, c: r.c }));
-        const issues = {}; ISS.forEach(([k], i) => { issues[k] = ((out2[4 + i].results || [])[0] || {}).c || 0; });
-        return jsonResp({ ok: true, byKind, bySrc7d: bySrc, byDay, issues, conversations: { turns: cv.c || 0, sessions: cv.s || 0 } });
+        const iss0 = (out2[4].results || [])[0] || {};
+        const issues = {}; ISS.forEach(([k], i) => { issues[k] = Number(iss0['c' + i]) || 0; });
+        const ans = { ok: true, byKind, bySrc7d: bySrc, byDay, issues, conversations: { turns: cv.c || 0, sessions: cv.s || 0 }, at: Date.now() };
+        await kvPut(env.AXIOM_KV, 'arc_stats_v1', JSON.stringify(ans), 600);
+        return jsonResp(ans);
       } catch (e) { return jsonResp({ ok: false, error: 'stats_failed', detail: String(e).slice(0, 160) }, 500); }
     }
 
@@ -22680,6 +22730,8 @@ export default AXIOM_WORKER;
 async function handleScheduled(env) {
   console.log('AXIOM Auto-Collect triggered at', new Date().toISOString());
   try { await deskLexiconLoad(env, true); } catch (e) {}   // the desks' approved terms tag everything this tick collects
+  // before anything reads the archive: the index that makes those reads walk a window, not a whole kind (made once)
+  try { const ix = await archiveIndexEnsure(env); if (ix.made && ix.made.length) console.log('Archive index made:', ix.made.join(', '), '(' + ix.ms + 'ms)'); else if (!ix.ok) console.log('Archive index not made:', ix.detail); } catch (e) {}
 
   // Pre-warm the default /allnews snapshot so dashboard loads are instant,
   // and append a pulse-history point (share-of-voice + tone time series).

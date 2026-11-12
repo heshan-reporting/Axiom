@@ -1059,3 +1059,36 @@ minute on that answer. What actually failed on the live worker is not known here
 against this build in the sandbox, so the cause is live state (most likely the database refusing the claim, as it
 refused Anne's Den the day before). **The next line the collector prints is the evidence.** If it says the database
 is busy most of the time, the tags-by-item table of s.6.9 is no longer optional.
+
+### 9.7 Why the database was busy, and the index that ends it (12 November 2026; build `2026-11-12.studio-p64`)
+
+With p63 deployed the collector printed the reason: "the worker's database is busy", twice in two minutes. So the
+claim of a job, one of the smallest statements the worker has, could not get a turn.
+
+The database runs one statement at a time. The archive (`arc_items`) held 136,564 news rows. Almost every read of it
+says "rows of this kind since this time", and the table had an index on (kind, address) and one on (time) but none on
+(kind, time). Asked to choose, the database takes the kind and walks every row of that kind ever held - four months of
+articles, text included - to return the last day. 59 of the 65 distinct archive statements that a tick and the main
+screens run were answered that way. This is also what was behind the overload of 11 November (s.6.9): that fix made
+Anne's Den ask less often, which helped, but each ask still walked the whole kind.
+
+What changed:
+
+| Change | Effect |
+|---|---|
+| Index `arc_items_kind_ts (kind, ts)` | Those 59 statements walk their window only |
+| Made at the top of the next tick, once (or now: `POST /archive/index`) | No setup batch can time out on it; a busy database is tried again next tick |
+| `/archive/stats` counted once in ten minutes, four statements in place of eight | Every page load asked it; one of its statements walked the whole table by source |
+
+On a local copy shaped like the live archive (172,470 rows, 553 MB), four of those statements fell from 156-187 ms to
+1-26 ms and the index was built in 0.2 seconds. **D1 was not timed**: the evidence on the live worker is the collector
+no longer printing "database is busy", and `GET /archive/index` answering `missing: []`.
+
+The owner's step, straight after the deploy (it is also done by the first tick, within half an hour):
+
+```
+curl -sS -X POST -H "X-Axiom-Key: $AXIOM_KEY" https://newsaus.heshan-998.workers.dev/archive/index
+```
+
+`{"ok":true,"made":["arc_items_kind_ts"],"ms":...}` is the answer wanted. `db_busy` means the database was mid-scan:
+wait a minute and ask again.
