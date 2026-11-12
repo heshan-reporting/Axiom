@@ -196,6 +196,9 @@ const AX_ERROR_DETAIL = {
   url_or_name_required: 'Give an address or a name.',
 };
 function jsonResp(data, status = 200) {
+  // A database that would not answer is said as that, on every route: the areas' own catches answer 500 `<area>_failed`
+  // with the runtime's sentence, which told a collector polling every fifteen seconds nothing it could act on.
+  if (status >= 500 && data && typeof data === 'object' && !Array.isArray(data) && typeof data.error === 'string' && data.error !== 'db_busy' && denBusy(data.detail)) { data = Object.assign({}, DEN_BUSY, { was: data.error }); status = 503; }
   if (status >= 400 && data && typeof data === 'object' && !Array.isArray(data) && typeof data.error === 'string' && !data.detail && AX_ERROR_DETAIL[data.error]) data = Object.assign({}, data, { detail: AX_ERROR_DETAIL[data.error] });
   return new Response(JSON.stringify(data), { status, headers: CORS });
 }
@@ -1915,7 +1918,10 @@ async function metaCron(env) {
 // (r/victoria is Victoria, British Columbia, and refuses us anyway; r/melbourne
 // is where the state's argument happens.)
 const REDDIT_POLITICS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon', 'auscorp',
-  'melbourne', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs'];
+  'melbourne', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs',
+  // p62, a wider net: the other capitals and regions, and where law, property, money, work and power bills are argued
+  'aus', 'Adelaide', 'canberra', 'tasmania', 'darwin', 'newcastle', 'geelong', 'queensland',
+  'AusProperty', 'AusLegal', 'AusHENRY', 'fiaustralia', 'friendlyjordies', 'AustralianTeachers', 'AusElectricians'];
 // The keyword pass searches all of Reddit, so a generic client term - 'interest
 // rates', 'gas prices', 'question time' - also finds American and British
 // threads, and the wide matchers tag them. A hit outside the watched subs is
@@ -2318,7 +2324,7 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook', 'ytsearch', 'gated'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook', 'ytsearch', 'gated', 'hansard', 'blueskyaccounts', 'community'];   // topic: keyword research; sources: a registry sweep; community: Lemmy, Hacker News, forum feeds and the comments underneath; render: a page through a real browser
 const BRIDGE_DESKTOP_ONLY = ['x', 'ytsearch', 'gated'];      // no server-side path exists for these (ytsearch: YouTube keyword search through a collector)
 /* The signed-in layer (DEN.md, layer 2): what a Mac collector may be asked to read, and the switch that stops it. */
 const REACH_SOURCES = ['facebook', 'instagram', 'ytsearch', 'x', 'reddit', 'gated'];
@@ -2434,6 +2440,41 @@ async function jobClaim(env, agent, sources) {
   return { id: row.id, source: row.source, params };
 }
 const REACH_WAIT_MS = 180000;
+const BRIDGE_STALE_MS = 30 * 60000;     // a queued job nobody tails: failed by the tick after this long with nobody to serve it
+/* What to try when X search does not work on the Mac. Mirrors X_REMEDY in tools/reach-x.py: what to do first. */
+const X_DOWN_REMEDY = 'To try on the Mac: `uv tool upgrade twitter-cli` (with pipx: `pipx upgrade twitter-cli`), then `python3 tools/reach-agent.py --channels` - X reads "usable" when search works. The collector has stopped offering X and rechecks every ten minutes, so nothing needs restarting. The upgrade helps only if that machine is behind the newest twitter-cli; otherwise it waits on an upstream fix.';
+/** Why nothing can serve a queued job, in words a person can act on. When a live collector has said the platform is
+ *  down on its machine, that is the reason - not "no collector connected". */
+function noCollector(source, agents) {
+  const label = REACH_LABEL[source] || source;
+  const downOn = (agents || []).filter(a => a.live && (a.down || []).indexOf(source) >= 0).map(a => a.agent);
+  if (source === 'x' && downOn.length) return { error: 'no_collector', why: 'x_unavailable',
+    detail: 'X search is unavailable on the connected collector (' + downOn.join(', ') + '), so this job was not going to run. ' + X_DOWN_REMEDY + ' Why: twitter-cli cannot build the x-client-transaction-id header X requires on search. The worker still reads MP and registered account timelines itself.' };
+  if (downOn.length) return { error: 'no_collector', why: source + '_unavailable', detail: label + ' cannot be read on the connected collector (' + downOn.join(', ') + ') right now, so this job was not going to run. On the Mac: python3 tools/reach-agent.py --channels says why.' };
+  return { error: 'no_collector', detail: 'No collector that can read ' + label + ' is connected, so this job was never going to run. On the Mac: python3 tools/reach-agent.py --channels says what that machine can read and why not; python3 tools/reach-agent.py --key $AXIOM_KEY connects it.' };
+}
+const collectorFor = (agents, source) => (agents || []).some(a => a.live && (a.sources || []).indexOf(source) >= 0);
+/** Queued jobs with nobody to serve them are failed in words instead of waiting for ever. The console did this for a
+ *  job someone was watching (jobTail); a job nobody tails - a topic's X child, above all - sat in the queue until a
+ *  collector connected days later and was handed the lot. `source` and `maxAgeMs: 0` are for the moment a collector
+ *  reports a platform down; the tick uses the half hour and leaves the morning plan to its own twelve-hour rule. */
+async function bridgeExpire(env, o) {
+  o = o || {}; if (!env.MIND_DB) return { ok: false, failed: 0 };
+  await ensureBridge(env);
+  const age = o.maxAgeMs == null ? BRIDGE_STALE_MS : o.maxAgeMs;
+  const w = ["status='queued'", 'created<=?']; const b = [Date.now() - age];
+  if (o.source) { w.push('source=?'); b.push(o.source); } else w.push("COALESCE(who,'')<>'plan'");
+  const rows = ((await env.MIND_DB.prepare('SELECT id, source FROM bridge_jobs WHERE ' + w.join(' AND ') + ' ORDER BY created LIMIT 200').bind(...b).all()).results) || [];
+  if (!rows.length) return { ok: true, failed: 0 };
+  const agents = await agentsSeen(env); let failed = 0;
+  for (const r of rows) {
+    if (collectorFor(agents, r.source)) continue;
+    const nc = noCollector(r.source, agents);
+    await jobLog(env, r.id, [{ k: 'err', t: nc.detail }]);
+    if (await jobFinish(env, r.id, false, Object.assign({ ok: false }, nc))) failed++;
+  }
+  return { ok: true, failed };
+}
 /** The platforms a full key has switched off for the signed-in layer (KV reach_off). */
 async function reachOff(env) { try { const v = JSON.parse((await kvGet(env.AXIOM_KV, 'reach_off')) || '[]'); return Array.isArray(v) ? v.filter(x => REACH_SOURCES.indexOf(x) >= 0) : []; } catch (e) { return []; } }
 async function reachChallenges(env) { try { return JSON.parse((await kvGet(env.AXIOM_KV, 'reach_challenges')) || '{}') || {}; } catch (e) { return {}; } }
@@ -2494,13 +2535,15 @@ async function jobTail(env, id, after) {
       job.status = 'failed'; job.ok = 0; job.finished = Date.now(); job.result = JSON.stringify({ ok: false, error: 'worker_stopped', detail });
     }
   }
-  if (job.status === 'queued' && Date.now() - (job.created || 0) > REACH_WAIT_MS) {
-    // a job waiting for a collector that is not there: say so instead of spinning
+  if (job.status === 'queued') {
+    // a job waiting for a collector that is not there: say so instead of spinning. It gets three minutes (a collector
+    // may be about to connect) - unless a live collector has already said it cannot read this platform: then at once
     const agents = await agentsSeen(env);
-    if (!agents.some(a => a.live && (a.sources || []).indexOf(job.source) >= 0)) {
-      const detail = 'No collector that can read ' + (REACH_LABEL[job.source] || job.source) + ' is connected, so this job was never going to run. On the Mac: python3 tools/reach-agent.py --channels says what that machine can read and why not; python3 tools/reach-agent.py --key $AXIOM_KEY connects it.';
-      await jobLog(env, id, [{ k: 'err', t: detail }]);
-      if (await jobFinish(env, id, false, { ok: false, error: 'no_collector', detail })) { job.status = 'failed'; job.ok = 0; job.finished = Date.now(); job.result = JSON.stringify({ ok: false, error: 'no_collector', detail }); }
+    const downNow = agents.some(a => a.live && (a.down || []).indexOf(job.source) >= 0);
+    if (!collectorFor(agents, job.source) && (downNow || Date.now() - (job.created || 0) > REACH_WAIT_MS)) {
+      const nc = Object.assign({ ok: false }, noCollector(job.source, agents));
+      await jobLog(env, id, [{ k: 'err', t: nc.detail }]);
+      if (await jobFinish(env, id, false, nc)) { job.status = 'failed'; job.ok = 0; job.finished = Date.now(); job.result = JSON.stringify(nc); }
     }
   }
   const rows = await env.MIND_DB.prepare('SELECT id,ts,kind,text FROM bridge_log WHERE job=? AND id>? ORDER BY id LIMIT 200').bind(id, Number(after) || 0).all();
@@ -2514,10 +2557,12 @@ async function jobTail(env, id, after) {
   };
 }
 /** Agents announce themselves on every poll; the app shows who is connected. */
-async function agentBeat(env, agent, sources) {
+async function agentBeat(env, agent, sources, down) {
   if (!env.AXIOM_KV || !agent) return;
+  // `down`: what the machine has the tool for and still cannot read (X search with twitter-cli's generator broken)
+  const dn = (down || []).filter(x => REACH_SOURCES.indexOf(x) >= 0).slice(0, 8);
   await kvPut(env.AXIOM_KV, 'bridge_agent_' + String(agent).replace(/[^\w-]/g, '').slice(0, 40),
-    JSON.stringify({ ts: Date.now(), sources: (sources || []).slice(0, 16) }), 3 * 86400);
+    JSON.stringify({ ts: Date.now(), sources: (sources || []).filter(x => dn.indexOf(x) < 0).slice(0, 16), down: dn }), 3 * 86400);
 }
 async function agentsSeen(env) {
   if (!env.AXIOM_KV || !env.AXIOM_KV.list) return [];
@@ -2527,7 +2572,7 @@ async function agentsSeen(env) {
     for (const k of (l.keys || []).slice(0, 10)) {
       const v = await kvGet(env.AXIOM_KV, k.name);
       let d = {}; try { d = JSON.parse(v || '{}'); } catch (e) {}
-      out.push({ agent: k.name.replace('bridge_agent_', ''), last: d.ts || 0, sources: d.sources || [], live: Date.now() - (d.ts || 0) < 5 * 60000 });
+      out.push({ agent: k.name.replace('bridge_agent_', ''), last: d.ts || 0, sources: d.sources || [], down: Array.isArray(d.down) ? d.down : [], live: Date.now() - (d.ts || 0) < 5 * 60000 });
     }
     return out.sort((a, b) => b.last - a.last);
   } catch (e) { return []; }
@@ -2842,7 +2887,7 @@ async function hansardSearch(env, kw, max) {
     return { ok: true, items: rows.map(x => ({
       speaker: (((x.speaker || {}).first_name || '') + ' ' + ((x.speaker || {}).last_name || '')).trim(), party: (x.speaker || {}).party || '',
       house: x.major === 1 ? 'representatives' : x.major === 101 ? 'senate' : '', date: x.hdate || '',
-      text: stripHtml(x.body || x.extract || '').slice(0, 1500), url: x.listurl ? 'https://www.openaustralia.org.au' + x.listurl : '', id: String(x.gid || ''),
+      text: stripHtml(x.body || x.extract || '').slice(0, 1500), url: x.listurl ? 'https://www.openaustralia.org.au' + x.listurl : '', id: String(x.gid || ''), debate: stripHtml(String((x.parent || {}).body || '')).slice(0, 160),
     })).filter(x => x.text) };
   } catch (e) { return { ok: false, items: [], detail: String((e && e.message) || e).slice(0, 120) }; }
 }
@@ -2901,9 +2946,24 @@ async function topicRun(env, job, log) {
   // 4. MPs on X, from their own accounts - a desktop job; replies included
   const mps = p.mps === false ? [] : await mpsList(env, { withX: true, limit: 400 });
   if (mps.length) {
-    const child = await jobCreate(env, 'x', { queries: [auQualify(keyword)], fromQueries: [keyword], from: mps.map(m => m.x), mps: mps.map(m => ({ x: m.x, name: m.name, party: m.party, house: m.house })), topic: id, ns, time: win, perQuery: 30, threads: 15, commentsPer: 40 }, 'topic:' + id);
-    out.children.x = child.id;
-    await log('info', 'queued X job ' + child.id + ' for the Mac collector: "' + keyword + '" across ' + mps.length + ' MP and senator accounts, replies included');
+    // One X job a topic, and only when something can serve it. Every run used to queue one whatever was connected, and
+    // nothing took an unserved one off the queue: the first collector to connect was handed each keyword once per run.
+    const agents = await agentsSeen(env);
+    const held = await topicMpPosts(env, keyword, hours, 200);
+    const heldWords = held.length + ' post' + (held.length === 1 ? '' : 's') + ' by MPs and senators carrying the keyword ' + (held.length === 1 ? 'is' : 'are') + ' already held from the worker\'s own timeline reader and ' + (held.length === 1 ? 'is' : 'are') + ' in this topic\'s results';
+    out.counts.xHeld = held.length;
+    const waiting = await env.MIND_DB.prepare("SELECT id FROM bridge_jobs WHERE source='x' AND who=? AND status='queued' ORDER BY created DESC LIMIT 1").bind('topic:' + id).first();
+    if (!collectorFor(agents, 'x')) {
+      const nc = noCollector('x', agents); out.xSkipped = nc.why || 'no_collector';
+      await log('info', 'X search across the ' + mps.length + ' MP and senator accounts was not queued: ' + nc.detail.replace(/, so this job (was not|was never) going to run/, '') + ' ' + heldWords + '.');
+    } else if (waiting) {
+      out.children.x = waiting.id;
+      await log('info', 'X job ' + waiting.id + ' for this topic is already waiting for the Mac collector, so another was not queued. ' + heldWords + '.');
+    } else {
+      const child = await jobCreate(env, 'x', { queries: [auQualify(keyword)], fromQueries: [keyword], from: mps.map(m => m.x), mps: mps.map(m => ({ x: m.x, name: m.name, party: m.party, house: m.house })), topic: id, ns, time: win, perQuery: 30, threads: 15, commentsPer: 40 }, 'topic:' + id);
+      out.children.x = child.id;
+      await log('info', 'queued X job ' + child.id + ' for the Mac collector: "' + keyword + '" across ' + mps.length + ' MP and senator accounts, replies included. ' + heldWords + '.');
+    }
   } else await log('info', 'no MP register yet (Sync MPs builds it from Wikidata), so no MP account sweep this run');
   // 5. the Reddit keyword pass - the Mac collector when one is connected, the worker otherwise
   {
@@ -2963,6 +3023,18 @@ async function topicRun(env, job, log) {
   out.ms = Date.now() - t0;
   return out;
 }
+/** The stand-in for X search across the MPs' accounts: posts by sitting members already in the archive (the worker's
+ *  keyless timeline reader, xSyndSweep, and earlier collector runs) that carry every word of the keyword. Nothing is
+ *  fetched. Only rows that carry meta.mp - a registered MP on its own post - so nobody else is named or included. */
+async function topicMpPosts(env, keyword, hours, limit) {
+  try {
+    const words = String(keyword || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2).slice(0, 3);
+    if (!words.length || !(await ensureArchive(env))) return [];
+    const cond = words.map(() => "(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')").join(' AND ');
+    const binds = [Date.now() - (hours || 168) * 3600000]; words.forEach(w => { const l = arcLike(w); binds.push(l, l); });
+    return ((await env.MIND_DB.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.mp') mp, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='sig_thread' AND ts>? AND json_extract(meta,'$.platform')='x' AND json_extract(meta,'$.mp') IS NOT NULL AND " + cond + ' ORDER BY ts DESC LIMIT ' + (Math.min(parseInt(limit, 10) || 80, 200))).bind(...binds).all()).results) || [];
+  } catch (e) { return []; }
+}
 /** Everything on file for one topic, for the view and for SIFA. */
 async function topicResults(env, idOrKeyword, days) {
   const topic = await topicGet(env, idOrKeyword);
@@ -2973,6 +3045,9 @@ async function topicResults(env, idOrKeyword, days) {
   const pj = s => { try { const v = JSON.parse(s); return v && typeof v === 'object' ? v : null; } catch (e) { return null; } };
   const hits = (await db.prepare("SELECT src, title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.source') source, json_extract(meta,'$.outlet') outlet, json_extract(meta,'$.mp') mp FROM arc_items WHERE kind='topic_hit' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 300").bind(id, since).all()).results || [];
   const x = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.mp') mp, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='sig_thread' AND json_extract(meta,'$.platform')='x' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 80").bind(id, since).all()).results || [];
+  // beside what an X search job filed under the topic: MPs' own posts already held that carry the keyword (marked held)
+  const xHeld = (await topicMpPosts(env, (topic && topic.keyword) || idOrKeyword, Math.round((Date.now() - since) / 3600000), 80)).filter(h => !x.some(r => r.url === h.url));
+  xHeld.forEach(h => { h.held = true; x.push(h); }); x.sort((a, b) => (b.ts || 0) - (a.ts || 0));
   const reddit = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.sub') sub, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='reddit_thread' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 80").bind(id, since).all()).results || [];
   const cm = (await db.prepare("SELECT json_extract(meta,'$.platform') platform, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND json_extract(meta,'$.topic')=? AND ts>? GROUP BY platform").bind(id, since).all()).results || [];
   await ensureBridge(env);   // a topic that has never run has no job table yet: its results are empty, not a failure
@@ -2982,7 +3057,8 @@ async function topicResults(env, idOrKeyword, days) {
   return {
     ok: true, topic: topic || { id, keyword: idOrKeyword }, days: Math.round((Date.now() - since) / 86400000), brief,
     news: hits.filter(h => h.source === 'news').map(strip), statements: hits.filter(h => h.source === 'statement').map(strip), hansard: hits.filter(h => h.source === 'hansard').map(strip),
-    x: x.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, id: r.id, score: r.score, comments: r.comments, mp: pj(r.mp), issues: pj(r.issues) || [], excerpt: String(r.body || '').split('\n')[0].slice(0, 400) })),
+    x: x.map(r => Object.assign({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, id: r.id, score: r.score, comments: r.comments, mp: pj(r.mp), issues: pj(r.issues) || [], excerpt: String(r.body || '').split('\n')[0].slice(0, 400) }, r.held ? { held: true } : {})),
+    xNote: xHeld.length ? xHeld.length + ' of these ' + (xHeld.length === 1 ? 'is a post' : 'are posts') + ' by MPs and senators already held from the worker\'s own timeline reader (their own posts only: no replies, and no keyword search of X).' : '',
     reddit: reddit.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, id: r.id, sub: r.sub || '', score: r.score, comments: r.comments, issues: pj(r.issues) || [], excerpt: String(r.body || '').split('\n')[0].slice(0, 400) })),
     comments: cm.map(c => ({ platform: c.platform || 'reddit', n: c.n || 0, hostile: c.hostile || 0, supportive: c.supportive || 0 })),
     jobs,
@@ -4540,15 +4616,15 @@ function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) +
 // source_health with the reason.
 // ==============================================================================
 let SOURCES_READY = false;
-const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'wire', 'independent', 'official', 'party', 'polling', 'thinktank', 'sector', 'podcast', 'video', 'newsletter', 'sweep'];
+const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'wire', 'independent', 'official', 'party', 'polling', 'thinktank', 'sector', 'podcast', 'video', 'newsletter', 'community', 'sweep'];
 const SOURCE_JURIS = ['au', 'nsw', 'vic', 'qld', 'wa', 'sa', 'tas', 'act', 'nt'];
-const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render'];
+const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render', 'public', 'process', 'lexicon', 'lemmy', 'hn', 'forum'];
 const SOURCES_PER_TICK = 50;        // registry sources swept per cron tick (the core is fetched separately)
 const SOURCE_DEAD_FAILS = 6;        // consecutive failed sweeps before a source is reported dead
 const SOURCE_WINDOW_H = 72;         // dated items older than this are not filed
 const SOURCE_FETCH_MS = 7000;       // per-request abort
 const SOURCE_HEALTH_KEEP = 4000;    // rows kept in source_health
-const SOURCE_SCHED = { core: 30, wire: 30, broadcaster: 30, national: 45, metro: 45, regional: 90, independent: 90, sector: 90, official: 120, party: 120, polling: 180, thinktank: 180, podcast: 240, video: 120, newsletter: 180, sweep: 60 };
+const SOURCE_SCHED = { core: 30, wire: 30, broadcaster: 30, national: 45, metro: 45, regional: 90, independent: 90, sector: 90, official: 120, party: 120, polling: 180, thinktank: 180, podcast: 240, video: 120, newsletter: 180, community: 60, sweep: 60 };
 /* Names, tiers and jurisdictions for the AU_FEEDS core (keys not listed here
  * are Google News sweeps, named from their key). */
 const CORE_META = {
@@ -4620,6 +4696,37 @@ const SOURCE_SEED_EXT = [
   ['aph_senate_committees', 'Senate committees', 'official', 'au', 'gov,gas,gastax,firearms', { h: 'https://www.aph.gov.au/Parliamentary_Business/Committees/Senate', g: 'site:aph.gov.au Senate committee inquiry gas OR firearms OR "fuel tax"' }],
   ['nopsema', 'NOPSEMA', 'official', 'au', 'gasprojects,gas', { s: 'nopsema.gov.au', h: 'https://www.nopsema.gov.au/news-and-media' }],
   ['wa_epa', 'EPA Western Australia', 'official', 'wa', 'gasprojects', { s: 'epa.wa.gov.au', h: 'https://www.epa.wa.gov.au/media-statements' }],
+  // -- release 7: public-record routes. Each is read by the `public` method (robots.txt obeyed, an honest user agent, a
+  //    headline and a link only), with Google News as the fallback. Every address is unverified until a sweep proves it. --
+  ['medianet', 'Medianet Newshub', 'wire', 'au', 'gov,gas,gastax,ftc,firearms,activism', { b: 'https://newshub.medianet.com.au/', s: 'newshub.medianet.com.au' }],
+  ['treasury_foi', 'Treasury FOI disclosure log', 'official', 'au', 'ftc,gastax,econ', { b: 'https://treasury.gov.au/the-department/accountability-reporting/foi', g: 'site:treasury.gov.au foi "fuel tax credit" OR "gas"' }],
+  ['hcourt', 'High Court of Australia judgments', 'official', 'au', 'mining,gov', { b: 'https://www.hcourt.gov.au/cases-and-judgments/judgments/judgments-2000-current', s: 'hcourt.gov.au' }],
+  ['fedcourt', 'Federal Court of Australia judgments', 'official', 'au', 'mining,gasprojects', { b: 'https://www.fedcourt.gov.au/digital-law-library/judgments/latest', s: 'fedcourt.gov.au' }],
+  ['nopsema_decisions', 'NOPSEMA decisions', 'official', 'au', 'gasprojects', { b: 'https://www.nopsema.gov.au/environmental-management/assessment-and-decisions', g: 'site:docs.nopsema.gov.au OR site:nopsema.gov.au "statement of reasons" OR "acceptance"' }],
+  ['stopthebuyback', 'Stop the Buyback', 'sector', 'au', 'firearms', { b: 'https://stopthebuyback.com.au/', s: 'stopthebuyback.com.au' }],
+  ['handsoffourfuel', 'Hands Off Our Fuel', 'sector', 'au', 'ftc', { b: 'https://handsoffourfuel.com.au/', s: 'handsoffourfuel.com.au' }],
+  ['ourgas', 'Our Gas', 'sector', 'au', 'gastax', { b: 'https://www.ourgas.com.au/', s: 'ourgas.com.au' }],
+  ['aep_members', 'Australian Energy Producers member updates', 'sector', 'au', 'gas,gastax', { b: 'https://member.energyproducers.au/explore' }],
+  ['ssaa_nsw', 'SSAA NSW', 'sector', 'nsw', 'firearms,hunting', { b: 'https://ssaansw.org.au/', s: 'ssaansw.org.au' }],
+  ['ssaa_act', 'SSAA ACT', 'sector', 'act', 'firearms', { b: 'https://www.ssaaact.org.au/media-releases/', s: 'ssaaact.org.au' }],
+  ['ssaa_vic', 'SSAA Victoria', 'sector', 'vic', 'firearms,hunting', { b: 'https://ssaavic.com.au/', s: 'ssaavic.com.au' }],
+  ['australianhunter', 'Australian Hunter', 'sector', 'au', 'firearms,hunting', { b: 'https://australianhunter.com.au/', s: 'australianhunter.com.au' }],
+  ['fieldandgame', 'Field & Game Australia', 'sector', 'au', 'hunting,firearms', { b: 'https://www.fieldandgame.com.au/news', s: 'fieldandgame.com.au' }],
+  ['austdeer', 'Australian Deer Association', 'sector', 'au', 'hunting,firearms', { b: 'https://www.austdeer.com.au/news', s: 'austdeer.com.au' }],
+  ['agsa', 'Australian Gun Safety Alliance', 'sector', 'au', 'firearms', { b: 'https://www.gunsafetyalliance.org.au/', s: 'gunsafetyalliance.org.au' }],
+  ['environskimberley', 'Environs Kimberley', 'sector', 'wa', 'gasprojects,activism', { b: 'https://www.environskimberley.org.au/news', s: 'environskimberley.org.au' }],
+  ['fara', 'Friends of Australian Rock Art', 'sector', 'wa', 'gasprojects', { b: 'https://www.fara.com.au/', s: 'fara.com.au' }],
+  ['envirojustice', 'Environmental Justice Australia', 'sector', 'au', 'gasprojects,mining', { b: 'https://envirojustice.org.au/', s: 'envirojustice.org.au' }],
+  ['ieefa', 'IEEFA Australia', 'thinktank', 'au', 'gas,gastax,ftc', { b: 'https://ieefa.org/regions/australia', s: 'ieefa.org' }],
+  ['climateenergyfinance', 'Climate Energy Finance', 'thinktank', 'au', 'ftc,cm', { b: 'https://climateenergyfinance.org/', s: 'climateenergyfinance.org' }],
+  ['amnesty_au', 'Amnesty International Australia', 'sector', 'au', 'energy,activism', { b: 'https://www.amnesty.org.au/news/', s: 'amnesty.org.au' }],
+  ['nit', 'National Indigenous Times', 'independent', 'au', 'gasprojects,mining', { b: 'https://nit.com.au/', s: 'nit.com.au' }],
+  ['miningweekly', 'Mining Weekly (Australasia)', 'sector', 'au', 'mining,cm', { b: 'https://www.miningweekly.com/page/australasia-home', s: 'miningweekly.com' }],
+  ['energytoday', 'Energy Today', 'sector', 'au', 'gas,gasprojects', { b: 'https://www.energytodaymag.com.au/', s: 'energytodaymag.com.au' }],
+  ['cityhub', 'City Hub', 'regional', 'nsw', 'firearms,gov', { b: 'https://cityhub.com.au/', s: 'cityhub.com.au' }],
+  ['greenleft', 'Green Left', 'independent', 'au', 'activism,mining,gas', { b: 'https://www.greenleft.org.au/', s: 'greenleft.org.au' }],
+  ['tasmaniantimes', 'Tasmanian Times', 'regional', 'tas', 'firearms,gov', { b: 'https://tasmaniantimes.com/', s: 'tasmaniantimes.com' }],
+  ['boilingcold', 'Boiling Cold', 'independent', 'wa', 'gasprojects,gas', { b: 'https://www.boilingcold.com.au/', s: 'boilingcold.com.au' }],
   ['vic_energy_minister', 'Victorian Minister for Energy', 'official', 'vic', 'electrify,energy,gas', { g: 'site:premier.vic.gov.au energy OR gas OR electrification' }],
   ['nsw_parl_inquiries', 'NSW Parliament inquiries', 'official', 'nsw', 'firearms', { g: 'site:parliament.nsw.gov.au inquiry firearms OR buyback' }],
   ['geelongadv', 'Geelong Advertiser', 'regional', 'vic', 'regional', { r: 'https://www.geelongadvertiser.com.au/rss', s: 'geelongadvertiser.com.au' }],
@@ -4859,11 +4966,112 @@ const SOURCE_SEED_EXT = [
   ['sweep_activism', 'Sweep: activist campaigns', 'sweep', 'au', 'activism', { g: 'australia "rising tide" OR "lock the gate" OR "market forces" OR "extinction rebellion" OR "blockade australia"' }],
   ['sweep_firearms', 'Sweep: firearms policy', 'sweep', 'au', '', { g: 'australia firearms OR "gun laws" OR "national firearms register" OR "gun buyback"' }],
   ['sweep_education', 'Sweep: education policy', 'sweep', 'au', '', { g: 'australia "education minister" OR "school funding" OR universities policy OR "early childhood education"' }],
+  // -- p62, a wider net: sweeps that follow the lexicon (x), community sources (l Lemmy instance, k Hacker News words, f a
+  //    forum's own feed), and outlets not yet held (site only: Google News and the site's own sitemap are the routes).
+  //    Nothing here is verified until a sweep proves it --
+  ['lex_gnews', 'Lexicon sweep: Google News', 'sweep', 'au', '', { x: 'gnews' }, 30],
+  ['lex_gdelt', 'Lexicon sweep: GDELT', 'sweep', 'au', '', { x: 'gdelt' }, 60],
+  ['lemmy_aussiezone', 'Lemmy: aussie.zone', 'community', 'au', '', { l: 'aussie.zone' }, 60],
+  ['hn_australia', 'Hacker News: stories that name Australia', 'community', 'au', '', { k: 'australia,australian' }, 180],
+  ['forum_ozpolitic', 'OzPolitic forum', 'community', 'au', 'gov', { f: 'https://www.ozpolitic.com/forum/YaBB.pl?action=RSSrecent' }, 60],
+  ['forum_propertychat', 'PropertyChat forum', 'community', 'au', 'housing', { f: 'https://www.propertychat.com.au/community/index.rss' }, 60],
+  ['forum_bigfooty_pol', 'BigFooty: Australian politics board', 'community', 'au', 'gov', { f: 'https://www.bigfooty.com/forum/forums/australian-politics.229/index.rss' }, 90],
+  ['wn_fifthestate', 'The Fifth Estate', 'sector', 'au', 'housing,energy', { s: 'thefifthestate.com.au' }],
+  ['wn_thedriven', 'The Driven', 'sector', 'au', 'electrify,energy', { s: 'thedriven.io' }],
+  ['wn_onestep', 'One Step Off The Grid', 'sector', 'au', 'energy,electrify', { s: 'onestepoffthegrid.com.au' }],
+  ['wn_arena', 'ARENA', 'official', 'au', 'energy', { s: 'arena.gov.au' }],
+  ['wn_cefc', 'Clean Energy Finance Corporation', 'official', 'au', 'energy', { s: 'cefc.com.au' }],
+  ['wn_aemc', 'Australian Energy Market Commission', 'official', 'au', 'energy,gas', { s: 'aemc.gov.au' }],
+  ['wn_energycouncil', 'Australian Energy Council', 'sector', 'au', 'energy,gas', { s: 'energycouncil.com.au' }],
+  ['wn_energynetworks', 'Energy Networks Australia', 'sector', 'au', 'energy,gas,electrify', { s: 'energynetworks.com.au' }],
+  ['wn_nopta', 'NOPTA', 'official', 'au', 'gasprojects', { s: 'nopta.gov.au' }],
+  ['wn_ga', 'Geoscience Australia', 'official', 'au', 'cm,mining', { s: 'ga.gov.au' }],
+  ['wn_csiro', 'CSIRO', 'official', 'au', 'energy,cm', { s: 'csiro.au' }],
+  ['wn_nswmining', 'NSW Minerals Council', 'sector', 'nsw', 'mining', { s: 'nswmining.com.au' }],
+  ['wn_miningmonthly', 'Australia\'s Mining Monthly', 'sector', 'au', 'mining', { s: 'miningmonthly.com' }],
+  ['wn_marketonline', 'The Market Online', 'sector', 'au', 'mining,cm,econ', { s: 'themarketonline.com.au' }],
+  ['wn_smallcaps', 'Small Caps', 'sector', 'au', 'mining,cm', { s: 'smallcaps.com.au' }],
+  ['wn_businessnewswa', 'Business News (WA)', 'sector', 'wa', 'mining,gasprojects,econ', { s: 'businessnews.com.au' }],
+  ['wn_ahuri', 'AHURI', 'thinktank', 'au', 'housing', { s: 'ahuri.edu.au' }],
+  ['wn_shelter', 'National Shelter', 'sector', 'au', 'housing', { s: 'shelter.org.au' }],
+  ['wn_everybodyshome', 'Everybody\'s Home', 'sector', 'au', 'housing,activism', { s: 'everybodyshome.com.au' }],
+  ['wn_propertyupdate', 'Property Update', 'sector', 'au', 'housing', { s: 'propertyupdate.com.au' }],
+  ['wn_architectureau', 'ArchitectureAU', 'sector', 'au', 'housing,construction', { s: 'architectureau.com' }],
+  ['wn_housingaus', 'Housing Australia', 'official', 'au', 'housing', { s: 'housingaustralia.gov.au' }],
+  ['wn_infraaus', 'Infrastructure Australia', 'official', 'au', 'construction', { s: 'infrastructureaustralia.gov.au' }],
+  ['wn_awu', 'Australian Workers\' Union', 'sector', 'au', 'construction,mining', { s: 'awu.net.au' }],
+  ['wn_etu', 'Electrical Trades Union', 'sector', 'au', 'construction,energy', { s: 'etunational.asn.au' }],
+  ['wn_mua', 'Maritime Union of Australia', 'sector', 'au', 'construction', { s: 'mua.org.au' }],
+  ['wn_amwu', 'Australian Manufacturing Workers\' Union', 'sector', 'au', 'construction', { s: 'amwu.org.au' }],
+  ['wn_unionsnsw', 'Unions NSW', 'sector', 'nsw', 'construction', { s: 'unionsnsw.org.au' }],
+  ['wn_racgp', 'RACGP newsGP', 'sector', 'au', 'pharmacy', { s: 'racgp.org.au' }],
+  ['wn_chf', 'Consumers Health Forum', 'sector', 'au', 'pharmacy', { s: 'chf.org.au' }],
+  ['wn_insightplus', 'MJA InSight+', 'sector', 'au', 'pharmacy', { s: 'insightplus.mja.com.au' }],
+  ['wn_healthservices', 'Health Services Daily', 'sector', 'au', 'pharmacy', { s: 'healthservicesdaily.com.au' }],
+  ['wn_hospitalhealth', 'Hospital and Healthcare', 'sector', 'au', 'pharmacy', { s: 'hospitalhealth.com.au' }],
+  ['wn_sff', 'Shooters, Fishers and Farmers Party', 'party', 'au', 'firearms,hunting', { s: 'shootersfishersandfarmers.org.au' }],
+  ['wn_ssaaqld', 'SSAA Queensland', 'sector', 'qld', 'firearms,hunting', { s: 'ssaaqld.org.au' }],
+  ['wn_ssaawa', 'SSAA Western Australia', 'sector', 'wa', 'firearms,hunting', { s: 'ssaawa.org.au' }],
+  ['wn_ssaasa', 'SSAA South Australia', 'sector', 'sa', 'firearms,hunting', { s: 'ssaasa.org.au' }],
+  ['wn_gma', 'Game Management Authority (Victoria)', 'official', 'vic', 'hunting', { s: 'gma.vic.gov.au' }],
+  ['wn_invasives', 'Invasive Species Council', 'sector', 'au', 'hunting', { s: 'invasives.org.au' }],
+  ['wn_rspca', 'RSPCA Australia', 'sector', 'au', 'hunting', { s: 'rspca.org.au' }],
+  ['wn_animalsaus', 'Animals Australia', 'sector', 'au', 'hunting', { s: 'animalsaustralia.org' }],
+  ['wn_ajp', 'Animal Justice Party', 'party', 'au', 'hunting', { s: 'animaljusticeparty.org' }],
+  ['wn_acic', 'Australian Criminal Intelligence Commission', 'official', 'au', 'firearms', { s: 'acic.gov.au' }],
+  ['wn_afp', 'Australian Federal Police', 'official', 'au', 'firearms', { s: 'afp.gov.au' }],
+  ['wn_wwf', 'WWF-Australia', 'sector', 'au', 'energy,activism', { s: 'wwf.org.au' }],
+  ['wn_aycc', 'Australian Youth Climate Coalition', 'sector', 'au', 'energy,activism', { s: 'aycc.org.au' }],
+  ['wn_accr', 'Australasian Centre for Corporate Responsibility', 'sector', 'au', 'energy,gas,gasprojects,activism', { s: 'accr.org.au' }],
+  ['wn_commsdeclare', 'Comms Declare', 'sector', 'au', 'energy,gas,activism', { s: 'commsdeclare.org' }],
+  ['wn_parentsclimate', 'Parents for Climate', 'sector', 'au', 'energy,electrify,activism', { s: 'parentsforclimate.org' }],
+  ['wn_farmersclimate', 'Farmers for Climate Action', 'sector', 'au', 'energy,regional,activism', { s: 'farmersforclimateaction.org.au' }],
+  ['wn_dea', 'Doctors for the Environment Australia', 'sector', 'au', 'energy,gas,activism', { s: 'dea.org.au' }],
+  ['wn_seedmob', 'Seed Indigenous Youth Climate Network', 'sector', 'au', 'gasprojects,activism', { s: 'seedmob.org.au' }],
+  ['wn_tomorrow', 'Tomorrow Movement', 'sector', 'au', 'energy,activism', { s: 'tomorrowmovement.com' }],
+  ['wn_ss4c', 'School Strike 4 Climate', 'sector', 'au', 'energy,activism', { s: 'schoolstrike4climate.com' }],
+  ['wn_sunrise', 'The Sunrise Project', 'sector', 'au', 'energy,gas,activism', { s: 'sunriseproject.org' }],
+  ['wn_solutions', 'Solutions for Climate Australia', 'sector', 'au', 'energy,gas,activism', { s: 'solutionsforclimate.org.au' }],
+  ['wn_climateworks', 'Climateworks Centre', 'thinktank', 'au', 'energy', { s: 'climateworkscentre.org' }],
+  ['wn_carbonmarket', 'Carbon Market Institute', 'thinktank', 'au', 'energy', { s: 'carbonmarketinstitute.org' }],
+  ['wn_igcc', 'Investor Group on Climate Change', 'thinktank', 'au', 'energy', { s: 'igcc.org.au' }],
+  ['wn_advance', 'Advance', 'sector', 'au', 'gov,energy,activism', { s: 'advanceaustralia.org.au' }],
+  ['wn_spectator', 'The Spectator Australia', 'independent', 'au', 'gov', { s: 'spectator.com.au' }],
+  ['wn_quadrant', 'Quadrant', 'independent', 'au', 'gov', { s: 'quadrant.org.au' }],
+  ['wn_newmatilda', 'New Matilda', 'independent', 'au', 'gov', { s: 'newmatilda.com' }],
+  ['wn_redflag', 'Red Flag', 'independent', 'au', 'gov,activism', { s: 'redflag.org.au' }],
+  ['wn_overland', 'Overland', 'independent', 'au', 'gov', { s: 'overland.org.au' }],
+  ['wn_eurekastreet', 'Eureka Street', 'independent', 'au', 'gov', { s: 'eurekastreet.com.au' }],
+  ['wn_probono', 'Pro Bono Australia', 'sector', 'au', 'gov', { s: 'probonoaustralia.com.au' }],
+  ['wn_thesenior', 'The Senior', 'independent', 'au', 'col', { s: 'thesenior.com.au' }],
+  ['wn_govnews', 'Government News', 'sector', 'au', 'gov', { s: 'governmentnews.com.au' }],
+  ['wn_psnews', 'PS News', 'sector', 'au', 'gov', { s: 'psnews.com.au' }],
+  ['wn_insidelg', 'Inside Local Government', 'sector', 'au', 'gov,regional', { s: 'insidelocalgovernment.com.au' }],
+  ['wn_innovationaus', 'InnovationAus', 'sector', 'au', 'econ', { s: 'innovationaus.com' }],
+  ['wn_itnews', 'iTnews', 'sector', 'au', 'econ', { s: 'itnews.com.au' }],
+  ['wn_ausbiz', 'ausbiz', 'sector', 'au', 'econ', { s: 'ausbiz.com.au' }],
+  ['wn_bna', 'Business News Australia', 'sector', 'au', 'econ', { s: 'businessnewsaustralia.com' }],
+  ['wn_startupdaily', 'Startup Daily', 'sector', 'au', 'econ', { s: 'startupdaily.net' }],
+  ['wn_apra', 'APRA', 'official', 'au', 'econ', { s: 'apra.gov.au' }],
+  ['wn_acma', 'ACMA', 'official', 'au', 'gov', { s: 'acma.gov.au' }],
+  ['wn_esafety', 'eSafety Commissioner', 'official', 'au', 'gov', { s: 'esafety.gov.au' }],
+  ['wn_nacc', 'National Anti-Corruption Commission', 'official', 'au', 'gov', { s: 'nacc.gov.au' }],
+  ['wn_trademin', 'Minister for Trade', 'official', 'au', 'gov,econ', { s: 'trademinister.gov.au' }],
+  ['wn_dssmin', 'Social Services ministers', 'official', 'au', 'gov,col', { s: 'ministers.dss.gov.au' }],
+  ['wn_edumin', 'Education ministers', 'official', 'au', 'gov', { s: 'ministers.education.gov.au' }],
+  ['wn_agmin', 'Minister for Agriculture', 'official', 'au', 'gov,regional', { s: 'minister.agriculture.gov.au' }],
+  ['wn_agsmin', 'Attorney-General\'s ministers', 'official', 'au', 'gov,firearms', { s: 'ministers.ag.gov.au' }],
+  ['wn_pmcmin', 'PM and Cabinet ministers', 'official', 'au', 'gov', { s: 'ministers.pmc.gov.au' }],
+  ['wn_finmin', 'Minister for Finance', 'official', 'au', 'gov,econ', { s: 'financeminister.gov.au' }],
+  ['wn_wamedia', 'WA Government media statements', 'official', 'wa', 'gov,gasprojects,mining', { s: 'wa.gov.au/government/media-statements' }],
+  ['wn_nswmedia', 'NSW Government media releases', 'official', 'nsw', 'gov', { s: 'nsw.gov.au/media-releases' }],
 ];
 function sourceMethods(urls, explicit) {
   urls = urls || {};
   if (Array.isArray(explicit) && explicit.length) { const e = explicit.map(String).filter(m => SOURCE_METHODS.indexOf(m) >= 0); if (e.length) return e; }
   const m = [];
+  if (urls.process) m.push('process');
+  if (urls.public) m.push('public');
   if (urls.rss) m.push('rss');
   if (urls.wp) m.push('wp');
   if (urls.json) m.push('json');
@@ -4874,6 +5082,10 @@ function sourceMethods(urls, explicit) {
   if (urls.home) m.push('html');
   if (urls.site || urls.gnews) m.push('gnews');
   if (urls.home) m.push('render');
+  if (urls.lexicon) m.push('lexicon');
+  if (urls.lemmy) m.push('lemmy');
+  if (urls.hn) m.push('hn');
+  if (urls.forum) m.push('forum');
   return m;
 }
 /** The whole seed: the AU_FEEDS core (fetched by buildAllNews, health mirrored
@@ -4890,9 +5102,11 @@ function sourceSeed() {
     const u = r[5] || {}; const urls = {};
     if (u.r) urls.rss = u.r; if (u.w) urls.wp = u.w; if (u.j) urls.json = u.j; if (u.m) urls.sitemap = u.m;
     if (u.p) urls.podcast = u.p; if (u.h) urls.home = u.h; if (u.s) urls.site = u.s; if (u.g) urls.gnews = u.g;
-    if (u.y) urls.youtube = u.y; if (u.n) urls.substack = u.n;
+    if (u.y) urls.youtube = u.y; if (u.n) urls.substack = u.n; if (u.b) urls.public = u.b;
+    if (u.x) urls.lexicon = u.x; if (u.l) urls.lemmy = u.l; if (u.k) urls.hn = u.k; if (u.f) urls.forum = u.f;
     out.push({ id: r[0], name: r[1], tier: r[2], juris: r[3], issues: String(r[4] || '').split(/[,\s]+/).filter(Boolean), methods: sourceMethods(urls, null), urls, schedule: r[6] || SOURCE_SCHED[r[2]] || 60, core: false });
   });
+  PROCESS_SEED.forEach(r => out.push({ id: r[0], name: r[1], tier: 'official', juris: r[2], issues: String(r[6] || '').split(',').filter(Boolean), methods: ['process'], urls: { process: r[5], ptype: r[4], house: r[3] }, schedule: 360, core: false }));
   return out;
 }
 async function ensureSources(env) {
@@ -5004,11 +5218,15 @@ function sourceSanitize(b, cur) {
   let urls = cur ? Object.assign({}, cur.urls) : {};
   if (u) {
     urls = {};
-    ['rss', 'wp', 'json', 'sitemap', 'home', 'substack'].forEach(k => { const v = String(u[k] || '').trim(); if (/^https?:\/\/\S+$/.test(v)) urls[k] = v.slice(0, 400); });
+    ['rss', 'wp', 'json', 'sitemap', 'home', 'substack', 'public', 'process', 'forum'].forEach(k => { const v = String(u[k] || '').trim(); if (/^https?:\/\/\S+$/.test(v)) urls[k] = v.slice(0, 400); });
     if (u.youtube) { const y = String(u.youtube).trim(); const idm = y.match(/(UC[\w-]{22})/); if (idm) urls.youtube = idm[1]; else if (/^@?[\w.-]{2,60}$/.test(y.replace(/^https?:\/\/(www\.)?youtube\.com\//, ''))) urls.youtube = y.replace(/^https?:\/\/(www\.)?youtube\.com\//, '').replace(/^@?/, '@').slice(0, 64); }
     if (u.site) urls.site = String(u.site).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '').slice(0, 120);
     if (u.gnews) urls.gnews = String(u.gnews).trim().slice(0, 200);
     if (u.podcast) urls.podcast = String(u.podcast).trim().slice(0, 120);
+    if (u.lexicon && (u.lexicon === 'gnews' || u.lexicon === 'gdelt')) urls.lexicon = u.lexicon;
+    if (u.lemmy && LEMMY_HOST_RX.test(String(u.lemmy).trim().toLowerCase())) urls.lemmy = String(u.lemmy).trim().toLowerCase();
+    if (u.hn) { const wds = String(u.hn).split(',').map(x => x.replace(/[^A-Za-z0-9 -]/g, '').trim()).filter(Boolean).slice(0, 4); if (wds.length) urls.hn = wds.join(','); }
+    if (urls.process) { if (PROCESS_TYPES.indexOf(String(u.ptype)) >= 0) urls.ptype = String(u.ptype); if (u.house && PROCESS_HOUSES.indexOf(String(u.house)) >= 0) urls.house = String(u.house); }
   }
   const name = String(b.name || (cur && cur.name) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const id = sourceIdClean(b.id || (cur && cur.id) || name.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
@@ -5121,13 +5339,13 @@ async function srcRss(env, src) {
 }
 async function srcWp(env, src) {
   const base = String(src.urls.wp).replace(/\/+$/, '');
-  const f = await srcFetch(base + '/wp-json/wp/v2/posts?per_page=20&_fields=link,title,date_gmt,excerpt,content', 'application/json');
+  const f = await srcFetch(base + '/wp-json/wp/v2/posts?per_page=20&_fields=id,link,title,date_gmt,excerpt,content', 'application/json');
   if (!f.ok) return srcFail(f);
   let arr; try { arr = JSON.parse(f.text); } catch (e) { return { ok: false, items: [], status: f.status, detail: 'HTTP 200 but not JSON (REST API disabled?)' }; }
   if (!Array.isArray(arr)) return { ok: false, items: [], status: f.status, detail: arr && arr.message ? String(arr.message).slice(0, 100) : 'unexpected JSON shape' };
   const items = arr.map(p => ({ title: stripHtml((p.title && p.title.rendered) || ''), link: p.link || '',
     date: p.date_gmt ? String(p.date_gmt).replace(/Z?$/, 'Z') : (p.date || ''),
-    desc: stripHtml((p.excerpt && p.excerpt.rendered) || '').slice(0, 240), text: stripHtml((p.content && p.content.rendered) || '').slice(0, 6000) })).filter(i => i.title && i.link);
+    desc: stripHtml((p.excerpt && p.excerpt.rendered) || '').slice(0, 240), text: stripHtml((p.content && p.content.rendered) || '').slice(0, 6000), wpid: Number(p.id) > 0 ? Number(p.id) : 0 })).filter(i => i.title && i.link);
   return items.length ? { ok: true, items, status: f.status, full: true } : { ok: false, items: [], status: f.status, detail: 'REST API answered with no posts' };
 }
 async function srcJson(env, src) {
@@ -5196,14 +5414,18 @@ async function srcHtml(env, src) {
   const items = listingLinks(f.text, f.url || src.urls.home);
   return items.length ? { ok: true, items, status: f.status, undated: true } : { ok: false, items: [], status: f.status, detail: 'page had no article-shaped links (built client-side? render would show)' };
 }
+/** Google News items: the outlet is the suffix of each headline; it moves to its own field. */
+function gnewsItems(xml) {
+  return parseFeedXml(xml).map(it => {
+    const m = it.title.match(/\s[-\u2013\u2014]\s([^-\u2013\u2014]{2,60})$/);
+    return { title: m ? it.title.slice(0, m.index).trim() : it.title, link: it.link, date: it.date || '', desc: '', outlet: m ? m[1].trim() : '' };
+  });
+}
 async function srcGnews(env, src) {
   const q = src.urls.gnews || ('site:' + String(src.urls.site || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, ''));
   const f = await srcFetch('https://news.google.com/rss/search?q=' + encodeURIComponent(q + ' when:2d') + '&hl=en-AU&gl=AU&ceid=AU:en', 'application/rss+xml,application/xml,text/xml,*/*', 8000);
   if (!f.ok) return srcFail(f);
-  const items = parseFeedXml(f.text).map(it => {
-    const m = it.title.match(/\s[-\u2013\u2014]\s([^-\u2013\u2014]{2,60})$/);
-    return { title: m ? it.title.slice(0, m.index).trim() : it.title, link: it.link, date: it.date || '', desc: '', outlet: m ? m[1].trim() : '' };
-  });
+  const items = gnewsItems(f.text);
   return items.length ? { ok: true, items, status: f.status } : { ok: false, items: [], status: f.status, detail: 'Google News has nothing indexed for ' + q.slice(0, 60) + ' in 2 days' };
 }
 /** A rendered page, for sites built entirely in the browser. Two back ends:
@@ -5238,6 +5460,199 @@ async function srcRender(env, src) {
   const items = listingLinks(r.html, src.urls.home);
   return items.length ? { ok: true, items, status: 200, undated: true } : { ok: false, items: [], status: 200, detail: 'rendered page had no article-shaped links' };
 }
+/* ---- A wider net (p62): lexicon sweeps and community sources -------------------------------------------------------
+ * Four more methods, all keyless and all public. `lexicon` asks a news index for the next few of the lexicon's own
+ * search terms in turn (issueQueries(): every client's terms and the terms a person approved on a desk) and keeps only
+ * what carries a client issue, so the net follows the lexicon instead of a list of mastheads. `lemmy`, `hn` and `forum`
+ * read public community threads; communityEnrich() reads the comments under the ones that drew any, and under WordPress
+ * articles on an issue. Every request to a site added here goes through pubFetch: robots.txt obeyed, the honest user
+ * agent, ten seconds a host, a refusal backed off for a day. Nobody is named: no creator, author or commenter is read.
+ * Every address and answer shape is as each service documents it, and unverified until a live sweep (DEN.md s.9). */
+const LEX_PER_RUN = { gnews: 12, gdelt: 3 };
+const LEMMY_HOST_RX = /^[a-z0-9][a-z0-9.-]{1,80}\.[a-z]{2,24}(\/c\/[a-z0-9_]{1,60})?$/;
+const COMMUNITY_POLITICS_RX = /politic|auspol/i;
+const WP_COMMENT_SOURCES = 12;                 // WordPress sites whose articles are looked through for comments in one run, in turn
+const WP_COMMENT_WAIT_MS = 3 * 3600000;      // an article is asked for its comments once, after readers have had this long
+function mdText(s) { return String(s || '').replace(/```[\s\S]*?```/g, ' ').replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^[>#]+\s*/gm, '').replace(/\*+|~~|`/g, '').replace(/\s+/g, ' ').trim(); }
+function gdeltDate(s) { const m = String(s || '').match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/); return m ? m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6] + 'Z' : ''; }
+function pubJson(f) { if (!f || !f.ok) return null; try { return JSON.parse(f.text); } catch (e) { return null; } }
+const pubStop = f => !!(f && (f.refused || /^robots/.test(String(f.code || ''))));     // the host said no: ask it nothing more this run
+/** The next n search terms of the lexicon for this source, in turn. A probe reads without moving the cursor. */
+async function lexTerms(env, src, n) {
+  const all = issueQueries(); if (!all.length) return [];
+  const key = 'lex_cur_' + src.id; const cur = (Number(await kvGet(env.AXIOM_KV, key)) || 0) % all.length;
+  const out = []; for (let i = 0; i < Math.min(n, all.length); i++) out.push(all[(cur + i) % all.length]);
+  if (!src.probe) await kvPut(env.AXIOM_KV, key, String((cur + out.length) % all.length), 30 * 86400);
+  return out;
+}
+/** Source Registry method `lexicon` (urls.lexicon = gnews | gdelt): the lexicon's own terms asked of a news index, a
+ *  few a run. Only a headline that carries a client issue is kept; the term that found it rides on the row (meta.q). */
+async function srcLexicon(env, src) {
+  const engine = String((src.urls || {}).lexicon || '') === 'gdelt' ? 'gdelt' : 'gnews';
+  const terms = await lexTerms(env, src, LEX_PER_RUN[engine]);
+  if (!terms.length) return { ok: false, items: [], detail: 'the lexicon has no search terms' };
+  const items = []; const errs = []; const seen = new Set(); let answered = 0; let refused = false;
+  for (const term of terms) {
+    let got = [];
+    if (engine === 'gnews') {
+      const f = await srcFetch('https://news.google.com/rss/search?q=' + encodeURIComponent(auQualify(term) + ' when:2d') + '&hl=en-AU&gl=AU&ceid=AU:en', 'application/rss+xml,application/xml,text/xml,*/*', 8000);
+      if (!f.ok) { errs.push(term + ': ' + String(srcFail(f).detail || 'failed')); continue; }
+      answered++; got = gnewsItems(f.text);
+    } else {
+      const q = '"' + String(term).replace(/["()]/g, ' ').replace(/\s+/g, ' ').trim() + '" sourcecountry:australia';
+      const f = await pubFetch(env, 'https://api.gdeltproject.org/api/v2/doc/doc?query=' + encodeURIComponent(q) + '&mode=artlist&format=json&maxrecords=75&timespan=2d&sort=datedesc', { accept: 'application/json,*/*', ms: 12000 });
+      if (!f.ok) { errs.push(term + ': ' + String(f.error)); if (pubStop(f)) { refused = !!f.refused; break; } continue; }
+      const d = pubJson(f);
+      if (!d || typeof d !== 'object' || (d.articles != null && !Array.isArray(d.articles))) { errs.push(term + ': GDELT did not answer with a list (not JSON): ' + f.text.replace(/\s+/g, ' ').slice(0, 70)); continue; }
+      answered++; got = (d.articles || []).map(a => ({ title: String((a && a.title) || '').replace(/\s+/g, ' ').trim(), link: String((a && a.url) || ''), date: gdeltDate(a && a.seendate), desc: '', outlet: String((a && a.domain) || '').slice(0, 60) }));
+    }
+    got.forEach(it => { if (!it.link || seen.has(it.link) || !issueTag(it.title).length) return; seen.add(it.link); it.q = term; items.push(it); });
+  }
+  if (!answered) return { ok: false, items: [], status: 0, refused, detail: ('no term was answered. ' + errs.slice(0, 2).join('; ')).slice(0, 160) };
+  return { ok: true, items, status: 200, quiet: !items.length, asked: terms.length, answered };
+}
+/** Source Registry method `lemmy` (urls.lemmy = an instance's host, or host/c/community): the instance's own posts,
+ *  newest first. A post is kept when it carries a client issue or comes from a politics community. */
+async function srcLemmy(env, src) {
+  const spec = String((src.urls || {}).lemmy || '').trim().toLowerCase();
+  if (!LEMMY_HOST_RX.test(spec)) return { ok: false, items: [], detail: 'lemmy needs an instance host, e.g. aussie.zone, or host/c/community' };
+  const host = spec.split('/')[0]; const comm = (spec.match(/\/c\/([a-z0-9_]+)$/) || [])[1] || '';
+  const f = await pubFetch(env, 'https://' + host + '/api/v3/post/list?' + (comm ? 'community_name=' + encodeURIComponent(comm) : 'type_=Local') + '&sort=New&limit=50', { accept: 'application/json', ms: 12000 });
+  if (!f.ok) return { ok: false, items: [], status: f.status, refused: !!f.refused, detail: String(f.error).slice(0, 160) };
+  const d = pubJson(f);
+  if (!d || !Array.isArray(d.posts)) return { ok: false, items: [], status: 200, detail: 'the instance answered with no list of posts' + (d && d.error ? ' (' + String(d.error).slice(0, 60) + ')' : '') };
+  const now = Date.now(); const cut = now - SOURCE_WINDOW_H * 3600000; const rows = []; const items = [];
+  d.posts.forEach(x => { const p = (x && x.post) || {}; const c = (x && x.counts) || {}; const cm = (x && x.community) || {};
+    if (!p.id || !p.name || p.deleted || p.removed) return; const ts = Date.parse(p.published || '') || 0; if (!ts || ts < cut || ts > now + 86400000) return;
+    const body = mdText(p.body).slice(0, 2400); const issues = issueTag(p.name + ' ' + body);
+    if (!issues.length && !COMMUNITY_POLITICS_RX.test(String(cm.name || ''))) return;
+    const url = 'https://' + host + '/post/' + p.id;
+    const row = engRow(sigThreadRow({ platform: 'lemmy', id: 'lm' + arcHash(host) + '_' + p.id, title: String(p.name), body, page: String(cm.name || '').slice(0, 60), page_name: String(cm.title || cm.name || '').slice(0, 80), score: Number(c.score) || 0, comments: Number(c.comments) || 0, link: /^https?:\/\//.test(String(p.url || '')) ? String(p.url) : '', url, ts, via: 'worker' }), { likes: Number(c.upvotes) || Number(c.score) || 0, replies: Number(c.comments) || 0 });
+    row.meta.source = src.id; row.meta.lemmy = { host, post: Number(p.id) };
+    rows.push(row); items.push({ title: String(p.name), link: url, date: new Date(ts).toISOString(), desc: body.slice(0, 200) }); });
+  return { ok: true, items, status: 200, quiet: !items.length, kind: 'sig_thread', rows, extra: [] };
+}
+/** Source Registry method `hn` (urls.hn = words, comma separated): Hacker News stories of the window found on each
+ *  word, kept when the story itself names Australia and carries a client issue. */
+async function srcHn(env, src) {
+  const words = String((src.urls || {}).hn || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 4);
+  if (!words.length) return { ok: false, items: [], detail: 'hn needs one or more words to search for' };
+  const now = Date.now(); const since = Math.floor((now - SOURCE_WINDOW_H * 3600000) / 1000); const seen = new Set(); const rows = []; const items = []; const errs = []; let answered = 0; let refused = false;
+  for (const wd of words) {
+    const f = await pubFetch(env, 'https://hn.algolia.com/api/v1/search_by_date?query=' + encodeURIComponent(wd) + '&tags=story&hitsPerPage=50&numericFilters=' + encodeURIComponent('created_at_i>' + since), { accept: 'application/json', ms: 12000 });
+    if (!f.ok) { errs.push(String(f.error)); if (pubStop(f)) { refused = !!f.refused; break; } continue; }
+    const d = pubJson(f); if (!d || !Array.isArray(d.hits)) { errs.push('no list of stories'); continue; }
+    answered++;
+    d.hits.forEach(h => { const id = String((h && h.objectID) || '').replace(/[^0-9]/g, ''); const title = String((h && h.title) || '').replace(/\s+/g, ' ').trim(); if (!id || !title || seen.has(id)) return;
+      const body = stripHtml(String(h.story_text || '')).slice(0, 2400); const text = title + ' ' + body;
+      if (!issueTag(text).length || !AU_QUERY_RX.test(text)) return; seen.add(id);
+      const ts = (Number(h.created_at_i) || 0) * 1000 || now; const url = 'https://news.ycombinator.com/item?id=' + id;
+      const row = engRow(sigThreadRow({ platform: 'hn', id: 'hn' + id, title, body, page: 'news.ycombinator.com', page_name: 'Hacker News', score: Number(h.points) || 0, comments: Number(h.num_comments) || 0, link: /^https?:\/\//.test(String(h.url || '')) ? String(h.url) : '', url, ts, q: wd, via: 'worker' }), { likes: Number(h.points) || 0, replies: Number(h.num_comments) || 0 });
+      row.meta.source = src.id; row.meta.hn = id;
+      rows.push(row); items.push({ title, link: url, date: new Date(ts).toISOString(), desc: '' }); });
+  }
+  if (!answered) return { ok: false, items: [], status: 0, refused, detail: ('Hacker News search did not answer. ' + errs.slice(0, 2).join('; ')).slice(0, 160) };
+  return { ok: true, items, status: 200, quiet: !items.length, kind: 'sig_thread', rows, extra: [] };
+}
+/** Source Registry method `forum` (urls.forum = a forum's own feed of threads): each thread as a community row. A
+ *  general forum keeps only the threads on a client issue; a board the registry lists under an issue keeps them all.
+ *  A feed says who started a thread; that is not read. */
+async function srcForum(env, src) {
+  const f = await pubFetch(env, (src.urls || {}).forum, { accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*', ms: 12000 });
+  if (!f.ok) return { ok: false, items: [], status: f.status, refused: !!f.refused, detail: String(f.error).slice(0, 160) };
+  const posts = parseFeedXml(f.text);
+  if (!posts.length) return { ok: false, items: [], status: 200, detail: 'the forum feed had no threads' };
+  const now = Date.now(); const cut = now - SOURCE_WINDOW_H * 3600000; const host = siteHost((src.urls || {}).forum); const rows = []; const items = []; const seen = new Set();
+  const board = Array.isArray(src.issues) && src.issues.length > 0;      // the registry says this board is about a client issue: it is on topic as a whole
+  posts.forEach(p => { const title = String(p.title || '').replace(/\s+/g, ' ').trim(); const link = String(p.link || '').trim(); if (title.length < 6 || !/^https?:\/\//.test(link) || seen.has(link)) return;
+    const t = Date.parse(p.date || ''); if (!isNaN(t) && t > 0 && (t < cut || t > now + 86400000)) return;
+    const text = stripHtml(String(p.desc || '')).slice(0, 1200); if (!board && !issueTag(title + ' ' + text).length) return; seen.add(link);
+    const row = sigThreadRow({ platform: 'forum', id: 'f' + arcHash(link), title, body: text, page: host, page_name: String(src.name || host).slice(0, 80), score: 0, comments: 0, url: link, ts: (!isNaN(t) && t > 0) ? t : now, via: 'worker' });
+    row.meta.source = src.id; rows.push(row); items.push({ title, link, date: p.date || '', desc: '' }); });
+  return { ok: true, items, status: 200, quiet: !items.length, kind: 'sig_thread', rows, extra: [] };
+}
+/** The comments under what the community methods found, and under WordPress articles on a client issue (the standard
+ *  public comments route of a site whose posts are already read that way). Each thread and each article is asked once.
+ *  No commenter's name is read. A few a run, a host at a time, under the public rules. */
+async function communityEnrich(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {}); const now = Date.now();
+  const out = { ok: true, platform: 'community', threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [], by: { lemmy: { threads: 0, comments: 0 }, hn: { threads: 0, comments: 0 }, web: { threads: 0, comments: 0 } } };
+  if (!env.MIND_DB) return Object.assign(out, { ok: false, detail: 'Bind the D1 database as MIND_DB.' });
+  await ensureArchive(env); await ensureSources(env);
+  const per = Math.min(Math.max(parseInt(opts.max, 10) || 4, 1), 12); const since = now - SOURCE_WINDOW_H * 3600000;
+  const mark = (id, k, v) => env.MIND_DB.prepare("UPDATE arc_items SET meta=json_set(COALESCE(meta,'{}'), '$." + k + "', ?) WHERE id=?").bind(v, id).run();
+  const trows = []; const crows = [];
+  for (const plat of ['lemmy', 'hn']) {
+    const rows = ((await env.MIND_DB.prepare("SELECT id, title, url, meta FROM arc_items WHERE kind='sig_thread' AND src=? AND ts>? AND COALESCE(json_extract(meta,'$.comments'),0)>0 AND json_extract(meta,'$.enriched') IS NULL ORDER BY json_array_length(COALESCE(json_extract(meta,'$.issues'),'[]')) DESC, json_extract(meta,'$.comments') DESC LIMIT ?").bind(plat, since, per).all()).results) || [];
+    for (const r of rows) {
+      let m = {}; try { m = JSON.parse(r.meta || '{}'); } catch (e) { m = {}; }
+      const thread = { id: String(m.id || ''), title: r.title, url: r.url, issues: Array.isArray(m.issues) ? m.issues : [] }; const got = [];
+      if (plat === 'lemmy') {
+        const lm = m.lemmy || {}; if (!lm.host || !lm.post) { await mark(r.id, 'enriched', 0); continue; }
+        await log('cmd', 'GET ' + lm.host + '/api/v3/comment/list?post_id=' + lm.post);
+        const f = await pubFetch(env, 'https://' + lm.host + '/api/v3/comment/list?post_id=' + encodeURIComponent(lm.post) + '&sort=Top&limit=50&max_depth=6', { accept: 'application/json', ms: 12000 });
+        const d = pubJson(f); if (!f.ok || !d || !Array.isArray(d.comments)) { out.errors.push('lemmy: ' + (f.ok ? 'no list of comments' : f.error)); await log('err', out.errors[out.errors.length - 1]); if (pubStop(f)) break; continue; }
+        d.comments.forEach(x => { const c = (x && x.comment) || {}; if (!c.id || c.deleted || c.removed) return; const body = mdText(c.content); if (!body) return;
+          got.push({ id: 'lm' + arcHash(lm.host) + '_c' + c.id, body, score: Number((x.counts || {}).score) || 0, depth: Math.max(0, String(c.path || '').split('.').length - 2), ts: Date.parse(c.published || '') || now }); });
+      } else {
+        const id = String(m.hn || '').replace(/[^0-9]/g, ''); if (!id) { await mark(r.id, 'enriched', 0); continue; }
+        await log('cmd', 'GET hn.algolia.com/api/v1/items/' + id);
+        const f = await pubFetch(env, 'https://hn.algolia.com/api/v1/items/' + id, { accept: 'application/json', ms: 12000 });
+        const d = pubJson(f); if (!f.ok || !d || typeof d !== 'object') { out.errors.push('hn: ' + (f.ok ? 'no story' : f.error)); await log('err', out.errors[out.errors.length - 1]); if (pubStop(f)) break; continue; }
+        const walk = (arr, depth) => (Array.isArray(arr) ? arr : []).forEach(c => { if (!c || got.length >= 80) return; const body = stripHtml(String(c.text || '')); if (body && c.id) got.push({ id: 'hn' + c.id, body, score: 0, depth, ts: (Number(c.created_at_i) || 0) * 1000 || now }); walk(c.children, depth + 1); });
+        walk(d.children, 0);
+      }
+      got.forEach(c => crows.push(engRow(sigCommentRow({ platform: plat, id: c.id, body: c.body, score: c.score, depth: c.depth, ts: c.ts, via: 'worker' }, thread), { likes: c.score })));
+      await mark(r.id, 'enriched', got.length); out.by[plat].threads++; out.by[plat].comments += got.length; await log('out', got.length + ' comments');
+    }
+  }
+  // WordPress sites already read through their own public API: the comments under an article on a client issue
+  const wps = ((await env.MIND_DB.prepare("SELECT id, name, urls FROM sources WHERE method_ok='wp' AND enabled=1 LIMIT 80").all()).results) || [];
+  const base = {}; wps.forEach(s => { let u = {}; try { u = JSON.parse(s.urls || '{}'); } catch (e) { u = {}; } if (u.wp) base[s.id] = { root: String(u.wp).replace(/\/+$/, ''), name: s.name }; });
+  // a few sites a run, in turn: the read below looks inside `meta`, which sits after the article's text in the row, so
+  // asking it of every WordPress source at once is the kind of scan that overloaded the database on 11 November
+  const every = Object.keys(base).sort(); const cur = every.length ? (Number(await kvGet(env.AXIOM_KV, 'wpc_cur')) || 0) % every.length : 0;
+  const ids = every.length <= WP_COMMENT_SOURCES ? every : Array.from({ length: WP_COMMENT_SOURCES }, (x, i) => every[(cur + i) % every.length]);
+  if (every.length > WP_COMMENT_SOURCES) await kvPut(env.AXIOM_KV, 'wpc_cur', String((cur + WP_COMMENT_SOURCES) % every.length), 30 * 86400);
+  if (ids.length) {
+    const arts = ((await env.MIND_DB.prepare("SELECT id, src, title, url, ts, meta FROM arc_items WHERE kind='news' AND src IN (" + ids.map(() => '?').join(',') + ") AND ts>? AND ts<? AND json_extract(meta,'$.wp') IS NOT NULL AND json_extract(meta,'$.wpc') IS NULL AND json_array_length(COALESCE(json_extract(meta,'$.issues'),'[]'))>0 ORDER BY ts DESC LIMIT ?").bind(...ids, since, now - WP_COMMENT_WAIT_MS, per).all()).results) || [];
+    for (const a of arts) {
+      let m = {}; try { m = JSON.parse(a.meta || '{}'); } catch (e) { m = {}; } const b = base[a.src]; if (!b || !(Number(m.wp) > 0)) continue;
+      await log('cmd', 'GET ' + b.root + '/wp-json/wp/v2/comments?post=' + m.wp);
+      const f = await pubFetch(env, b.root + '/wp-json/wp/v2/comments?post=' + Number(m.wp) + '&per_page=50&_fields=id,parent,date_gmt,content', { accept: 'application/json', ms: 12000 });
+      const d = pubJson(f); if (!f.ok || !Array.isArray(d)) { out.errors.push(a.src + ': ' + (f.ok ? 'no list of comments (comments may be closed to the public API)' : f.error)); await log('err', out.errors[out.errors.length - 1]); if (f.ok || !pubStop(f)) await mark(a.id, 'wpc', -1); continue; }
+      const thread = { id: 'wp' + arcHash(a.url), title: a.title, url: a.url, issues: Array.isArray(m.issues) ? m.issues : [] }; let n = 0;
+      d.forEach(c => { const body = stripHtml(String((c && c.content && c.content.rendered) || '')); if (!c || !c.id || !body) return; n++;
+        crows.push(sigCommentRow({ platform: 'web', id: thread.id + '_' + c.id, body, score: 0, depth: Number(c.parent) > 0 ? 1 : 0, ts: Date.parse(String(c.date_gmt || '').replace(/Z?$/, 'Z')) || now, via: 'worker' }, thread)); });
+      if (n) { const row = sigThreadRow({ platform: 'web', id: thread.id, title: a.title, body: '', page: a.src, page_name: String(b.name || a.src).slice(0, 80), score: 0, comments: n, link: a.url, url: a.url + '#comments', ts: a.ts, via: 'worker' }); row.meta.source = a.src; row.meta.item = a.id; trows.push(row); out.by.web.threads++; out.by.web.comments += n; }
+      await mark(a.id, 'wpc', n); await log('out', n + ' comments under ' + String(a.title).slice(0, 60));
+    }
+  }
+  out.threads = out.by.lemmy.threads + out.by.hn.threads + out.by.web.threads; out.comments = crows.length; out.hostile = crows.filter(r => r.tone < 0).length;
+  const f = await sigFile(env, trows, crows); out.threadRows = f.threadRows; out.commentRows = f.commentRows;
+  await log('info', 'read ' + out.threads + ' threads: filed ' + f.commentRows + ' new comments');
+  return out;
+}
+/** The community job (Signals tabs Lemmy, Hacker News, Forums, Web comments; POST /social/sweep {platform:'community'};
+ *  socialCron): the registry's community sources first (a Lemmy instance, Hacker News, a forum's own feed), then the
+ *  comments under what they and the WordPress sites found. `max` bounds the comment reads, since one host is asked
+ *  once in ten seconds: a job the worker runs after a response has about thirty, and the tick finishes the rest. */
+const COMMUNITY_METHODS = ['lemmy', 'hn', 'forum'];
+async function communitySweep(env, p, log) {
+  p = p || {}; log = log || (async () => {});
+  if (!(await ensureSources(env))) return { ok: false, platform: 'community', error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  const rows = ((await env.MIND_DB.prepare("SELECT id, methods FROM sources WHERE enabled=1 AND core=0 AND tier='community' ORDER BY COALESCE(last_try,0) LIMIT 40").all()).results) || [];
+  const ids = rows.filter(r => { let m = []; try { m = JSON.parse(r.methods || '[]'); } catch (e) { m = []; } return m.some(x => COMMUNITY_METHODS.indexOf(x) >= 0); }).map(r => r.id).slice(0, 12);
+  let sources = { ran: 0, succeeded: 0, failed: 0, items: 0, added: 0 }; let note = '';
+  if (ids.length) {
+    await log('info', 'reading ' + ids.length + ' community source' + (ids.length === 1 ? '' : 's') + ' from the Source Registry');
+    const sw = await sourceSweep(env, { ids, log });
+    sources = { ran: sw.ran || 0, succeeded: sw.succeeded || 0, failed: sw.failed || 0, items: sw.items || 0, added: sw.added || 0 };
+  } else { note = 'No community source is switched on in the Source Registry (tier community: a Lemmy instance, Hacker News, a forum feed). Add one in Sources.'; await log('info', note); }
+  await log('info', 'reading the comments under the threads and articles held');
+  const en = await communityEnrich(env, { max: p.max || 2, log });
+  return Object.assign(en, { sources, threadRows: (en.threadRows || 0) + sources.added, note: note || undefined });
+}
 async function srcMethod(env, m, src) {
   const u = src.urls || {};
   if (m === 'rss') return u.rss ? srcRss(env, src) : { ok: false, items: [], skipped: true, detail: 'no feed url' };
@@ -5250,6 +5665,12 @@ async function srcMethod(env, m, src) {
   if (m === 'html') return u.home ? srcHtml(env, src) : { ok: false, items: [], skipped: true, detail: 'no listing page' };
   if (m === 'gnews') return (u.gnews || u.site) ? srcGnews(env, src) : { ok: false, items: [], skipped: true, detail: 'no site or query for Google News' };
   if (m === 'render') return u.home ? srcRender(env, src) : { ok: false, items: [], skipped: true, detail: 'no page to render' };
+  if (m === 'public') return u.public ? srcPublic(env, src) : { ok: false, items: [], skipped: true, detail: 'no public page' };
+  if (m === 'process') return u.process ? srcProcess(env, src) : { ok: false, items: [], skipped: true, detail: 'no parliament page' };
+  if (m === 'lexicon') return u.lexicon ? srcLexicon(env, src) : { ok: false, items: [], skipped: true, detail: 'no news index named' };
+  if (m === 'lemmy') return u.lemmy ? srcLemmy(env, src) : { ok: false, items: [], skipped: true, detail: 'no Lemmy instance' };
+  if (m === 'hn') return u.hn ? srcHn(env, src) : { ok: false, items: [], skipped: true, detail: 'no words for Hacker News' };
+  if (m === 'forum') return u.forum ? srcForum(env, src) : { ok: false, items: [], skipped: true, detail: 'no forum feed' };
   return { ok: false, items: [], skipped: true, detail: 'unknown method ' + m };
 }
 function srcTarget(src, m) {
@@ -5257,7 +5678,9 @@ function srcTarget(src, m) {
   if (m === 'rss') return u.rss || ''; if (m === 'wp') return String(u.wp || '').replace(/\/+$/, '') + '/wp-json/wp/v2/posts'; if (m === 'json') return u.json || '';
   if (m === 'youtube') return 'youtube.com/feeds/videos.xml ' + (u.youtube || ''); if (m === 'substack') return String(u.substack || '').replace(/\/+$/, '') + '/feed';
   if (m === 'sitemap') return u.sitemap || ('https://' + siteHost(u.site) + '/robots.txt'); if (m === 'podcast') return 'itunes.apple.com/search "' + (u.podcast || '') + '"';
-  if (m === 'html' || m === 'render') return u.home || ''; if (m === 'gnews') return 'news.google.com/rss/search ' + (u.gnews || ('site:' + siteHost(u.site)));
+  if (m === 'html' || m === 'render') return u.home || ''; if (m === 'public') return u.public || ''; if (m === 'process') return u.process || ''; if (m === 'gnews') return 'news.google.com/rss/search ' + (u.gnews || ('site:' + siteHost(u.site)));
+  if (m === 'lexicon') return (u.lexicon === 'gdelt' ? 'api.gdeltproject.org' : 'news.google.com/rss/search') + ' <the next ' + (LEX_PER_RUN[u.lexicon] || LEX_PER_RUN.gnews) + ' lexicon terms>';
+  if (m === 'lemmy') return String(u.lemmy || '').split('/')[0] + '/api/v3/post/list'; if (m === 'hn') return 'hn.algolia.com/api/v1/search_by_date ' + (u.hn || ''); if (m === 'forum') return u.forum || '';
   return '';
 }
 /** Run one source through its method chain. Normally stops at the first method
@@ -5272,10 +5695,11 @@ async function sourceRun(env, src, opts) {
   for (const m of chain) {
     const t0 = Date.now();
     await log('cmd', src.id + ': ' + m + ' ' + srcTarget(src, m));
-    let r; try { r = await srcMethod(env, m, src); } catch (e) { r = { ok: false, items: [], detail: String((e && e.message) || e).slice(0, 120) }; }
-    const n = (r.items || []).length, ok = !!(r.ok && n), ms = r.ms || (Date.now() - t0);
+    let r; try { r = await srcMethod(env, m, opts.all ? Object.assign({}, src, { probe: true }) : src); } catch (e) { r = { ok: false, items: [], detail: String((e && e.message) || e).slice(0, 120) }; }
+    const n = (r.items || []).length, ok = !!(r.ok && (n || r.quiet)), ms = r.ms || (Date.now() - t0);
     const t = { method: m, ok, n, ms, status: r.status || 0, skipped: !!r.skipped, detail: ok ? '' : String(r.detail || 'failed').slice(0, 160) };
     if (ok && r.full) t.full = true;
+    if (r.refused) t.refused = true;
     if (opts.all) t.sample = (r.items || []).slice(0, 3).map(i => ({ title: String(i.title || '').slice(0, 140), link: String(i.link || '').slice(0, 200), date: i.date || '' }));
     tried.push(t);
     if (ok) { await log('out', src.id + ': ' + n + ' items via ' + m + ' (' + ms + 'ms)'); if (!hit) { hit = r; hit.method = m; } if (!opts.all) break; }
@@ -5302,14 +5726,30 @@ function sourceRows(src, hit, now) {
     const meta = { reg: 1, source: src.id, tier: src.tier, juris: src.juris, method: hit.method, issues: issueTag(title + ' ' + (it.desc || '') + ' ' + text.slice(0, 1500)), dated: dated ? 1 : 0 };
     if (e.parties) meta.parties = e.parties;
     if (it.outlet) meta.outlet = String(it.outlet).slice(0, 60);
+    if (it.q) meta.q = String(it.q).slice(0, 80);                 // the lexicon term that found it
+    if (it.wpid) meta.wp = it.wpid;                               // the site's own post number: what its comments hang from
+    const claim = claimOf(title + '. ' + (it.desc || '') + ' ' + text.slice(0, 3000)); if (claim) meta.claim = claim;
     if (text.length > 600) { meta.full = 1; meta.ft = hit.method; }
     rows.push({ src: src.id, title: title.slice(0, 500), body: (text.length > (it.desc || '').length ? text : String(it.desc || '')).slice(0, 6000), url: link, tone: e.tone, meta, ts: dated ? t : now });
   }
   return rows;
 }
+/** How long until a source is due again. One failure is a blip and changes nothing; from the second failure in a row
+ *  the wait doubles, a dead source (SOURCE_DEAD_FAILS) is asked once a day, and a source that delivers is back on its
+ *  schedule. A failing source walks every method it has, so it is the dearest run there is: backing it off is what
+ *  leaves room in a tick for the sources that deliver. */
+function sourceWaitMs(s, ok) {
+  const base = Math.max(15, Number(s.schedule) || 60) * 60000; if (ok) return base;
+  const fails = (Number(s.fails) || 0) + 1; if (fails >= SOURCE_DEAD_FAILS) return 86400000;
+  return Math.min(86400000, base * Math.pow(2, Math.max(0, fails - 1)));
+}
+/** Registry sources read in one tick: SOURCES_PER_TICK, or the var of that name (1 to 150) once the owner has seen how
+ *  long a sweep takes (`lastSweep.ms` on GET /sources). */
+function sourcesPerTick(env) { const n = parseInt(String((env && env.SOURCES_PER_TICK) || ''), 10); return n > 0 ? Math.min(150, n) : SOURCES_PER_TICK; }
 function sourceStmts(env, run, added, now) {
   const s = run.src; const stmts = [];
-  const next = now + Math.max(15, Number(s.schedule) || 60) * 60000;
+  // a host that refused the public reader is not due again for a day: the refusal is its health, and it backs off
+  const next = now + (run.tried.some(t => t.refused) ? PUB_BACKOFF_S * 1000 : sourceWaitMs(s, run.ok));
   const short = run.tried.map(t => t.method + ':' + (t.ok ? t.n : (t.skipped ? 'skip' : 'x' + (t.status || '')))).join(' ');
   const detail = run.ok ? short : (short + ' | ' + run.tried.filter(t => !t.skipped).map(t => t.method + ' ' + t.detail).join('; ')).slice(0, 400);
   if (run.ok) {
@@ -5352,7 +5792,7 @@ async function sourceSweep(env, opts) {
   if (!(await ensureSources(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
   const now = Date.now();
   const ids = Array.isArray(opts.ids) ? opts.ids.map(sourceIdClean).filter(Boolean).slice(0, 150) : [];
-  const limit = Math.min(Math.max(parseInt(opts.limit, 10) || (opts.all ? 150 : SOURCES_PER_TICK), 1), 150);
+  const limit = Math.min(Math.max(parseInt(opts.limit, 10) || (opts.all ? 150 : sourcesPerTick(env)), 1), 150);
   let rows = [];
   if (ids.length) { for (let i = 0; i < ids.length; i += 90) { const part = ids.slice(i, i + 90); rows.push(...((await env.MIND_DB.prepare('SELECT * FROM sources WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results || [])); } }   // P49 (F8): under D1's 100 bound variables
   else if (opts.all) rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE enabled=1 AND core=0 ORDER BY COALESCE(last_try,0) LIMIT ?').bind(limit).all()).results || [];
@@ -5430,7 +5870,7 @@ async function sourcesList(env, filt) {
   const q = String(filt.q || '').toLowerCase();
   const list = rows.filter(s => (!filt.tier || s.tier === filt.tier) && (!filt.juris || s.juris === filt.juris) && (!filt.status || s.status === filt.status)
     && (!filt.issue || s.issues.indexOf(filt.issue) >= 0) && (!q || (s.name + ' ' + s.id + ' ' + JSON.stringify(s.urls)).toLowerCase().indexOf(q) >= 0));
-  return { ok: true, sources: list, summary, lastSweep: last, tiers: SOURCE_TIERS, juris: SOURCE_JURIS, methods: SOURCE_METHODS, deadAfter: SOURCE_DEAD_FAILS, perTick: SOURCES_PER_TICK, renderConfigured: renderConfigured(env) };
+  return { ok: true, sources: list, summary, lastSweep: last, tiers: SOURCE_TIERS, juris: SOURCE_JURIS, methods: SOURCE_METHODS, deadAfter: SOURCE_DEAD_FAILS, perTick: sourcesPerTick(env), renderConfigured: renderConfigured(env) };
 }
 
 // ==============================================================================
@@ -5727,10 +6167,10 @@ async function renderJob(env, job, log) {
 // their own posts. What each platform needs, what it can and cannot reach and
 // how it fared last time is one table: socialCoverage().
 // ==============================================================================
-const SOCIAL_PLATFORMS = ['bluesky', 'mastodon', 'youtube', 'petitions', 'instagram', 'facebook'];   // worker-side sweeps the Signals view can start as jobs
+const SOCIAL_PLATFORMS = ['bluesky', 'mastodon', 'youtube', 'petitions', 'instagram', 'facebook', 'hansard', 'blueskyaccounts', 'community'];   // worker-side sweeps the Signals view can start as jobs
 const BSKY_API = 'https://public.api.bsky.app/xrpc/';
 const MASTO_INSTANCES = ['aus.social', 'mastodon.au', 'theblower.au', 'mastodon.social'];
-const MASTO_TAGS = ['auspol', 'springst', 'nswpol', 'qldpol', 'wapol', 'sapol', 'taspol', 'ntpol', 'actpol', 'ausvotes', 'insiders', 'qanda'];
+const MASTO_TAGS = ['auspol', 'springst', 'nswpol', 'qldpol', 'wapol', 'sapol', 'taspol', 'ntpol', 'actpol', 'ausvotes', 'insiders', 'qanda', 'vicpol', 'auspolitics'];
 const X_TIMELINE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
 const X_TWEET = 'https://cdn.syndication.twimg.com/tweet-result';
 const YT_FEED = 'https://www.youtube.com/feeds/videos.xml?channel_id=';
@@ -6214,7 +6654,8 @@ async function petitionsSweep(env, opts) {
   for (let i = 0; i < canon.length; i += 150) out.rows += await archiveItems(env, 'petition', canon.slice(i, i + 150));
   for (let i = 0; i < snaps.length; i += 150) out.snapshots += await archiveItems(env, 'petition', snaps.slice(i, i + 150));
   for (let i = 0; i < upd.length; i += 50) { try { await env.MIND_DB.batch(upd.slice(i, i + 50)); } catch (e) {} }
-  out.threads = canon.length; out.threadRows = out.rows;
+  if (!opts.site) { try { const c = await petitionCountersSweep(env, { log }); out.counters = c.read || 0; out.read += c.read || 0; out.rows += c.rows || 0; out.snapshots += c.snapshots || 0; (c.errors || []).forEach(e => out.errors.push(e)); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 100)); } }
+  out.threads = canon.length + (out.counters || 0); out.threadRows = out.rows;
   await log('info', out.read + ' petitions read, ' + out.rows + ' new, ' + out.snapshots + ' signature snapshots for ' + day);
   if (!out.read && out.errors.length) { out.ok = false; out.detail = 'Nothing was read. ' + out.errors[0]; }
   return out;
@@ -6236,7 +6677,7 @@ async function petitionsList(env, opts) {
     let m = {}; try { m = JSON.parse(r.meta || '{}') || {}; } catch (e) { m = {}; }
     const h = hist[r.url] || []; const sigs = Number(m.signatures) || 0;
     const y = at(h, dayKey(1)), wk = at(h, dayKey(7));
-    return { title: r.title, url: r.url, site: m.site || '', juris: m.juris || '', issues: Array.isArray(m.issues) ? m.issues : [], signatures: sigs, closes: m.closes || '', seen: m.seen || r.ts, first: r.ts,
+    return { title: r.title, url: r.url, site: m.site || '', juris: m.juris || '', issues: Array.isArray(m.issues) ? m.issues : [], signatures: sigs, self_reported: !!m.self_reported, campaign: m.campaign || '', closes: m.closes || '', seen: m.seen || r.ts, first: r.ts,
       growth24: y == null ? null : sigs - y, growth7: wk == null ? null : sigs - wk, excerpt: String(r.body || '').slice(0, 300), points: h.slice(-10) };
   }).sort((a, b) => ((b.growth24 || 0) - (a.growth24 || 0)) || (b.signatures - a.signatures));
   return { ok: true, days, petitions: list, sites: PETITION_SITES.map(s => ({ id: s.id, name: s.name, juris: s.juris, url: s.list })) };
@@ -6290,9 +6731,9 @@ async function socialCoverage(env, probe) {
   if (db) {
     try {
       await ensureArchive(env);
-      const rows = (await db.prepare("SELECT COALESCE(json_extract(meta,'$.platform'), src) p, kind, SUM(ts>?) d1, COUNT(*) d7, MAX(ts) newest FROM arc_items WHERE ts>? AND kind IN ('sig_thread','sig_comment','petition','transcript','reddit_thread','reddit_comment','forum','oppads') GROUP BY p, kind").bind(now - 86400000, now - 7 * 86400000).all()).results || [];
+      const rows = (await db.prepare("SELECT COALESCE(json_extract(meta,'$.platform'), src) p, kind, SUM(ts>?) d1, COUNT(*) d7, MAX(ts) newest FROM arc_items WHERE ts>? AND kind IN ('sig_thread','sig_comment','petition','transcript','reddit_thread','reddit_comment','forum','oppads','hansard') GROUP BY p, kind").bind(now - 86400000, now - 7 * 86400000).all()).results || [];
       rows.forEach(r => {
-        const p = /^reddit_/.test(r.kind) ? 'reddit' : r.kind === 'forum' ? 'forums' : r.kind === 'oppads' ? 'adlibrary' : (r.p || 'unknown');
+        const p = /^reddit_/.test(r.kind) ? 'reddit' : (r.kind === 'forum' || r.p === 'forum') ? 'forums' : r.kind === 'oppads' ? 'adlibrary' : (r.p || 'unknown');
         const c = counts[p] = counts[p] || { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 };
         const isC = /comment/.test(r.kind);
         if (isC) { c.comments24 += r.d1 || 0; c.comments7 += r.d7 || 0; } else { c.threads24 += r.d1 || 0; c.threads7 += r.d7 || 0; }
@@ -6305,7 +6746,9 @@ async function socialCoverage(env, probe) {
   const mac = agents.some(a => a.live);
   const P = [
     { id: 'reddit', label: 'Reddit', method: 'JSON API with app credentials from the worker, or rdt on a signed-in Mac', keys: 'REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET (optional; registration is closed)', configured: redditAuthed(env) || mac, where: redditAuthed(env) ? 'worker' : 'mac', reach: 'watched subs, keyword search across Reddit, full comment trees, scores', unreachable: '' },
-    { id: 'bluesky', label: 'Bluesky', method: 'public AppView API (searchPosts, getPostThread)', keys: 'none', configured: true, where: 'worker', reach: 'keyword search, threads, replies, likes/reposts/quotes; the Australian gate applies', unreachable: '' },
+    { id: 'bluesky', label: 'Bluesky', method: 'public AppView API (searchPosts, getPostThread, getAuthorFeed)', keys: 'none', configured: true, where: 'worker', reach: 'keyword search, threads, replies, likes/reposts/quotes; the Australian gate applies; the own posts of register accounts marked as public actors', unreachable: '' },
+    { id: 'parliament', label: 'Parliamentary record', method: 'bill, inquiry and notice pages on the parliaments\' own sites, as Source Registry sources (method process), under the public reader\'s rules', keys: 'none', configured: true, where: 'worker', reach: 'stage, hearing dates, submissions closing, report date and the number of submissions; a stage change files one row; dates feed the desks\' Upcoming list', unreachable: 'a page whose robots.txt disallows it or that refuses the reader; submitters\' names are never read' },
+    { id: 'hansard', label: 'Hansard', method: 'OpenAustralia getHansard, the desks\' terms, once a sitting day', keys: 'OPENAUSTRALIA_KEY (free, openaustralia.org.au/api)', configured: !!env.OPENAUSTRALIA_KEY, where: 'worker', reach: 'speeches in both houses on the desks\' issues; the speaker named only when the MP register holds them', unreachable: 'state parliaments\' Hansard' },
     { id: 'mastodon', label: 'Mastodon', method: 'tag timelines and reply contexts on ' + MASTO_INSTANCES.join(', '), keys: 'none', configured: true, where: 'worker', reach: 'the Australian political tags (' + MASTO_TAGS.slice(0, 5).join(', ') + '...), replies, favourites/boosts', unreachable: 'full-text search needs an instance token' },
     { id: 'x', label: 'X', method: 'account timelines through X\'s embed service from the worker; keyword search and replies through twitter-cli on a signed-in Mac', keys: 'none for timelines; a signed-in Mac for search', configured: true, where: 'both', reach: 'MP register and watch-list timelines with likes/reposts/replies counts; search and reply threads from the Mac', unreachable: 'keyword search and reply text from the cloud (X requires a session and a transaction id)' },
     { id: 'youtube', label: 'YouTube', method: 'channel feeds as Source Registry sources; comments through the Data API or YouTube\'s web endpoint; captions', keys: 'YOUTUBE_KEY optional (free, 10,000 units a day)', configured: true, apiKey: !!env.YOUTUBE_KEY, where: 'worker', reach: 'every video of a listed channel, its comments with likes, its captions as a transcript', unreachable: 'keyword search without YOUTUBE_KEY' },
@@ -6316,8 +6759,11 @@ async function socialCoverage(env, probe) {
     { id: 'instagram', label: 'Instagram public accounts and hashtags', method: 'layer 1: Business Discovery and hashtag search through the Graph API, or the Supermetrics Instagram Public Data connector in a session; layer 2: a signed-in collector on a Mac', keys: 'META_TOKEN + META_IG_USER (the agency\'s Instagram business account id); hashtag search also needs Instagram Public Content Access (Meta app review)', configured: igConfigured(env) || agents.some(a => a.live && (a.sources || []).indexOf('instagram') >= 0), where: igConfigured(env) ? 'worker' : 'mac', reach: 'registered business and creator accounts\' posts with likes and comment counts; recent posts on up to ' + IG_HASHTAG_LIMIT + ' hashtags a week', unreachable: 'comment text, personal accounts, stories, keyword search beyond hashtags' },
     { id: 'threads', label: 'Threads', method: 'none available', keys: 'Threads API is for the account\'s own posts; keyword search needs the threads_keyword_search permission (app review)', configured: false, where: 'none', reach: '', unreachable: 'no public route to others\' posts; the web pages are built client-side behind a login prompt' },
     { id: 'tiktok', label: 'TikTok', method: 'oEmbed for a single post url', keys: 'none; the Research API needs approval', configured: true, where: 'worker', reach: 'title and thumbnail of a given post', unreachable: 'profiles, search and comments: signed requests from a browser session (a Mac render job could read a profile; the Research API is approval-gated)' },
-    { id: 'forums', label: 'Forums', method: 'RSS, Discourse JSON and listing pages (AU_FORUMS)', keys: 'none', configured: true, where: 'worker', reach: 'new threads on Whirlpool, OzBargain, BigFooty, HotCopper, PropertyChat and Discourse boards', unreachable: 'reply text on most boards' },
-    { id: 'petitions', label: 'Petitions', method: 'the parliaments\' e-petition pages, daily', keys: 'none', configured: true, where: 'worker', reach: PETITION_SITES.map(s => s.name).join(', ') + ': title, text, signatures a day, closing date', unreachable: 'change.org (bot-walled from servers; add a petition url as a source to try)' },
+    { id: 'forums', label: 'Forums', method: 'forum feeds as Source Registry sources (urls.forum) under the public reader: robots.txt obeyed; and the older listing readers', keys: 'none', configured: true, where: 'worker', reach: 'new threads on the listed forums, as community rows with their issues; older readers: Whirlpool, BigFooty, HotCopper, PropertyChat titles', unreachable: 'reply text on most boards; who posted is never read' },
+    { id: 'lemmy', label: 'Lemmy', method: 'an instance\'s public API (post and comment lists) under the public reader: robots.txt obeyed, ten seconds a request', keys: 'none', configured: true, where: 'worker', reach: 'posts on a client issue or from a politics community on each listed instance (urls.lemmy), and the comments under them', unreachable: 'instances whose robots.txt disallows the API; who posted is never read' },
+    { id: 'hn', label: 'Hacker News', method: 'the public search API, stories that name Australia, under the public reader (robots.txt obeyed)', keys: 'none', configured: true, where: 'worker', reach: 'stories on a client issue and their comment trees', unreachable: 'anything that does not say Australia in the story itself' },
+    { id: 'web', label: 'Site comments', method: 'the standard public comments route of WordPress sites already read through their own API, under the public reader (robots.txt obeyed)', keys: 'none', configured: true, where: 'worker', reach: 'readers\' comments under articles on a client issue, each article asked once', unreachable: 'sites that use a comment service, close their comments to the API or put them behind a sign-in; who commented is never read' },
+    { id: 'petitions', label: 'Petitions', method: 'the parliaments\' e-petition pages, daily', keys: 'none', configured: true, where: 'worker', reach: PETITION_SITES.map(s => s.name).join(', ') + ': title, text, signatures a day, closing date; campaigns\' own counters, marked self-reported', unreachable: 'change.org (bot-walled from servers; add a petition url as a source to try)' },
     { id: 'substack', label: 'Substack', method: 'publication feed plus the comments API, as Source Registry sources (urls.substack)', keys: 'none', configured: true, where: 'worker', reach: 'posts and comment threads of any listed publication; discovery through /social/substack/search', unreachable: '' },
   ];
   P.forEach(p => { p.counts = counts[p.id] || { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 }; p.last = last[p.id] || null; });
@@ -6347,7 +6793,10 @@ async function socialSweep(env, params, log) {
     case 'x': return xSyndSweep(env, p);
     case 'instagram': return instagramSweep(env, p);
     case 'facebook': return fbPublicSweep(env, p);
-    default: return { ok: false, error: 'unknown_platform', detail: 'platform must be one of bluesky, mastodon, youtube, petitions, x, instagram, facebook.' };
+    case 'hansard': return hansardSweep(env, Object.assign({ force: true }, p));
+    case 'blueskyaccounts': return bskyActorSweep(env, p);
+    case 'community': return communitySweep(env, p, log);
+    default: return { ok: false, error: 'unknown_platform', detail: 'platform must be one of bluesky, blueskyaccounts, mastodon, youtube, petitions, hansard, community, x, instagram, facebook.' };
   }
 }
 function socialSummary(r) {
@@ -6374,9 +6823,12 @@ async function socialCron(env) {
   const qs = all.slice(cur, cur + slice).concat(cur + slice > all.length ? all.slice(0, cur + slice - all.length) : []);
   await kvPut(env.AXIOM_KV, 'bsky_q_cursor', String((cur + slice) % Math.max(1, all.length)), 7 * 86400);
   await run('bluesky', () => bskySweep(env, { queries: qs, threads: 15, days: 3 }));
+  await run('bluesky_accounts', () => bskyActorSweep(env, { max: 20 }));
+  if (env.OPENAUSTRALIA_KEY) { const hz = await hansardSweep(env, {}); if (!hz.skipped) res.hansard = Object.assign({ at: now }, socialSummary(hz)); }
   await run('mastodon', () => mastodonSweep(env, { threads: 15, days: 3 }));
   await run('x', () => xSyndSweep(env, { max: 30, days: 3 }));
   await run('youtube', () => youtubeEnrich(env, { max: 6 }));
+  await run('community', () => communityEnrich(env, { max: 4 }));
   // the Graph routes run only when what they need is in place: a refusal every two hours tells nobody anything
   if (igConfigured(env)) await run('instagram', () => instagramSweep(env, { max: 15 }));
   if (env.META_TOKEN && String(env.META_PUBLIC_PAGES || '') === '1') await run('facebook', () => fbPublicSweep(env, { max: 15 }));
@@ -6403,7 +6855,7 @@ const DEN_PLATFORMS = ['x', 'facebook', 'instagram', 'youtube', 'tiktok', 'threa
 const DEN_STATUS = ['proposed', 'active', 'off', 'dismissed'];
 const DEN_ACTOR_KINDS = ['org', 'official', 'media'];
 const DEN_SOURCES = ['operator', 'reports', 'discovery', 'seed'];
-const DEN_INGEST_PLATFORMS = ['facebook', 'instagram', 'x', 'youtube', 'tiktok', 'threads'];
+const DEN_INGEST_PLATFORMS = ['facebook', 'instagram', 'x', 'youtube', 'tiktok', 'threads', 'bluesky'];
 const DEN_INGEST_MAX = 500;
 const DEN_CAPS = { facebook: 40, instagram: 40, x: 60, youtube: 30, hashtags: 10, urls: 25 };
 const IG_HASHTAG_LIMIT = 30, IG_HASHTAG_WINDOW_MS = 7 * 86400000;
@@ -6462,6 +6914,10 @@ function canonPermalink(platform, url) {
     if (host !== 'x.com' && host !== 'twitter.com') return '';
     const i = seg.indexOf('status'); const id = i >= 0 ? seg[i + 1] : '';
     return num(id) ? 'https://x.com/i/web/status/' + id : '';
+  }
+  if (platform === 'bluesky') {
+    if (host !== 'bsky.app') return '';
+    return seg[0] === 'profile' && seg[2] === 'post' && /^(did:[a-z0-9:.-]+|[a-z0-9.-]{3,120})$/i.test(seg[1] || '') && /^[a-z0-9]{6,20}$/i.test(seg[3] || '') ? 'https://bsky.app/profile/' + seg[1].toLowerCase() + '/post/' + seg[3] : '';
   }
   if (platform === 'instagram') {
     if (host !== 'instagram.com') return '';
@@ -7320,8 +7776,17 @@ const DEN_DESK_SEED = [
 const DEN_OPTIONS = { hidden: [], minEng: {}, fold: true, density: 'regular', mutes: [] };
 const DEN_BOARD_KINDS = ['news', 'sig_thread', 'reddit_thread', 'petition', 'transcript'];
 const DEN_BOARD_ROWS = 4000, DEN_DAILY_CALLS = 20, DEN_BRIEF_MAX = 120000, DEN_SECTION_MAX = 20000;
+/* The strip's counts over a fortnight and a month (an issue against its own baseline, who is named for the first time, a
+ * registered account's usual, the channels a desk relies on) move slowly and cost the database a long scan each, so they
+ * are counted once in this many seconds for a desk and a window. Sentinel spikes, emerging narratives and collection gaps
+ * are read on every open. Found live on 11 November 2026: every open of the page ran all of it, twice over with the
+ * board's own read, and D1 answered that it was overloaded. */
+const DEN_SLOW_TTL = 900;
+/** D1 saying it cannot answer now: too much is reading it at once. Said in words with a status a page retries on. */
+function denBusy(e) { return /D1 DB is overloaded|Too many resources consumed|too many requests queued|D1_ERROR[^.]*overload|database is locked|SQLITE_BUSY/i.test(String((e && e.message) || e || '')); }
+const DEN_BUSY = { ok: false, error: 'db_busy', retry: true, detail: 'The database is busy right now: too much is reading it at once. Nothing was changed. Try again in a few seconds.' };
 const DEN_MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-const DEN_CH_NAME = { news: 'News', x: 'X', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', reddit: 'Reddit', bluesky: 'Bluesky', tiktok: 'TikTok', threads: 'Threads', linkedin: 'LinkedIn', mastodon: 'Mastodon' };
+const DEN_CH_NAME = { news: 'News', x: 'X', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', reddit: 'Reddit', bluesky: 'Bluesky', tiktok: 'TikTok', threads: 'Threads', linkedin: 'LinkedIn', mastodon: 'Mastodon', lemmy: 'Lemmy', hn: 'Hacker News', forum: 'Forums', web: 'Site comments', substack: 'Substack' };
 const DEN_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 let DESKS_READY = false;
 async function ensureDesks(env) {
@@ -7445,8 +7910,11 @@ async function denBoard(env, deskId, opts) {
   if (!(await ensureArchive(env))) return { ok: false, status: 501, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
   const now = Date.now(); const win = denWindow(desk, opts, now); const mine = desk.issues.map(i => i.id); const o = desk.options;
   const watch = new Map(); (((await env.MIND_DB.prepare("SELECT id, kind, platform, value, name, actor_kind, status FROM den_watch WHERE ns=? AND kind='account'").bind(desk.ns).all()).results) || []).forEach(w => watch.set(w.id, w));
-  const raw = ((await env.MIND_DB.prepare('SELECT id, kind, src, url, title, substr(body,1,600) body, tone, ts, seen, meta FROM arc_items WHERE ts>? AND ts<=? AND kind IN (' + DEN_BOARD_KINDS.map(() => '?').join(',') + ') ORDER BY ts DESC LIMIT ' + DEN_BOARD_ROWS)
-    .bind(win.from, win.to, ...DEN_BOARD_KINDS).all()).results) || [];
+  // only rows that name one of the desk's issues, or a registered account, leave the database: the test in the loop below
+  // is still the rule, this keeps the other clients' rows (most of the window) from being read out and parsed here
+  const near = mine.map(() => 'instr(meta,?)>0').concat(["instr(meta,'\"watch\"')>0"]).join(' OR ');
+  const raw = ((await env.MIND_DB.prepare('SELECT id, kind, src, url, title, substr(body,1,600) body, tone, ts, seen, meta FROM arc_items WHERE ts>? AND ts<=? AND kind IN (' + DEN_BOARD_KINDS.map(() => '?').join(',') + ') AND (' + near + ') ORDER BY ts DESC LIMIT ' + DEN_BOARD_ROWS)
+    .bind(win.from, win.to, ...DEN_BOARD_KINDS, ...mine.map(i => '"' + i + '"')).all()).results) || [];
   const muted = { account: new Set(), domain: new Set(), term: [] }; o.mutes.forEach(m => { if (m.kind === 'term') { const rx = denTermRx(m.value); if (rx) muted.term.push(rx); } else if (muted[m.kind]) muted[m.kind].add(String(m.value)); });
   const rows = []; let nMuted = 0, nLow = 0, nRegion = 0;
   for (const r0 of raw) {
@@ -7471,7 +7939,7 @@ async function denBoard(env, deskId, opts) {
     if (!f) folds.set(k, { head: r, outlets: [outlet], ids: [r.id], pinned: r.pinned, gated: !!r.meta.gated, fb: r.meta.fb || null }); else { if (f.outlets.indexOf(outlet) < 0) f.outlets.push(outlet); f.ids.push(r.id); f.pinned = f.pinned || r.pinned; f.gated = f.gated || !!r.meta.gated; if (!f.fb && r.meta.fb) f.fb = r.meta.fb; } });
   const fbTotal = fb => (fb ? (Number(fb.reactions) || 0) + (Number(fb.comments) || 0) + (Number(fb.shares) || 0) : 0);
   const media = Array.from(folds.values()).map(f => ({ id: f.head.id, title: f.head.title.slice(0, 300), url: link(f.head), outlet: f.outlets[0], outlets: f.outlets.slice(0, 12), n: f.outlets.length, copies: f.ids.slice(0, 40), ts: f.head.ts, tier: f.head.meta.tier || '', juris: f.head.meta.juris || '',
-    gated: f.gated, access: f.head.meta.access || '', full: !!(f.head.meta.full || (f.head.meta.ft && f.head.meta.ft !== 'none' && f.head.meta.ft !== 'retry')), fb: f.fb, issues: f.head.issues, tone: f.head.tone, pinned: f.pinned, summary: f.head.body.slice(0, 260) }))
+    gated: f.gated, access: f.head.meta.access || '', full: !!(f.head.meta.full || (f.head.meta.ft && f.head.meta.ft !== 'none' && f.head.meta.ft !== 'retry')), fb: f.fb, issues: f.head.issues, tone: f.head.tone, pinned: f.pinned, summary: f.head.body.slice(0, 260), claim: f.head.meta.claim || null }))
     .sort((a, b) => (b.pinned - a.pinned) || (b.n - a.n) || (fbTotal(b.fb) - fbTotal(a.fb)) || (b.ts - a.ts)).slice(0, 150);
   // social: what the register's accounts posted and what the terms found; public actors and MPs go to their own table
   const soc = live.filter(r => r.kind === 'sig_thread' || r.kind === 'reddit_thread' || r.kind === 'transcript'); const isActor = r => !!(r.meta.actor || r.meta.mp);
@@ -7480,7 +7948,7 @@ async function denBoard(env, deskId, opts) {
   const prev = new Map(); const keys = pick.filter(r => /^https?:/.test(String(r.url || ''))).map(r => ['x:eng:' + arcHash(r.url) + ':' + auDayKey((Number(r.meta.eng_at) || r.ts) - 86400000), r.id]);
   for (let i = 0; i < keys.length; i += 90) (((await env.MIND_DB.prepare("SELECT url, meta FROM arc_items WHERE kind='sig_eng' AND url IN (" + keys.slice(i, i + 90).map(() => '?').join(',') + ')').bind(...keys.slice(i, i + 90).map(k => k[0])).all()).results) || []).forEach(s => { const k = keys.find(x => x[0] === s.url); const e = (denJ(s.meta, {}).eng) || {}; if (k) prev.set(k[1], (Number(e.likes) || 0) + (Number(e.comments) || 0) + (Number(e.shares) || 0) + (Number(e.reposts) || 0) + (Number(e.replies) || 0) + (Number(e.quotes) || 0)); });
   const held = new Map(); const tids = pick.map(r => String(r.meta.id || '')).filter(Boolean);
-  for (let i = 0; i < tids.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, AVG(tone) a FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND ts>? AND json_extract(meta,'$.thread') IN (" + tids.slice(i, i + 90).map(() => '?').join(',') + ") GROUP BY t").bind(win.from - 7 * 86400000, ...tids.slice(i, i + 90)).all()).results) || []).forEach(h => held.set(String(h.t), { n: h.n, tone: h.a == null ? null : Math.round(h.a * 100) / 100 }));
+  for (let i = 0; i < tids.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, AVG(tone) a FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND ts>? AND json_extract(meta,'$.thread') IN (" + tids.slice(i, i + 90).map(() => '?').join(',') + ") GROUP BY t").bind(win.from - 86400000, ...tids.slice(i, i + 90)).all()).results) || []).forEach(h => held.set(String(h.t), { n: h.n, tone: h.a == null ? null : Math.round(h.a * 100) / 100 }));
   const socRow = r => ({ id: r.id, platform: r.ch, text: (r.title && r.title !== r.ch + ' post' ? r.title : r.body).slice(0, 280), url: link(r), ts: r.ts, eng: r.eng, total: r.total, eng_at: Number(r.meta.eng_at) || 0, growth: prev.has(r.id) ? r.total - prev.get(r.id) : null,
     held: held.get(String(r.meta.id || '')) || null, layers: Array.isArray(r.meta.layers) ? r.meta.layers : (r.meta.via === 'reach' ? [2] : []), issues: r.issues, term: r.meta.term || r.meta.q || '', hashtag: r.meta.hashtag || '', registered: !!r.w, pinned: r.pinned, sub: r.meta.sub || '' });
   const social = pick.filter(r => !isActor(r)).slice(0, 90).map(socRow);
@@ -7492,7 +7960,9 @@ async function denBoard(env, deskId, opts) {
       .map(n => Object.assign(n, { issues: denJ(n.issues, []), spread: denJ(n.spread, []) })).filter(n => n.issues.some(i => mine.indexOf(i) >= 0)).slice(0, 25)
       .map(n => ({ id: n.id, label: n.label || 'A narrative not yet named', claim: n.claim || '', counter: n.counter_claim || '', issues: n.issues.filter(i => mine.indexOf(i) >= 0), n: n.n, n24: n.n24, pace: n.velocity, side: n.side || '', status: n.status || '', spread: (Array.isArray(n.spread) ? n.spread : []).slice(0, 6).map(s => (s && s.platform) || s).filter(Boolean), first: n.first_ts, last: n.last_ts }));
   } catch (e) { narratives = []; }
-  const upcoming = denUpcoming(live, now);
+  // recorded dates (read from a parliament's own page) lead; a stage row's own sentence is not read again as a guess
+  let recorded = []; try { recorded = await processUpcoming(env, mine, now); } catch (e) { recorded = []; }
+  const upcoming = recorded.concat(denUpcoming(live.filter(r => !(r.meta && r.meta.process)), now)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(0, 40);
   return { ok: true, desk, window: win, narratives, media, social, actors, upcoming, aside, pinned: live.filter(r => r.pinned).map(r => r.id),
     counts: { rows: live.length, news: news.length, media: media.length, social: social.length, actors: actors.length, narratives: narratives.length, upcoming: upcoming.length, aside: aside.length, muted: nMuted, underMinimum: nLow, otherRegions: nRegion }, capped: raw.length >= DEN_BOARD_ROWS,
     byChannel: live.reduce((a, r) => { a[r.ch] = (a[r.ch] || 0) + 1; return a; }, {}), _rows: opts.keepRows ? live : undefined };
@@ -7538,7 +8008,7 @@ async function denMute(env, b, who) {
 async function denMissed(env, deskId, opts) {
   opts = opts || {}; const board = opts.board || await denBoard(env, deskId, Object.assign({}, opts, { keepRows: true })); if (!board.ok) return board;
   const desk = board.desk, win = board.window, mine = desk.issues.map(i => i.id); const out = []; const rows = board._rows || []; const label = id => (desk.issues.find(i => i.id === id) || {}).label || id;
-  const soft = async fn => { try { await fn(); } catch (e) {} };
+  const soft = async fn => { try { await fn(); } catch (e) { if (denBusy(e)) throw e; } };   // a busy database is said, never read as nothing found
   // 1 Sentinel spikes on this desk's issues
   await soft(async () => { await ensureSentinel(env);
     (((await env.MIND_DB.prepare('SELECT id, issue, label, ratio, hot, detected_ts, acked_ts FROM arc_alerts WHERE ns=? AND detected_ts>? AND detected_ts<=? ORDER BY detected_ts DESC LIMIT 20').bind(desk.ns, win.from, win.to).all()).results) || [])
@@ -7547,28 +8017,36 @@ async function denMissed(env, deskId, opts) {
   board.narratives.filter(n => n.status === 'emerging' && n.first >= win.from - 48 * 3600000).forEach(n => out.push({ sig: 'emerging', key: 'N:' + n.id, title: 'Emerging narrative: ' + n.label, detail: n.n + ' rows, ' + n.n24 + ' in the last day' + (n.side ? ', ' + n.side + ' toward the client' : ''), cover: ['N:' + n.id], words: [], open: { view: 'narratives', params: { id: n.id } }, at: n.first }));
   // 3 first-seen actors: a registered account, or a register entity, on this desk's issues for the first time in fourteen days
   const wIds = Array.from(new Set(rows.filter(r => r.w).map(r => r.w.id)));
-  await soft(async () => { const before = new Set();
-    for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT DISTINCT json_extract(meta,'$.watch') w FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ')').bind(win.from - 14 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => before.add(x.w));
+  // the slow figures (DEN_SLOW_TTL): counted once for this desk and window, read from the cache until then
+  const wkey = wIds.slice().sort().join(','); const sk = 'den_slow_' + desk.id + '_' + win.hours; const useCache = !opts.to; let slow = null;
+  if (useCache && !opts.fresh) { try { slow = JSON.parse((await kvGet(env.AXIOM_KV, sk)) || 'null'); } catch (e) { slow = null; } if (!slow || !(Number(slow.at) > Date.now() - DEN_SLOW_TTL * 1000) || slow.wkey !== wkey) slow = null; }
+  const cached = !!slow; if (!slow) slow = { at: Date.now(), wkey, failed: 0 };
+  const slowly = async (name, fn) => { if (cached) return slow[name]; try { slow[name] = await fn(); } catch (e) { if (denBusy(e)) throw e; slow.failed++; slow[name] = null; } return slow[name]; };
+  await soft(async () => { const seenBefore = await slowly('before', async () => { const before = [];
+    for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT DISTINCT json_extract(meta,'$.watch') w FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ')').bind(win.from - 14 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => before.push(x.w));
+      return before; }); if (!seenBefore) return; const before = new Set(seenBefore);
     wIds.filter(w => !before.has(w)).slice(0, 12).forEach(w => { const mineRows = rows.filter(r => r.w && r.w.id === w); const a = mineRows[0].w; const named = !!a.actor_kind;
       out.push({ sig: 'first_seen', key: 'W:' + w, title: (named ? (a.name || a.value) : 'A registered ' + (DEN_CH_NAME[a.platform] || a.platform) + ' account') + ' posted on this desk for the first time in fourteen days', detail: mineRows.length + ' post' + (mineRows.length === 1 ? '' : 's') + ' in the window on ' + (DEN_CH_NAME[a.platform] || a.platform) + '.', cover: mineRows.map(r => 'S:' + r.id).concat(mineRows.map(r => 'P:' + r.id)), words: named ? [a.name || a.value] : [], open: { item: mineRows[0].id, url: mineRows[0].url }, at: mineRows[0].ts }); }); });
-  await soft(async () => { await ensureSentiment(env); if (!mine.length) return;
+  await soft(async () => { const named = await slowly('ents', async () => { await ensureSentiment(env); if (!mine.length) return [];
     const like = mine.map(() => 'i.issues LIKE ?').join(' OR ');
     const ents = ((await env.MIND_DB.prepare('SELECT e.entity id, MIN(e.ts) first, COUNT(*) n FROM sent_entities e JOIN sent_items i ON i.item=e.item WHERE e.ts>? AND e.ts<=? AND (' + like + ') GROUP BY e.entity HAVING MIN(e.ts)>? ORDER BY n DESC LIMIT 12').bind(win.from - 14 * 86400000, win.to, ...mine.map(i => '%"' + i + '"%'), win.from).all()).results) || [];
-    if (!ents.length) return;
+    if (!ents.length) return [];
     const names = new Map((((await env.MIND_DB.prepare('SELECT id, name, kind FROM entities WHERE id IN (' + ents.map(() => '?').join(',') + ") AND kind IN ('org','person','party')").bind(...ents.map(e => e.id)).all()).results) || []).map(e => [e.id, e]));
-    ents.filter(e => names.has(e.id)).forEach(e => out.push({ sig: 'first_seen', key: 'E:' + e.id, title: names.get(e.id).name + ' named on this desk\'s issues for the first time in fourteen days', detail: e.n + ' judged mention' + (e.n === 1 ? '' : 's') + ' in the window.', cover: [], words: [names.get(e.id).name], open: { view: 'sentiment', params: { id: e.id } }, at: e.first })); });
+    return ents.filter(e => names.has(e.id)).map(e => ({ id: e.id, first: e.first, n: e.n, name: names.get(e.id).name })); });
+    (named || []).forEach(e => out.push({ sig: 'first_seen', key: 'E:' + e.id, title: e.name + ' named on this desk\'s issues for the first time in fourteen days', detail: e.n + ' judged mention' + (e.n === 1 ? '' : 's') + ' in the window.', cover: [], words: [e.name], open: { view: 'sentiment', params: { id: e.id } }, at: e.first })); });
   // 4 an issue running well above its own fourteen-day baseline for a window this long
-  await soft(async () => { (await overviewIssues(env, win.to, win.hours)).filter(i => i.ns === desk.ns && i.recent >= 3 && (i.ratio === null || i.ratio >= 2.5))
+  await soft(async () => { ((await slowly('burst', async () => (await overviewIssues(env, win.to, win.hours)).filter(i => i.ns === desk.ns && i.recent >= 3 && (i.ratio === null || i.ratio >= 2.5)).map(i => ({ id: i.id, label: i.label, recent: i.recent, base: i.base, ratio: i.ratio })))) || [])
     .forEach(i => out.push({ sig: 'burst', key: 'I:' + i.id, title: i.label + ' is running above its baseline', detail: i.recent + ' rows in the window against ' + i.base + ' usual' + (i.ratio ? ' (' + i.ratio + ' times)' : ' (nothing in the fortnight before)') + '. Counted nationally, whatever this desk\'s region.', cover: ['T:' + i.id], words: [i.label], open: { view: 'narratives', params: { issue: i.id } }, at: win.to })); });
   // 5 a registered account's post drawing several times what its posts usually do
-  await soft(async () => { if (!wIds.length) return; const hist = new Map();
-    for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.watch') w, COALESCE(json_extract(meta,'$.score'),0) + COALESCE(json_extract(meta,'$.comments'),0) s FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ') LIMIT 4000').bind(win.to - 30 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => { if (!hist.has(x.w)) hist.set(x.w, []); hist.get(x.w).push(Number(x.s) || 0); });
+  await soft(async () => { if (!wIds.length) return; const usual = await slowly('hist', async () => { const hist = {};
+    for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.watch') w, COALESCE(json_extract(meta,'$.score'),0) + COALESCE(json_extract(meta,'$.comments'),0) s FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ') LIMIT 4000').bind(win.to - 30 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => { (hist[x.w] = hist[x.w] || []).push(Number(x.s) || 0); });
+      return hist; }); if (!usual) return; const hist = new Map(Object.keys(usual).map(k => [k, usual[k]]));
     rows.filter(r => r.w && hist.has(r.w.id) && hist.get(r.w.id).length >= 4).forEach(r => { const h = hist.get(r.w.id).slice().sort((a, b) => a - b); const med = h[Math.floor(h.length / 2)]; if (r.total >= Math.max(20, 4 * Math.max(1, med)))
       out.push({ sig: 'outlier', key: 'S:' + r.id, title: (r.w.actor_kind ? (r.w.name || r.w.value) : 'A registered ' + (DEN_CH_NAME[r.w.platform] || r.w.platform) + ' account') + ': one post is drawing far more than usual', detail: r.total + ' interactions against a usual ' + med + ' (the middle of its last ' + h.length + ' posts).', cover: ['S:' + r.id, 'P:' + r.id], words: [], open: { item: r.id, url: r.url }, at: r.ts }); }); });
   // 6 collection gaps: a channel this desk relies on that delivered nothing, with why
   await soft(async () => { const reach = await reachView(env); const act = await denActive(env, desk.ns); const relied = new Set(['news']);
     act.filter(r => r.kind === 'account').forEach(r => relied.add(r.platform));
-    (((await env.MIND_DB.prepare("SELECT DISTINCT COALESCE(json_extract(meta,'$.platform'), 'reddit') p FROM arc_items WHERE kind IN ('sig_thread','reddit_thread') AND ts>? AND ts<=? LIMIT 20").bind(win.from - 7 * 86400000, win.from).all()).results) || []).forEach(x => { if (['x', 'facebook', 'instagram', 'youtube', 'reddit', 'bluesky'].indexOf(x.p) >= 0) relied.add(x.p); });
+    ((await slowly('relied', async () => (((await env.MIND_DB.prepare("SELECT DISTINCT COALESCE(json_extract(meta,'$.platform'), 'reddit') p FROM arc_items WHERE kind IN ('sig_thread','reddit_thread') AND ts>? AND ts<=? LIMIT 20").bind(win.from - 7 * 86400000, win.from).all()).results) || []).map(x => x.p))) || []).forEach(p => { if (['x', 'facebook', 'instagram', 'youtube', 'reddit', 'bluesky'].indexOf(p) >= 0) relied.add(p); });
     const NAME = DEN_CH_NAME;
     Array.from(relied).filter(p => !(board.byChannel[p] > 0) && NAME[p]).forEach(p => { const src = p === 'youtube' ? 'ytsearch' : p; const rp = (reach.platforms || []).find(x => x.source === src) || null; const why = [];
       if (p === 'news') why.push('No story on this desk\'s issues' + (desk.region !== 'au' ? ' in this region' : '') + ' was filed in the window. Check Sources for failing feeds before reading it as a quiet day.');
@@ -7580,7 +8058,8 @@ async function denMissed(env, deskId, opts) {
       out.push({ sig: 'gap', key: 'G:' + p, title: NAME[p] + ' delivered nothing in this window', detail: why.join(' '), cover: [], words: [], open: { tab: 'collection' }, at: win.to, channel: p }); }); });
   const order = { gap: 0, spike: 1, emerging: 2, outlier: 3, first_seen: 4, burst: 5 };
   out.sort((a, b) => (order[a.sig] - order[b.sig]) || (b.at - a.at));
-  return { ok: true, desk: desk.id, window: win, signals: out, counts: out.reduce((a, s) => { a[s.sig] = (a[s.sig] || 0) + 1; return a; }, {}), clear: !out.length };
+  if (useCache && !cached && !slow.failed) { try { await kvPut(env.AXIOM_KV, sk, JSON.stringify(slow), DEN_SLOW_TTL); } catch (e) {} }
+  return { ok: true, desk: desk.id, window: win, signals: out, counts: out.reduce((a, s) => { a[s.sig] = (a[s.sig] || 0) + 1; return a; }, {}), clear: !out.length, slow: { cached, at: slow.at, every: DEN_SLOW_TTL } };
 }
 /** The evidence a draft is written from. Every line carries an id; the map says what each id is, for the checks and for
  *  the Source List. A subscriber row gives the model thirty words and no more. */
@@ -7595,14 +8074,14 @@ async function denEvidence(env, desk, board, missed, pins) {
   const med = board.media.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
   L.push('', 'TRADITIONAL MEDIA (' + board.counts.news + ' stories, ' + board.media.length + ' after folding syndicated copies; ' + med.length + ' shown)');
   med.forEach(m => put('M:' + m.id, { k: 'media', label: m.outlet + ' - ' + m.title, url: m.url, gated: m.gated, item: m.id }, (pinned.has(m.id) ? 'PINNED | ' : '') + m.outlet + (m.tier ? ' (' + m.tier + (m.juris && m.juris !== 'au' ? ', ' + m.juris : '') + ')' : '') + ' | ' + when(m.ts) + ' | ' + one(m.title) + (m.n > 1 ? ' | also carried by ' + (m.n - 1) + ' other outlet' + (m.n === 2 ? '' : 's') : '')
-    + (m.fb ? ' | Facebook: ' + (Number(m.fb.reactions) || 0) + ' reactions, ' + (Number(m.fb.comments) || 0) + ' comments, ' + (Number(m.fb.shares) || 0) + ' shares' : '') + (m.gated ? ' | SUBSCRIBER TEXT, QUOTE AT MOST THIRTY WORDS: ' + gatedExcerpt(gt[m.id] || m.summary) : m.summary ? ' | ' + one(m.summary).slice(0, 220) : '')));
+    + (m.claim ? ' | ' + claimLine(m.claim) : '') + (m.fb ? ' | Facebook: ' + (Number(m.fb.reactions) || 0) + ' reactions, ' + (Number(m.fb.comments) || 0) + ' comments, ' + (Number(m.fb.shares) || 0) + ' shares' : '') + (m.gated ? ' | SUBSCRIBER TEXT, QUOTE AT MOST THIRTY WORDS: ' + gatedExcerpt(gt[m.id] || m.summary) : m.summary ? ' | ' + one(m.summary).slice(0, 220) : '')));
   const engLine = s => (s.eng ? [['likes', 'likes'], ['comments', 'comments'], ['shares', 'shares'], ['reposts', 'reposts'], ['replies', 'replies'], ['views', 'views']].filter(k => Number(s.eng[k[0]]) > 0).map(k => s.eng[k[0]] + ' ' + k[1]).join(', ') : (s.total ? s.total + ' interactions' : '')) || 'no counts held';
   const soc = board.social.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
   L.push('', 'SOCIAL (' + board.social.length + ' posts held; ' + soc.length + ' shown; authors are not recorded and must not be guessed)');
   soc.forEach(s => put('S:' + s.id, { k: 'social', label: s.platform + ' post', url: s.url, item: s.id, platform: s.platform }, (pinned.has(s.id) ? 'PINNED | ' : '') + s.platform + (s.sub ? ' r/' + s.sub : '') + ' | ' + when(s.ts) + ' | ' + one(s.text).slice(0, 240) + ' | ' + engLine(s) + (s.growth != null && s.growth > 0 ? ' | +' + s.growth + ' since yesterday\'s read' : '') + (s.held ? ' | ' + s.held.n + ' comments held, tone ' + s.held.tone : '')));
   L.push('', 'INFLUENCER AND POLITICAL (registered public actors and MPs, on their own posts; these may be named)');
   board.actors.slice(0, 20).forEach(a => put('P:' + a.id, { k: 'actor', label: a.who + ' on ' + a.platform, url: a.url, item: a.id, who: a.who, platform: a.platform }, (pinned.has(a.id) ? 'PINNED | ' : '') + a.who + ' (' + (a.role === 'mp' ? 'MP' + (a.party ? ', ' + a.party : '') : a.role) + ') on ' + a.platform + ' | ' + when(a.ts) + ' | ' + one(a.text).slice(0, 240) + ' | ' + engLine(a)));
-  if (board.upcoming.length) { L.push('', 'UPCOMING (dates as written in the rows)'); board.upcoming.slice(0, 15).forEach((u, i) => put('U:' + (i + 1), { k: 'upcoming', label: u.date + ' ' + u.event, url: u.url, item: u.item }, u.weekday + ' ' + u.date + ' | ' + u.event + ' | ' + one(u.what))); }
+  if (board.upcoming.length) { L.push('', 'UPCOMING (dates as written in the rows; RECORDED marks a date read from a parliament\'s own page)'); board.upcoming.slice(0, 15).forEach((u, i) => put('U:' + (i + 1), { k: 'upcoming', label: u.date + ' ' + u.event, url: u.url, item: u.item }, u.weekday + ' ' + u.date + ' | ' + (u.recorded ? 'RECORDED | ' : '') + u.event + ' | ' + one(u.what))); }
   try { await ensureSentiment(env); const mine = desk.issues.map(i => i.id);
     for (const id of mine) { const r = await env.MIND_DB.prepare('SELECT COUNT(*) n, AVG(tone) a, SUM(tone<0) neg, SUM(tone>0) pos FROM sent_items WHERE ts>? AND ts<=? AND issues LIKE ?').bind(board.window.from, board.window.to, '%"' + id + '"%').first();
       if (r && r.n) { if (!ev.size || !L.some(x => x === 'TONE (rows a model has judged, by issue)')) L.push('', 'TONE (rows a model has judged, by issue)'); put('T:' + id, { k: 'tone', label: (desk.issues.find(i => i.id === id) || {}).label || id }, ((desk.issues.find(i => i.id === id) || {}).label || id) + ': ' + r.n + ' rows judged, mean tone ' + (Math.round((Number(r.a) || 0) * 100) / 100) + ', ' + (r.neg || 0) + ' negative, ' + (r.pos || 0) + ' positive'); } }
@@ -7802,6 +8281,7 @@ async function denCollection(env, deskId) {
   const reach = await reachView(env); const act = await denActive(env, desk.ns); const rp = s => (reach.platforms || []).find(x => x.source === s) || null;
   const got = {}; const wIds = new Set(act.filter(r => r.kind === 'account').map(r => r.id));
   (((await env.MIND_DB.prepare('SELECT kind, ts, meta FROM arc_items WHERE ts>? AND kind IN (' + DEN_BOARD_KINDS.map(() => '?').join(',') + ') ORDER BY ts DESC LIMIT 6000').bind(now - 7 * 86400000, ...DEN_BOARD_KINDS).all()).results) || []).forEach(r => { const m = denJ(r.meta, {}); if (!((Array.isArray(m.issues) ? m.issues : []).some(i => mine.indexOf(i) >= 0) || (m.watch && wIds.has(m.watch)))) return; const ch = platformOf(r.kind, m); const g = got[ch] = got[ch] || { d1: 0, d7: 0, last: 0, layers: {}, days: [0, 0, 0, 0, 0, 0, 0] }; g.d7++; g.days[Math.max(0, 6 - Math.floor((now - r.ts) / 86400000))]++; if (r.ts > now - 86400000) g.d1++; if (r.ts > g.last) g.last = r.ts; (Array.isArray(m.layers) ? m.layers : (m.via === 'reach' ? [2] : [])).forEach(l => { g.layers[l] = 1; }); });
+  const pub = await publicDelivered(env, desk);
   const n = p => act.filter(r => r.kind === 'account' && r.platform === p).length; const st = (src) => { const x = rp(src); return x ? { source: src, offered: x.offered, off: x.off, challenge: x.challenge } : null; };
   const CH = [
     { id: 'news', label: 'News and official sources', how: 'Layer 3: the Source Registry, every tick. Subscriber outlets: layer 2, on the Mac, once cleared.', collect: 'sources', collector: null, worker: true },
@@ -7810,8 +8290,11 @@ async function denCollection(env, deskId) {
     { id: 'instagram', label: 'Instagram', how: (igConfigured(env) ? 'Layer 1: registered accounts and hashtags through the Graph API.' : 'Layer 1 is not set (META_IG_USER).') + ' Layer 2: registered accounts\' posts on the Mac.', collect: 'instagram', collector: st('instagram'), accounts: n('instagram'), worker: igConfigured(env), cannot: 'Comment text; keyword search.' },
     { id: 'youtube', label: 'YouTube', how: 'Layer 2: keyword search on the Mac. Layer 3: registered channels\' feeds, comments and captions from the worker.', collect: 'ytsearch', collector: st('ytsearch'), accounts: n('youtube'), worker: true },
     { id: 'reddit', label: 'Reddit', how: 'Layer 2 on the Mac (Reddit refuses cloud networks), or the worker with app credentials.', collect: 'reddit', collector: st('reddit'), worker: !!(env.REDDIT_CLIENT_ID && env.REDDIT_CLIENT_SECRET) },
-    { id: 'bluesky', label: 'Bluesky', how: 'Layer 3: public search from the worker.', collect: 'bluesky', collector: null, worker: true },
-  ].map(c => Object.assign(c, { delivered: got[c.id] || { d1: 0, d7: 0, last: 0, layers: {}, days: [0, 0, 0, 0, 0, 0, 0] } })).map(c => Object.assign(c, { delivered: Object.assign({}, c.delivered, { layers: Object.keys(c.delivered.layers).map(Number).sort() }) }));
+    { id: 'bluesky', label: 'Bluesky', how: 'Layer 3: public search from the worker, and the own posts of registered accounts marked as public actors.', collect: 'bluesky', collector: null, accounts: n('bluesky'), worker: true },
+    { id: 'parliament', label: 'Parliamentary record', how: 'Layer 3: bill, inquiry and notice pages on the parliaments\' own sites, read under robots.txt at one request every ten seconds a host. A stage change files one row; recorded dates lead Upcoming.', collect: '', collector: null, worker: true, watched: pub.parliament.watched || 0, cannot: 'Submitters\' names; a page that refuses the reader.' },
+    { id: 'hansard', label: 'Hansard', how: env.OPENAUSTRALIA_KEY ? 'Layer 3: OpenAustralia, the desk\'s terms in both houses, once a sitting day.' : 'Layer 3 is not set: add the secret OPENAUSTRALIA_KEY (free, openaustralia.org.au/api).', collect: '', collector: null, worker: !!env.OPENAUSTRALIA_KEY, cannot: 'State parliaments\' Hansard.' },
+    { id: 'counters', label: 'Campaign petition counters', how: 'Layer 3: the count a campaign prints on its own page, once a day. Self-reported by the campaign, and said so wherever it is shown.', collect: '', collector: null, worker: true, cannot: 'change.org (it refuses automated readers).' },
+  ].map(c => Object.assign(c, { delivered: pub[c.id] ? Object.assign({ layers: {} }, pub[c.id], { layers: { 3: 1 } }) : (got[c.id] || { d1: 0, d7: 0, last: 0, layers: {}, days: [0, 0, 0, 0, 0, 0, 0] }) })).map(c => Object.assign(c, { delivered: Object.assign({}, c.delivered, { layers: Object.keys(c.delivered.layers).map(Number).sort() }) }));
   let gated = []; try { await ensureSources(env); await ensureGated(env); gated = (((await env.MIND_DB.prepare('SELECT id, name, tier, access, cleared_by, cleared_at FROM sources ORDER BY name LIMIT 1000').all()).results) || []).map(s => ({ id: s.id, name: s.name, access: sourceAccessOf(s), cleared: Number(s.cleared_at) > 0, cleared_by: s.cleared_by || '', cleared_at: Number(s.cleared_at) || 0 })).filter(s => GATED_NEEDS_CLEARANCE.indexOf(s.access) >= 0).slice(0, 80); } catch (e) { gated = []; }
   let backtest = null; try { backtest = JSON.parse((await kvGet(env.AXIOM_KV, 'den_backtest_' + desk.id)) || 'null'); } catch (e) { backtest = null; }
   return { ok: true, desk: desk.id, channels: CH, reach: { off: reach.off, agents: reach.agents, challenges: reach.challenges }, hashtags: await igHashtagLedger(env), gated, backtest, notBuilt: ['TikTok, Threads and LinkedIn are not collected: no usable route, and no link to any of them in the reports read.', 'Today\'s reads against each platform\'s cap are counted on the Mac (its settings file), not here.'] };
@@ -7866,6 +8349,391 @@ async function denHeartbeat(env, work) {
   put(' '); const tick = setInterval(() => { put(' '); }, beat);
   p.then(() => { clearInterval(tick); const body = shape(settled); if (body && body.status) { body.httpStatus = body.status; delete body.status; } put(JSON.stringify(body)); chain = chain.then(() => w.close()).catch(() => {}); });
   return new Response(ts.readable, { status: 200, headers: Object.assign({}, CORS, { 'Cache-Control': 'no-store, no-transform' }) });
+}
+
+// ==============================================================================
+// PUBLIC-RECORD ROUTES (monitoring desk, release 7). Keyless, public pages only:
+// parliaments' own bill, inquiry and notice pages (the process calendar),
+// Hansard as a standing sweep, release wires and campaign pages as headlines,
+// campaigns' own petition counters, and registered actors' Bluesky feeds. The
+// rules live in pubFetch(), so no reader here can skip them: robots.txt is
+// obeyed, the user agent says what it is, one request every ten seconds a host,
+// and a refusal (401, 403, 429, a challenge page) is recorded for the host and
+// not asked again for a day. Nothing here signs in, reads past a paywall,
+// solves a challenge, uses a proxy or calls a model.
+// ==============================================================================
+const PUB_UA_DEFAULT = 'AxiomPublicRecord/1.0 (monitoring reader; obeys robots.txt)';
+const PUB_PACE_MS = 10000;        // between two requests to one host; not a setting
+const PUB_BACKOFF_S = 86400;      // a host that refused is left alone for a day
+const PUB_LAST = new Map();       // host -> the time its next request may start (this isolate)
+const PUB_PAYWALL_RX = /isAccessibleForFree["']?\s*:\s*["']?false|class=["'][^"']*paywall|subscribe to (read|continue)|subscriber[- ]only|piano\.io|tp\.push\(|meter-?wall/i;
+function pubUA(env) { const s = String((env && env.PUBLIC_UA) || '').replace(/[^\x20-\x7e]/g, '').trim(); return s.length >= 8 ? s.slice(0, 160) : PUB_UA_DEFAULT; }
+function pubWait(env, ms) { if (env && typeof env.__pubSleep === 'function') return env.__pubSleep(ms); return new Promise(r => setTimeout(r, ms)); }
+/** The slot is taken before the wait, so readers running side by side still queue behind one another for a host. */
+async function pubPace(env, host) {
+  const now = Date.now(); let shared = 0;
+  // another isolate may have asked this host a moment ago: the next free slot is also kept in KV (a minute, KV's shortest life)
+  try { shared = Number(await kvGet(env.AXIOM_KV, 'pub_next_' + host)) || 0; } catch (e) { shared = 0; }
+  const at = Math.max(now, PUB_LAST.get(host) || 0, shared <= now + 6 * PUB_PACE_MS ? shared : 0); PUB_LAST.set(host, at + PUB_PACE_MS);
+  try { await kvPut(env.AXIOM_KV, 'pub_next_' + host, String(at + PUB_PACE_MS), 60); } catch (e) {}
+  if (at > now) await pubWait(env, at - now);
+}
+function robotsMatch(pat, path) {
+  const end = /\$$/.test(pat); const parts = pat.replace(/\$$/, '').split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'));
+  try { return new RegExp('^' + parts.join('.*') + (end ? '$' : '')).test(path); } catch (e) { return false; }
+}
+/** robots.txt as RFC 9309 reads it: the group that names this reader, else the * group; the longest matching rule
+ *  decides, and Allow wins a tie. An empty Disallow allows everything. */
+function robotsAllows(txt, path, ua) {
+  const groups = []; let cur = null; let lastUA = false;
+  String(txt || '').split(/\r?\n/).forEach(l0 => { const l = l0.replace(/#.*$/, '').trim(); const m = l.match(/^([A-Za-z-]+)\s*:\s*(.*)$/); if (!m) return; const k = m[1].toLowerCase(); const v = m[2].trim();
+    if (k === 'user-agent') { if (!cur || !lastUA) { cur = { agents: [], rules: [] }; groups.push(cur); } cur.agents.push(v.toLowerCase()); lastUA = true; }
+    else { lastUA = false; if (cur && (k === 'allow' || k === 'disallow')) cur.rules.push({ allow: k === 'allow', path: v }); } });
+  const tok = String(ua || '').split('/')[0].toLowerCase();
+  const mine = groups.filter(g => g.agents.some(a => a !== '*' && a.length > 1 && tok.indexOf(a) >= 0)); const use = mine.length ? mine : groups.filter(g => g.agents.indexOf('*') >= 0);
+  let best = null;
+  use.forEach(g => g.rules.forEach(r => { if (!r.path || !robotsMatch(r.path, path)) return; if (!best || r.path.length > best.path.length || (r.path.length === best.path.length && r.allow)) best = r; }));
+  return !best || best.allow;
+}
+async function pubRefuse(env, host, status, why) {
+  await kvPut(env.AXIOM_KV, 'pub_refused_' + host, JSON.stringify({ status, why, at: Date.now() }), PUB_BACKOFF_S);
+  return { ok: false, status, text: '', refused: true, code: 'refused', error: 'refused: ' + host + ' answered ' + why + '. Not retried; not asked again for a day.' };
+}
+async function pubRaw(env, url, accept, ms) {
+  const u = new URL(url); await pubPace(env, u.hostname.toLowerCase());
+  try { const r = await fetch(url, { headers: { 'User-Agent': pubUA(env), 'Accept': accept || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'en-AU,en;q=0.8' }, signal: abortAfter(ms || 15000), redirect: 'follow' });
+    const text = r.status === 200 ? (await r.text()).slice(0, 1500000) : ''; return { status: r.status, text };
+  } catch (e) { const s = String((e && e.name) || '') + ' ' + String((e && e.message) || e); return { status: 0, text: '', error: /timeout|abort/i.test(s) ? 'timed out' : s.trim().slice(0, 90) }; }
+}
+/** One public page, under the rules above. { ok, status, text, paywall } or { ok:false, code, error, refused? }. Never throws. */
+async function pubFetch(env, url, opts) {
+  opts = opts || {}; const u = denUrl(url);
+  if (!u || axUrlProblem(u.toString())) return { ok: false, status: 0, text: '', code: 'bad_url', error: 'not a public http(s) address' };
+  const host = u.hostname.toLowerCase(); let back = null;
+  try { back = JSON.parse((await kvGet(env.AXIOM_KV, 'pub_refused_' + host)) || 'null'); } catch (e) { back = null; }
+  if (back) return { ok: false, status: back.status || 0, text: '', refused: true, code: 'refused_backoff', error: 'refused: ' + host + ' answered ' + back.why + ' on ' + auDayKey(back.at) + '. Not asked again for a day.' };
+  let robots = await kvGet(env.AXIOM_KV, 'pub_robots_' + host);
+  if (robots == null) {
+    const r = await pubRaw(env, u.protocol + '//' + u.host + '/robots.txt', 'text/plain,*/*', 10000);
+    if (r.status === 429) return pubRefuse(env, host, 429, 'HTTP 429 to robots.txt');
+    if (r.status === 0 || r.status >= 500) return { ok: false, status: r.status, text: '', code: 'robots_unreachable', error: 'robots.txt of ' + host + ' could not be read (' + (r.error || ('HTTP ' + r.status)) + '), so the page was not requested' };
+    robots = r.status === 200 ? r.text.slice(0, 60000) : '';      // no robots.txt (4xx): nothing is disallowed
+    await kvPut(env.AXIOM_KV, 'pub_robots_' + host, robots || ' ', PUB_BACKOFF_S);
+  }
+  if (!robotsAllows(robots, u.pathname + (u.search || ''), pubUA(env))) return { ok: false, status: 0, text: '', code: 'robots_disallowed', error: 'robots.txt of ' + host + ' disallows this page, so it was not requested' };
+  const r = await pubRaw(env, u.toString(), opts.accept, opts.ms);
+  if (r.status === 401 || r.status === 403 || r.status === 407 || r.status === 429) return pubRefuse(env, host, r.status, 'HTTP ' + r.status);
+  if (r.status !== 200) return { ok: false, status: r.status, text: '', code: r.status ? 'http_' + r.status : 'unreachable', error: r.error || ('HTTP ' + r.status) };
+  const head = r.text.slice(0, 20000); const title = stripHtml((head.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
+  if (/just a moment|attention required|access denied|are you a (robot|human)|security check|captcha|verify you are human/i.test(title) || (r.text.length < 20000 && /cf-chl|challenge-platform|g-recaptcha|h-captcha|px-captcha/i.test(head))) return pubRefuse(env, host, 200, 'a challenge page');
+  if (r.text.length < 30000 && /<input[^>]+type=["']?password/i.test(r.text)) return { ok: false, status: 200, text: '', code: 'login_required', error: 'the page asks for a sign-in (login): it is not a public source' };
+  return { ok: true, status: 200, text: r.text, paywall: PUB_PAYWALL_RX.test(r.text), url: u.toString() };
+}
+/** Source Registry method `public`: a listing page read under the public rules. A headline and a link, never a body,
+ *  whether or not the page shows a paywall. */
+async function srcPublic(env, src) {
+  const f = await pubFetch(env, (src.urls || {}).public);
+  if (!f.ok) return { ok: false, items: [], status: f.status || 0, detail: f.error, refused: !!f.refused };
+  const items = listingLinks(f.text, src.urls.public).map(i => ({ title: i.title, link: i.link, date: '', desc: '' }));
+  return items.length ? { ok: true, items, status: 200, undated: true } : { ok: false, items: [], status: 200, detail: 'the page had no article-shaped links' };
+}
+
+// -- who paid for the number: rules only ----------------------------------------
+const CLAIM_POLLSTERS = ['YouGov', 'Essential', 'Resolve', 'Newspoll', 'RedBridge', 'uComms', 'Freshwater', 'Roy Morgan', 'Ipsos', 'DemosAU', 'JWS Research', 'Lonergan', 'Talbot Mills', 'Accent Research', 'Pyxis'];
+/** A poll or an economic estimate reported in a row: who commissioned it, who ran it, how many were asked - where the
+ *  text says so, and "sponsor not stated" where it does not. null when the text reports neither. */
+function claimOf(text) {
+  const s = String(text || '').replace(/\s+/g, ' ').slice(0, 4000);
+  const poll = /\b(poll(?:s|ing|ed)?|survey(?:s|ed)?)\b/i.test(s) && /\b\d{1,3}(?:\.\d)?\s?(?:%|per ?cent)/i.test(s);
+  const est = !poll && /\b(modell?ing|economic (?:analysis|report|modell?ing|impact)|cost[- ]benefit|costing)\b/i.test(s) && /\$\s?\d[\d,.]*\s?(?:m|b|bn|million|billion)\b/i.test(s);
+  if (!poll && !est) return null;
+  const NAME = "((?:the\\s+)?[A-Z][\\w&'.-]*(?:\\s+(?:and|of|for|the|&|[A-Z][\\w&'.-]*))*)";
+  const m = s.match(new RegExp('\\b(?:commissioned|paid for|funded|sponsored)\\s+by\\s+' + NAME)) || s.match(new RegExp('\\b(?:poll(?:ing)?|survey|research|modell?ing|report)\\s+(?:conducted\\s+|prepared\\s+)?for\\s+' + NAME));
+  let sponsor = m ? m[1].replace(/\s+(?:and|of|for|the|&)$/i, '').replace(/[.,;:]+$/, '').trim() : '';
+  if (sponsor.length < 3 || /^(the|a|an)$/i.test(sponsor)) sponsor = '';
+  const pollster = CLAIM_POLLSTERS.find(p => new RegExp('\\b' + p.replace(/ /g, '\\s+') + '\\b', 'i').test(s)) || '';
+  const nm = s.match(/\b(?:of|n\s?=)\s?(\d{1,2},?\d{3})(?:\s+(?:\w+\s+){0,2}(?:voters|people|respondents|australians|adults|residents))?/i);
+  return { kind: poll ? 'poll' : 'estimate', sponsor: sponsor.slice(0, 120) || 'sponsor not stated', pollster, n: nm && (/n\s?=/.test(nm[0]) || /voters|people|respondents|australians|adults|residents/i.test(nm[0])) ? parseInt(nm[1].replace(/,/g, ''), 10) : 0 };
+}
+function claimLine(c) { return c ? (c.kind === 'poll' ? 'POLL' : 'ESTIMATE') + ', ' + (c.sponsor === 'sponsor not stated' ? 'sponsor not stated' : 'commissioned by ' + c.sponsor) + (c.pollster ? ', ' + c.pollster : '') + (c.n ? ', n=' + c.n : '') : ''; }
+
+// -- the process calendar ---------------------------------------------------------
+const PROCESS_TYPES = ['bill', 'inquiry', 'motion', 'disallowance', 'regulation', 'decision'];
+const PROCESS_HOUSES = ['senate', 'reps', 'upper', 'lower', 'joint', ''];
+let PROCESS_READY = false;
+async function ensureProcess(env) {
+  if (!env.MIND_DB) return false;
+  if (PROCESS_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare("CREATE TABLE IF NOT EXISTS den_process(id TEXT PRIMARY KEY, juris TEXT DEFAULT 'au', house TEXT DEFAULT '', type TEXT NOT NULL, title TEXT, stage TEXT DEFAULT '', url TEXT, issues TEXT DEFAULT '[]', next_date TEXT DEFAULT '', next_what TEXT DEFAULT '', dates TEXT DEFAULT '{}', submissions INTEGER DEFAULT 0, src TEXT DEFAULT '', seen INTEGER, updated INTEGER)"),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS den_process_next ON den_process(next_date)'),
+  ]);
+  PROCESS_READY = true; return true;
+}
+function procLines(html) {
+  return String(html || '').replace(/<(script|style|nav|footer|noscript|svg|form)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<\/(p|div|li|tr|td|th|dt|dd|h[1-6]|section|article|table|ul|ol|dl)>|<br\s*\/?>/gi, '\n')
+    .split('\n').map(l => stripHtml(l).replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+/** Every date written in a line, as YYYY-MM-DD: "13 November 2026", "November 13, 2026", "13/11/2026". A date with no year is not read. */
+function procDates(s) {
+  const out = []; const MN = DEN_MONTHS.join('|'); const iso = (y, m, d) => { const t = new Date(Date.UTC(y, m, d)); return t.getUTCDate() === d && t.getUTCMonth() === m ? y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0') : ''; };
+  const mon = w => { const k = String(w).toLowerCase(); const i = DEN_MONTHS.findIndex(x => x === k || x.slice(0, 3) === k.slice(0, 3)); return i; };
+  let m; const A = new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(' + MN + '|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?,?\\s+(20\\d\\d)\\b', 'gi');
+  while ((m = A.exec(s))) { const d = iso(Number(m[3]), mon(m[2]), Number(m[1])); if (d) out.push(d); }
+  const B = new RegExp('\\b(' + MN + ')\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(20\\d\\d)\\b', 'gi');
+  while ((m = B.exec(s))) { const d = iso(Number(m[3]), mon(m[1]), Number(m[2])); if (d) out.push(d); }
+  const C = /\b(\d{1,2})\/(\d{1,2})\/(20\d\d)\b/g;
+  while ((m = C.exec(s))) { const d = iso(Number(m[3]), Number(m[2]) - 1, Number(m[1])); if (d) out.push(d); }
+  return out;
+}
+const PROC_STAGE_RX = [['Assented', /\b(royal )?assent(ed)?( given)?\b/i], ['Passed both Houses', /passed (by )?both houses|finally passed/i], ['Report tabled', /report (was |has been )?(tabled|presented|published)|final report/i],
+  ['Passed one House', /passed (by |in )?(the )?(house|senate|assembly|council|lower house|upper house)|third reading (agreed|passed)/i], ['Before committee', /referred to (a |the )?[\w ]{0,40}committee/i],
+  ['Second reading', /second reading/i], ['Introduced', /introduced|first reading|notice given/i]];
+/** One bill or inquiry page as a record. A labelled status line is taken as written; without one the stage is the latest
+ *  the page's words support, and for an inquiry it follows from its dates. The dates are the labelled ones only. */
+function processParse(html, url, type, fallbackTitle, now) {
+  now = now || Date.now(); const lines = procLines(html); const today = auDayKey(now);
+  const h1 = stripHtml((String(html).match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '').replace(/\s+/g, ' ').trim();
+  const title = (fallbackTitle || h1 || stripHtml((String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '')).slice(0, 200);
+  const dates = { referred: '', hearings: [], submissions_close: '', report: '' }; let stage = ''; let subs = 0;
+  const after = (i, re) => { const own = lines[i].replace(re, ' '); const d = procDates(own); return d.length ? d : procDates(lines[i + 1] || ''); };
+  const val = (i, re) => { const own = lines[i].replace(re, '').replace(/^[\s:.-]+/, '').trim(); return own || (lines[i + 1] || ''); };
+  for (let i = 0; i < lines.length; i++) { const l = lines[i]; if (l.length > 400) continue;
+    if (!stage && /^(current )?(status|stage|progress)\b/i.test(l)) { const v = val(i, /^(current )?(status|stage|progress)\b/i); if (v && v.length <= 80 && !/^(of|report)\b/i.test(v)) stage = v.replace(/[.;]+$/, ''); }
+    if (/\b(date )?referr(ed|al)\b/i.test(l) && !dates.referred) dates.referred = after(i, /x^/)[0] || '';
+    if (/\bhearings?\b/i.test(l)) procDates(l).forEach(d => { if (dates.hearings.indexOf(d) < 0) dates.hearings.push(d); });
+    if (/submissions?\s+(close[ds]?|closing|due)|closing date for submissions/i.test(l) && !dates.submissions_close) dates.submissions_close = after(i, /x^/)[0] || '';
+    if (/\breport(ing)?\s+(date|due)|due to report|to report by|date of report/i.test(l) && !dates.report) dates.report = after(i, /x^/)[0] || '';
+    const sm = l.match(/\b(\d[\d,]{0,6})\s+submissions?\b/i) || l.match(/submissions?\s+(?:received|published)\s*:?\s*(\d[\d,]{0,6})/i); if (sm && !subs) subs = parseInt(sm[1].replace(/,/g, ''), 10) || 0;
+  }
+  dates.hearings.sort();
+  if (!stage) { const all = lines.filter(l => l.length <= 400).join(' | '); const hit = PROC_STAGE_RX.find(x => x[1].test(all)); stage = hit ? hit[0] : '';
+    if (type === 'inquiry') stage = dates.report && dates.report < today ? 'Reporting date passed' : dates.submissions_close && dates.submissions_close >= today ? 'Accepting submissions' : dates.hearings.some(d => d >= today) ? 'Hearings' : (stage || 'Inquiry under way'); }
+  const cand = dates.hearings.filter(d => d >= today).map(d => [d, 'hearing']).concat(dates.submissions_close >= today ? [[dates.submissions_close, 'submissions close']] : []).concat(dates.report >= today ? [[dates.report, 'report due']] : []).filter(c => c[0]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  return { title, stage: stage || 'Listed', url, dates, submissions: subs, next_date: cand.length ? cand[0][0] : '', next_what: cand.length ? cand[0][1] : '' };
+}
+/** A notice paper or a disallowance list: each notice that speaks to a client issue, one record each. */
+function processNotices(html, url, type) {
+  const seen = new Set(); const out = [];
+  procLines(html).forEach(l => { if (l.length < 60 || l.length > 1500 || !/\b(to move|that the (senate|house|council|assembly)|that a |disallow|be disallowed)\b/i.test(l)) return; const issues = issueTag(l).filter(i => CLIENT_ISSUES.some(ci => ci.id === i && ci.ns !== 'cmm')); if (!issues.length) return;   // every notice says "the Senate": the agency's own general issues do not make one a client's
+    const title = l.slice(0, 240); const k = arcHash(title); if (seen.has(k)) return; seen.add(k);
+    out.push({ id: 'pn' + k + arcHash(url), title, stage: type === 'disallowance' ? 'Disallowance notice given' : 'Notice given', url, issues, dates: {}, submissions: 0, next_date: '', next_what: '' }); });
+  return out.slice(0, 25);
+}
+/** Source Registry method `process`: one parliament page read under the public rules, kept as records in den_process.
+ *  A record seen for the first time, or whose stage has changed, files one news-shaped row; an unchanged page is a
+ *  success that files nothing. */
+async function srcProcess(env, src) {
+  if (!(await ensureProcess(env))) return { ok: false, items: [], detail: 'mind_unbound' };
+  const u = src.urls || {}; const type = PROCESS_TYPES.indexOf(u.ptype) >= 0 ? u.ptype : 'bill'; const now = Date.now();
+  const f = await pubFetch(env, u.process);
+  if (!f.ok) return { ok: false, items: [], status: f.status || 0, detail: f.error, refused: !!f.refused };
+  const list = type === 'motion' || type === 'disallowance';
+  const recs = list ? processNotices(f.text, u.process, type) : [Object.assign(processParse(f.text, u.process, type, src.name, now), { id: src.id })];
+  const items = [];
+  for (const r of recs) {
+    const issues = Array.from(new Set((r.issues || []).concat(src.issues || []).concat(issueTag(r.title))));
+    const prev = await env.MIND_DB.prepare('SELECT stage FROM den_process WHERE id=?').bind(r.id).first();
+    if (src.probe) { items.push({ title: (r.title + ': ' + r.stage).slice(0, 300), link: r.url, date: r.next_date || '', desc: '' }); continue; }   // the Probe reads and records nothing
+    await env.MIND_DB.prepare('INSERT INTO den_process(id, juris, house, type, title, stage, url, issues, next_date, next_what, dates, submissions, src, seen, updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, stage=excluded.stage, issues=excluded.issues, next_date=excluded.next_date, next_what=excluded.next_what, dates=excluded.dates, submissions=excluded.submissions, updated=excluded.updated')
+      .bind(r.id, src.juris || 'au', PROCESS_HOUSES.indexOf(u.house) >= 0 ? u.house : '', type, r.title, r.stage, r.url, JSON.stringify(issues), r.next_date, r.next_what, JSON.stringify(r.dates || {}), r.submissions || 0, src.id, now, now).run();
+    if (prev && prev.stage === r.stage) continue;
+    const d = r.dates || {}; const bits = [(d.hearings || []).length ? 'Hearings: ' + d.hearings.join(', ') : '', d.submissions_close ? 'Submissions close ' + d.submissions_close : '', d.report ? 'Report due ' + d.report : '', r.submissions ? r.submissions + ' submissions received' : ''].filter(Boolean);
+    items.push({ title: (list ? r.stage + ': ' + r.title : r.title + ': ' + r.stage).slice(0, 300), link: r.url + '#' + (list ? r.id : 'stage=' + r.stage.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50)), date: '', desc: bits.join('. '), process: r.id });
+  }
+  const rows = sourceRows(src, { items, method: 'process' }, now); rows.forEach((row, i) => { const it = items.find(x => x.link === row.url); if (it) { row.meta.process = it.process; row.meta.issues = Array.from(new Set(row.meta.issues.concat(src.issues || []))); } });
+  return { ok: true, quiet: true, items, rows, status: 200, undated: true };
+}
+function processView(r) { return { id: r.id, juris: r.juris, house: r.house, type: r.type, title: r.title, stage: r.stage, url: r.url, issues: denJ(r.issues, []), next_date: r.next_date || '', next_what: r.next_what || '', dates: denJ(r.dates, {}), submissions: Number(r.submissions) || 0, source: r.src || '', seen: r.seen, updated: r.updated }; }
+async function processList(env, f) {
+  if (!(await ensureProcess(env))) return { ok: false, status: 501, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  f = f || {}; let mine = null;
+  if (f.desk) { const desk = await deskGet(env, f.desk); if (!desk) return DESK_UNKNOWN; mine = desk.issues.map(i => i.id); }
+  else if (f.ns) { const ns = String(f.ns).toLowerCase(); if (!denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'Name the client (ns) or the desk whose calendar this is.' }; mine = denNsIssues(ns); }
+  else return { ok: false, status: 400, error: 'ns_required', detail: 'A calendar is one client\'s: say which with ns= or desk=.' };
+  const rows = (((await env.MIND_DB.prepare('SELECT * FROM den_process ORDER BY (next_date=\'\'), next_date, updated DESC LIMIT 400').all()).results) || []).map(processView).filter(p => p.issues.some(i => mine.indexOf(i) >= 0));
+  let pages = []; try { await ensureSources(env); pages = (((await env.MIND_DB.prepare("SELECT * FROM sources WHERE methods LIKE '%process%' ORDER BY name LIMIT 200").all()).results) || []).map(sourceRow).filter(x => x.methods.indexOf('process') >= 0 && (!x.issues.length || x.issues.some(i => mine.indexOf(i) >= 0)))
+    .map(x => ({ id: x.id, name: x.name, url: (x.urls || {}).process || '', type: (x.urls || {}).ptype || 'bill', juris: x.juris, enabled: !!x.enabled, last_ok: Number(x.last_ok) || 0, last_try: Number(x.last_try) || 0, error: x.last_ok && !x.fails ? '' : String(x.last_error || '').slice(0, 200) })); } catch (e) { pages = []; }
+  return { ok: true, process: rows, pages, types: PROCESS_TYPES, houses: PROCESS_HOUSES.filter(Boolean) };
+}
+/** Watch one parliament page: a Source Registry source whose method is `process`, so its health is recorded like any other. */
+async function processAdd(env, b, who) {
+  b = b || {}; const u = denUrl(b.url);
+  if (!u || axUrlProblem(u.toString())) return { ok: false, status: 400, error: 'bad_url', detail: 'Give the public address of the bill, inquiry or notice page (https://...).' };
+  const type = String(b.type || 'bill').toLowerCase(); if (PROCESS_TYPES.indexOf(type) < 0) return { ok: false, status: 400, error: 'bad_type', detail: 'type is one of ' + PROCESS_TYPES.join(', ') + '.' };
+  const title = String(b.title || '').replace(/\s+/g, ' ').trim().slice(0, 120); if (title.length < 4) return { ok: false, status: 400, error: 'missing_title', detail: 'Give the bill or inquiry its name, as the parliament writes it.' };
+  await ensureSources(env);
+  const s = sourceSanitize({ id: 'proc_' + arcHash(u.toString()), name: title, tier: 'official', juris: b.juris, issues: b.issues, schedule: 360, urls: { process: u.toString(), ptype: type, house: b.house }, note: 'process calendar; added by ' + String(who || '').slice(0, 40) }, null);
+  const had = await sourceGet(env, s.id); await sourceUpsert(env, s, Date.now());
+  return { ok: true, added: !had, source: await sourceGet(env, s.id) };
+}
+/** Stop watching one parliament page: its source is switched off and its records leave the calendar. Seeded pages can be switched back on in Sources. */
+async function processRemove(env, b) {
+  b = b || {}; const id = sourceIdClean(b.source || b.id || ''); await ensureSources(env); await ensureProcess(env);
+  const src = id ? await sourceGet(env, id) : null;
+  if (!src || (src.methods || []).indexOf('process') < 0) return { ok: false, status: 404, error: 'unknown_process', detail: 'No watched parliament page has that id.' };
+  await env.MIND_DB.batch([env.MIND_DB.prepare('UPDATE sources SET enabled=0, edited=1, updated=? WHERE id=?').bind(Date.now(), id), env.MIND_DB.prepare('DELETE FROM den_process WHERE src=?').bind(id)]);
+  return { ok: true, removed: id };
+}
+/** The recorded dates ahead for a desk: read from the parliaments' own pages, never worked out from a sentence. */
+async function processUpcoming(env, mine, now) {
+  if (!(await ensureProcess(env))) return [];
+  const today = auDayKey(now); const horizon = auDayKey(now + 120 * 86400000);
+  return (((await env.MIND_DB.prepare("SELECT * FROM den_process WHERE next_date>=? AND next_date<=? ORDER BY next_date LIMIT 120").bind(today, horizon).all()).results) || []).map(processView).filter(p => p.issues.some(i => mine.indexOf(i) >= 0))
+    .map(p => ({ date: p.next_date, weekday: DEN_DAYS[new Date(p.next_date + 'T00:00:00Z').getUTCDay()], event: p.next_what, what: (p.title + ' - ' + p.stage).slice(0, 240), item: 0, url: p.url, yearWritten: true, recorded: true, process: p.id }));
+}
+/* The pages a research pass on 11 November 2026 named. Every address is unverified until a sweep proves it: a page that
+ * has moved fails in words on its source, and its address is corrected in the Sources drawer. [id, name, juris, house, type, url, issues] */
+const PROCESS_SEED = [
+  ['proc_gasres_inquiry', 'Domestic Gas Reservation Bill 2026 inquiry', 'au', 'senate', 'inquiry', 'https://www.aph.gov.au/Parliamentary_Business/Committees/Senate/Economics/DomesticGasRes2026', 'gas,gastax'],
+  ['proc_gasres_bill', 'Domestic Gas Reservation Bill 2026', 'au', 'reps', 'bill', 'https://www.aph.gov.au/Parliamentary_Business/Bills_Legislation/Bills_Search_Results/Result?bId=r7559', 'gas'],
+  ['proc_nsw_pc5_firearms', 'NSW Portfolio Committee No. 5: firearms reforms repeal inquiry', 'nsw', 'upper', 'inquiry', 'https://www.parliament.nsw.gov.au/parliamentary-business/committees/committee-details?committeeId=203', 'firearms'],
+  ['proc_nsw_disallowance', 'NSW Legislative Council disallowance alerts', 'nsw', 'upper', 'disallowance', 'https://www.parliament.nsw.gov.au/parliamentary-business/legislative-council/disallowance-alerts', ''],
+  ['proc_vic_firearms_bill', 'Firearms Amendment Bill 2026 (Victoria)', 'vic', '', 'bill', 'https://www.legislation.vic.gov.au/bills/firearms-amendment-bill-2026', 'firearms'],
+  ['proc_act_firearms_bill', 'Firearms (Public Safety) Amendment Bill 2026 (ACT)', 'act', '', 'bill', 'https://www.legislation.act.gov.au/b/db_73940', 'firearms'],
+  // the bill id below was reported by an aggregator citing the Parliament of NSW record; the page itself was not seen
+  ['proc_nsw_mtpleasant_bill', 'Mount Pleasant Mine Bill 2026 (NSW)', 'nsw', 'lower', 'bill', 'https://www.parliament.nsw.gov.au/bills/Pages/bill-details.aspx?pk=18979', 'mining'],
+];
+
+// -- Hansard as a standing sweep --------------------------------------------------
+const HANSARD_TERMS = 12;
+/** Once a sitting day a client: the desk's issue terms and approved terms searched in both houses through OpenAustralia's
+ *  API. A speech is kept when it speaks to the client's issues; its speaker is named only when the MP register holds them. */
+async function hansardSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!env.OPENAUSTRALIA_KEY) return { ok: false, platform: 'hansard', error: 'openaustralia_key_missing', detail: 'Set the secret OPENAUSTRALIA_KEY (free, from openaustralia.org.au/api) to read Hansard for the desks.' };
+  if (!(await ensureArchive(env)) || !(await ensureDesks(env))) return { ok: false, platform: 'hansard', error: 'mind_unbound' };
+  const now = Date.now(); const day = auDayKey(now); const cut = now - 8 * 86400000;
+  let nss = Array.from(new Set(((((await env.MIND_DB.prepare('SELECT ns FROM den_desks').all()).results) || []).map(r => r.ns))));
+  if (opts.ns) nss = nss.filter(n => n === String(opts.ns).toLowerCase());
+  const mps = {}; try { await ensureTopics(env); (((await env.MIND_DB.prepare('SELECT name, party, house FROM mps LIMIT 400').all()).results) || []).forEach(m => { mps[String(m.name || '').toLowerCase().replace(/\s+/g, ' ').trim()] = m; }); } catch (e) {}
+  const out = { ok: true, platform: 'hansard', clients: 0, terms: 0, found: 0, threads: 0, threadRows: 0, comments: 0, commentRows: 0, errors: [], skipped: false };
+  const max = Math.min(Math.max(parseInt(opts.terms, 10) || HANSARD_TERMS, 1), HANSARD_TERMS);
+  for (const ns of nss) {
+    if (!opts.force && (await kvGet(env.AXIOM_KV, 'hansard_day_' + ns)) === day) continue;
+    await kvPut(env.AXIOM_KV, 'hansard_day_' + ns, day, 2 * 86400); out.clients++;
+    const mine = denNsIssues(ns); const act = await denActive(env, ns); const deskTerms = act.filter(r => r.kind === 'term').map(r => r.value);
+    const terms = Array.from(new Set(CLIENT_ISSUES.filter(ci => ci.ns === ns).map(ci => (ci.q || [])[0]).filter(Boolean).concat(deskTerms))).slice(0, max);
+    const rx = deskTerms.map(denTermRx).filter(Boolean); const rows = new Map();
+    for (const term of terms) {
+      await log('cmd', 'openaustralia getHansard search="' + term + '"');
+      const r = await hansardSearch(env, '"' + term + '"', 20); out.terms++;
+      if (!r.ok) { out.errors.push(term + ': ' + r.detail); await log('err', term + ': ' + r.detail); if (/HTTP (401|403|429)/.test(String(r.detail))) break; await rdSleep(1000); continue; }
+      r.items.forEach(h => { out.found++; const ts = Date.parse(h.date) || now; if (ts < cut || !h.url) return; const issues = issueTag(h.text); if (!issues.some(i => mine.indexOf(i) >= 0) && !rx.some(x => x.test(h.text))) return;
+        const mp = mps[String(h.speaker || '').toLowerCase().replace(/\s+/g, ' ').trim()]; const where = h.house === 'senate' ? 'the Senate' : h.house === 'representatives' ? 'the House' : 'Parliament';
+        const meta = { platform: 'hansard', house: h.house, debate: String(h.debate || '').slice(0, 160), issues, ns, term, layer: 3, layers: [3], via: 'openaustralia' }; if (mp) meta.mp = { name: mp.name, party: mp.party || '', house: mp.house || '' };
+        rows.set(h.url, { src: 'hansard', title: ((mp ? mp.name + ' in ' + where : 'Speech in ' + where) + (h.debate ? ' (' + h.debate + ')' : '') + ': ' + h.text.slice(0, 120)).slice(0, 300), body: h.text, url: h.url, author: '', ts, tone: commentTone(h.text), meta }); });
+      await rdSleep(1000);
+    }
+    const list = Array.from(rows.values()); out.threads += list.length;
+    for (let i = 0; i < list.length; i += 150) out.threadRows += await archiveItems(env, 'hansard', list.slice(i, i + 150));
+    await log('out', ns + ': ' + list.length + ' speeches on the desk\'s issues');
+  }
+  if (!out.clients) out.skipped = true;
+  return out;
+}
+
+// -- campaigns' own petition counters ----------------------------------------------
+/* A campaign page that prints its own signature count. The number is the campaign's claim: it is stored as self-reported
+ * and said so wherever it is shown. Addresses are unverified until a sweep proves them. change.org is left out: it
+ * refuses automated readers. */
+const PETITION_COUNTERS = [
+  { url: 'https://stopthebuyback.com.au/', name: 'Stop the Buyback', ns: 'guns' },
+  { url: 'https://handsoffourfuel.com.au/', name: 'Hands Off Our Fuel', ns: 'mca' },
+  { url: 'https://nb.australiainstitute.org.au/gas_export_tax_b', name: 'Tax the gas industry its fair share (The Australia Institute)', ns: 'aep' },
+  { url: 'https://www.climatecouncil.org.au/actions/end-the-free-ride-petition/', name: 'End the Free Ride (Climate Council)', ns: 'mca' },
+  { url: 'https://www.getup.org.au/campaigns/tax/cap-the-diesel-rort/will-you-share-the-petition', name: 'Cap the diesel rort (GetUp)', ns: 'mca' },
+  { url: 'https://act.350.org.au/petitions/cut-the-diesel-handout-to-big-mining', name: 'Cut the diesel handout to big mining (350 Australia)', ns: 'mca' },
+];
+async function petitionCounters(env) {
+  let extra = []; try { extra = JSON.parse((await kvGet(env.AXIOM_KV, 'petition_counters')) || '[]'); } catch (e) { extra = []; }
+  let off = []; try { off = JSON.parse((await kvGet(env.AXIOM_KV, 'petition_counters_off')) || '[]'); } catch (e) { off = []; }
+  const seen = new Set(); return PETITION_COUNTERS.map(c => Object.assign({ seed: true }, c)).concat(Array.isArray(extra) ? extra : []).filter(c => { if (!c || !c.url || seen.has(c.url) || off.indexOf(c.url) >= 0) return false; seen.add(c.url); return true; });
+}
+async function petitionCounterEdit(env, b, who) {
+  b = b || {}; let extra = []; try { extra = JSON.parse((await kvGet(env.AXIOM_KV, 'petition_counters')) || '[]'); } catch (e) { extra = []; }
+  let off = []; try { off = JSON.parse((await kvGet(env.AXIOM_KV, 'petition_counters_off')) || '[]'); } catch (e) { off = []; }
+  if (b.add) { const u = denUrl(b.add.url); const name = String(b.add.name || '').replace(/\s+/g, ' ').trim().slice(0, 120); const ns = String(b.add.ns || '').toLowerCase();
+    if (!u || axUrlProblem(u.toString())) return { ok: false, status: 400, error: 'bad_url', detail: 'Give the public address of the campaign page that shows the count.' };
+    if (/(^|\.)change\.org$/i.test(u.hostname)) return { ok: false, status: 400, error: 'not_readable', detail: 'change.org refuses automated readers, so its counts are not collected.' };
+    if (name.length < 3) return { ok: false, status: 400, error: 'missing_name', detail: 'Name the petition as the campaign does.' };
+    if (ns && !denNsKnown(env, ns)) return { ok: false, status: 400, error: 'unknown_ns', detail: 'ns is a client this desk knows, or left out.' };
+    if (extra.length >= 60) return { ok: false, status: 409, error: 'counter_cap', detail: 'Sixty counters are watched already. Remove one first.' };
+    extra = extra.filter(c => c.url !== u.toString()).concat([{ url: u.toString(), name, ns, by: String(who || '').slice(0, 40), at: Date.now() }]); off = off.filter(x => x !== u.toString()); }
+  if (b.remove) { const url = String(b.remove); extra = extra.filter(c => c.url !== url); if (PETITION_COUNTERS.some(c => c.url === url) && off.indexOf(url) < 0) off.push(url); }
+  await kvPut(env.AXIOM_KV, 'petition_counters', JSON.stringify(extra), 3650 * 86400); await kvPut(env.AXIOM_KV, 'petition_counters_off', JSON.stringify(off), 3650 * 86400);
+  return { ok: true, counters: await petitionCounters(env) };
+}
+function counterCount(html) {
+  const s = stripHtml(String(html).replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')).replace(/\s+/g, ' ');
+  const m = s.match(/(\d[\d,]{2,9})\s*(?:\+\s*)?(?:signatures?|people have signed|have signed|signers|supporters|signed so far|names)/i) || s.match(/(?:signatures?|signed|supporters?)\s*(?:so far|to date)?\s*:?\s*(\d[\d,]{2,9})\b/i);
+  return m ? (parseInt(m[1].replace(/[^\d]/g, ''), 10) || 0) : 0;
+}
+/** Read each counter once a day. A count that cannot be found is an error by name and files nothing. */
+async function petitionCountersSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
+  const now = Date.now(); const day = new Date(now).toISOString().slice(0, 10); const out = { ok: true, counters: 0, read: 0, rows: 0, snapshots: 0, errors: [] };
+  const list = (await petitionCounters(env)).filter(c => !opts.only || opts.only.some(h => c.url.indexOf(h) >= 0)); const canon = [], snaps = [], upd = [];
+  for (const c of list) { out.counters++; const id = (denUrl(c.url) || { hostname: 'counter' }).hostname.replace(/^www\./, '').replace(/[^a-z0-9]+/gi, '_');
+    await log('cmd', 'GET ' + c.url); const f = await pubFetch(env, c.url);
+    if (!f.ok) { out.errors.push(id + ': ' + f.error); await log('err', id + ': ' + f.error); continue; }
+    const sigs = counterCount(f.text);
+    if (!sigs) { out.errors.push(id + '_parse_failed: the page shows no signature count this reader can find'); await log('err', id + '_parse_failed'); continue; }
+    out.read++; const issues = Array.from(new Set(issueTag(c.name + ' ' + stripHtml(f.text).slice(0, 2000)).concat(c.ns ? denNsIssues(c.ns).slice(0, 1) : [])));
+    const meta = { platform: 'petitions', site: 'counter', campaign: c.name, juris: 'au', issues, signatures: sigs, self_reported: true, ns: c.ns || '', closes: '', seen: now, day };
+    canon.push({ src: 'counter', title: c.name.slice(0, 300), body: '', url: c.url, ts: now, tone: 0, meta });
+    snaps.push({ src: 'counter', title: c.name.slice(0, 300), body: '', url: 'x:pet:' + arcHash(c.url) + ':' + day, ts: now, meta: { platform: 'petitions', site: 'counter', juris: 'au', petition: c.url, signatures: sigs, self_reported: true, issues, day } });
+    upd.push(env.MIND_DB.prepare("UPDATE arc_items SET meta=json_set(COALESCE(meta,'{}'),'$.signatures',?,'$.seen',?,'$.self_reported',json('true')) WHERE kind='petition' AND url=?").bind(sigs, now, c.url));
+    await log('out', sigs + ' signatures, self-reported by the campaign - ' + c.name.slice(0, 70)); }
+  for (let i = 0; i < canon.length; i += 150) out.rows += await archiveItems(env, 'petition', canon.slice(i, i + 150));
+  for (let i = 0; i < snaps.length; i += 150) out.snapshots += await archiveItems(env, 'petition', snaps.slice(i, i + 150));
+  for (let i = 0; i < upd.length; i += 50) { try { await env.MIND_DB.batch(upd.slice(i, i + 50)); } catch (e) {} }
+  return out;
+}
+
+// -- registered public actors' own Bluesky posts ------------------------------------
+/** Each register account on Bluesky that a person marked as a public actor: its own posts from the public AppView,
+ *  filed through signalsIngest so the name comes from the register and the desk's relevance rules apply. Reposts are not read. */
+async function bskyActorSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!(await ensureDen(env))) return { ok: false, platform: 'bluesky', error: 'mind_unbound' };
+  const max = Math.min(Math.max(parseInt(opts.max, 10) || 20, 1), 40); const now = Date.now();
+  const acc = ((await env.MIND_DB.prepare("SELECT * FROM den_watch WHERE kind='account' AND platform='bluesky' AND status='active' AND COALESCE(actor_kind,'')!='' ORDER BY COALESCE(last_ok,0) LIMIT ?").bind(max).all()).results) || [];
+  const out = { ok: true, platform: 'bluesky', accounts: acc.length, threads: 0, threadRows: 0, comments: 0, commentRows: 0, errors: [] };
+  for (const w of acc) {
+    await log('cmd', 'GET app.bsky.feed.getAuthorFeed actor=' + w.value);
+    const r = await socialJson(BSKY_API + 'app.bsky.feed.getAuthorFeed?actor=' + encodeURIComponent(w.value) + '&limit=30&filter=posts_no_replies');
+    if (!r.ok || !r.json) { const why = String(r.error || ('HTTP ' + r.status)).slice(0, 120); out.errors.push(w.value + ': ' + why); try { await env.MIND_DB.prepare('UPDATE den_watch SET last_error=? WHERE id=?').bind(why, w.id).run(); } catch (e) {} await rdSleep(SOCIAL_PACE); continue; }
+    const rows = (r.json.feed || []).filter(f => f && f.post && !f.reason && String((f.post.author || {}).handle || '').toLowerCase() === w.value).map(f => bskyNorm(f.post, '')).filter(p => p.text && /^https:/.test(p.url))
+      .map(p => ({ platform: 'bluesky', url: p.url, text: p.text, ts: p.ts, eng: { likes: p.likes, reposts: p.reposts, replies: p.replies, quotes: p.quotes }, watch: w.id }));
+    const ing = rows.length ? await signalsIngest(env, { ns: w.ns, layer: 3, via: 'bsky_actor', rows }, 'worker') : { kept: 0, inserted: 0 };
+    out.threads += ing.kept || 0; out.threadRows += ing.inserted || 0;
+    try { await env.MIND_DB.prepare("UPDATE den_watch SET last_ok=?, last_error='', last_layer=3 WHERE id=?").bind(now, w.id).run(); } catch (e) {}
+    await log('out', w.value + ': ' + rows.length + ' own posts, ' + (ing.kept || 0) + ' on the desk\'s topics'); await rdSleep(SOCIAL_PACE);
+  }
+  return out;
+}
+
+/* Campaign names a research pass found in paid advertising. Nothing puts them in a register unasked: a person with a full
+ * key presses the step (POST /den/watch/seed), and each then waits as a proposal that nothing searches until it is approved.
+ * A name a person dismissed is never proposed again. */
+const DEN_SEED_R7 = [['mca', 'hands off our fuel', 'ftc'], ['aep', 'australia runs on natural gas', 'gas'], ['guns', 'stop the buyback', 'firearms']];
+async function denSeedR7(env, who) {
+  const out = { ok: true, proposed: 0, known: 0 };
+  for (const s of DEN_SEED_R7) { const r = await denWatchPropose(env, { ns: s[0], source: 'seed', items: [{ kind: 'term', value: s[1], issue: s[2], score: 5, evidence: [{ snippet: 'A campaign name reported in public coverage of paid political advertising (research pass, 11 November 2026). Approve it to search the Ad Library and the desk\'s channels for it.' }] }] }, who || 'seed'); out.proposed += r.proposed || 0; out.known += r.known || 0; }
+  return out;
+}
+/** What the public-record routes delivered for one desk: the collection view's rows. */
+async function publicDelivered(env, desk) {
+  const now = Date.now(); const mine = desk.issues.map(i => i.id); const z = () => ({ d1: 0, d7: 0, last: 0, layers: [3] }); const out = { parliament: z(), hansard: z(), counters: z() };
+  try { await ensureProcess(env);
+    (((await env.MIND_DB.prepare("SELECT kind, ts, meta FROM arc_items WHERE ts>? AND ((kind='news' AND json_extract(meta,'$.process') IS NOT NULL) OR kind='hansard' OR (kind='petition' AND json_extract(meta,'$.site')='counter' AND url NOT LIKE 'x:pet:%')) ORDER BY ts DESC LIMIT 2000").bind(now - 7 * 86400000).all()).results) || []).forEach(r => { const m = denJ(r.meta, {});
+      if (!(Array.isArray(m.issues) ? m.issues : []).some(i => mine.indexOf(i) >= 0) && m.ns !== desk.ns) return; const k = r.kind === 'hansard' ? 'hansard' : r.kind === 'petition' ? 'counters' : 'parliament'; const t = r.kind === 'petition' ? (Number(m.seen) || r.ts) : r.ts;
+      out[k].d7++; if (t > now - 86400000) out[k].d1++; out[k].last = Math.max(out[k].last, t); });
+    out.parliament.watched = (await processList(env, { desk: desk.id })).process.length;
+  } catch (e) {}
+  return out;
 }
 
 // ==============================================================================
@@ -8014,6 +8882,16 @@ const ENTITY_SEED = [
   ['origin', 'org', 'Origin Energy', 'Origin Energy', '', 'Energy retailer and gas producer', 'neutral', 'aep'],
   ['eca', 'org', 'Energy Consumers Australia', 'Energy Consumers Australia', '', 'Consumer body', 'neutral', ''],
   ['nopsema_org', 'org', 'NOPSEMA', 'NOPSEMA|the offshore regulator', '', 'Offshore petroleum regulator', 'neutral', 'aep'],
+  // release 7: organisations the public-record routes read
+  ['environskimberley', 'org', 'Environs Kimberley', 'Environs Kimberley', '', 'Kimberley conservation group', 'opponent', 'aep'],
+  ['fara', 'org', 'Friends of Australian Rock Art', 'Friends of Australian Rock Art', '', 'Murujuga rock art group', 'opponent', 'aep'],
+  ['envirojustice', 'org', 'Environmental Justice Australia', 'Environmental Justice Australia', '', 'Public interest legal centre', 'opponent', 'aep'],
+  ['ieefa', 'org', 'IEEFA', 'IEEFA|Institute for Energy Economics and Financial Analysis', '', 'Energy finance think tank', 'opponent', 'aep'],
+  ['cef', 'org', 'Climate Energy Finance', 'Climate Energy Finance', '', 'Think tank', 'opponent', 'mca'],
+  ['amnesty_au', 'org', 'Amnesty International Australia', 'Amnesty International Australia|Amnesty Australia', '', 'Human rights organisation', 'opponent', 'aep'],
+  ['fieldandgame', 'org', 'Field & Game Australia', 'Field & Game Australia|Field and Game Australia', '', 'Hunting and shooting organisation', 'neutral', 'guns'],
+  ['austdeer', 'org', 'Australian Deer Association', 'Australian Deer Association', '', 'Hunting organisation', 'neutral', 'guns'],
+  ['agsa', 'org', 'Australian Gun Safety Alliance', 'Australian Gun Safety Alliance', '', 'Gun-control alliance', 'opponent', 'guns'],
   ['bhp', 'org', 'BHP', 'BHP', '', 'Miner', 'neutral', 'mca'],
   ['riotinto', 'org', 'Rio Tinto', 'Rio Tinto', '', 'Miner', 'neutral', 'mca'],
   ['fortescue', 'org', 'Fortescue', 'Fortescue|FMG|Andrew Forrest|Twiggy Forrest', '', 'Miner', 'neutral', 'mca'],
@@ -9149,7 +10027,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-12.studio-p59';
+const AXIOM_BUILD = '2026-11-12.studio-p64';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -17138,7 +18016,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -17166,7 +18044,9 @@ const AXIOM_WORKER = {
     try { res = await AXIOM_WORKER.handle(req, env, ctx); const gg = AX_GUEST_GATES.get(req); if (gg && gg.refused) { const r = axGuestRefusal('guest_live_project'); res = new Response(JSON.stringify(r.body), { status: r.status, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) }); } }
     catch (e) {
       console.log(JSON.stringify({ rid, level: 'error', method: req.method, path, err: axRedact((e && e.message) || e).slice(0, 300) }));
-      res = new Response(JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done. Quote this id when reporting it.', requestId: rid }), { status: 500, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) });
+      res = denBusy(e)
+        ? new Response(JSON.stringify(Object.assign({}, DEN_BUSY, { requestId: rid })), { status: 503, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) })
+        : new Response(JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done. Quote this id when reporting it.', requestId: rid }), { status: 500, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) });
     }
     try {
       const out = new Response(res.body, res); out.headers.set('X-Request-Id', rid);
@@ -18157,7 +19037,8 @@ const AXIOM_WORKER = {
         if (path === '/bridge/next') {
           const agent = String(reqUrl.searchParams.get('agent') || 'agent').slice(0, 40);
           const sources = String(reqUrl.searchParams.get('sources') || '').split(',').map(x => x.trim()).filter(Boolean);
-          await agentBeat(env, agent, sources.length ? sources : BRIDGE_SOURCES);
+          const down = String(reqUrl.searchParams.get('down') || '').split(',').map(x => x.trim()).filter(Boolean);
+          await agentBeat(env, agent, sources.length ? sources : BRIDGE_SOURCES, down);
           // a platform switched off is not handed to any collector, even a job queued before the switch
           const off = await reachOff(env); const may = (sources.length ? sources : BRIDGE_SOURCES).filter(x => off.indexOf(x) < 0);
           const job = may.length ? await jobClaim(env, agent, may) : null;
@@ -18177,6 +19058,17 @@ const AXIOM_WORKER = {
           if (took && bbody.ok === false) {
             const m = /^([a-z]+)_challenge$/.exec(String((bbody.result || {}).error || ''));
             if (m) { try { const j = await env.MIND_DB.prepare('SELECT source, agent FROM bridge_jobs WHERE id=?').bind(id).first(); await reachChallenge(env, (j && j.source) || m[1], (bbody.result || {}).detail, (j && j.agent) || bbody.agent || ''); } catch (e) {} }
+            // X search does not work on that machine: it stops counting as an X collector now (it will say so itself on
+            // its next poll), and the X jobs still waiting are failed in words rather than handed to it one by one
+            if (String((bbody.result || {}).error || '') === 'x_unavailable') {
+              try {
+                const j = await env.MIND_DB.prepare('SELECT agent FROM bridge_jobs WHERE id=?').bind(id).first();
+                const who = String((j && j.agent) || bbody.agent || '');
+                const seen = (await agentsSeen(env)).find(a => a.agent === who.replace(/[^\w-]/g, '').slice(0, 40));
+                if (seen) await agentBeat(env, seen.agent, seen.sources, (seen.down || []).concat(['x']));
+                await bridgeExpire(env, { source: 'x', maxAgeMs: 0 });
+              } catch (e) {}
+            }
           }
           return took ? jsonResp({ ok: true }) : jsonResp({ ok: false, ignored: true, error: 'job_ended', detail: 'The job had already ended or was cancelled; this report was not filed.' }, 409);
         }
@@ -19588,9 +20480,15 @@ const AXIOM_WORKER = {
         if (path === '/den/plan' && req.method === 'GET') return send(await denPlan(env, sp.get('ns'), String(sp.get('platform') || '').toLowerCase()));
         if (req.method === 'GET') {
           if (path === '/den/desks') return send(await deskList(env));
-          if (path === '/den/board') { const r = await denBoard(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to') }); if (r && r._rows) delete r._rows; return send(r); }
-          if (path === '/den/missed') { const r = await denMissed(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to') }); return send(r); }
+          if (path === '/den/board') {   // with missed=1 the strip rides in the same answer, so an open of the page reads the window once
+            const both = sp.get('missed') === '1'; const r = await denBoard(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to'), keepRows: both }); if (!r || r.ok === false) return send(r);
+            const out = Object.assign({}, r); delete out._rows;
+            if (both) { try { out.missed = await denMissed(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to'), board: r, fresh: sp.get('fresh') === '1' }); }
+              catch (e) { out.missed = denBusy(e) ? Object.assign({}, DEN_BUSY) : { ok: false, error: 'den_failed', detail: 'The checks could not be read: ' + String((e && e.message) || e).slice(0, 160) }; } }
+            return send(out); }
+          if (path === '/den/missed') { const r = await denMissed(env, sp.get('desk'), { hours: sp.get('hours'), to: sp.get('to'), fresh: sp.get('fresh') === '1' }); return send(r); }
           if (path === '/den/collection') return send(await denCollection(env, sp.get('desk')));
+          if (path === '/den/process') return send(await processList(env, { ns: sp.get('ns'), desk: sp.get('desk') }));
           if (path === '/den/held') return send(await denHeld(env, sp.getAll('u')));
           if (path === '/den/briefs') { const d = await deskGet(env, sp.get('desk')); if (!d) return send(Object.assign({}, DESK_UNKNOWN));
             const rows = ((await env.MIND_DB.prepare('SELECT id, day, status, revision, by, filed_by, filed_at, updated FROM den_briefs WHERE desk=? ORDER BY day DESC LIMIT 90').bind(d.id).all()).results) || []; return jsonResp({ ok: true, desk: d.id, briefs: rows }); }
@@ -19640,11 +20538,15 @@ const AXIOM_WORKER = {
           if (path === '/den/brief/save') return send(await denBriefSave(env, ob, auth.name));
           if (path === '/den/brief/file') return send(await denBriefFile(env, ob, auth.name));
           if (path === '/den/backtest') return send(await denBacktestSave(env, ob, auth.name));
+          if (path === '/den/process/add') return send(await processAdd(env, ob, auth.name));
+          if (path === '/den/watch/seed') return send(await denSeedR7(env, auth.name));
+          if (path === '/den/process/remove') return send(await processRemove(env, ob));
           if (path === '/den/discover') return send(await denDiscover(env, ob.ns, { days: ob.days, dry: !!ob.dry }, auth.name));
           if (path === '/den/themes') return send(await denThemes(env, ob.ns));
         }
         return jsonResp({ error: 'not_found' }, 404);
-      } catch (e) { return jsonResp({ ok: false, error: 'den_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
+      } catch (e) { if (denBusy(e)) return jsonResp(Object.assign({}, DEN_BUSY), 503);
+        return jsonResp({ ok: false, error: 'den_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
     }
     if (path.startsWith('/social/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
@@ -19653,6 +20555,7 @@ const AXIOM_WORKER = {
         await ensureArchive(env);
         if (path === '/social/coverage' && req.method === 'GET') return jsonResp(await socialCoverage(env, reqUrl.searchParams.get('probe') === '1'));
         if (path === '/social/petitions' && req.method === 'GET') return jsonResp(await petitionsList(env, { issue: reqUrl.searchParams.get('issue') || '', juris: reqUrl.searchParams.get('juris') || '', days: reqUrl.searchParams.get('days') || 30 }));
+        if (path === '/social/petitions/counters') { if (req.method === 'GET') return jsonResp({ ok: true, counters: await petitionCounters(env) }); const r = await petitionCounterEdit(env, ob, auth.name); const st = r.ok === false ? (r.status || 400) : 200; if (r.status) delete r.status; return jsonResp(r, st); }
         if (path === '/social/substack/search' && req.method === 'GET') {
           const q = String(reqUrl.searchParams.get('q') || '').trim().slice(0, 80);
           if (!q) return jsonResp({ error: 'missing_q', detail: 'Give q=, e.g. australian politics.' }, 400);
@@ -19679,6 +20582,7 @@ const AXIOM_WORKER = {
         if (path === '/social/sweep') {
           const platform = String(ob.platform || '').toLowerCase().replace(/[^a-z]/g, '');
           if (SOCIAL_PLATFORMS.indexOf(platform) < 0 && platform !== 'x') return jsonResp({ error: 'unknown_platform', detail: 'platform must be one of ' + SOCIAL_PLATFORMS.concat(['x']).join(', ') + '.' }, 400);
+          if (platform === 'hansard' && !env.OPENAUSTRALIA_KEY) return jsonResp({ ok: false, error: 'openaustralia_key_missing', detail: 'Set the secret OPENAUSTRALIA_KEY (free, from openaustralia.org.au/api) to read Hansard for the desks. Nothing was queued.' }, 400);
           const params = Object.assign({}, (ob.params && typeof ob.params === 'object') ? ob.params : {}, { where: 'worker' }, platform === 'x' ? { mode: 'timelines' } : {});
           const job = await jobCreate(env, platform, params, auth.name);
           ctx.waitUntil(jobRunLocal(env, { id: job.id, source: platform, params }));
@@ -19781,7 +20685,7 @@ const AXIOM_WORKER = {
         if (path === '/sources/add') {
           const s = sourceSanitize(sb, null);
           if (!s.id || !s.name) return jsonResp({ error: 'missing_name', detail: 'Give the source a name.' }, 400);
-          if (!s.methods.length) return jsonResp({ error: 'missing_urls', detail: 'Give at least one way in: urls.rss, urls.wp, urls.json, urls.sitemap, urls.home, urls.site, urls.gnews or urls.podcast.' }, 400);
+          if (!s.methods.length) return jsonResp({ error: 'missing_urls', detail: 'Give at least one way in: urls.rss, urls.wp, urls.json, urls.sitemap, urls.home, urls.public, urls.site, urls.gnews urls.podcast, urls.lexicon (gnews or gdelt), urls.lemmy (an instance), urls.hn (words) or urls.forum (a forum feed).' }, 400);
           const had = await sourceGet(env, s.id);
           if (had && had.core) return jsonResp({ error: 'core_source', detail: s.id + ' is a core feed; edit it with /sources/update.' }, 400);
           await sourceUpsert(env, s, Date.now());
@@ -21827,6 +22731,7 @@ async function handleScheduled(env) {
   try { await socialCron(env); } catch (e) { console.log('social cron failed', String(e).slice(0, 120)); }
   // the signed-in layer's morning plan: jobs for the collectors that are connected; no model call, never gated
   try { await denReachCron(env); } catch (e) { console.log('reach plan failed', String(e).slice(0, 120)); }
+  try { await bridgeExpire(env, {}); } catch (e) { console.log('bridge expiry failed', String(e).slice(0, 120)); }
   try { await denDiscoverCron(env); } catch (e) { console.log('desk discovery failed', String(e).slice(0, 120)); }
   // Sentiment: the newest rows that mention an entity get their verdicts, within the day's budget (a model call per batch:
   // held outside the day's window).

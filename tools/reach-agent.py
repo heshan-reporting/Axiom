@@ -93,11 +93,53 @@ def have_playwright():
         return False
 
 
-def collectors():
+# ---- X search that does not work: stop offering it, say so once, look again every ten minutes ----------------------
+# Signed in is not able to search (see reach-x.py). The first live run claimed sixteen X jobs in a row and failed each
+# the same way, because `x` stayed in what the agent offered. Now one failure (or the check at the start) takes X out
+# of the offer; the worker is told (`down=x` on every poll) so it stops queueing and says why; and the same
+# ten-minute rhythm the social channels use asks twitter-cli again and puts X back when search works.
+X_RECHECK = 600
+X_DOWN = {}          # {'at': when last checked, 'why': the message} while X search is known not to work here
+
+
+def x_mark_down(why, clock=time.time):
+    X_DOWN['at'] = clock(); X_DOWN['why'] = str(why)
+
+
+def x_check(clock=time.time):
+    """Ask twitter-cli whether search can work (one `twitter status`, never a search). True when it can."""
+    if not have('twitter'):
+        X_DOWN.clear(); return False
+    if rx.transaction_generator_broken():
+        x_mark_down(rx.x_unavailable(), clock); return False
+    X_DOWN.clear(); return True
+
+
+def x_usable(clock=time.time):
+    """Whether to offer X now. While it is down, twitter-cli is asked again only every ten minutes."""
+    if not have('twitter'): return False
+    if not X_DOWN: return True
+    if clock() - X_DOWN.get('at', 0) < X_RECHECK: return False
+    return x_check(clock)
+
+
+def down():
+    """What this machine has the tool for and still cannot read; sent to the worker with every poll."""
+    return ['x'] if X_DOWN and have('twitter') else []
+
+
+def offering(fixed=None, clock=time.time):
+    """What to offer the worker: the --sources list when one was given, else what is installed - never X while its
+    search is down, whoever asked for it."""
+    if fixed: return [s for s in fixed if s != 'x' or x_usable(clock)]
+    return collectors(clock)
+
+
+def collectors(clock=time.time):
     """Which sources this machine can actually collect, checked not assumed."""
     out = []
     if have('rdt'): out.append('reddit')
-    if have('twitter'): out.append('x')
+    if x_usable(clock): out.append('x')
     if have_playwright(): out.append('render')
     if have_playwright() and gated_profiles(): out.append('gated')      # subscriber news: only with a publisher a person signed in to
     # Facebook, Instagram and YouTube search: only when agent-reach is installed, the channel is signed in to and
@@ -420,8 +462,11 @@ def run_job(worker, key, job, echo=True):
         # Not a broken collector: the platform cannot be read from here. Its
         # own error code so the job log says which, and so a retry is not
         # the obvious response.
-        result = {'ok': False, 'error': 'x_unavailable', 'detail': str(e)[:400]}
-        log('err', str(e)[:400])
+        # The message leads with what to do (reach-x.py X_REMEDY), and is sent whole: 400 characters used to cut
+        # it before the remedy. A console line holds 1,200.
+        x_mark_down(str(e))
+        result = {'ok': False, 'error': 'x_unavailable', 'detail': rs.scrub(str(e))[:1100]}
+        log('err', str(e)[:1200])
         ok = False
     except rs.Challenge as e:
         # The platform asked for a verification. The collector has already stopped and paused that platform here for
@@ -450,7 +495,7 @@ def run_job(worker, key, job, echo=True):
 
 
 def poll_once(worker, key, agent, sources, echo=True):
-    d = rr.http_json(worker.rstrip('/') + '/bridge/next?agent=%s&sources=%s' % (agent, ','.join(sources)), key, timeout=30)
+    d = rr.http_json(worker.rstrip('/') + '/bridge/next?agent=%s&sources=%s%s' % (agent, ','.join(sources), ('&down=' + ','.join(down())) if down() else ''), key, timeout=30)
     job = d.get('job')
     if not job:
         return None
@@ -472,9 +517,16 @@ def plist_path():
     return os.path.expanduser('~/Library/LaunchAgents/%s.plist' % LABEL)
 
 
+def launchd_command(repo, python=None):
+    q = lambda x: "'" + str(x).replace("'", "'\\''") + "'"
+    return 'cd %s && %s tools/reach-agent.py --quiet' % (q(repo), q(python or sys.executable or 'python3'))
+
+
 def install_launchd(repo):
     log = os.path.expanduser('~/Library/Logs/axiom-reach-agent.log')
-    cmd = 'cd %s && python3 tools/reach-agent.py --quiet' % repo.replace("'", "'\\''")
+    # the Python that installs it is the Python that runs it: installed from the collector's own environment
+    # (~/.axiom-reach/venv/bin/python), the background agent sees Playwright and yt-dlp there; plain `python3` did not
+    cmd = launchd_command(repo)
     xml = '''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -540,50 +592,99 @@ def main(argv=None):
         return 0 if rs.login(a.login.strip().lower()) else 1
     if a.channels:
         print('reddit     %s' % ('usable' if have('rdt') else 'rdt is not installed'))
-        print('x          %s' % ('usable' if have('twitter') else 'twitter is not installed'))
+        print('x          %s' % ('twitter is not installed' if not have('twitter') else 'usable' if x_check() else 'search is unavailable  - ' + rx.x_remedy()))
         print('render     %s' % ('usable' if have_playwright() else 'Playwright is not installed'))
         print('gated      %s' % (('usable for: ' + ', '.join(gated_profiles())) if (have_playwright() and gated_profiles()) else 'no publisher is signed in on this machine (--login news:<source id>)'))
         for c in rs.CHANNELS:
             st = rs.status(c)
-            print('%-10s %s%s' % (c, 'usable, %d of %d reads today' % (st['reads_today'], st['per_day']) if st['usable'] else (st['status'] or 'not installed'), ('  - ' + st['why']) if st.get('why') else ''))
+            print('%-10s %s%s' % (c, 'usable, %d of %d reads today' % (st['reads_today'], st['per_day']) if st['usable'] else (st['status'] or 'not installed'), ('  - ' + st['why']) if st.get('why') else '') + (('\n             ' + st['native_hint']) if st.get('native_hint') else '') + ((' (read through %s)' % st['backend']) if st.get('backend') and st['usable'] else ''))
         return 0
     if not a.key: sys.exit('need --key or AXIOM_KEY (export it in ~/.zshrc so the background agent can find it)')
     say = (lambda *x: None) if a.quiet else print
     fixed = [s.strip() for s in a.sources.split(',') if s.strip()]
-    sources = fixed or collectors(); checked = time.time()
-    if not sources:
+    try:
+        return serve(a.worker, a.key, a.agent, fixed, poll=a.poll, once=a.once, say=say, echo=not a.quiet)
+    except KeyboardInterrupt:
+        say('\nagent stopped'); return 0
+
+
+X_STOPPED = 'no longer offering X: '
+X_BACK = 'X search works again: offering X again'
+
+
+BUSY_WAIT = 60.0      # a busy database is not helped by asking it again every fifteen seconds
+
+
+def http_reason(code, body, headers=None, poll=15.0):
+    """What the worker said when it refused a poll, in one line, and how long to wait. The worker answers refusals as
+    JSON with a code, a sentence and often an id to quote; an answer that is not JSON is a gateway's page, not the
+    worker's, and its markup is not printed. Nothing here can carry the key: only the worker's own words are read."""
+    d = None
+    try: d = json.loads(body)
+    except Exception: d = None
+    rid = ''
+    try: rid = str((headers or {}).get('X-Request-Id') or '')
+    except Exception: rid = ''
+    if not isinstance(d, dict):
+        return 'HTTP %s, and the answer is not the worker\'s own (a gateway or network page)' % code, poll
+    err = str(d.get('error') or '')[:60]; detail = ' '.join(str(d.get('detail') or '').split())[:260]; rid = str(d.get('requestId') or rid)[:40]
+    if err == 'db_busy':
+        return 'the worker\'s database is busy (%s)' % (detail or 'too much is reading it at once'), max(poll, BUSY_WAIT)
+    line = 'worker said HTTP %s' % code
+    if err: line += ' (%s%s)' % (err, (': ' + detail) if detail else '')
+    if rid: line += ' [id %s]' % rid
+    return line, poll
+
+
+def serve(worker, key, agent, fixed, poll=15.0, once=False, say=print, echo=True, sleep=time.sleep, clock=time.time, rounds=None):
+    """Stay connected: offer what this machine can read, take a job when there is one, look again at what can be read
+    every ten minutes. `rounds`, `sleep` and `clock` exist so the loop can be driven by a test."""
+    if have('twitter') and (not fixed or 'x' in fixed) and not x_check(clock):
+        say('  twitter-cli is installed but X search cannot work on this machine: not offering X. ' + rx.x_remedy())
+    sources = offering(fixed, clock); checked = clock()
+    if not sources and not down():
         sys.exit('no collectors installed on this machine. Reddit needs `rdt` (pipx install "git+https://github.com/public-clis/rdt-cli.git"); X needs `twitter` (uv tool install twitter-cli). Install one, sign in, and run this again.')
     say('%s  agent "%s" connected to %s, offering: %s' % (
-        datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC'), a.agent, a.worker, ', '.join(sources)))
-    if 'reddit' not in sources: say('  (rdt not installed: Reddit jobs will wait for another machine)')
-    if 'x' not in sources: say('  (twitter not installed: X jobs will wait for another machine)')
-    if 'render' not in sources: say('  (Playwright not installed: render jobs will wait for another machine - pip install playwright && playwright install chromium)')
-    if not any(s in sources for s in ('facebook', 'instagram', 'ytsearch')): say('  (no social channel through agent-reach is usable here: python3 tools/reach-agent.py --channels says why)')
-    while True:
+        datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC'), agent, worker, ', '.join(sources) or 'nothing yet'))
+    if not have('rdt'): say('  (rdt not installed: Reddit jobs will wait for another machine)')
+    if not have('twitter'): say('  (twitter not installed: X jobs will wait for another machine)')
+    if 'render' not in sources: say('  (Playwright not installed: render jobs will wait for another machine - python3 -m pip install playwright && python3 -m playwright install chromium)')
+    if not any(s in sources for s in ('facebook', 'instagram', 'ytsearch')): say('  (no social channel is usable here - Facebook, Instagram or YouTube search: python3 tools/reach-agent.py --channels says why)')
+    n = 0
+    while rounds is None or n < rounds:
+        n += 1
         try:
-            if not fixed and time.time() - checked > 600:
-                # a platform signed in to, paused or switched off since the agent started is offered, or not, from now on
-                now_have = collectors(); checked = time.time()
-                if sorted(now_have) != sorted(sources): say('  now offering: %s' % ', '.join(now_have)); sources = now_have
-            r = poll_once(a.worker, a.key, a.agent, sources, echo=not a.quiet)
-            if r is not None and a.once: return 0
+            if clock() - checked >= X_RECHECK:
+                # a platform signed in to, paused, switched off or repaired since the agent started is offered, or not, from now on
+                was_down = bool(X_DOWN)
+                now_have = offering(fixed, clock); checked = clock()
+                if was_down and 'x' in now_have: say('  ' + X_BACK)
+                if sorted(now_have) != sorted(sources): say('  now offering: %s' % (', '.join(now_have) or 'nothing')); sources = now_have
+            r = poll_once(worker, key, agent, sources, echo=echo) if (sources or down()) else None
+            if X_DOWN and 'x' in sources:
+                # the job just run learned that X search cannot work here: one failure, not one per queued job
+                sources = [s for s in sources if s != 'x']; X_DOWN['at'] = clock()
+                say('  ' + X_STOPPED + rx.x_remedy())
+            if r is not None and once: return 0
             if r is None:
-                if a.once: say('no job waiting'); return 0
-                time.sleep(a.poll)
+                if once: say('no job waiting'); return 0
+                sleep(poll)
             # a job just ran: check again straight away in case more are queued
         except urllib.error.HTTPError as e:
             body = ''
-            try: body = e.read().decode()[:200]
+            try: body = e.read().decode('utf-8', 'replace')[:2000]
             except Exception: pass
             if e.code in (401, 403):
-                sys.exit('AXIOM refused the key (HTTP %s). Use a full-access key: %s' % (e.code, body))
-            say('worker said HTTP %s; retrying in %ds' % (e.code, int(a.poll)))
-            time.sleep(a.poll)
+                sys.exit('AXIOM refused the key (HTTP %s). Use a full-access key: %s' % (e.code, body[:200]))
+            why, wait = http_reason(e.code, body, e.headers, poll)
+            say('%s; retrying in %ds' % (why, int(wait)))
+            sleep(wait)
         except KeyboardInterrupt:
-            say('\nagent stopped'); return 0
+            raise
         except Exception as e:
-            say('connection trouble (%s); retrying in %ds' % (str(e)[:120], int(a.poll)))
-            time.sleep(a.poll)
+            say('connection trouble (%s); retrying in %ds' % (str(e)[:120], int(poll)))
+            sleep(poll)
+    return 0
 
 
 if __name__ == '__main__':

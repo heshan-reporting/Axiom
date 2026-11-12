@@ -278,9 +278,17 @@ For the owner, to switch a route on:
 
 Decision D7, as the owner asked on 11 November 2026: the Mac collector reads social platforms through a person's
 signed-in session. **Nothing is switched on by this release.** A platform collects only after a person signs in to it
-on the Mac, having read the warning. Platforms the owner has switched on so far: none recorded.
+on the Mac, having read the warning. Platforms the owner has switched on so far: Facebook (the owner's Mac, user heshhomefolder,
+11 November 2026, through opencli; s.3.2).
 
-**What agent-reach can do, and so what this layer can do.** Read from its documentation and channel source on
+**Corrected by the first live run (11 November 2026, the owner's Mac; s.3.1 below).** Agent Reach v1.5.0 as installed
+has no `facebook`, `instagram`, `youtube` or `login` command at all: its commands are `setup, install, configure,
+doctor, uninstall, skill, format, transcribe, check-update, watch, version`. It checks and installs other tools; it
+does not search. The table below is what was *read from documentation* and is **not true of the installed tool**.
+Until the owner chooses a backend that really answers, layer 2 for Facebook, Instagram and YouTube collects nothing,
+and `--channels` says so as `no_command`.
+
+**What agent-reach was expected to do.** Read from its documentation and channel source on
 11 November 2026 (`agent-reach <channel> <action>`, one line of JSON, `NEED_LOGIN` / `PLATFORM_BLOCKED` /
 `RATE_LIMITED` as named errors):
 
@@ -347,6 +355,156 @@ python3 tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out 
 
 Read `/tmp/yt.json`: every row should have an address, words and counts. If the counts are missing, the field names
 in `_ALIASES` need the ones agent-reach uses. Then Facebook and Instagram, each with `--login` first.
+(Superseded: with v1.5.0 the second line reports `no_command` for all three and the rest cannot run.)
+
+### 3.1 The first live run of the Mac collector (11 November 2026; build `2026-11-11.studio-p59`, page `?v=r45`)
+
+What the owner saw, what was wrong, what changed. Proven against real output: only the `agent-reach doctor` and
+`agent-reach --help` shapes (the owner's paste, kept in `tests/fixtures/den/agent-reach-*-1.5.0.txt`). Everything
+about X below is proven against stand-ins only.
+
+- **A. The agent kept claiming X jobs it could not run.** `x` stayed in the offer after `x_unavailable`, so sixteen
+  queued X jobs were claimed and failed one by one. Now (`tools/reach-agent.py`: `X_DOWN`, `x_check`, `x_usable`,
+  `offering`, `serve`): twitter-cli is asked once at the start (`twitter status`, never a search) and X is not offered
+  when its search cannot work; one job that learns it takes X out of the offer at once and says so once; every poll
+  tells the worker (`/bridge/next?...&down=x`); twitter-cli is asked again every ten minutes and X is offered again
+  when it works; `--sources x` does not override it; `--channels` prints "search is unavailable" with the command.
+  **Queued X jobs, decided:** they are failed in words, not kept. A topic's X job is a week-window search that the
+  next run of the topic queues again, so a stale one has no value. The worker does it: `POST /bridge/done` with
+  `x_unavailable` removes X from that collector's offer and fails every X job still waiting
+  (`bridgeExpire {source:'x', maxAgeMs:0}`) unless another live collector offers X; a new X job fails at once
+  (`jobTail`, no three-minute wait when a live collector says the platform is down); result
+  `{error:'no_collector', why:'x_unavailable', detail}` with the command first. `/bridge/status` agents carry `down`.
+- **A, the wider hole.** `no_collector` was only ever decided when someone tailed the job. `bridgeExpire(env, {})`
+  now runs every tick: a job queued thirty minutes (`BRIDGE_STALE_MS`) with no live collector offering its source is
+  failed `no_collector`. The morning plan (`who='plan'`) keeps its own twelve-hour rule.
+- **B. The message was cut before the remedy.** `X_REMEDY` then `X_CAUSE` in `tools/reach-x.py`: what to do is
+  inside the first 300 characters; the report carries 1,100 and the console line 1,200 (the worker's line limit).
+- **C. Why the keywords came round twice.** Not a retry. Every topic run (`topicsCron`: the two stalest active topics
+  a window) queued one X job whatever was connected, and nothing ever removed an unserved one, so the queue held one
+  X job per keyword per run. Now `topicRun` queues an X job only when a live collector offers X, at most one waiting
+  job a topic (`already waiting`), and otherwise says once why not (`out.xSkipped`). **The stand-in:** the worker's
+  keyless timeline reader (`xSyndSweep`) already files MPs' own posts; `topicMpPosts()` finds those that carry every
+  word of the keyword (rows with `meta.mp` only) and `topicResults` returns them under `x` marked `held: true` with
+  an `xNote`. Nothing new is fetched; it is their own posts only - no replies, no search. A trade-off to know: a
+  topic researched while the Mac is asleep gets no X search that day (before, the job waited for the Mac).
+- **D. Upstream.** Checked on PyPI from the sandbox: twitter-cli 0.8.5 (17 March 2026) is the newest release; its
+  header generator is the package `xclienttransaction` (newest 1.0.3, 26 June 2026). **Both newest releases still
+  contain the unguarded `.search(...).group(1)`** (`x_client_transaction/utils.py` lines 59 and 61), and 1.0.2 is the
+  release that changed how the page is read. So `uv tool upgrade twitter-cli` can only help if the Mac is behind
+  those; if it is already on them there is no released fix. twitter-cli's GitHub repository could not be read from
+  the sandbox, so nothing is known here about unreleased fixes.
+- **E. agent-reach reported every channel as "unknown".** The parser looked for a JSON line or English status words;
+  the real answer is marked text in Chinese (U+2705 usable, `[!]` needs configuration or sign-in, `[X]` not
+  installed, plus one sentence listing the channels still to unlock), and `doctor --text` is not accepted.
+  `doctor_marks()` reads that; `commands()` reads the subcommands from `agent-reach --help`; a channel with no
+  command is `no_command` (never usable, whatever the doctor ticks); an answer in neither shape is `unreadable`;
+  `login()` stops before any question when there is no `login` command. On the real output all three channels are
+  `no_command` and nothing is offered. **The search and read commands in `CHANNELS` do not exist in v1.5.0.**
+  Not built, because it is the owner's decision (D7 names agent-reach as the backend): reading YouTube search through
+  `yt-dlp` directly, which is what agent-reach's own YouTube channel installs.
+
+Harnesses: `tests/reach-agent-test.py` (26, new), `tests/reach-channels-test.py` (80), `tests/den-reach-worker.mjs`
+(9), `tests/topics-worker.mjs` (4, new).
+
+### 3.2 After the deploy (11 November 2026, evening; tools only, worker and page unchanged)
+
+**Seen on the owner's Mac and the live worker (build p59):** the deploy verified; the agent started with one line
+"not offering X", offered `reddit, render` and claimed no X job; `--channels` printed X as "search is unavailable"
+and the three social channels as `no_command`. twitter-cli there is installed with pipx at 0.8.5 with
+xclienttransaction 1.0.3 (the newest of both), and the unreleased twitter-cli 0.8.6 (commit 7c634e0) was tried and
+did not fix X search. **So there is no fix upstream, released or not; X keyword search waits on those projects.**
+Homebrew's Python refuses `pip install`, so the collector has its own environment, `~/.axiom-reach/venv`, and is
+run with `~/.axiom-reach/venv/bin/python`.
+
+Changed after that, at the owner's word ("fix all"):
+
+- **The X message knows what is installed.** `x_versions()` asks the Python of twitter-cli's own environment (pipx or
+  uv; nothing fetched) and `x_remedy()` says which case the machine is in: on the newest releases, "Nothing to do on
+  this Mac: no fix is available yet"; behind them, the upgrade command for the installer that was used, both
+  packages; unreadable, the general advice. `X_NEWEST` holds the versions known to carry the fault.
+- **The background agent runs with the Python that installed it** (`launchd_command`): install it with
+  `~/.axiom-reach/venv/bin/python tools/reach-agent.py --install-launchd` and it sees Playwright and yt-dlp. It used
+  a bare `python3`, which on this Mac has neither.
+- **YouTube keyword search reads through yt-dlp. Decision D7 amended, 11 November 2026, the owner:** agent-reach
+  cannot search YouTube, so `reach_social.py` uses yt-dlp directly for the `youtube` channel when agent-reach has no
+  such command (`backend()`): `yt-dlp "ytsearchN:<term>" --flat-playlist --dump-json --no-warnings --ignore-config`,
+  public search, no sign-in, no cookies. The rules are unchanged: the ten-second floor and the daily cap; "Sign in to
+  confirm you're not a bot" is a challenge (stop, 24 hours, no retry, no cookies handed over); a line that is not
+  JSON is `youtube_parse_failed`; a 429 ends the run; the channel's and uploader's names and ids are never carried.
+  A person still switches it on once: `--login youtube` asks for the platform's name and records who (there is
+  nothing to sign in to); until then the status is `not_switched_on`. Facebook and Instagram are unchanged.
+  **Not proven on a real machine:** the field names (`id`, `title`, `description`, `view_count`, `timestamp`,
+  `upload_date`) are yt-dlp's as recalled. The dry run below is the test.
+
+```
+~/.axiom-reach/venv/bin/pip install -U "yt-dlp[default]"
+~/.axiom-reach/venv/bin/python tools/reach-agent.py --channels          # youtube: not_switched_on
+~/.axiom-reach/venv/bin/python tools/reach-agent.py --login youtube     # type: youtube
+~/.axiom-reach/venv/bin/python tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out /tmp/yt.json
+~/.axiom-reach/venv/bin/python tools/reach-agent.py --install-launchd   # the background agent, with this Python
+```
+
+Harnesses: `tests/reach-agent-test.py` (37), `tests/reach-channels-test.py` (96).
+### 3.3 Facebook and Instagram through opencli, the tool agent-reach installs for them (11 November 2026, at the owner's request; no worker or page change)
+
+Section 3.2 gave YouTube a backend and left Facebook and Instagram with nothing to run. The owner then asked for those
+too ("i need all these"): the tool agent-reach itself installs for them. Read from agent-reach 1.5.0's own channel files on the
+owner's Mac: Facebook and Instagram are `opencli <site> ...` (it drives the Chrome a person is already signed in to),
+YouTube is `yt-dlp`. Decision D7 is unchanged - a person signs in by hand, public content only, the pace, the caps, the
+24-hour pause - and only the command the collector runs is new.
+
+- **When it applies.** `use_native(channel)`: agent-reach is absent or has no command for the channel, and the tool is
+  on the machine (`NATIVE` = Facebook and Instagram, found through `_which`). An agent-reach that one day has the commands is still used first.
+- **YouTube** keeps the yt-dlp path of s.3.2 (`backend()`, `run_ytsearch()`); a second yt-dlp path written here was
+  removed when the two were merged.
+- **Facebook keyword search**: `opencli facebook search <term> --limit N -f json --window background`. Its columns are
+  index, title, text, url. `title` can be a person's or a page's name and is never read; a result whose address is not
+  a post (a page, a person) is dropped. **It returns no counts and no date**, so a Facebook row from this route has
+  words and an address only.
+- **Instagram, registered accounts' posts**: `opencli instagram user <account> --limit N -f json --window background`.
+  Its documented columns are index, caption, likes, comments, type, date - **no address**. The collector takes `url`,
+  `link`, `permalink` or a `shortcode` when the JSON carries one; when no post carries any, the sweep fails as
+  `instagram_no_address` in words. It is never guessed and never an empty success.
+- **Only reads.** opencli can also like, follow, comment, post, add a friend and join a group. `OPENCLI_READS` is the
+  whole list of what this collector may run (`facebook search`, `facebook whoami`, `instagram user`,
+  `instagram whoami`); anything else raises before a process starts. `login` runs only inside `login()`, typed for by a
+  person.
+- **Switching on.** `python3 tools/reach-agent.py --login facebook` (or `instagram`): the warning, the client-admin
+  question, the platform's name typed, then `opencli <site> login`; it is recorded as switched on only when
+  `opencli <site> whoami` then reports someone signed in. Until then the channel is `needs_login` and is not offered.
+  Each job asks `whoami` once before it sweeps; the account's name is never logged or stored.
+- **Refusals** are read from what the tool said (its error stream; its output only when that is not data, so a post
+  that says "checkpoint" is a post): a verification stops the sweep and pauses the platform 24 hours, a slow-down stops
+  it, signed out is `needs_login`, a disconnected browser bridge says to run `opencli doctor`.
+- **A refused sign-in pauses the platform.** When `opencli <site> login` or the check after it answers "too many
+  requests" or a verification, nothing is switched on, the platform is paused 24 hours, and a second `--login` inside
+  the day stops before any question.
+- **What has run for real (the owner's Mac, 11 November 2026).** `opencli doctor` clean; `--login facebook` confirmed
+  through `whoami` and recorded; `--login instagram` refused by Instagram with HTTP 429 (before the pause existed: it is
+  not to be tried again until the next day). **No sweep has run**: the first Facebook job went to the worker's own
+  Graph route because the collector on the Mac was the `main` copy, which had no Facebook path. The answers of
+  `opencli facebook search` and `opencli instagram user` in `tests/reach-channels-test.py` are stand-ins; the
+  Instagram address is the likeliest thing to fail.
+- **The first Facebook sweep (the owner's Mac, 11 November 2026, opencli 1.8.6): no posts.** The job ran on the Mac
+  and `opencli facebook search "fuel tax credit"` answered two results - a group and a page - and no post; "diesel
+  rebate" the same way. opencli's Facebook commands are add-friend, events, feed, friends, groups, join-group, login,
+  marketplace-*, memories, notifications, profile, search and whoami: its search has no posts filter and nothing reads
+  a page's own posts. **So this backend cannot collect public Facebook posts by keyword.** The collector now says so
+  (`facebook_no_posts`, three in a row pause the platform) instead of "0 items, 0 posts". Open for the owner: whether
+  the official routes, or leaving Facebook to the news rows' reach counts.
+- **Checked the same evening.** opencli 2.0.3 (the newest on npm, read with `npx` in the sandbox, nothing installed on
+  the Mac): the same Facebook commands and the same search with only `--limit`, so upgrading changes nothing; its
+  Instagram `search` finds users, not posts. Supermetrics, asked live from a session: `FBPD` (report types Page,
+  PagePosts, UrlShares) and `IGPD2` both answer `LICENSE_DATA_SOURCE_NOT_AVAILABLE` for licence 2083978 - the route
+  in s.2 is built and still waits on the licence. Meta's Page Public Content Access was not probed from here (it needs
+  the AXIOM key: `GET /meta/status?probe=1`).
+- **Not collected still:** comment text on Facebook and Instagram, a Facebook page's own timeline, Instagram keyword
+  search.
+
+Owner's steps: `--login youtube` (s.3.2);
+with Chrome open and `opencli doctor` green, `--login facebook` and `--login instagram` on a profile that administers
+no client asset; record each under D7 with who and when; restart the agent.
 
 ## 4. Release 4 - subscriber news, newsletters and monitoring exports (build `2026-11-11.studio-p56`, page `?v=r43`)
 
@@ -555,14 +713,44 @@ writes to fail and to drop. The first run found that a route answering 200 with 
 "nothing found" and the desk list say "no desk is set up", and that two secondary reads failed silently. All are
 fixed: a malformed answer is always said as a failure, with one press to try again, and nothing typed is lost.
 
-Harnesses: `tests/den-worker.mjs` (17), `tests/den-browser.mjs` (24), `tests/den-inject-browser.mjs` (60),
-`tests/den-tools-test.py` (54). Screenshots of each tab at 1366 x 768 and 1920 x 1080: `node --experimental-sqlite
+Harnesses: `tests/den-worker.mjs` (20), `tests/den-browser.mjs` (27), `tests/den-inject-browser.mjs` (60),
+`tests/den-tools-test.py` (63). Screenshots of each tab at 1366 x 768 and 1920 x 1080: `node --experimental-sqlite
 tests/den-shots.mjs` (into the ignored `tests/shots/den/`); they were looked at.
 
 **Not verifiable here.** No draft has been written by a real model: the stub writes from the evidence it is sent, so
 the quality of a real draft - whether it reads like her reports - is unknown until the first one on the live worker
 (one call). No live archive was read, so the board has only been seen on invented rows. Clipboard paste into a real
 Google Doc was not tried (the clipboard holds HTML and plain text; what Docs makes of it is Docs').
+
+### 6.9 The first live open (build `2026-11-11.studio-p61`, page `den.js?v=r48`)
+
+On 11 November 2026, the day it was deployed, the page's first open on the live database answered "Today's evidence
+could not be loaded. D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window."
+
+What the page asked of the database on every open, before the fix:
+
+| Read | Rows it walks | How often |
+|---|---|---|
+| The window's rows for the board | every row of the window, with its text | twice at once: the board, and the strip's own copy |
+| An issue against its fourteen-day baseline | a fortnight of the archive | every open |
+| Who is named for the first time | a fortnight of judged mentions | every open |
+| The channels the desk relies on | a week of social rows | every open |
+| A registered account's first post and its usual | a fortnight and a month of social rows | every open, once an account is registered |
+
+In `arc_items` the tags (`meta`) are stored after the article text (`body`), so reading a row's tags walks its text
+too: a scan over a fortnight is expensive in proportion to the full text held, which has grown since the full-text
+work. At the same moment the Mac collector was claiming a run of topic jobs, each of which searches the whole
+archive. Which of the two tipped it over is not known: no timing from the live database is available here.
+
+What changed: one request on Today (`/den/board?missed=1`); the board's read narrowed in the database to the desk's
+rows; the slow figures counted once in fifteen minutes for a desk and window and cached, with what is urgent read
+every time; `503 db_busy` in words, retried twice by the page. Tests: DK18 to DK20 in `tests/den-worker.mjs`, two
+cases in `tests/den-browser.mjs`; each failed before the change.
+
+Still open, and for a person to decide: the archive has no index on `(kind, ts)` and keeps `meta` behind `body`. A
+small table of tags by item (`item, issue, ts, kind`) written when a row is filed would let the board and every
+baseline count read an index and never touch article text. It is the lasting fix and it is a change to how every
+collector files a row, so it was not made in a hurry on the day of the fault.
 
 ## 7. Hand-over (11 November 2026)
 
@@ -576,6 +764,7 @@ Google Doc was not tried (the clipboard holds HTML and plain text; what Docs mak
 | 4 | p56, r43 | Subscriber outlets through the agency's own subscription, once cleared; newsletters; monitoring exports |
 | 5 | p57 | Keyword discovery: proposed with evidence, approved by a person |
 | 6 | p58, r44 | Anne's Den: the page |
+| 6.9 | p61, den.js r48 | The page's first live open overloaded the database: one read on Today, slow counts cached, a busy database said and retried |
 
 ### 7.2 The three layers, in one table
 
@@ -649,6 +838,20 @@ python3 tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out 
 python3 tools/reach-agent.py --key $AXIOM_KEY --install-launchd                                  # keeps the collector connected
 ```
 
+**After the first live run (s.3.1), in this order:**
+
+```
+git pull                                                  # the collector's fixes are in tools/
+uv tool upgrade twitter-cli                               # may not fix X search: see s.3.1 D
+uv pip list --python ~/.local/share/uv/tools/twitter-cli/bin/python | grep -i -E "twitter|xclient"   # which versions the Mac has
+python3 -m pip install playwright && python3 -m playwright install chromium                           # for render and subscriber reads
+python3 tools/reach-agent.py --channels                   # X: "usable" or "search is unavailable"; the three social channels: no_command
+python3 tools/reach-agent.py --key $AXIOM_KEY             # after the worker is deployed (tools/deploy-worker.sh)
+```
+
+The `--login youtube|facebook|instagram` lines above cannot work with Agent Reach v1.5.0 (no such commands) and now
+stop with that sentence.
+
 **Subscriber outlets.** In Sources, open the outlet, choose how it is read, write what covers reading it for
 monitoring, press Record. Then on the Mac:
 
@@ -677,7 +880,12 @@ against her own report for the same day. That comparison is the acceptance test 
 | The 28 seed source addresses | No egress | The first sweep in Sources |
 | The Meta permissions and limits (thirty hashtags a week, Business Discovery, Page Public Content Access) | Meta's documentation was unreachable from the sandbox; written as recalled | `/meta/status?probe=1` once a permission is granted |
 | The Supermetrics public-data field ids | The licence refused both reads | `tools/den-pull-plan.py` and one real answer, once licensed |
-| Every layer 2 channel against its live site, above all which fields carry the counts | No platform was contacted and nothing was signed in to | `reach_social.py <channel> --dry-run --out` on the Mac |
+| Every layer 2 channel against its live site, above all which fields carry the counts | No platform was contacted and nothing was signed in to; **and agent-reach v1.5.0 has no command for any of them (s.3.1 E)**, so there is nothing to run until a backend is chosen | The owner's decision on a backend; then `reach_social.py <channel> --dry-run --out` on the Mac |
+| **Verified against real output (11 November 2026):** the shape of `agent-reach doctor` and `agent-reach --help` for v1.5.0 | The owner's paste, kept as fixtures | `tests/reach-channels-test.py`; a newer agent-reach needs a new paste |
+| Whether `uv tool upgrade twitter-cli` repairs X search | Only the Mac can show it; the newest releases still carry the flaw | `python3 tools/reach-agent.py --channels` after the upgrade |
+| The agent's stop-and-recheck for X on the real twitter-cli (the "Failed to init ClientTransaction" line on stderr of `twitter status`) | A stand-in answers in the tests | Run the agent: one line "not offering X" at the start, no X job claimed; `/bridge/status` shows `down: ["x"]` |
+| The worker's side on the live queue: the X jobs already waiting are failed as `no_collector` within a tick | No live worker is contacted | After deploy, the Signals console or `GET /bridge/status` (queued falls) |
+| MPs' own posts appearing under a topic from the timeline reader | The embed service was never reached from the sandbox | Topics, a keyword an MP has posted on, the X tab's note |
 | Every subscriber read: the sign-in, the page shape, the wall detection | No publisher was contacted | `--login news:<id>`, then Read on one article and the job log |
 | Recall against her reports | Her reports stay outside the repository and the worker is not contacted | `tools/den-backtest.py ... --save` |
 | Pasting the copied brief into a real Google Doc | No Google Doc is written from here | Copy for the document, paste, look |
@@ -697,7 +905,162 @@ against her own report for the same day. That comparison is the acceptance test 
 - **Re-tagging rows collected before a term was approved.** A term tags from its approval onwards.
 
 
-## 8. The interface, redesigned (12 November 2026; page `?v=r45` to `?v=r47`, worker `studio-p59` for one additive field)
+## 8. Release 7 - public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`)
+
+Keyless public routes that a research pass on 11 November 2026 found productive. No signed-in route was added and no
+decision in 7.3 changed. The research report itself is client intelligence and is not in the repository.
+
+### 8.1 What exists
+
+| Route | What it is | Where |
+|---|---|---|
+| The public reader | `pubFetch()`: robots.txt obeyed (RFC 9309: this reader's group, else `*`; longest rule; Allow wins a tie), a user agent that says what it is (`AxiomPublicRecord/1.0`, or the var `PUBLIC_UA`), ten seconds between requests to one host, and a refusal (401, 403, 407, 429, a challenge page) recorded for the host in KV `pub_refused_<host>` and not asked again for a day. A sign-in page is `login_required`. No retry, no proxy, no challenge solved | worker |
+| Source method `public` | A listing page read through the public reader: a headline and a link, never a body, paywall or not. A refused source's `last_error` says so and its `next_due` is a day away | Source Registry |
+| The process calendar | Source method `process` and D1 `den_process`: a bill or inquiry page as one record (stage, referral, hearings, submissions closing, report date, number of submissions); a notice paper or disallowance list as one record a notice on a client issue. First sight and each stage change file one news row (`meta.process`); an unchanged page is a success that files nothing. `GET /den/process?ns=|desk=` (read), `POST /den/process/add {url, type, juris, house, title, issues}` (full) | worker |
+| Upcoming | `denBoard` puts recorded dates first, marked `recorded`, with the parliament's page as the link; the page shows a "recorded" chip | worker, `docs/den.js` |
+| Hansard | `hansardSweep()`: once a Sydney day a client, the first search term of each of its issues plus its approved terms (twelve at most) through OpenAustralia; kind `hansard`; the speaker named only when the MP register holds them. Needs the secret `OPENAUSTRALIA_KEY` | worker, `socialCron` |
+| Petition counters | `petitionCountersSweep()` inside the daily petitions sweep: the count a campaign prints on its own page, stored with `meta.self_reported` and a daily snapshot; a count that cannot be found is `<host>_parse_failed` and files nothing. `GET/POST /social/petitions/counters {add:{url,name,ns} | remove}` | worker; Signals shows "self-reported by the campaign" |
+| Sponsor on polls and estimates | `claimOf()` in `sourceRows`: `meta.claim {kind, sponsor, pollster, n}` by rules, "sponsor not stated" otherwise; the brief's evidence line carries it | worker |
+| Registered actors on Bluesky | `bskyActorSweep()`: register accounts on Bluesky marked as public actors, their own posts (no reposts) through the public AppView, filed through `signalsIngest` as layer 3 so the name comes from the register. `canonPermalink` knows Bluesky (mirrored in `tools/den_permalink.py`) | worker, `socialCron` |
+| Campaign names for the Ad Library | `POST /den/watch/seed` (full) proposes three campaign names as terms. Nothing is proposed unasked and nothing searches a proposal until a person approves it | worker |
+| Seeds | 29 sources (release wire, court lists, Treasury's FOI log, NOPSEMA decisions, campaign and member pages of both sides, trade and community press), 7 watched parliament pages, 6 petition counters, 9 organisations in the entity register | worker |
+
+`GET /den/collection` lists Parliamentary record, Hansard and Campaign petition counters with what each delivered;
+`GET /social/coverage` lists Parliamentary record and Hansard. Harness: `tests/den-public-worker.mjs` (12).
+
+### 8.2 Step 0 as it was done, and what it could not do
+
+The prompt asked for `GET /sources` first. This session had no network route to the live worker and no key, so the
+check was made against the seed list in the worker source instead. Already seeded, and so not added again: the
+Parliamentary Budget Office, APO (a core feed), Australian Energy Producers (news), SSAA national, SIFA, Shooters Union, Sporting Shooter,
+the Environmental Defenders Office, Beef Central, Gun Control Australia, the Alannah & Madeline Foundation. **What the
+live registry shows (edited rows, failing addresses) was not seen**: read `/sources?status=unverified` after deploy.
+
+### 8.3 Where this differs from the prompt
+
+- **No archive kind `process`.** The record is the table; a stage change is a `news` row carrying `meta.process`, so it
+  appears in the desk's media and the brief's evidence without a new kind in every reader.
+- **One of the five pages named for seeding is not seeded**: the Tasmanian firearms bill. A second search found the
+  parliament's list of 2026 bills (it is Bill No. 30 of 2026) but not the bill's own page. Add it in Anne's Den,
+  Collection, once its address is known. Seeded since the follow-up: the ACT bill (its page on the ACT Legislation
+  Register surfaced in search) and the Mount Pleasant Mine Bill (**its address is built from a bill id an aggregator
+  reported; the page itself was not seen**, so expect it to need correcting).
+- **"Once a sitting day" is once a Sydney day.** There is no sitting calendar in the worker; on a non-sitting day the
+  sweep finds nothing new and files nothing.
+- **Campaign names are proposed by a step a person presses**, not by the release itself: proposing them automatically
+  gave three desks a register of their own accord, which changed when keyword discovery runs.
+- **The stricter rules apply to the new routes only.** Sources that were already seeded keep their existing methods
+  (`html`, `rss`, `gnews`) and the existing fetch. Moving one to the public reader is a change of its `urls.public`.
+- **Adding a watched bill or a counter** is in Anne's Den, Collection (follow-up, `den.js?v=r47`): the watched pages
+  with stage, next date and the last read or its failure in words, Watch this page, Stop (`POST /den/process/remove`:
+  the source is switched off and its records leave the calendar); the desk's counters with Add and Remove; and
+  Propose campaign names.
+- **The ten-second pace** is kept in the isolate and, since the follow-up, shared through KV (`pub_next_<host>`, a
+  minute). KV is eventually consistent, so two isolates asking one host in the same second could still both go; each
+  source also runs on its own schedule (a watched parliament page every six hours), which is the wider spacing.
+
+### 8.4 Not verified here, and what verifies each
+
+| Not verified | Why | What verifies it |
+|---|---|---|
+| Every address in the new seeds | No egress; the addresses came from search results, none was opened | The first sweep: Sources, filter Untried, Sweep. A page that has moved fails in words on its source |
+| The parsers against real pages (`processParse`, `processNotices`, `counterCount`) | The fixtures in `tests/fixtures/public/` are invented stand-ins shaped like such pages, because nothing could be saved from a real one | `GET /sources/probe?id=proc_gasres_inquiry`, then `GET /den/process?ns=aep`: the stage and dates against the page itself. Each counter: its number in Signals, Petitions, against the campaign's page |
+| What each site's robots.txt allows this reader | Not read | The source's `last_error` after the first sweep (`robots.txt ... disallows this page`) |
+| Hansard rows on real speeches | No key, no egress | Set `OPENAUSTRALIA_KEY`; `POST /social/sweep {platform:'hansard'}` and the job log |
+| The Bluesky author feed's field names | The public AppView was not contacted | Add one organisation's Bluesky account as a public actor; `POST /social/sweep {platform:'blueskyaccounts'}` |
+| The Ad Library on the campaign names | Needs `META_USER_TOKEN` and a person's approval of each term | `POST /den/watch/seed`, approve in Watch, `/meta/status?probe=1` |
+| Recall against the filed reports, before and after | The reports are outside the repository and the worker was not contacted | `tools/den-backtest.py <folder> --desk aep_au --key --save` before deploy and a week after. **That number is the measure of this release, and it has not been taken** |
+| The page in Firefox and WebKit | Not installed here | CI |
+
+### 8.5 The owner's steps for this release
+
+```
+tools/deploy-worker.sh                                   # then the page from main
+npx wrangler secret put OPENAUSTRALIA_KEY --name newsaus # free, openaustralia.org.au/api; Hansard stays off without it
+# optional: a contact in the reader's user agent, e.g. "AxiomPublicRecord/1.0 (+https://<a page that says who runs it>)"
+#   set the var PUBLIC_UA in the Cloudflare dashboard
+```
+
+Then: Sources, Untried, Sweep (the 29 sources and 7 parliament pages); `POST /den/watch/seed` and approve what is
+wanted in Watch; add the three missing bills once their addresses are known.
+
+## 9. A wider net (build `2026-11-11.studio-p62`; no page marker changed)
+
+Asked for by the owner on 11 November 2026: collect more, from more places, on the clients' topics. Built under the
+rules already in force and nothing else: public content, no sign-in, every new site through the public reader
+(robots.txt obeyed, an honest user agent, ten seconds between requests to a host, a refusal not asked again for a
+day), nobody named, and only rows on a client issue.
+
+### 9.1 What exists
+
+| What | How it is read | What is kept |
+|---|---|---|
+| Lexicon sweep, Google News (`lex_gnews`) | Each search term of the lexicon in turn, twelve a run, the last two days | A headline that carries a client issue, the outlet, the term that found it |
+| Lexicon sweep, GDELT (`lex_gdelt`) | Three terms a run, Australian sources only | The same; a headline and a link, never a body |
+| Lemmy (`lemmy_aussiezone`) | The instance's own posts, newest first | A post on an issue or from a politics community; then its comments |
+| Hacker News (`hn_australia`) | Stories of the last three days on "australia" | A story that says Australia and carries an issue; then its comments |
+| Forum feeds (`forum_ozpolitic`, `forum_propertychat`, `forum_bigfooty_pol`) | Each forum's own feed of threads | Threads (a general forum: only those on an issue). The feed gives no replies |
+| Comments under news articles | A WordPress site's own comments interface, for sites already read that way | Comments under an article on a client issue, three hours after it appeared |
+| 89 more outlets and organisations (`wn_*`) | Google News for the site, then its sitemap | Headlines, tagged like every other source |
+| Reddit | 28 subreddits (15 more) | As before, on the Mac |
+| Mastodon | Two more tags | As before |
+
+A failing source now waits longer each time it fails (double, to a day at most), which is what makes room in a tick
+for 96 more sources. The var `SOURCES_PER_TICK` raises the 50 a tick reads.
+
+### 9.2 Not verified here, and what verifies each
+
+| Not verified | Why | What verifies it |
+|---|---|---|
+| Every new address (89 sites, three forum feeds, the Lemmy instance) | No egress from the sandbox; the addresses are from memory of the sites, none was opened | Sources, filter Untried, Sweep. A wrong address fails in words on its own row and backs off |
+| The three forum feed addresses in particular | Forum software moves its feeds; these are the usual addresses for each product | `GET /sources/probe?id=forum_ozpolitic` (and the other two). A feed that is not there: correct `urls.forum` in the drawer, or switch the source off |
+| The answer shapes: Lemmy `post/list` and `comment/list`, the Hacker News search and item, GDELT's article list, WordPress comments | The fixtures in `tests/widenet-worker.mjs` are invented stand-ins written from each service's public documentation | The Probe on each source; the Signals tabs after one Sweep; a shape that differs fails as "no list of posts" and the like, never as an empty success |
+| What each site's robots.txt allows this reader | Not read | The source's last error (`robots.txt ... disallows`) |
+| Whether GDELT answers a Cloudflare address, and how often | Not contacted | `lex_gdelt` in Sources after a day: delivering, or refused and backed off |
+| Which WordPress sites publish comments | Many close the interface or use another comment system | Signals, Web comments, after a day. An article whose site answers no list is marked and not asked again |
+| How long a tick's sweep now takes | Cannot be timed here | `lastSweep.ms` on `GET /sources` (the Sources strip). Raise `SOURCES_PER_TICK` only if it is well under a minute |
+| The database under more rows | The p61 overload was reasoned, not measured, and this release adds rows | Anne's Den opening without `db_busy` a week on. If it returns, the tags-by-item table (s.6.9) is the fix |
+
+### 9.3 The owner's steps for this release
+
+```
+tools/deploy-worker.sh                    # then the page from main
+```
+
+Then, in the app: Sources, filter Untried, Sweep (the new rows); Signals, Lemmy, Sweep (one job reads every community
+source and the comments). A day later: Sources, filter Failing and Dead, and switch off or correct what never
+delivered. To add a forum, a Lemmy instance or a Hacker News word: Sources, Add source, tier Community.
+
+### 9.4 Asked for and not built, with the reason
+
+- **Forums without a feed, read page by page.** Each would need its own parser and many requests a thread; a feed is
+  the forum's own statement of what may be read in bulk.
+- **Disqus, Facebook-plugin and publisher-hosted comments.** No public keyless interface; reading them means driving
+  a browser against a third party's widget.
+- **More Reddit from the cloud, X search, Facebook and Instagram.** Unchanged: the Mac collector, as sections 3 to 3.3
+  say.
+- **Paywalled bodies.** Unchanged: headlines only unless a source is cleared (decision D8).
+
+### 9.5 Published and not seen (12 November 2026)
+
+The owner could not see the new Signals tabs after the merge. GitHub Pages had published the commit; the page loaded
+`signals.js` and `sources.js` (and six other islands, and `axiom-ds.css`) with no release marker, so a browser that had
+them kept the old copies. Each now carries `?v=r1` and the check in `tests/asset-versions.mjs` refuses a page script or
+stylesheet without one. Until a browser has loaded the page once after this release, a hard refresh (Cmd+Shift+R) shows
+the new files. The tabs come from the page alone; the Coverage rows, the Community tier in Sources and anything a Sweep
+collects need the worker at build p62 (`tools/deploy-worker.sh`).
+
+### 9.6 The collector's "HTTP 500" (12 November 2026; build `2026-11-12.studio-p63`)
+
+The owner's Mac connected (offering Reddit, render, Facebook and YouTube search) and then printed "worker said HTTP
+500; retrying in 15s". The worker had answered with a reason; the collector did not print it. It does now, with the id
+to quote. A database that is too busy to answer says so (`503 db_busy`) on every route, and the collector waits a
+minute on that answer. What actually failed on the live worker is not known here: the same poll answers correctly
+against this build in the sandbox, so the cause is live state (most likely the database refusing the claim, as it
+refused Anne's Den the day before). **The next line the collector prints is the evidence.** If it says the database
+is busy most of the time, the tags-by-item table of s.6.9 is no longer optional.
+
+## 10. The interface, redesigned (12 November 2026; built as pages `?v=r45` to `?v=r47`, merged with main as page `?v=r49` and build `studio-p64`)
 
 **The decision.** The owner, of release 6's page: "The current UI looks primitive and boring ... a total UI upgrade to
 look professional, production grade and reliable", and then, with a reference image of a light analytics dashboard:
@@ -741,7 +1104,7 @@ check` 26. No test was changed. Screenshots of every tab were retaken with `test
   the dark theme survives a reload and passes axe on all five tabs; the menu by keyboard, the channel tiles, and no
   sideways scroll at 1024). No earlier case was changed.
 
-**Third pass (page `?v=r47`, `ax-ui.js?v=r5`, worker build `2026-11-12.studio-p59`).**
+**Third pass (page `?v=r47`, `ax-ui.js?v=r5`, worker build `2026-11-12.studio-p59` on the branch; `studio-p64` once merged with main).**
 - **Sheets beside the page** (`Sheet` in `docs/den.js`): never a modal. From 1280 px the workspace gives an open
   sheet its room, so no action is covered; below that the sheet lies over the page and Close or Escape puts it away.
   The brief's History and Compare open in sheets (the same panels inside), and "Show beside the page" under a

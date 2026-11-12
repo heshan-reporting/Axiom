@@ -61,6 +61,15 @@
       about: 'Videos from the channels listed in Sources, their comments with likes, and their captions filed as transcripts. Add channels in the Sources view.' },
     { id: 'substack', label: 'Substack', unit: 'post', channel: 'publication', prefix: '', colour: '#FF6719', desktop: false,
       about: 'Posts and comment threads of the publications listed in Sources. Find publications with the search on the Coverage tab.' },
+    /* Community sources (the Source Registry's tier "community") and the comments under what they find: one job, `community`. */
+    { id: 'lemmy', label: 'Lemmy', unit: 'post', channel: 'community', prefix: '', colour: '#7FD4A8', desktop: false, job: 'community',
+      about: 'Posts on a client issue, or from a politics community, on the Lemmy instances listed in Sources (aussie.zone to begin with), and the comments underneath. Nobody is named.' },
+    { id: 'hn', label: 'Hacker News', unit: 'story', channel: '', prefix: '', colour: '#FF8A3D', desktop: false, job: 'community',
+      about: 'Hacker News stories that say Australia and carry a client issue, with their comment threads. Nobody is named.' },
+    { id: 'forum', label: 'Forums', unit: 'thread', channel: 'forum', prefix: '', colour: '#C9A86A', desktop: false, job: 'community',
+      about: 'Threads from the public forums listed in Sources, read from each forum\'s own feed. The feed gives the thread, not the replies, and the poster is not stored.' },
+    { id: 'web', label: 'Web comments', unit: 'article', channel: 'outlet', prefix: '', colour: '#9FB4C8', desktop: false, job: 'community',
+      about: 'The comments readers left under an article on a client issue, on the news sites that publish them through their own public interface. Commenters are not named.' },
   ];
   /* Two tabs that are not a platform: what people are signing, and how every platform is read. */
   const EXTRA_TABS = [
@@ -243,8 +252,8 @@
       </div>
       ${err ? html`<div class="rd-res err">${err}</div>` : null}
       ${d && !list.length ? html`<div class="aud-notice" style=${{ margin: '6px 0 14px' }}><b>No petitions on file for this scope.</b> The cron reads the parliaments' e-petition pages once a day. ${canWrite ? 'Press the button to read them now.' : 'Ask a full-access user to read them now.'}</div>` : null}
-      ${list.length ? html`<table class="src-probe pet-table"><thead><tr><th>Petition</th><th>Parliament</th><th class="num">Signatures</th><th class="num">24h</th><th class="num">7d</th><th>Closes</th><th>Issues</th></tr></thead><tbody>
-        ${list.map(p => html`<tr key=${p.url}><td><a href=${p.url} target="_blank" rel="noopener">${p.title}</a>${p.excerpt ? html`<div class="m">${p.excerpt.slice(0, 160)}</div>` : null}</td><td>${siteName(p.site)}</td><td class="num">${fmtN(p.signatures)}</td><td class="num" style=${{ color: p.growth24 > 0 ? 'var(--x-pos)' : undefined }}>${growth(p.growth24)}</td><td class="num">${growth(p.growth7)}</td><td>${p.closes || '-'}</td><td><${IssueChips} ids=${p.issues} /></td></tr>`)}
+      ${list.length ? html`<table class="src-probe pet-table"><thead><tr><th>Petition</th><th>Where</th><th class="num">Signatures</th><th class="num">24h</th><th class="num">7d</th><th>Closes</th><th>Issues</th></tr></thead><tbody>
+        ${list.map(p => html`<tr key=${p.url}><td><a href=${p.url} target="_blank" rel="noopener">${p.title}</a>${p.excerpt ? html`<div class="m">${p.excerpt.slice(0, 160)}</div>` : null}</td><td>${p.self_reported ? 'Campaign page' : siteName(p.site)}</td><td class="num">${fmtN(p.signatures)}${p.self_reported ? html`<div class="m" title="The campaign prints this number on its own page. Nobody has audited it.">self-reported by the campaign</div>` : null}</td><td class="num" style=${{ color: p.growth24 > 0 ? 'var(--x-pos)' : undefined }}>${growth(p.growth24)}</td><td class="num">${growth(p.growth7)}</td><td>${p.closes || '-'}</td><td><${IssueChips} ids=${p.issues} /></td></tr>`)}
       </tbody></table>` : null}
     </div>`;
   }
@@ -373,7 +382,7 @@
     const sweep = async () => {
       setBusy(b => Object.assign({}, b, { sweep: true })); setResult(null); setJob(null);
       try {
-        const d = await call('/bridge/run', { source: tab, params: { issue: f.issue || undefined, queries: 'auto', time: f.days <= 1 ? 'day' : f.days <= 7 ? 'week' : 'month', days: f.days, sweepChannels: tab === 'youtube' ? true : undefined } });
+        const d = await call('/bridge/run', { source: plat.job || tab, params: { issue: f.issue || undefined, queries: 'auto', time: f.days <= 1 ? 'day' : f.days <= 7 ? 'week' : 'month', days: f.days, sweepChannels: tab === 'youtube' ? true : undefined } });
         setJob({ id: d.id, source: tab, status: d.where === 'worker' ? 'running' : 'queued', lines: [], follow: true });
         follow(d.id);
       } catch (e) {

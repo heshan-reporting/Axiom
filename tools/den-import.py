@@ -106,13 +106,22 @@ def main(argv=None):
     ap.add_argument('--key', default=os.environ.get('AXIOM_KEY', '')); ap.add_argument('--worker', default=WORKER); ap.add_argument('--apply', action='store_true')
     a = ap.parse_args(argv)
     name, _, path = a.what.partition('=')
-    if name == 'eml':
-        if not a.source: sys.exit('a newsletter is imported under its source: --source <id from the Sources view>')
-        kind, items = 'newsletter', from_eml(path)
-    elif name == 'monitor':
-        kind, items = 'monitor', from_monitor(path)
-    else:
+    if name not in ('eml', 'monitor') or not path.strip():
         sys.exit('say what to import: eml=<folder> or monitor=<csv>')
+    for v in (path, a.source):
+        if re.search(r'[<>]', v or ''):                 # "<folder>" and "<source id>" in the instructions stand for a real value
+            sys.exit('"%s" is the placeholder from the instructions, not a real value: put the real folder, file or source id in its place' % v)
+    full = os.path.expanduser(path)
+    if name == 'eml':
+        if not a.source: sys.exit('a newsletter is imported under its source: --source followed by the id shown under its name in the Sources view')
+        if not os.path.isdir(full): sys.exit('No such folder: %s (eml= takes the folder that holds the saved .eml files)' % path)
+        n = sum(1 for fn in os.listdir(full) if fn.lower().endswith('.eml'))
+        if not n: sys.exit('no .eml files in %s: save each newsletter from the mail app as a .eml file into that folder first' % path)
+        kind, items = 'newsletter', from_eml(path)
+        if not items: sys.exit('%d .eml files in %s, none with a subject and at least 200 characters of text' % (n, path))
+    else:
+        if not os.path.isfile(full): sys.exit('No such file: %s (monitor= takes the CSV file the monitoring service exported)' % path)
+        kind, items = 'monitor', from_monitor(path)
     if a.apply and not a.key: sys.exit('--apply needs --key or AXIOM_KEY')
     run(kind, items, a.ns, a.source, a.worker, a.key, a.apply)
     return 0

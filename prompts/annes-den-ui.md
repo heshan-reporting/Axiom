@@ -90,7 +90,7 @@ and an empty table is never read as a quiet day. Do not restyle any other view i
 - **Privacy rules in the data.** Commenters and unregistered accounts are never named; subscriber text shows thirty
   words. A card layout must not surface a field a table row did not.
 
-## Built in the first pass (page `?v=r45`; `DEN.md` s.8)
+## Built in the first pass (page `?v=r45`; `DEN.md` s.10)
 
 - **Light theme while the Den is open.** `docs/den.css` re-declares the app's tokens on `body:has(#v-den.on)`, so the
   masthead and navigation turn light with the Den and return to dark on leaving it. The Den's own tokens (`--den-*`:
@@ -116,14 +116,14 @@ and an empty table is never read as a quiet day. Do not restyle any other view i
 ## Built in the second pass (page `?v=r46`)
 
 A dark theme by choice; a Cards / Table switch on Today; channel tiles above Collection's table; skeletons; citation
-tips in the brief; a score meter in Watch; five new browser cases (`tests/den-browser.mjs` is 29). `DEN.md` s.8 has
+tips in the brief; a score meter in Watch; five new browser cases (`tests/den-browser.mjs` is 29). `DEN.md` s.10 has
 the detail.
 
 ## Built in the third pass (page `?v=r47`)
 
 Sheets beside the page (History, Compare, the brief's evidence); ratings as radio groups; the desk menu; seven-day
 bars a channel (one additive worker field); the docked console; proposals as review cards; the Options index and
-switches; the styleguide section. `tests/den-browser.mjs` is 31. `DEN.md` s.8 has the detail and what was decided
+switches; the styleguide section. `tests/den-browser.mjs` is 31. `DEN.md` s.10 has the detail and what was decided
 against.
 
 ## What is left

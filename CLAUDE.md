@@ -136,8 +136,8 @@ verifies each, and what was asked for and not built.
     `facebook_public` row is gone). Harnesses: `tests/den-collect-worker.mjs` (18), `tests/den-tools-test.py` (23).
 - **Release 3, the signed-in layer (build `2026-11-11.studio-p55`, page `?v=r42`). Decision D7, 11 November 2026, at
   the owner's request: the Mac collector may read Facebook, Instagram and YouTube keyword search through a person's
-  signed-in session, with agent-reach as the backend. Platforms switched on so far: none recorded - add each here
-  with who and when.** LinkedIn is unchanged: the clients' own pages through LinkedIn's API, no scraping path.
+  signed-in session, with agent-reach as the backend. Platforms switched on so far: Facebook
+  (the owner's Mac, user heshhomefolder, 11 November 2026, through opencli) - add each here with who and when.** LinkedIn is unchanged: the clients' own pages through LinkedIn's API, no scraping path.
   TikTok and Threads are not collected.
   - `tools/reach_social.py` (`CHANNELS`: facebook -> keyword search, instagram -> registered accounts' posts,
     youtube -> keyword search, bridge source `ytsearch`). `status()` / `assert_ready()` check, not assume; `sweep()`
@@ -156,7 +156,7 @@ verifies each, and what was asked for and not built.
     a live collector offers (no model call, never gated); `xSyndSweep` reads the registers' X accounts.
   - **Comment text on Facebook and Instagram is collected by no layer**, and a Facebook page's own timeline only by
     the official route. `DEN.md` s.3 says what was assumed and what agent-reach actually offers.
-  - Harnesses: `tests/reach-channels-test.py` (62), `tests/den-reach-worker.mjs` (7).
+  - Harnesses: `tests/reach-channels-test.py` (62, now 80), `tests/den-reach-worker.mjs` (7, now 9).
 - **Release 4, subscriber news (build `2026-11-11.studio-p56`, page `?v=r43`). Decision D8, 11 November 2026, at the
   owner's request: a paid source may be read through a subscription the agency holds, signed in by a person on the
   Mac, and only after someone has recorded on that source what covers reading it for monitoring. Sources cleared so
@@ -273,14 +273,111 @@ verifies each, and what was asked for and not built.
   - A read that answers 200 without what was asked for (a gateway's page, an older worker, the wrong shape) is an
     error in words (`get(path, need)` in `docs/den.js`), never an empty panel: the strip must not say "nothing
     found" because a route misbehaved.
-  - Harnesses: `tests/den-worker.mjs` (17), `tests/den-browser.mjs` (24, with axe at 1366, 1440 and 1920 for a
+  - **The first live open overloaded the database (build `2026-11-11.studio-p61`, page `den.js?v=r48`; 11 November 2026).**
+    D1 answered "overloaded: too many resources consumed within a 10 second window". Opening the page read the
+    window twice at once (the board, and the strip through its own board) and ran the strip's fortnight and month
+    scans on every open. Now: on Today the page asks once, `GET /den/board?desk=&missed=1`, and the strip rides in
+    that answer (`missed`; the strip asks `/den/missed` itself on the other tabs, and on Today only when the board
+    came back without it); the board's read is narrowed in the database to rows that name one of the desk's issues
+    or a registered account (`instr(meta, ...)`; the test in the loop is still the rule); the strip's slow figures
+    (an issue against its baseline, first-seen entities and accounts, a registered account's usual, the channels a
+    desk relies on) are counted once in `DEN_SLOW_TTL` = 900 seconds for a desk and window (KV `den_slow_<desk>_<hours>`,
+    `slow {cached, at}` on the answer, `fresh=1` counts again; never cached for a past window or when a part
+    failed) while Sentinel spikes, emerging narratives and collection gaps are read every time; a busy database is
+    `503 db_busy` in words on every Den route (`denBusy`, `DEN_BUSY`), never swallowed into an empty strip, and the
+    page's `get()` asks again by itself twice (2.5 s, 6 s) and says so once. **Not measured on the live database**:
+    the sandbox cannot reach it, so the reduction is reasoned from the queries, not timed.
+  - Harnesses: `tests/den-worker.mjs` (20), `tests/den-browser.mjs` (27, with axe at 1366, 1440 and 1920 for a
     full and a read-only key), `tests/den-inject-browser.mjs` (60: every read failing, answering a gateway page,
     answering the wrong shape, hanging and dropping, and every write failing and dropping, one at a time), the
-    recall cases in `tests/den-tools-test.py` (54); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
+    recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
+- **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.10 is the hand-over).**
+  Keyless public routes only; no signed-in route added, no decision changed, no model call.
+  - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
+    robots.txt obeyed (`robotsAllows`, cached a day in KV `pub_robots_<host>`), an honest user agent (`pubUA`:
+    `AxiomPublicRecord/1.0`, or the var `PUBLIC_UA`), `PUB_PACE_MS` = ten seconds between requests to one host (not a
+    setting; kept per isolate), and a refusal (401, 403, 407, 429, a challenge page) recorded in KV
+    `pub_refused_<host>` and not asked again for a day (`refused`, then `refused_backoff`); a sign-in page is
+    `login_required`. Never a retry, a proxy or a solved challenge. Do not fetch a new public source any other way.
+  - **Source methods `public` and `process`** (`urls.public`, `urls.process` + `ptype` + `house`; seed key `b`).
+    `public` files a headline and a link, never a body. `sourceRun` counts a method that answers `quiet` as a success
+    with no items; a refused source is not due again for a day.
+  - **The process calendar**, D1 `den_process(id, juris, house, type bill|inquiry|motion|disallowance|regulation|
+    decision, title, stage, url, issues, next_date, next_what, dates, submissions, src, seen, updated)`:
+    `processParse` (labelled status and dates only; a date with no year is not read), `processNotices` (a notice on a
+    client issue; the agency's own `cmm` issues do not count), `srcProcess` (first sight and each stage change file one
+    `news` row with `meta.process`). `GET /den/process?ns=|desk=` (read), `POST /den/process/add` (full).
+    `denBoard` puts `processUpcoming()` first in Upcoming, marked `recorded`. Submitters' names are never read.
+  - **`hansardSweep`** (kind `hansard`, once a Sydney day a client, needs `OPENAUSTRALIA_KEY`; the speaker named only
+    from the MP register), **`petitionCountersSweep`** (campaign pages' own counts, `meta.self_reported`, a daily
+    snapshot; a count not found is `<host>_parse_failed`, never zero; `GET/POST /social/petitions/counters`),
+    **`claimOf`** (`meta.claim {kind, sponsor, pollster, n}` on registry rows, "sponsor not stated" otherwise),
+    **`bskyActorSweep`** (register accounts on Bluesky marked as public actors, own posts only, through
+    `signalsIngest`; `bluesky` joined `DEN_INGEST_PLATFORMS` and `canonPermalink`), and **`POST /den/watch/seed`**
+    (full; proposes campaign names as terms - nothing is proposed unasked). Job sources `hansard`, `blueskyaccounts`.
+  - In Anne's Den, Collection (`PublicRecord` in `docs/den.js`): the desk's watched parliament pages (`pages` on
+    `GET /den/process`: stage, next date, the last read or its failure) with Watch this page and Stop (`POST
+    /den/process/remove`), the desk's petition counters with Add and Remove, and Propose campaign names. The pace is
+    also shared across isolates through KV `pub_next_<host>`.
+  - Every seed address and every parser is unverified until a live sweep: the fixtures in `tests/fixtures/public/`
+    are invented stand-ins. Harness: `tests/den-public-worker.mjs` (12).
 
-- **The Den's interface, redesigned (12 November 2026, pages `?v=r45` to `?v=r47`; `DEN.md` s.8,
+- **The first live run of the Mac collector (build `2026-11-11.studio-p59`, page `?v=r45`; `DEN.md` s.3.1).**
+  - **Agent Reach v1.5.0 has no `facebook`, `instagram`, `youtube` or `login` command** (its commands: setup, install,
+    configure, doctor, uninstall, skill, format, transcribe, check-update, watch, version). The release 3 command form
+    was read from documentation and does not exist in the installed tool, so layer 2 collects nothing for those three
+    until the owner chooses a backend. `reach_social.py` reads the real `agent-reach doctor` text (`doctor_marks()`:
+    U+2705 usable, `[!]` needs configuration, `[X]` not installed, and the sentence listing channels still to unlock;
+    `doctor --text` is not a command) and the real `--help` (`commands()`); a channel with no command is
+    `no_command`, an answer in neither shape `unreadable`, never usable; `login()` stops before any question. The
+    owner's paste is the fixture (`tests/fixtures/den/agent-reach-*-1.5.0.txt`) and the only real agent-reach answer
+    anything is tested against.
+  - **X search that does not work.** `tools/reach-x.py`: `X_REMEDY` (what to try: `uv tool upgrade twitter-cli`, then
+    `--channels`) comes before `X_CAUSE`, inside the first 300 characters. `tools/reach-agent.py`: `x_check()` at the
+    start and every ten minutes while down (`X_RECHECK`; one `twitter status`, never a search), `X_DOWN`,
+    `offering()`, `serve()` (the loop, drivable by a test); after `XUnavailable` X leaves the offer at once, said
+    once, and every poll carries `&down=x`. Upstream, checked on PyPI: twitter-cli 0.8.5 and xclienttransaction 1.0.3
+    are the newest and both still carry the unguarded `.group(1)`, so the upgrade is not promised to work.
+  - **Worker.** `agentBeat(env, agent, sources, down)` and `agentsSeen` carry `down`; `noCollector(source, agents)`
+    writes the reason (`why: 'x_unavailable'` with `X_DOWN_REMEDY` when a live collector says X is down);
+    `bridgeExpire(env, {source, maxAgeMs})` fails queued jobs nobody can serve - every tick after
+    `BRIDGE_STALE_MS` (30 minutes; the morning plan keeps its twelve hours), and at once for X when
+    `/bridge/done` reports `x_unavailable` (unless another live collector offers X); `jobTail` skips the
+    three-minute wait when a live collector reports the platform down.
+  - **Topics.** `topicRun` queues an X job only when a live collector offers X and none for that topic is still
+    waiting; otherwise it says once why (`xSkipped`). The keywords "came round twice" because every run queued one
+    and nothing removed an unserved one. `topicMpPosts()` is the stand-in for the MP accounts: posts already held
+    with `meta.mp` (the keyless timeline reader) that carry the keyword, returned by `topicResults` under `x` with
+    `held: true` and `xNote`. Nothing new is fetched.
+  - **After the deploy, same day (tools only; `DEN.md` s.3.2).** Seen on the owner's Mac and the live worker: the
+    agent offers `reddit, render`, says once that X is not offered and claims no X job. twitter-cli is pipx-installed
+    at 0.8.5 / xclienttransaction 1.0.3, and the unreleased 0.8.6 did not fix X search: **no fix exists upstream.**
+    The collector runs from its own environment (`~/.axiom-reach/venv/bin/python`; Homebrew's Python refuses pip).
+    `x_versions()` / `x_remedy()` in `tools/reach-x.py` say which case a machine is in ("Nothing to do on this Mac"
+    on the newest; the pipx or uv command when behind). `--install-launchd` uses the Python that runs it
+    (`launchd_command`). **Decision D7 amended (the owner, 11 November 2026): YouTube keyword search reads through
+    yt-dlp directly** (`backend()`, `run_ytsearch()`, `ytdlp_ready()` in `reach_social.py`: public search, no sign-in,
+    no cookies; a bot check is a challenge; names never carried; switched on once with `--login youtube`, status
+    `not_switched_on` until then). Its field names are unproven until the first dry run on the Mac. YouTube is not yet switched on
+    (`--login youtube`).
+  - **The backend the owner chose (11 November 2026; `DEN.md` s.3.3): Facebook and Instagram through opencli, the tool agent-reach installs for them.**
+    When agent-reach has no command for the channel and opencli is on the machine (`NATIVE`, `use_native`), `reach_social.py`
+    runs it itself (YouTube keeps its own yt-dlp path above): Facebook search is `opencli facebook search` and Instagram's registered accounts are
+    `opencli instagram user`, both in the Chrome a person signed in to. opencli can also write (like, follow, post):
+    `OPENCLI_READS` is the whole list of commands this collector may run and anything else raises before a process
+    starts. Facebook and Instagram stay `needs_login` until a person runs `--login <platform>` (the warning, the
+    question, `opencli <site> login`, then `whoami` must report someone); each job asks `whoami` first and never logs
+    the name. A Facebook result's `title` is never read (it can be a person's name) and only post addresses are kept;
+    this route gives Facebook no counts or dates. Instagram posts with no address fail as `instagram_no_address`. A
+    refusal is read from the error stream, never from a post's own words. A sign-in the platform refuses (429, a verification)
+    pauses it 24 hours and a second `--login` inside the day asks nothing. `whoami` is the one real opencli answer
+    seen (it confirmed the Facebook switch-on); every sweep answer in the tests is a stand-in until the first sweep.
+  - Harnesses: `tests/reach-agent-test.py` (41), `tests/reach-channels-test.py` (141), `tests/den-reach-worker.mjs`
+    (9), `tests/topics-worker.mjs` (4).
+
+- **The Den's interface, redesigned (12 November 2026, pages `?v=r45` to `?v=r47`; `DEN.md` s.10,
   `prompts/annes-den-ui.md`).** At the owner's request and to a reference they supplied, the Den alone leaves the
   Phase 5 shell rules: while it is open the whole page takes light tokens (`body:has(#v-den.on)` in `docs/den.css`,
   which also hides the scope bar), with a side menu (the five areas as a vertical tablist), one white workspace card,
@@ -294,7 +391,7 @@ verifies each, and what was asked for and not built.
   on the side card (the header select is gone; tests use `desk(page, id)` from the fixture), `delivered.days` on
   `/den/collection` for the tiles' seven-day bars, the job console docked in the shell and dark in both themes,
   proposals drawn as cards, an index and switches in Options, and a Den section in `docs/styleguide.html`.
-  `tests/den-browser.mjs` is 31. `DEN.md` s.8 lists what was decided against and why.
+  Merged with main as page `?v=r49`, build `studio-p64`. `DEN.md` s.10 lists what was decided against and why.
 
 ## The research agent
 
@@ -689,6 +786,72 @@ Petitions tab (growth table, Read now) and the Coverage tab (Probe), and the
 X tab has **Read account timelines**. Harnesses in the session scratchpad:
 `social-worker.mjs` (16 route and cron tests over the SQLite-backed D1),
 `signals-browser.mjs` (7 browser tests).
+
+## A wider net (build `2026-11-11.studio-p62`; no page marker changed; `DEN.md` s.9 is the hand-over)
+
+At the owner's request (11 November 2026): more news, more community threads and the comments under them, on the
+clients' topics, because the engines have nothing to analyse without rows. Everything here is a keyless public route
+under the rules already in force: a new site is read only through `pubFetch` (robots.txt, the honest user agent, ten
+seconds a host, a refusal backed off a day), nobody is named, and a row is kept because it is on a client issue, not
+because it exists. **Every address and every answer shape below is unverified until a live sweep proves it.**
+
+- **Four Source Registry methods** (so each is a row in `sources` with health, a probe and a switch):
+  `lexicon` (`urls.lexicon` = `gnews` | `gdelt`; seed key `x`) asks a news index for the lexicon's own search terms
+  (`issueQueries()`: the client terms plus each desk's approved terms), `LEX_PER_RUN` = 12 a run on Google News and 3
+  on GDELT (Australian sources only, through `pubFetch`), in turn by cursor (KV `lex_cur_<source>`; a probe does not
+  move it); only a headline that carries a client issue is kept, with `meta.q` the term that found it.
+  `lemmy` (`urls.lemmy` = host or host/c/community; key `l`): an instance's own posts, kept when on an issue or from a
+  politics community, `meta.lemmy {host, post}`. `hn` (`urls.hn` = words; key `k`): Hacker News stories that say
+  Australia and carry an issue. `forum` (`urls.forum` = a forum's own feed; key `f`): a general forum keeps only
+  threads on a client issue, a board the registry lists under an issue keeps them all. The three community methods
+  file `sig_thread` rows (platforms `lemmy`, `hn`, `forum`), tier `community` (hourly).
+- **Comments** - `communityEnrich(env, {max})`: Lemmy comment lists, Hacker News comment trees, and the comments under
+  a WordPress article on a client issue (the site's own `/wp-json/wp/v2/comments?post=`, only for sources that already
+  deliver through `wp`, once an article is three hours old; `srcWp` now carries the post number as `meta.wp`). The
+  article becomes a `sig_thread` of platform `web` (url `<article>#comments`) and the comments hang from it. Each
+  thread and article is asked once (`meta.enriched`, `meta.wpc`). No commenter's name is read.
+  `communitySweep(env, p, log)` reads the registry's community sources and then the comments: bridge source and
+  `/social/sweep` platform `community`, which is what the Sweep button on the new Signals tabs starts; `socialCron`
+  runs the comments each time (the registry sweep reads the sources).
+- **The seed** grew by 96 (481 sources in the table, 86 of them the core feeds): `lex_gnews`, `lex_gdelt`, `lemmy_aussiezone`, `hn_australia`, three
+  forum feeds (`forum_*`), and 89 outlets, peak bodies, unions, campaign groups, agencies and ministers not held
+  before (`wn_*`: site only, so Google News and the site's own sitemap are the routes; no feed address was guessed).
+  `REDDIT_POLITICS` is 28 subreddits (the other capitals and regions, law, property, money, work), published to the
+  Mac by `GET /reddit/issues` and mirrored in `tools/reach-reddit.py` `SUBS`; `MASTO_TAGS` gained `vicpol` and
+  `auspolitics`.
+- **Room for it.** The registry wants about 6,100 source runs a day and a tick reads 50 (2,400 a day), so it was
+  already behind. `sourceWaitMs(s, ok)`: one failure changes nothing, from the second in a row the wait doubles, a dead
+  source (six) is asked once a day, a success restores the schedule - a failing source walks every method it has and
+  was retried at full pace forever. `sourcesPerTick(env)`: the var `SOURCES_PER_TICK` (1 to 150) raises what a tick
+  reads once `lastSweep.ms` on `GET /sources` shows there is time. **More rows make every archive scan dearer** (the
+  p61 overload): the tags-by-item table proposed in `DEN.md` s.6.9 is still the lasting fix and is not built.
+- In the app: Signals tabs Lemmy, Hacker News, Forums and Web comments (one Sweep job, `community`); the Coverage
+  table rows `lemmy`, `hn`, `web` and a rewritten `forums`; the Sources view labels the methods and the Community
+  tier and has fields for a forum feed, a Lemmy instance and Hacker News words, so a person adds a community source
+  there.
+- Not built, and why: a forum with no feed of its own is not read page by page (the older listing readers still
+  take thread titles from Whirlpool, BigFooty, HotCopper and PropertyChat as kind `forum`); Disqus, Facebook-plugin and publisher-hosted comment systems are not read (no public,
+  keyless interface); Reddit and X stay where they were (the Mac). Nothing signed-in was added.
+- Harnesses: `tests/widenet-worker.mjs` (12), the community tabs case in `tests/signals-browser.mjs` (9).
+- **Published and not seen (12 November 2026).** `signals.js`, `sources.js` and six other islands, and `axiom-ds.css`,
+  were loaded with no `?v=` at all, so a browser kept its old copies and the new tabs reached nobody who had opened the
+  app before. Every one of the page's own scripts and stylesheets now carries a marker (`?v=r1` for those nine), and
+  `tests/asset-versions.mjs` fails on any that does not (`unversioned()`; the vendored libraries are pinned files and are
+  left out). **A change to any island needs its `?v=` bumped in `docs/index.html`, then `--write`.** The same push
+  showed `tests/den-reach-worker.mjs` RR8 failing in CI only: jobs created inside one millisecond share the time part
+  of their id, so their order by `(created, id)` is random; the test names the waiting jobs by id now.
+- **"worker said HTTP 500" (build `2026-11-12.studio-p63`; 12 November 2026).** The owner's collector printed the
+  number and nothing else. The bridge routes answer a failure as `500 bridge_failed` with the reason in `detail`, and
+  the collector threw that away: `http_reason()` in `tools/reach-agent.py` now prints the worker's code, its sentence
+  and the id to quote (a gateway's page is said as "not the worker's own", its markup never printed; the key is never
+  read). A database that will not answer is `503 db_busy` in words **on every route**, not only Anne's Den: `jsonResp`
+  turns any 5xx whose detail is the database's overload sentence into it (`was` keeps the area's code), the request
+  wrapper does the same for an error nothing caught, and the collector waits `BUSY_WAIT` = 60 seconds on it instead of
+  asking again in fifteen. **The live cause was not seen from the sandbox**: the route answers correctly here for the
+  four channels that Mac offered, so the next run of the collector is what names it. One read was bounded on the way:
+  the comment pass looks through `WP_COMMENT_SOURCES` = 12 WordPress sites a run, in turn (KV `wpc_cur`), since that
+  read looks inside `meta`. Harnesses: the busy-database case in `tests/diagnostics-worker.mjs` (4), the refused-poll
+  cases in `tests/reach-agent-test.py` (45), WN12 in `tests/widenet-worker.mjs` (12).
 
 ## Sentiment by party, person, organisation and topic (Phase 3)
 

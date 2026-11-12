@@ -9,6 +9,10 @@
  *   RR5 the registers' X accounts join the timeline sweep; a registered public actor is named, a plain account is not
  *   RR6 the morning plan: one job a desk for each platform a live collector offers, once a day, none when switched off
  *   RR7 a YouTube video found by search carries its video id, so the worker's comment and caption pass picks it up
+ * The first live run of the Mac collector (11 November 2026); each of these fails on the p58 commit:
+ *   RR8 a collector reports X search unavailable: it stops counting as an X collector at once, every X job waiting is
+ *       failed in words with the command to try, a new one fails at once, and X is routed again when it is offered again
+ *   RR9 a job nobody tails does not wait for ever: the tick fails what has waited half an hour with nobody to serve it
  * Run: node --experimental-sqlite tests/den-reach-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 
@@ -129,6 +133,55 @@ await S.t('RR7 a YouTube video found by search is picked up for comments and cap
   const r = await F(w, 'POST', '/signals/ingest', { ns: 'aep', layer: 2, via: 'reach', rows: [{ platform: 'youtube', url: 'https://youtu.be/dQw4w9WgXcQ', text: 'Why a gas export tax would work\nAn explainer from Canberra.', q: 'gas export tax', eng: { views: 34000, likes: 800 } }] });
   eq(r.body.inserted, 1); const m = JSON.parse(w.env.MIND_DB.db.prepare("SELECT meta FROM arc_items WHERE kind='sig_thread'").get().meta);
   eq([m.video, m.id, m.platform, m.layer], ['dQw4w9WgXcQ', 'dQw4w9WgXcQ', 'youtube', 2]); ok(!m.enriched, 'waiting for the worker\'s comment and caption pass');
+});
+
+const done = (w, id, agent, result) => F(w, 'POST', '/bridge/done', { job: id, ok: false, agent, result });
+const REMEDY = /uv tool upgrade twitter-cli/;
+
+await S.t('RR8 a collector reports that X search is unavailable', async () => {
+  const w = await mk(); await beat(w, 'macbook', ['reddit']);
+  const ids = []; for (let i = 0; i < 5; i++) ids.push((await F(w, 'POST', '/bridge/run', { source: 'x', params: { queries: ['kw' + i] } })).body.id);
+  const first = (await beat(w, 'macbook', ['reddit', 'x'])).body.job; eq(first.id, ids[0], 'the collector claims the oldest X job');
+  const r = await done(w, first.id, 'macbook', { ok: false, error: 'x_unavailable', detail: 'X search is unavailable on this machine. To try on this Mac: `uv tool upgrade twitter-cli` ...' });
+  eq(r.status, 200);
+  const st = jobs(w).filter(j => j.source === 'x'); eq(st.map(j => j.status), ['failed', 'failed', 'failed', 'failed', 'failed'], 'the four still waiting are not left for the collector to fail one by one');
+  const res = st.filter(j => j.id !== first.id).map(j => JSON.parse(j.result)); eq(res.length, 4); ok(res.every(x => x.error === 'no_collector' && x.why === 'x_unavailable' && REMEDY.test(x.detail)), JSON.stringify(res[0]));
+  ok(/X search/.test(res[0].detail) && /rechecks every ten minutes/.test(res[0].detail) && res[0].detail.indexOf('uv tool upgrade') < 260, 'what to do comes first: ' + res[0].detail);
+  const ag = (await F(w, 'GET', '/bridge/status')).body.agents.find(a => a.agent === 'macbook');
+  ok(ag.sources.indexOf('x') < 0 && ag.down.indexOf('x') >= 0 && ag.sources.indexOf('reddit') >= 0, 'the collector no longer counts as an X collector: ' + JSON.stringify(ag));
+  eq((await beat(w, 'macbook', ['reddit', 'x'])).body.job, null, 'nothing is left to claim');
+  // the agent now polls without X and says it is down; a new X job fails at once, in words, without the three-minute wait
+  await F(w, 'GET', '/bridge/next?agent=macbook&sources=reddit&down=x');
+  const n = await F(w, 'POST', '/bridge/run', { source: 'x', params: {} }); const j = (await F(w, 'GET', '/bridge/job?id=' + n.body.id)).body;
+  eq([j.status, j.result.error, j.result.why], ['failed', 'no_collector', 'x_unavailable']); ok(REMEDY.test(j.result.detail) && j.lines.some(l => l.kind === 'err' && REMEDY.test(l.text)), j.result.detail);
+  // a platform nobody reported as down still gets its three minutes
+  const y = await F(w, 'POST', '/bridge/run', { source: 'ytsearch', params: { ns: 'aep' } }); eq((await F(w, 'GET', '/bridge/job?id=' + y.body.id)).body.status, 'queued');
+  // repaired: the agent offers X again, and a job waits for it and is handed out
+  await beat(w, 'macbook', ['reddit', 'x']);
+  const ag2 = (await F(w, 'GET', '/bridge/status')).body.agents.find(a => a.agent === 'macbook'); ok(ag2.sources.indexOf('x') >= 0 && !(ag2.down || []).length, JSON.stringify(ag2));
+  const n2 = await F(w, 'POST', '/bridge/run', { source: 'x', params: {} }); eq((await F(w, 'GET', '/bridge/job?id=' + n2.body.id)).body.status, 'queued');
+  eq((await beat(w, 'macbook', ['reddit', 'x'])).body.job.id, n2.body.id);
+  // a second collector that can still search X keeps the queue alive
+  const w2 = await mk(); await beat(w2, 'studio-mac', ['x']);
+  const a = (await F(w2, 'POST', '/bridge/run', { source: 'x', params: {} })).body.id, b = (await F(w2, 'POST', '/bridge/run', { source: 'x', params: {} })).body.id;
+  const got = (await beat(w2, 'macbook', ['x'])).body.job; eq(got.id, a); await beat(w2, 'studio-mac', ['x']).then(x => x.body.job && w2.env.MIND_DB.db.prepare("UPDATE bridge_jobs SET status='queued', agent='' WHERE id=?").run(b));
+  await done(w2, a, 'macbook', { ok: false, error: 'x_unavailable', detail: 'x' });
+  eq(jobs(w2).find(x => x.id === b).status, 'queued', 'another live collector offers X, so the job waits for it');
+});
+
+await S.t('RR9 a job nobody tails does not wait for ever', async () => {
+  const w = await mk(); const expire = w.mod.__test.bridgeExpire; ok(typeof expire === 'function', 'bridgeExpire is exported');
+  const a = (await F(w, 'POST', '/bridge/run', { source: 'ytsearch', params: { ns: 'aep' } })).body.id;
+  const b = (await F(w, 'POST', '/bridge/run', { source: 'x', params: {} })).body.id;
+  const c = (await F(w, 'POST', '/bridge/run', { source: 'x', params: {} })).body.id;
+  await expire(w.env, {}); eq(jobs(w).map(j => j.status), ['queued', 'queued', 'queued'], 'a job just queued is left alone');
+  age(w, a, 31 * 60000); age(w, b, 31 * 60000); w.env.MIND_DB.db.prepare("UPDATE bridge_jobs SET who='plan' WHERE id=?").run(c); age(w, c, 31 * 60000);
+  const r = await expire(w.env, {}); eq(r.failed, 2);
+  const by = id => jobs(w).find(j => j.id === id);
+  eq([by(a).status, JSON.parse(by(a).result).error], ['failed', 'no_collector']); ok(/reach-agent\.py --channels/.test(JSON.parse(by(a).result).detail));
+  eq(by(b).status, 'failed'); eq(by(c).status, 'queued', 'the morning plan keeps its own twelve-hour rule');
+  const d = (await F(w, 'POST', '/bridge/run', { source: 'x', params: {} })).body.id; age(w, d, 31 * 60000); await w.env.AXIOM_KV.put('bridge_agent_macbook', JSON.stringify({ ts: Date.now(), sources: ['x'] }));
+  await expire(w.env, {}); eq(by(d).status, 'queued', 'with a live collector that offers it, it keeps waiting');
 });
 
 const r = S.done(); process.exit(r.fail ? 1 : 0);

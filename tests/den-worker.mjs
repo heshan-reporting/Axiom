@@ -19,6 +19,9 @@
  *   DK15 collection: channels and how each is read, the gated sources, collect now, held, the recall result
  *   DK16 the morning draft is off unless a desk asks for it
  *   DK17 a long draft keeps its connection
+ *   DK18 a busy database is said in words, with a status a page can retry on (found live, 11 November 2026)
+ *   DK19 the strip's slow figures are read once in fifteen minutes, not on every open; what is urgent stays live
+ *   DK20 the board asks the database only for this desk's rows, and the strip can be handed the board it needs
  * Run: node --experimental-sqlite tests/den-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 
@@ -271,8 +274,8 @@ await S.t('DK15 collection', async () => {
   const w = await mk(); await seedDay(w); await F(w, 'POST', '/den/watch/add', { ns: 'aep', kind: 'account', platform: 'facebook', value: 'harbourwatchpage' });
   await F(w, 'GET', '/sources'); await F(w, 'POST', '/sources/access', { id: 'afr', access: 'subscriber', cleared: true, basis: 'The agency holds a corporate subscription.' });
   const c = (await F(w, 'GET', '/den/collection?desk=aep_au', null, 'read-key')).body; const ch = id => c.channels.find(x => x.id === id);
-  ok(c.channels.every(x => Array.isArray(x.delivered.days) && x.delivered.days.length === 7 && x.delivered.days.reduce((n, v) => n + v, 0) === x.delivered.d7), 'each channel carries seven days, oldest first, that add up to its week');
-  eq(c.channels.map(x => x.id), ['news', 'x', 'facebook', 'instagram', 'youtube', 'reddit', 'bluesky']); eq([ch('news').delivered.d1, ch('x').delivered.d1, ch('x').delivered.layers, ch('facebook').delivered.d1], [4, 2, [2], 0], 'what each delivered for this desk, and by which layer');
+  ok(c.channels.filter(x => Array.isArray(x.delivered.days)).length >= 7 && c.channels.filter(x => Array.isArray(x.delivered.days)).every(x => x.delivered.days.length === 7 && x.delivered.days.reduce((n, v) => n + v, 0) === x.delivered.d7), 'each collected channel carries seven days, oldest first, that add up to its week');
+  eq(c.channels.map(x => x.id), ['news', 'x', 'facebook', 'instagram', 'youtube', 'reddit', 'bluesky', 'parliament', 'hansard', 'counters']); eq([ch('news').delivered.d1, ch('x').delivered.d1, ch('x').delivered.layers, ch('facebook').delivered.d1], [4, 2, [2], 0], 'what each delivered for this desk, and by which layer');
   ok(/not granted/.test(ch('facebook').how) && ch('facebook').accounts === 1 && /Comment text/.test(ch('facebook').cannot) && ch('facebook').collector.offered === false && ch('instagram').collector.off === false); eq([ch('news').worker, ch('news').collector, ch('x').worker, ch('facebook').worker, ch('reddit').worker], [true, null, true, false, false], 'which channels the worker reads whatever the Mac is doing');
   ok(c.gated.some(g => g.id === 'afr' && g.cleared && g.cleared_by === 'Anne') && c.gated.some(g => !g.cleared), 'the paid sources and which are cleared'); eq(c.backtest, null); ok(c.notBuilt.some(x => /TikTok, Threads and LinkedIn/.test(x)) && c.hashtags.limit === 30);
   const job = await F(w, 'POST', '/den/collect', { desk: 'aep_au', channel: 'facebook' }); eq([job.status, job.body.source, job.body.where], [200, 'facebook', 'worker'], JSON.stringify(job.body)); await w.settle();
@@ -298,6 +301,41 @@ await S.t('DK17 a long draft keeps its connection', async () => {
   const r = await F(w, 'POST', '/den/brief', { desk: 'aep_au' }); eq(r.status, 200); ok(/^ {2,}\{/.test(r.text), 'spaces arrive while the model writes, then the JSON: ' + JSON.stringify(r.text.slice(0, 12))); eq(JSON.parse(r.text).brief.sections.summary.text, 'Slow but whole.');
   w.answer(/api\.anthropic\.com/, async () => { await new Promise(r => setTimeout(r, 90)); return new Response('{"type":"error","error":{"message":"overloaded"}}', { status: 529 }); });
   const f = await F(w, 'POST', '/den/brief', { desk: 'aep_au', replace: true }); const j = JSON.parse(f.text); eq([f.status, j.ok, j.error], [200, false, 'draft_failed'], 'a failure after the answer began is a JSON refusal in the body'); ok(j.httpStatus === 502 && /Nothing was saved/.test(j.detail));
+});
+
+// what the database is asked, and a way to make it answer as D1 does when it is overloaded
+const spy = w => { const db = w.env.MIND_DB; const orig = db.prepare.bind(db); const seen = []; let boom = null;
+  db.prepare = sql => { seen.push(String(sql)); if (boom && boom.test(String(sql))) throw new Error('D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window. Try again'); return orig(sql); };
+  return { seen, fail: rx => { boom = rx; }, clear: () => { seen.length = 0; }, n: rx => seen.filter(q => rx.test(q)).length }; };
+const SLOW = /json_each\(json_extract\(a\.meta|FROM sent_entities e JOIN|SELECT DISTINCT COALESCE\(json_extract\(meta,'\$\.platform'\)/;
+
+await S.t('DK18 a busy database', async () => {
+  const w = await mk(); await seedDay(w); await board(w, 'aep_au'); const sp = spy(w); sp.fail(/FROM arc_items WHERE ts>\? AND ts<=\?/);
+  for (const path of ['/den/board?desk=aep_au', '/den/missed?desk=aep_au']) { const r = await F(w, 'GET', path, null, 'read-key');
+    eq([r.status, r.body.ok, r.body.error, r.body.retry], [503, false, 'db_busy', true], path); ok(/busy/i.test(r.body.detail) && /Nothing was changed/.test(r.body.detail) && !/D1_ERROR/.test(r.body.detail), 'in words, not the database\'s own: ' + r.body.detail); }
+  sp.fail(/INSERT INTO den_marks/); const pin = await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: itemBy(w, 'https://pointpost.example.com.au/a') }); eq([pin.status, pin.body.error], [503, 'db_busy'], 'a write says the same and is not repeated by the worker');
+  sp.fail(null); eq((await F(w, 'GET', '/den/board?desk=aep_au')).status, 200, 'and it works again when the database does');
+  sp.fail(/FROM den_desks/); const other = await F(w, 'GET', '/den/desks'); ok(other.status === 503 && other.body.error === 'db_busy', 'every Den route: ' + other.text.slice(0, 120));
+});
+
+await S.t('DK19 the strip\'s slow figures', async () => {
+  const w = await mk(); await seedDay(w); await F(w, 'GET', '/sentinel/alerts'); await F(w, 'GET', '/narratives/status'); await F(w, 'GET', '/sentiment/status'); const db = w.env.MIND_DB.db; const sp = spy(w);
+  const a = (await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key')).body; const first = sp.n(SLOW); ok(first >= 2, 'the first read does the fortnight\'s counting: ' + first); sp.clear();
+  db.prepare("INSERT INTO arc_alerts(ns,client,issue,label,severity,hot,baseline,ratio,srcs,detected_ts) VALUES('aep','AEP','gastax','Gas taxation','high',9,2.9,3.1,5,?)").run(NOW - H);
+  const b = (await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key')).body; eq(sp.n(SLOW), 0, 'the second open, a moment later, repeats none of it: ' + sp.seen.filter(q => SLOW.test(q)).map(q => q.slice(0, 60)).join(' | '));
+  eq(b.signals.filter(s => s.sig !== 'spike').map(s => s.key), a.signals.map(s => s.key), 'and says the same'); ok(b.signals.some(s => s.sig === 'spike'), 'a Sentinel spike is never held back by it');
+  ok(b.slow && b.slow.cached === true && b.slow.at > 0 && a.slow.cached === false, 'the answer says when the slow figures were counted: ' + JSON.stringify(b.slow)); sp.clear();
+  await F(w, 'GET', '/den/missed?desk=aep_au&fresh=1', null, 'read-key'); ok(sp.n(SLOW) >= 2, 'asked for afresh, they are counted again'); sp.clear();
+  await F(w, 'GET', '/den/missed?desk=mca_au', null, 'read-key'); ok(sp.n(SLOW) >= 1, 'another client\'s desk has its own');
+});
+
+await S.t('DK20 the board asks only for this desk\'s rows', async () => {
+  const w = await mk(); await seedDay(w); const sp = spy(w); const b = await board(w, 'aep_au'); const read = sp.seen.filter(q => /FROM arc_items WHERE ts>\? AND ts<=\?/.test(q));
+  eq(read.length, 1, 'one read of the window'); ok(/instr\(meta/.test(read[0]), 'narrowed in the database to rows that name one of the desk\'s issues or a registered account: ' + read[0].slice(0, 200));
+  ok(b.counts.news >= 3 && !JSON.stringify(b.media).includes('fuel tax credit story for somebody else'), 'and the board is what it was');
+  sp.clear(); const both = (await F(w, 'GET', '/den/board?desk=aep_au&missed=1', null, 'read-key')).body; eq(sp.n(/FROM arc_items WHERE ts>\? AND ts<=\?/), 1, 'the board and the strip in one answer read the window once, not twice');
+  ok(both.counts && both.missed && both.missed.ok === true && Array.isArray(both.missed.signals) && !('_rows' in both), 'board and strip together: ' + Object.keys(both).join(','));
+  const alone = (await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key')).body; eq(both.missed.signals.map(s => s.key), alone.signals.map(s => s.key), 'the same strip either way');
 });
 
 const r = S.done(); process.exit(r.fail ? 1 : 0);

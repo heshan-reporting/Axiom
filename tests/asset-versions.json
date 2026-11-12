@@ -1,86 +1,122 @@
 {
  "vendor/fonts/fonts.css": {
-  "v": "r44",
+  "v": "r45",
   "sha": "3c52d4a530d5e86f"
+ },
+ "axiom-ds.css": {
+  "v": "r1",
+  "sha": "acc6f28732a5397d"
  },
  "ax-ui.js": {
   "v": "r5",
   "sha": "6860962f3607ec3e"
+ },
+ "signals.js": {
+  "v": "r1",
+  "sha": "cd1115b558401dcd"
+ },
+ "release.js": {
+  "v": "r1",
+  "sha": "ca611eba7ab4abcd"
+ },
+ "topics.js": {
+  "v": "r1",
+  "sha": "edef3cbaf542b877"
  },
  "content.js": {
   "v": "r3",
   "sha": "2267fae92750fd0a"
  },
  "studio-progress.css": {
-  "v": "r44",
+  "v": "r45",
   "sha": "2233de4911ce0476"
  },
  "studio-flow.css": {
-  "v": "r44",
+  "v": "r45",
   "sha": "7a136471f27d13ff"
  },
  "studio-skin.css": {
-  "v": "r44",
+  "v": "r45",
   "sha": "f9a3e3f7fb2c1a2a"
  },
  "studio-guided.css": {
-  "v": "r44",
+  "v": "r45",
   "sha": "81f456d509b55897"
  },
  "studio-editor.css": {
-  "v": "r44",
+  "v": "r45",
   "sha": "1864b3e404bb0757"
  },
  "studio-shell.css": {
-  "v": "r44",
+  "v": "r45",
   "sha": "03fba5435d704e5d"
  },
  "studio-polish.css": {
-  "v": "r44",
+  "v": "r45",
   "sha": "37ba84a9f394526b"
  },
  "den.css": {
-  "v": "r47",
-  "sha": "147524ffb21adbb0"
+  "v": "r49",
+  "sha": "f3db6dc7ba782522"
  },
  "studio-render.js": {
-  "v": "r44",
+  "v": "r45",
   "sha": "23c87307deaae756"
  },
  "studio-progress.js": {
-  "v": "r44",
+  "v": "r45",
   "sha": "8a53708d07bf2da4"
  },
  "studio-merge.js": {
-  "v": "r44",
+  "v": "r45",
   "sha": "09ca57ede41b3e5b"
  },
  "studio.js": {
-  "v": "r44",
+  "v": "r45",
   "sha": "a92a2d5434e98a5d"
  },
  "studio-guided.js": {
-  "v": "r44",
+  "v": "r45",
   "sha": "b0c756335f41464e"
  },
  "studio-editor.js": {
-  "v": "r44",
+  "v": "r45",
   "sha": "93a243db73e894dd"
  },
  "studio-canvas.js": {
-  "v": "r44",
+  "v": "r45",
   "sha": "5e533c406797a094"
  },
  "studio-style.js": {
-  "v": "r44",
+  "v": "r45",
   "sha": "0941cfccf9bc119f"
  },
  "studio-brandmem.js": {
-  "v": "r44",
+  "v": "r45",
   "sha": "c2fdd7cec9c075a4"
  },
+ "sources.js": {
+  "v": "r1",
+  "sha": "12a8ff4b8c73b7f5"
+ },
  "den.js": {
-  "v": "r47",
-  "sha": "bd55bc66b55002fe"
+  "v": "r49",
+  "sha": "3fc3fe030c560301"
+ },
+ "sentiment.js": {
+  "v": "r1",
+  "sha": "99bc6121d7cbbc8b"
+ },
+ "narratives.js": {
+  "v": "r1",
+  "sha": "ad2977781ea0f27f"
+ },
+ "overview.js": {
+  "v": "r1",
+  "sha": "5dda64a9307ede00"
+ },
+ "scope.js": {
+  "v": "r1",
+  "sha": "27979c4b6aa607c8"
  }
 }

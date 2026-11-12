@@ -198,6 +198,27 @@ await t('a desk with nothing collected says so in every panel, with the one plac
   await p.getByRole('button', { name: 'Write it by hand' }).click(); await p.waitForSelector('.den-sec[data-section="judgement"] textarea'); eq(await p.$$eval('.den-sec h4', a => a.map(x => x.childNodes[0].textContent.trim())), ['Executive Summary', 'Today\'s Key Judgement', 'Key Developments', 'News environment', 'Organisational and influencer activity', 'Assessment of Activist Momentum', 'Implications for the client', 'Bottom Line', 'Source List']);
   eq(await p.$$eval('#den-tabpanel .den-bar .den-lab', a => a.map(x => x.childNodes[0].textContent.trim())), ['Overall activity level', 'Trend', 'Media risk', 'Social risk'], 'the firearms desk rates three things'); ok(!/edited by/.test(await txt(p, '#den-tabpanel')), 'a brief started by hand has no section marked as edited'); await p.context().close();
 });
+await t('Today reads the window once: the board\'s answer carries the strip, and the strip asks for itself only elsewhere', async () => {
+  const p = await open(w); await p.waitForSelector('section.den-panel[aria-label="Traditional media"] tr.den-row'); await p.waitForSelector('.den-strip li');
+  const today = p.served.filter(x => /^GET \/den\/(board|missed)/.test(x)); ok(today.length === 1 && /^GET \/den\/board\?.*missed=1/.test(today[0]), 'one request for the board and the strip together: ' + today.join(' | '));
+  ok(/Sentinel spike: Gas taxation/.test(await txt(p, '.den-strip')), 'and the strip is drawn from it');
+  await tab(p, 'watch'); await p.waitForSelector('#den-tabpanel section.den-panel:visible'); p.served.length = 0; await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click();
+  await p.waitForFunction(() => true); for (let i = 0; i < 40 && !p.served.some(x => /^GET \/den\/missed/.test(x)); i++) await new Promise(r => setTimeout(r, 100));
+  ok(p.served.some(x => /^GET \/den\/missed/.test(x)) && !p.served.some(x => /^GET \/den\/board/.test(x)), 'on another tab the strip asks for itself and the board is not read: ' + p.served.filter(x => /den\/(board|missed)/.test(x)).join(' | '));
+  await p.waitForSelector('.den-strip li'); await p.context().close();
+});
+await t('a busy database: the page says so once and asks again by itself', async () => {
+  let busy = 1; const asked = []; w.hooks.push(async (route, r, path) => { if (/^\/den\/board/.test(path)) { asked.push(Date.now()); if (busy > 0) { busy--; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'db_busy', retry: true, detail: 'The database is busy right now: too much is reading it at once. Nothing was changed. Try again in a few seconds.' }) }); return true; } } return false; });
+  const p = await open(w, 'full-key', { view: 'command' }); await p.evaluate(() => go('den')); await p.waitForSelector('#den-app');
+  await p.waitForFunction(() => /database is busy\. Trying again/i.test((document.querySelector('.toast, #toast') || {}).textContent || ''), null, { timeout: 8000 });
+  ok(!(await p.$('#den-tabpanel .den-state.err')), 'no error is shown while it is asking again');
+  await p.waitForSelector('section.den-panel[aria-label="Traditional media"] tr.den-row', { timeout: 15000 }); ok(asked.length === 2 && asked[1] - asked[0] >= 2000, 'asked again a few seconds later, without a click: ' + asked.map(a => a - asked[0]).join(', '));
+  await p.waitForSelector('.den-strip li'); await p.context().close(); w.hooks.length = 0;
+  busy = 9; w.hooks.push(async (route, r, path) => { if (/^\/den\/(board|missed)/.test(path)) { await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'db_busy', retry: true, detail: 'The database is busy right now: too much is reading it at once. Nothing was changed. Try again in a few seconds.' }) }); return true; } return false; });
+  const q2 = await open(w, 'full-key', { view: 'command' }); await q2.evaluate(() => go('den')); await q2.waitForSelector('#den-tabpanel .den-state.err', { timeout: 20000 });
+  ok(/Today's evidence could not be loaded\. The database is busy right now/.test(await txt(q2, '#den-tabpanel .den-state.err')) && await q2.locator('#den-tabpanel .den-state.err button', { hasText: 'Try again' }).count(), 'after two more tries it says so in words, with Try again: ' + await txt(q2, '#den-tabpanel .den-state.err'));
+  await q2.context().close(); w.hooks.length = 0;
+});
 await t('a failed read says what failed and tries again; a broken panel does not blank the page', async () => {
   let failBoard = 2; w.hooks.push(async (route, r, path) => { if (/^\/den\/board/.test(path) && failBoard > 0) { failBoard--; await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done.' }) }); return true; } return false; });
   const p = await open(w); await p.waitForSelector('#den-tabpanel .den-state.err'); ok(/Today's evidence could not be loaded\. Something failed on the worker/.test(await txt(p, '#den-tabpanel .den-state.err'))); ok(await p.$('.den-strip li'), 'the strip is still there');
@@ -206,6 +227,20 @@ await t('a failed read says what failed and tries again; a broken panel does not
   p.removeAllListeners('pageerror'); await tab(p, 'collection'); await p.waitForSelector('#den-tabpanel .den-state.err'); ok(/Collection stopped working\. The rest of the page is unaffected/.test(await txt(p, '#den-tabpanel .den-state.err'))); ok(await p.$('.den-strip li') && await p.$('button.den-deskcard'), 'the header and the strip survive');
   breakIt = false; await tab(p, 'today'); await p.waitForSelector('section.den-panel[aria-label="Traditional media"] tr.den-row'); w.hooks.length = 0; await p.context().close();
 });
+await t('Collection lists the watched parliament pages and the campaign counters, and adds and removes one of each', async () => {
+  const p = await open(w); await tab(p, 'collection'); const pages = panel(p, 'Watched parliament pages'); const ctr = panel(p, 'Campaign petition counters');
+  await pages.locator('tr.den-row').first().waitFor(); ok(/Domestic Gas Reservation Bill 2026 inquiry/.test(await pages.textContent()) && /not read yet/.test(await pages.textContent()), 'a seeded page says it has not been read yet');
+  ok(!/NSW Portfolio Committee/.test(await pages.textContent()), 'another client\'s page is not on this desk');
+  await pages.getByLabel('Address of the page').fill('https://parliament.example.gov.au/committees/harbour-levy'); await pages.getByLabel('Its name, as the parliament writes it').fill('Harbour Levy Bill 2026 inquiry');
+  await pages.getByRole('button', { name: 'Watch this page' }).click(); await pages.locator('tr.den-row', { hasText: 'Harbour Levy Bill 2026 inquiry' }).waitFor();
+  await pages.locator('tr.den-row', { hasText: 'Harbour Levy Bill 2026 inquiry' }).getByRole('button', { name: 'Stop' }).click(); await pages.locator('tr.den-row', { hasText: 'Harbour Levy Bill 2026 inquiry' }).locator('.den-chip', { hasText: 'switched off' }).waitFor();
+  await ctr.locator('tr.den-row').first().waitFor(); ok(/Tax the gas industry/.test(await ctr.textContent()) && !/Stop the Buyback/.test(await ctr.textContent()), 'this client\'s counters only'); ok(/Self-reported|own claim/i.test(await ctr.textContent()));
+  await ctr.getByLabel('Address of the campaign page').fill('https://campaign.example.org/petition'); await ctr.getByLabel('The petition\'s name').fill('Keep the Night Boat');
+  await ctr.getByRole('button', { name: 'Add counter' }).click(); const row = ctr.locator('tr.den-row', { hasText: 'Keep the Night Boat' }); await row.waitFor(); ok(/added by/.test(await row.textContent()));
+  await row.getByRole('button', { name: 'Remove' }).click(); await row.waitFor({ state: 'detached' });
+  eq(w.calls.length >= 0, true); await p.close();
+});
+
 await t('a paused platform is said in the strip and in Collection, and nothing retries it', async () => {
   await w.kv.set('reach_challenges', JSON.stringify({ facebook: { at: NOW - 2 * H, agent: 'mac-1', error: 'facebook_challenge' } }));
   const p = await open(w); await p.waitForSelector('.den-strip li'); ok(/Facebook delivered nothing.*stopped at a verification on \d{4}-\d\d-\d\d and is paused/.test((await all(p, '.den-strip li')).join(' ')), (await all(p, '.den-strip li'))[0]);
@@ -225,7 +260,7 @@ await t('a slow draft says it is working and locks its own buttons, not the page
   await tab(p, 'brief'); await p.waitForSelector('.den-sec[data-section="summary"] textarea', { timeout: 15000 }); eq(w3.calls.length, 1); await p.context().close();
 });
 
-/* ---- the redesigned interface (DEN.md s.8) ---- */
+/* ---- the redesigned interface (DEN.md s.10) ---- */
 const AXE_SRC = fs.readFileSync(new URL('../node_modules/axe-core/axe.min.js', import.meta.url), 'utf8');
 const axeBad = async pg => { await pg.waitForTimeout(300); return pg.evaluate(async () => { const r = await window.axe.run(document.querySelector('#v-den'), { resultTypes: ['violations'] }); return r.violations.filter(x => x.impact === 'serious' || x.impact === 'critical').map(x => x.id + ' x' + x.nodes.length + ' at ' + x.nodes.slice(0, 6).map(n => n.target.join(' ') + ' [' + ((n.any[0] || {}).data ? (n.any[0].data.contrastRatio + ' ' + n.any[0].data.fgColor + ' on ' + n.any[0].data.bgColor) : '') + ']').join('; ')); }); };
 await t('the figures are counts of the rows on the board, each tile opens its table, and the chart adds up', async () => {

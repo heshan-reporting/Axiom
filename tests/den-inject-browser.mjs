@@ -8,7 +8,7 @@ import { world, open, t, ok, eq, txt, tab, toast, finish } from './den-fixture.m
 console.log('den-inject-browser harness (every Den route failing, slow and malformed, one at a time)');
 const w = await world(); await w.F('POST', '/den/brief', { desk: 'aep_au' }); await w.F('POST', '/den/discover', { ns: 'aep' });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const READS = [['the desks', /^\/den\/desks/, 'today'], ['the board', /^\/den\/board/, 'today'], ['the strip', /^\/den\/missed/, 'today'], ['the brief', /^\/den\/brief\?/, 'brief'], ['the register', /^\/den\/watch\?/, 'watch'], ['the lexicon', /^\/den\/lexicon/, 'watch'], ['the themes', /^\/den\/themes/, 'watch'], ['collection', /^\/den\/collection/, 'collection']];
+const READS = [['the desks', /^\/den\/desks/, 'today'], ['the board', /^\/den\/board/, 'today'], ['the strip', /^\/den\/missed/, 'brief'], ['the brief', /^\/den\/brief\?/, 'brief'], ['the register', /^\/den\/watch\?/, 'watch'], ['the lexicon', /^\/den\/lexicon/, 'watch'], ['the themes', /^\/den\/themes/, 'watch'], ['collection', /^\/den\/collection/, 'collection']];
 const MODES = {
   failing: async route => { await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done.', requestId: 'r1' }) }); return true; },
   'a gateway page': async route => { await route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' }); return true; },

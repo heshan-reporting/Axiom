@@ -190,5 +190,34 @@ try: bk.run(bt, 'aep_au', 'https://worker.test', '', send=held, out=lambda *_: N
 except SystemExit as e: got = str(e)
 t('no key, no lookup', 'A key is needed' in got)
 
+# ---- a path that is not there is said in words, never a traceback ----
+def stops(fn, argv):
+    try:
+        fn(argv); return 'ran'
+    except SystemExit as e:
+        return str(e.code if e.code is not None else '')
+    except Exception as e:
+        return 'TRACEBACK ' + type(e).__name__
+gone = os.path.join(tmp, 'not-here')
+g = stops(imp.main, ['monitor=' + gone + '.csv', '--ns', 'aep'])
+t('a monitoring export that is not there is said in words', 'No such file' in g and gone in g, g)
+g = stops(imp.main, ['eml=' + gone, '--source', 'capitalbrief', '--ns', 'aep'])
+t('a newsletter folder that is not there is said in words', 'No such folder' in g and gone in g, g)
+g = stops(imp.main, ['eml=' + csvp, '--source', 'capitalbrief', '--ns', 'aep'])
+t('a file given where a folder of newsletters is wanted is said in words', 'No such folder' in g, g)
+g = stops(imp.main, ['monitor=' + nl, '--ns', 'aep'])
+t('a folder given where an export file is wanted is said in words', 'No such file' in g, g)
+g = stops(imp.main, ['eml=<folder>', '--source', 'capitalbrief', '--ns', 'aep'])
+t('a placeholder left in the command is named as one', 'placeholder' in g, g)
+g = stops(imp.main, ['monitor=', '--ns', 'aep'])
+t('nothing after the equals sign is said in words', 'eml=<folder> or monitor=<csv>' in g, g)
+empty = tempfile.mkdtemp()
+g = stops(imp.main, ['eml=' + empty, '--source', 'capitalbrief', '--ns', 'aep'])
+t('a folder with no saved newsletter in it says so', 'no .eml' in g, g)
+g = stops(conv.main, [os.path.join(tmp, 'o.json'), 'fbposts=' + gone + '.json', '--ns', 'aep', '--register', gone + '-reg.json'])
+t('a saved Supermetrics answer that is not there is said in words', 'No such file' in g, g)
+g = stops(plan.main, ['--ns', 'aep', '--plan', gone + '-plan.json'])
+t('a saved plan that is not there is said in words', 'No such file' in g, g)
+
 print('\n%d passed, %d failed' % (passed, failed))
 sys.exit(1 if failed else 0)

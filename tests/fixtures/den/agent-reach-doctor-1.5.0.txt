@@ -1,0 +1,17 @@
+Agent Reach 状态
+========================================
+图例：✅ 可用  [!] 已装但需配置/登录  [X] 未安装
+
+✅ 装好即用：
+  [!]  GitHub 仓库和代码 — gh CLI 可执行，且检测到显式认证配置；Doctor 不执行会写 device-id 的 `gh auth status`，因此未实时验证，未标记为可用。
+  [X]  YouTube 视频和字幕 — yt-dlp 未安装。安装：python -m pip install -U "yt-dlp[default]"
+  ✅ V2EX 节点、主题与回复 — 公开 API 可用（热门主题、节点浏览、主题详情、用户信息）
+  ✅ RSS/Atom 订阅源 — 可读取 RSS/Atom 源
+  [!]  全网语义搜索 — Exa 已写入 mcporter 配置，但 Doctor 未启动远端服务做连通验证，不能仅凭配置宣称可用。
+  ✅ 任意网页 — 通过 Jina Reader 读取任意网页（curl https://r.jina.ai/URL）
+
+可选渠道（已安装）：
+  ✅ B站视频、字幕和搜索 — B站搜索 API 可达（仅搜索，curl 直连）。完整功能建议安装 bili-cli：pipx install bilibili-cli （当前后端：B站搜索 API）
+
+状态：4/15 个渠道可用
+还有 8 个可选渠道可以解锁（Twitter/X 推文、Reddit 帖子和评论、Facebook 帖子、主页和群组、Instagram 用户、主页和指定用户帖子、小红书笔记、小宇宙播客转文字、雪球股票行情与社区动态、LinkedIn 职业社交），告诉你的 Agent「帮我装 XXX」即可
