@@ -1145,7 +1145,7 @@ under "Get it out" rather than a menu: each is one press. Section order has no d
 it needs a browser from 2023 or later (Chrome 105, Safari 15.4, Firefox 121); an older one shows the Den's cards
 light inside the dark shell.
 
-## 11. The guided run, and only what is working (12 November 2026; worker build `2026-11-12.studio-p65`, pages `den.js?v=r50` to `?v=r54`, `den.css?v=r53`)
+## 11. The guided run, and only what is working (12 November 2026; worker build `2026-11-12.studio-p65`, pages `den.js?v=r50` to `?v=r55`, `den.css?v=r53`)
 
 **The decision (D10).** The owner was shown three directions for the flow of the page (`prompts/annes-den-flow.md`:
 a guided run, a command desk, a briefing document) and chose the first, with one condition. The owner's words, in
@@ -1265,9 +1265,9 @@ checks ran and every channel delivered.
 
 **Proved here.** `tests/den-worker.mjs` 24 (DK21 the option, DK22 what follows it, DK23 `run`, DK24 `copies`; DK6,
 DK12, DK15 and DK19 changed to assert the default first and the gap with the option on), `tests/den-public-worker.mjs`
-12 unchanged, `tests/den-browser.mjs` 66, `tests/den-inject-browser.mjs` 81, `tests/studio-tokens-test.mjs` 4, `node
+12 unchanged, `tests/den-browser.mjs` 68, `tests/den-inject-browser.mjs` 81, `tests/studio-tokens-test.mjs` 4, `node
 tests/run.mjs check` 27 (it now parses `den.js`). In the browser harness the main journey turns `showGaps` on,
-because it asserts gaps; eighteen cases are the guided run on fresh profiles; thirteen are D10 with the option as it
+because it asserts gaps; eighteen cases are the guided run on fresh profiles; fifteen are D10 with the option as it
 ships. One of those reads every tab of a desk with rows and of an empty desk, in Guided, Table and Cards, and fails
 if the text that is drawn, or the title or label of anything drawn, matches
 `delivered nothing|not collected|not granted|not connected|No Mac collector|no collector|switched off|paused|not
@@ -1338,6 +1338,22 @@ checked against the code and fixed with a test that fails without it:
   applied). The dark axe pass is of the screen with gaps drawn again, and Cards are drawn and checked with the
   option on. The whole-page gate waits for the disclosure's own read of this visit, and checks names and overflow on
   every tab at all three widths. The inject harness fails the register read that the disclosure makes.
+
+**After a second review (page `den.js?v=r55`; no worker change).** Two more, each real in the code:
+- *The one-way switch could still switch a platform on.* `POST /den/reach` replaces the whole off list, and the
+  listed "Switch off" built the list it sent from the page's own copy, which is as old as its last read of
+  Collection. A second press before that read came back (X, then subscriber news) sent a list without the first
+  source, and one press on a page that had not seen a colleague's switch dropped the colleague's. Every switch,
+  the listed one and the one inside the disclosure, now reads the list in force (`GET /den/reach`) just before it
+  sends one and changes its own source only; the worker's answer is drawn at once, so what was switched off leaves
+  the list before Collection is read again. Two cases hold every later read of Collection and press: two listed
+  switches back to back, and each kind of switch after the list changed on the worker. (Between that read and
+  the write there is still a moment in which two people pressing at once can lose one press: the route takes a
+  whole list, and closing that needs a worker route that adds or removes one source.)
+- *A test that could not fail.* The inject harness took any row of "To finish setting up" as the healthy page of
+  the register read the disclosure makes. The world's never-read parliament page is a row there whether or not the
+  register answers, so "slow" passed 1.2 seconds before the answer and "recovers" passed without one. The healthy
+  page is now the registered account's own row, which only the register's answer can draw.
 
 **Not verifiable here.** Everything was seen on the fixture's invented rows with a stub model: no real draft was
 written under the new rule for the model ("write about what the evidence holds"), so what a real draft says about a

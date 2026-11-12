@@ -736,12 +736,26 @@
     // the register is read for "To finish setting up" the first time the disclosure opens, not before
     const want = opened && !gaps; const R = useLoad(() => (want ? get('/den/watch?' + q({ ns: desk.ns }), 'watch') : Promise.resolve(null)), [desk.ns, tick, want], desk.ns);
     const collect = async ch => { setBusy(ch.id); try { const d = await call('/den/collect', { desk: desk.id, channel: ch.collect }); setJob({ id: d.id, status: d.where === 'desktop' ? 'queued' : 'running', lines: [], title: ch.label + (d.where === 'desktop' ? ' (waiting for the Mac collector)' : '') }); tailJob(d.id, j => setJob(o => (o && o.id === d.id ? Object.assign({}, o, j) : o)), () => { C.reload(); bump('collected'); }); } catch (e) { toastMsg(say(e), true); } setBusy(''); };
-    const toggle = async src => { const off = (C.data.reach.off || []).slice(); const i = off.indexOf(src); if (i >= 0) off.splice(i, 1); else off.push(src); setBusy('sw'); try { await call('/den/reach', { off }); C.reload(); } catch (e) { toastMsg(say(e), true); } setBusy(''); };
-    /* The kill switch on the default screen: one way only. It adds the source to the off list and never takes one out, so
-       it cannot switch anything on whatever the page was told. What it switched off leaves the screen, so it says where
-       that went and hands the focus to the disclosure that now holds it. */
-    const switchOff = async (src, label) => { const off = (C.data.reach.off || []).slice(); if (off.indexOf(src) < 0) off.push(src); setBusy('sw'); let done = false; try { await call('/den/reach', { off }); done = true; } catch (e) { toastMsg(say(e), true); } setBusy(''); if (!done) return;
-      toastMsg('Switched off. ' + label + ' is listed under Add or switch on a channel.'); const s = document.querySelector('#den-more > summary'); if (s) s.focus(); C.reload(); };
+    /* The list in force is the worker's, never this page's copy of it. POST /den/reach replaces the whole list, and the copy
+       here is as old as this page's last read of Collection: a colleague may have switched a platform off since, and a
+       press of a moment ago may not have been read back yet. So every switch reads the list first and changes its own
+       source only, and what the worker answers is put on the page before a switch can be pressed again. */
+    const here = useRef(desk.id); here.current = desk.id; useEffect(() => () => { here.current = null; }, []); const cNow = useRef(C); cNow.current = C;
+    const reachOff = async () => ((await get('/den/reach', 'off')).off || []).slice();
+    const reachPut = r => { const cur = cNow.current.data; if (!cur || !r || !Array.isArray(r.off)) return;
+      cNow.current.set(Object.assign({}, cur, { reach: { off: r.off, agents: r.agents || cur.reach.agents, challenges: r.challenges || cur.reach.challenges }, channels: cur.channels.map(c => { if (!c.collector) return c; const k = Object.assign({}, c.collector, { off: r.off.indexOf(c.collector.source) >= 0 }); return Object.assign({}, c, { collector: k }, typeof c.working === 'boolean' ? { working: c.delivered.d7 > 0 && !(k.off || k.challenge) } : null); }) })); };
+    // the disclosure's switch: which way it goes is what the pressed button said; the rest of the list is the worker's
+    const toggle = async src => { const mine = desk.id; const on = (C.data.reach.off || []).indexOf(src) >= 0; setBusy('sw');
+      try { const off = await reachOff(); const i = off.indexOf(src); if (on) { if (i >= 0) off.splice(i, 1); } else if (i < 0) off.push(src); const r = await call('/den/reach', { off }); if (here.current === mine) { reachPut(r); cNow.current.reload(); } } catch (e) { toastMsg(say(e), true); } setBusy(''); };
+    /* The kill switch on the default screen: one way only. It adds the source to the worker's own off list, read a moment
+       before, and never takes one out, so it cannot switch anything on whatever this page was told or however old its
+       copy is: a second press before Collection has been read again, or a colleague's switch this page never saw, stays
+       off. What it switched off leaves the screen at once, from the worker's answer, so it says where that went and hands
+       the focus to the disclosure that now holds it. */
+    const switchOff = async (src, label) => { const mine = desk.id; setBusy('sw'); let r = null;
+      try { const off = await reachOff(); if (off.indexOf(src) < 0) off.push(src); r = await call('/den/reach', { off }); } catch (e) { toastMsg(say(e), true); }
+      if (r && here.current === mine) reachPut(r); setBusy(''); if (!r) return;
+      toastMsg('Switched off. ' + label + ' is listed under Add or switch on a channel.'); if (here.current !== mine) return; const s = document.querySelector('#den-more > summary'); if (s) s.focus(); cNow.current.reload(); };
     if (C.loading && !C.data) return html`<${Loading} what="collection" />`;
     if (C.err && !C.data) return html`<${Failed} what="Collection" err=${C.err} onRetry=${C.reload} />`;
     const d = C.data; const live = (d.reach.agents || []).filter(a => a.live); const bt = d.backtest;

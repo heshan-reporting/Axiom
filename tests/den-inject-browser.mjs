@@ -16,8 +16,10 @@ const READS = [['the desks', /^\/den\/desks/, 'today'], ['the board', /^\/den\/b
   // [3] how the page is opened, [4] what a healthy page shows: Guided has one card (or its done state) where the table has rows
   ['the board in Guided', /^\/den\/board/, 'today', { guided: true }, '#den-focus, .den-done'],
   // [5] a step after the tab opens. The register is read again when Collection's disclosure is opened, for "To finish setting up": the
-  // failure is said inside the disclosure, and the world's never-read Facebook account is listed once the read answers
-  ['the register, from Collection\'s disclosure', /^\/den\/watch\?/, 'collection', null, 'details.den-more[open] section.den-panel[aria-label="To finish setting up"] tbody tr', async page => { await page.locator('#den-root details.den-more > summary').click(); await page.waitForSelector('#den-root details.den-more[open] section.den-panel[aria-label="Signed-in collection"]'); }]];
+  // failure is said inside the disclosure, and the world's never-read Facebook account is listed once the read answers. The healthy
+  // page is that account's own row and no other: the panel also lists the world's never-read parliament page, which comes from another
+  // read and is drawn while the register is still being asked, so "any row" would pass before the register answered, or without it
+  ['the register, from Collection\'s disclosure', /^\/den\/watch\?/, 'collection', null, 'details.den-more[open] section.den-panel[aria-label="To finish setting up"] tbody tr:has-text("harbourwatchpage")', async page => { await page.locator('#den-root details.den-more > summary').click(); await page.waitForSelector('#den-root details.den-more[open] section.den-panel[aria-label="Signed-in collection"]'); }]];
 const MODES = {
   failing: async route => { await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done.', requestId: 'r1' }) }); return true; },
   'a gateway page': async route => { await route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' }); return true; },

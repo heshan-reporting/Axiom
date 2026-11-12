@@ -7,7 +7,7 @@
  *   connection mid-draft, and a reload with unsaved edits.
  *   The journey above is the table's: the fixture chooses Table for it, and it turns the desk's showGaps on, because it
  *   asserts gaps. The guided run (decision D10), which a fresh profile opens in, has eighteen cases after it, each in its
- *   own world; the last thirteen are D10 on the page with the option as it ships: nothing on screen says what was not
+ *   own world; the last fifteen are D10 on the page with the option as it ships: nothing on screen says what was not
  *   collected, Collection's one disclosure, the Options switch, Write and File, and the three whole-page gates.
  * Run: node --experimental-sqlite tests/den-browser.mjs   (SHOT=1 saves screenshots to tests/shots/den/) */
 import fs from 'node:fs';
@@ -914,6 +914,50 @@ await t('Collection on a worker older than p65, and what else is on the default 
   await dMore(p); eq(await panel(p, 'Signed-in collection').locator('tr', { hasText: 'Subscriber news' }).locator('.den-chip').first().textContent(), 'off');
   await panel(p, 'To finish setting up').locator('tr', { hasText: 'harbourlevy' }).waitFor(); const lines = await all(p, 'section.den-panel[aria-label="To finish setting up"] tbody tr'); ok(lines.some(l => /^harbourlevy ?A public Facebook group \| Not read yet\. \| Open Watch$/.test(l)), lines.join(' // '));
   wd.hooks = []; eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+/* POST /den/reach replaces the whole off list, and the page's copy of that list is only as new as its last read of Collection.
+   A switch therefore reads the list in force first and changes its own source only. The two cases below hold every later
+   read of Collection, so the page knows what it read on opening and what each press was answered, and nothing else. */
+const dHold = wd => { let go; const gate = new Promise(r => { go = r; }); const h = { n: 0, go: () => { wd.hooks = []; go(); } }; wd.hooks = [async (route, r, path) => { if (r.method() === 'GET' && /^\/den\/collection/.test(path)) { h.n++; await gate; } return false; }]; return h; };
+const dReach = sent => sent.filter(s => s[0] === '/den/reach').map(s => s[1].off);
+const dRows = (p, n) => p.waitForFunction(k => document.querySelectorAll('section.den-panel[aria-label="Channels"] tr.den-row').length === k, n);
+await t('two listed switches pressed back to back, before Collection has been read again: the second keeps off what the first switched off (D10)', async () => {
+  const wd = await world(); await wd.F('GET', '/sources'); eq((await wd.F('POST', '/sources/access', { id: 'afr', access: 'subscriber', cleared: true, basis: 'The agency holds a corporate subscription.' })).status, 200);
+  const p = await open(wd); const sent = gSent(p); await dTab(p, 'collection'); const ch = panel(p, 'Channels'); eq(await dListed(p), ['News and official sources', 'X']);
+  const stop = panel(p, 'Subscriber outlets').getByRole('button', { name: 'Switch off subscriber news', exact: true }); await stop.waitFor(); const hold = dHold(wd);
+  await ch.locator('tr.den-row', { hasText: /^X/ }).getByRole('button', { name: 'Switch off', exact: true }).click();
+  // the worker's answer to the press is on the page before any read of Collection: X has left the list, and the next switch can be pressed
+  await dRows(p, 1); eq([await dListed(p), await dTiles(p)], [['News and official sources'], [['News and official sources', 'ok']]]); ok(hold.n >= 1, 'the read after the press was not held, so this case proves nothing');
+  await stop.click(); await stop.waitFor({ state: 'detached' });
+  eq([dReach(sent), (await wd.F('GET', '/den/reach')).body.off], [[['x'], ['x', 'gated']], ['x', 'gated']], 'the second press switched X back on');
+  eq(p.served.filter(x => x === 'GET /den/reach').length, 2, 'each press reads the list in force before it sends one'); eq(await dSays(p, 'Collection, closed, two switches pressed'), []);
+  // the held reads answer: nothing comes back
+  const back = p.waitForResponse(x => /\/den\/collection\?/.test(x.url()), { timeout: 20000 }); hold.go(); await back; await p.waitForTimeout(400);
+  eq([await dListed(p), await stop.count()], [['News and official sources'], 0]); await dMore(p); const sw = panel(p, 'Signed-in collection'); const chip = name => sw.locator('tr', { hasText: name }).first().locator('.den-chip').first().textContent();
+  eq([await chip(/^X/), await chip('Subscriber news'), await chip('Facebook')], ['off', 'off', 'allowed']); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('a switch pressed on a page that has not seen a colleague\'s switch leaves the colleague\'s as it is: the listed switch, and the two ways of the one inside the disclosure (D10)', async () => {
+  const wd = await world(); const p = await open(wd); const sent = gSent(p); await dTab(p, 'collection'); const ch = panel(p, 'Channels'); eq(await dListed(p), ['News and official sources', 'X']);
+  const offNow = async () => (await wd.F('GET', '/den/reach')).body.off; const last = () => dReach(sent).pop(); const hold = dHold(wd);
+  // a colleague switches Reddit off after this page read Collection; the page presses its listed switch
+  eq((await wd.F('POST', '/den/reach', { off: ['reddit'] })).status, 200);
+  await ch.locator('tr.den-row', { hasText: /^X/ }).getByRole('button', { name: 'Switch off', exact: true }).click(); await dRows(p, 1);
+  eq([last(), await offNow()], [['reddit', 'x'], ['reddit', 'x']], 'the listed switch dropped a switch this page had not seen');
+  // inside the disclosure the worker's answer has been drawn: the colleague's switch shows with this page's own
+  await dMore(p); const sw = panel(p, 'Signed-in collection'); const chip = name => sw.locator('tr', { hasText: name }).first().locator('.den-chip').first().textContent();
+  const chipIs = (name, want) => p.waitForFunction(([n, v]) => { const r = Array.from(document.querySelectorAll('section.den-panel[aria-label="Signed-in collection"] tbody tr')).find(x => x.children[0].textContent === n); return !!r && r.querySelector('.den-chip').textContent === v; }, [name, want]);
+  eq([await chip('Reddit'), await chip(/^X/), await chip('Facebook'), await chip('Instagram')], ['off', 'off', 'allowed', 'allowed']);
+  // the colleague switches Instagram off; this page, which has not seen it, switches Facebook off
+  eq((await wd.F('POST', '/den/reach', { off: ['reddit', 'x', 'instagram'] })).status, 200);
+  await sw.locator('tr', { hasText: 'Facebook' }).getByRole('button', { name: 'Switch off', exact: true }).click(); await chipIs('Facebook', 'off');
+  eq([last(), await offNow(), await chip('Instagram')], [['reddit', 'x', 'instagram', 'facebook'], ['reddit', 'x', 'instagram', 'facebook'], 'off'], 'the switch inside dropped a switch this page had not seen');
+  // the colleague switches Reddit back on; this page, which still shows Reddit off, switches X on: only X comes out of the list
+  eq((await wd.F('POST', '/den/reach', { off: ['x', 'instagram', 'facebook'] })).status, 200);
+  await sw.locator('tr', { hasText: /^X/ }).getByRole('button', { name: 'Switch on', exact: true }).click(); await chipIs('X', 'allowed'); await dRows(p, 2);
+  eq([last(), await offNow()], [['instagram', 'facebook'], ['instagram', 'facebook']], 'switching one platform on switched another off again');
+  eq([await chip('Reddit'), await chip('Instagram'), await chip('Facebook'), await dListed(p)], ['allowed', 'off', 'off', ['News and official sources', 'X']]); ok(hold.n >= 3, 'the reads of Collection were not held, so the page may have seen the colleague\'s switches');
+  const back = p.waitForResponse(x => /\/den\/collection\?/.test(x.url()), { timeout: 20000 }); hold.go(); await back; await p.waitForTimeout(400);
+  eq([await chip('Reddit'), await chip(/^X/), await chip('Instagram'), await chip('Facebook'), await dListed(p)], ['allowed', 'allowed', 'off', 'off', ['News and official sources', 'X']]); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
 });
 await t('the Facebook column and figure are drawn only when a story on the board carries the figure (D10)', async () => {
   const wd = await world(); await wd.push('news', [1, 2].map(i => ({ src: 'minewire', title: 'Critical minerals strategy lands, part ' + i, body: 'A critical minerals processing plan was released this week.', url: 'https://minewire.example.com.au/' + i, ts: NOW - (2 + i) * H, meta: { issues: ['cm'], source: 'minewire' } })));
