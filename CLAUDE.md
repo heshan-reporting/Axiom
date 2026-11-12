@@ -853,6 +853,21 @@ because it exists. **Every address and every answer shape below is unverified un
   and screens' statements went from 156-187 ms to 1-26 ms and the index built in 0.2 s; **D1 itself was not timed.**
   Still whole-kind by design, and small today: reads with no window (`/signals/status`, held comments by thread).
   Harness: `tests/archive-index-worker.mjs` (4).
+- **"Sweep every source  FAILED  86 lines" (build `2026-11-12.studio-p65`, `sources.js?v=r2`; 12 November 2026).** The
+  two sweep buttons in the Sources view started a bridge job the worker ran after its response, and such a job is
+  stopped at about thirty seconds: 481 sources never fit, so the console ended in `worker_stopped` every time. The
+  page now repeats **`POST /sources/step {what: due|all, before, limit}`** (full; `sourcesStep`): `SOURCES_STEP` = 4
+  sources inside the request (one round of the pool, at most `SOURCES_STEP_MAX` = 5), answering `ran`, `results`, the
+  step's console `lines`, `skipped` and `remaining`. `before` is when the walk began: `all` takes the sources not
+  tried since then, `due` those that were due then, so a walk ends and never reads a source twice; a source with no
+  route is stamped and named, never the head of every step. The console counts "N of M swept", **Stop** halts between
+  steps, a busy database is waited out (20 seconds, three times), and a worker with no step route is said in words.
+  `POST /sources/sweep` with more than five ids, or `all`, is still a job for other callers and still bound by the
+  thirty seconds: **do not start whole-registry work from the app as a job; step it.** The banner over the failing
+  and stopped sources says why, by route tried (`failReasons` in `docs/sources.js`: each source's `last_error`, the
+  site's own name struck out, counted in sources), and a reason narrows the table (the search reads the failure too).
+  Why 276 of 481 sources were dark on the first day was not seen from the sandbox: that line is how it will be.
+  Harnesses: STEP1-3 in `tests/sources-worker.mjs` (26), the step and reason cases in `tests/sources-browser.mjs` (19).
 
 ## Sentiment by party, person, organisation and topic (Phase 3)
 

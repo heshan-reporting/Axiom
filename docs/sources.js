@@ -61,13 +61,33 @@
     </div>`;
   }
 
-  function DeadBanner({ list, onPick, shown }) {
+  /* Why the dark sources fail, by the route that was tried: a source's last failure reads
+     "sitemap:x403 gnews:x200 | sitemap HTTP 403; gnews Google News has nothing indexed for site:x in 2 days".
+     The part that names the site is struck out so the same reason on two sources is one line; each
+     reason is counted in sources and keeps the words the search matches. */
+  function failReasons(list) {
+    const by = new Map();
+    list.filter(s => s.status === 'dead' || s.status === 'failing').forEach(s => {
+      const tail = String(s.last_error || '').split(' | ')[1]; if (!tail) return;
+      const seen = new Set();
+      tail.split('; ').forEach(part => {
+        const m = /^([a-z]+)\s+(.+)$/.exec(part.trim()); if (!m) return;
+        const why = m[2].replace(/\s+for\s+\S.*$/, '').replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim().slice(0, 48); if (!why) return;
+        const key = m[1] + ' ' + why; if (seen.has(key)) return; seen.add(key);
+        const r = by.get(key) || { key, method: m[1], why, n: 0 }; r.n++; by.set(key, r);
+      });
+    });
+    return Array.from(by.values()).sort((a, b) => (b.n - a.n) || a.key.localeCompare(b.key));
+  }
+  function DeadBanner({ list, onPick, onWhy, shown }) {
     const dead = list.filter(s => s.status === 'dead');
     if (!dead.length) return null;
     if (!shown) return html`<div class="src-banner quiet"><span class="m">${dead.length} source${dead.length === 1 ? ' has' : 's have'} stopped delivering (reported to Slack once).</span> <button class="src-link" onClick=${() => onPick('')}>Show them</button></div>`;
+    const why = failReasons(list).slice(0, 8);
     return html`<div class="src-banner">
       <b>${dead.length} source${dead.length === 1 ? ' has' : 's have'} stopped delivering.</b> Reported to Slack once; probe to see every route, or switch off what is gone.
       <span class="src-banner-list">${dead.slice(0, 12).map(s => html`<button key=${s.id} class="src-link" onClick=${() => onPick(s.id)}>${s.name}</button>`)}${dead.length > 12 ? html`<span class="m">and ${dead.length - 12} more</span>` : null}</span>
+      ${why.length ? html`<div class="src-why"><span class="m">Why, by route tried (failing and stopped, counted in sources):</span> ${why.map(r => html`<button key=${r.key} class="src-link" title="Show the sources whose last failure says this" onClick=${() => onWhy(r.key)}>${(METHOD_LABEL[r.method] || r.method) + ': ' + r.why + ' (' + r.n + ')'}</button>`)}</div>` : null}
     </div>`;
   }
 
@@ -77,7 +97,7 @@
     const juris = (data && data.juris) || Object.keys(JURIS_LABEL);
     const methods = (data && data.methods) || Object.keys(METHOD_LABEL);
     return html`<div class="src-filters">
-      <input class="src-q" placeholder="Search name, id or url" value=${f.q} onInput=${e => set('q', e.target.value)} />
+      <input class="src-q" placeholder="Search name, id, url or failure" value=${f.q} onInput=${e => set('q', e.target.value)} />
       <select value=${f.tier} onChange=${e => set('tier', e.target.value)}><option value="">All tiers</option>${tiers.map(t => html`<option key=${t} value=${t}>${TIER_LABEL[t] || t}</option>`)}</select>
       <select value=${f.juris} onChange=${e => set('juris', e.target.value)}><option value="">All jurisdictions</option>${juris.map(j => html`<option key=${j} value=${j}>${JURIS_LABEL[j] || j}</option>`)}</select>
       <select value=${f.status} onChange=${e => set('status', e.target.value)} aria-label="Status"><option value="ok">Delivering only</option><option value="">Every status</option>${Object.keys(STATUS).filter(s => s !== 'ok').map(s => html`<option key=${s} value=${s}>${STATUS[s][0]}</option>`)}</select>
@@ -258,20 +278,54 @@
       if (!data) return [];
       const q = f.q.trim().toLowerCase();
       let l = data.sources.filter(s => (!f.tier || s.tier === f.tier) && (!f.juris || s.juris === f.juris) && (!f.status || s.status === f.status) && (!f.issue || s.issues.indexOf(f.issue) >= 0) && (!f.method || s.method_ok === f.method)
-        && (!q || (s.name + ' ' + s.id + ' ' + Object.values(s.urls || {}).join(' ')).toLowerCase().indexOf(q) >= 0));
+        && (!q || (s.name + ' ' + s.id + ' ' + Object.values(s.urls || {}).join(' ') + ' ' + (s.last_error || '')).toLowerCase().indexOf(q) >= 0));
       const by = { status: (a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || (b.fails - a.fails) || a.name.localeCompare(b.name), name: (a, b) => a.name.localeCompare(b.name), items: (a, b) => (b.items24 - a.items24) || a.name.localeCompare(b.name), latest: (a, b) => (b.latest_ts - a.latest_ts) || a.name.localeCompare(b.name), fails: (a, b) => (b.fails - a.fails) || a.name.localeCompare(b.name) };
       return l.slice().sort(by[f.sort] || by.status);
     }, [data, f]);
     const picked = data && pick ? data.sources.find(s => s.id === pick) : null;
+    // a job the drawer starts (a browser probe on a Mac) is tailed here
     const tail = (id, title) => {
       if (stopRef.current) stopRef.current();
       setJob({ id, title, status: 'running', lines: [] });
       stopRef.current = tailJob(id, j => setJob(Object.assign({ title }, j)), j => { setJob(Object.assign({ title }, j)); setBusy(false); load(); });
     };
+    /* A sweep from the app runs in steps of a few sources each, inside the request: a job the worker runs
+       after its response is stopped at about thirty seconds, and the registry never fits in that. Each
+       step says how many still wait; Stop halts between steps and what was read stays. */
+    const haltRef = useRef(false);
+    useEffect(() => () => { haltRef.current = true; }, []);
     const sweep = async (all) => {
-      setBusy(true);
-      try { const d = await call('/sources/sweep', all ? { all: true } : { ids: [] }); if (d.job) tail(d.job, all ? 'sweep every source' : 'sweep what is due'); else { setBusy(false); load(); } }
-      catch (e) { toastMsg(e.message, true); setBusy(false); }
+      setBusy(true); haltRef.current = false;
+      if (stopRef.current) { stopRef.current(); stopRef.current = null; }
+      const title = all ? 'sweep every source' : 'sweep what is due';
+      const lines = []; let n = 0;
+      const show = (status, success) => setJob({ id: 'step', step: true, title, status, success, lines: lines.slice(-500), follow: true });
+      const push = (kind, text) => { lines.push({ id: ++n, ts: Date.now(), kind, text }); show('running'); };
+      const before = Date.now(); let total = 0, done = 0, delivered = 0, added = 0, good = true, busyTries = 0;
+      push('info', (all ? 'sweeping every source that is switched on' : 'sweeping the sources that are due now') + ', a few at a time; Stop halts it and what was read stays');
+      for (let i = 0; i < 600; i++) {
+        if (haltRef.current) { push('info', 'stopped after ' + done + (total ? ' of ' + total : '') + '; the half-hourly tick carries on with the rest'); break; }
+        let d;
+        try { d = await call('/sources/step', { what: all ? 'all' : 'due', before }); busyTries = 0; }
+        catch (e) {
+          if (e.code === 'db_busy' && busyTries < 3) { busyTries++; push('info', 'the database is busy; waiting 20 seconds before the next step (' + busyTries + ' of 3)'); for (let w = 0; w < 40 && !haltRef.current; w++) await new Promise(r => setTimeout(r, 500)); continue; }
+          if (e.code === 'not_found' || e.status === 404) { push('err', 'This worker is older than the page: it has no step route yet. Deploy the worker (tools/deploy-worker.sh), then press again. The half-hourly tick is sweeping meanwhile.'); good = false; break; }
+          push('err', e.message + (done ? ' - ' + done + ' were swept before this and stay' : '')); good = false; break;
+        }
+        const here = (d.ran || 0) + ((d.skipped || []).length);
+        if (!total) total = here + (d.remaining || 0);
+        (d.lines || []).forEach(l => push(l.kind, l.text));
+        (d.skipped || []).forEach(id => push('info', id + ': no route to try, passed over'));
+        done += here; delivered += d.succeeded || 0; added += d.added || 0;
+        if (!total) { push('info', all ? 'no source is switched on' : 'nothing is due: every source was read inside its schedule'); break; }
+        push('info', done + ' of ' + total + ' swept: ' + delivered + ' delivered, ' + added + ' new in the archive');
+        if (!d.remaining) { push('info', 'done'); break; }
+        if (!here) { push('info', (d.remaining || 0) + ' still wait and this step took none; the half-hourly tick carries on'); break; }
+        if (done >= total + 12) { push('err', 'the worker is reading sources but not recording that it did (the database may be busy), so the count is not going down; stopped. What was read stays.'); good = false; break; }
+        if (i % 5 === 4) load();
+      }
+      setJob({ id: 'step', step: true, title, status: 'done', success: good, lines: lines.slice(-500), follow: true });
+      setBusy(false); load();
     };
     const exportJson = async () => { try { const d = await call('/sources/export'); dl('axiom-sources-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(d, null, 2)); } catch (e) { toastMsg(e.message, true); } };
     const importJson = async (file) => {
@@ -284,8 +338,8 @@
     if (!data) return html`<div class="empty" style=${{ padding: '40px 0' }}>Loading the source registry...</div>`;
     return html`<div class="src-app">
       <${Summary} data=${data} canWrite=${canWrite} busy=${busy} onSweepDue=${() => sweep(false)} onSweepAll=${() => sweep(true)} onStatus=${st => setF(Object.assign({}, f, { status: st, sort: 'status' }))} />
-      <${DeadBanner} list=${data.sources} shown=${f.status !== 'ok'} onPick=${id => { if (!id) { setF(Object.assign({}, f, { status: 'dead', sort: 'status' })); return; } setAdding(false); setPick(id); }} />
-      ${job ? html`<${Console} job=${job} title=${job.title} />` : null}
+      <${DeadBanner} list=${data.sources} shown=${f.status !== 'ok'} onWhy=${key => setF(Object.assign({}, f, { q: key }))} onPick=${id => { if (!id) { setF(Object.assign({}, f, { status: 'dead', sort: 'status' })); return; } setAdding(false); setPick(id); }} />
+      ${job ? html`<${Console} job=${job} title=${job.title} canWrite=${canWrite} onCancel=${job.step ? () => { haltRef.current = true; } : null} />` : null}
       <div class="src-toolbar">
         <${Filters} f=${f} setF=${setF} data=${data} count=${list.length} hidden=${data.sources.length - list.length} />
         <div class="src-toolbtns">

@@ -210,6 +210,52 @@ await t('a big sweep becomes a job the console tails, running in the worker', as
   eq(j.d.result.ran, 6); eq(j.d.result.succeeded, 5);
   const s = await req('POST', '/sources/sweep', { all: true }); ok(s.d.job, 'sweep all is a job'); await drain();
 });
+/* -- the sweep from the app, in steps (12 November 2026): "Sweep every source" ran as a job after the
+      response and the worker stopped it at about thirty seconds, 86 lines in. A step runs a few sources
+      inside the request and says how many wait, and the page repeats it. -- */
+await t('STEP1 a step sweeps a few sources inside the request and says how many still wait', async () => {
+  const T = Date.now();
+  db.prepare("UPDATE sources SET last_try=? WHERE core=0").run(T + 1);
+  const ten = ['nationals', 'couriermail', 'capitalbrief', 'pod_7am', 'guild_org', 'miningnews'].concat(db.prepare("SELECT id FROM sources WHERE core=0 AND enabled=1 AND id LIKE 'wn_%' ORDER BY id LIMIT 4").all().map(r => r.id));
+  for (const id of ten) db.prepare('UPDATE sources SET last_try=1, enabled=1 WHERE id=?').run(id);
+  const jobs0 = row('SELECT COUNT(*) n FROM bridge_jobs').n;
+  const a = await req('POST', '/sources/step', { what: 'all', before: T });
+  eq(a.status, 200, JSON.stringify(a.d).slice(0, 200)); eq(a.d.ok, true); eq(a.d.what, 'all'); eq(a.d.before, T);
+  ok(a.d.ran >= 1 && a.d.ran <= 4, 'a step is small: ' + a.d.ran); eq(a.d.remaining, 10 - a.d.ran);
+  ok(Array.isArray(a.d.lines) && a.d.lines.some(l => l.kind === 'cmd'), 'the step hands its console lines back');
+  eq(a.d.results.length, a.d.ran); ok(!a.d.job, 'not a job');
+  eq(row('SELECT COUNT(*) n FROM bridge_jobs').n, jobs0, 'no job was created');
+  const seen = new Set(a.d.results.map(r => r.id)); let guard = 0, last = a.d;
+  while (last.remaining > 0 && guard++ < 10) {
+    last = (await req('POST', '/sources/step', { what: 'all', before: T })).d;
+    for (const r of last.results) { ok(!seen.has(r.id), 'a source is not swept twice in one walk: ' + r.id); seen.add(r.id); }
+  }
+  eq(last.remaining, 0); eq(seen.size, 10); eq(Array.from(seen).sort(), ten.slice().sort());
+  const over = await req('POST', '/sources/step', { what: 'all', before: T }); eq(over.d.ran, 0); eq(over.d.remaining, 0);
+  const bad = row("SELECT fails, last_error FROM sources WHERE id='miningnews'"); ok(bad.fails >= 1 && /sitemap/.test(bad.last_error), 'a failure is recorded as the tick records it');
+});
+await t('STEP2 the due walk takes only what was due when it began, and a read key cannot sweep', async () => {
+  const T = Date.now();
+  db.prepare('UPDATE sources SET next_due=? WHERE core=0').run(T + 3600000);
+  db.prepare("UPDATE sources SET next_due=1 WHERE id IN ('nationals','capitalbrief')").run();
+  const ro = await req('POST', '/sources/step', { what: 'due', before: T }, 'read-key'); eq(ro.status, 403); eq(ro.d.error, 'read_only');
+  const a = await req('POST', '/sources/step', { what: 'due', before: T });
+  eq(a.d.what, 'due'); eq(a.d.ran, 2); eq(a.d.remaining, 0); eq(a.d.results.map(r => r.id).sort(), ['capitalbrief', 'nationals']);
+  ok(row("SELECT next_due FROM sources WHERE id='nationals'").next_due > T, 'swept sources are no longer due');
+  const b = await req('POST', '/sources/step', { before: T }); eq(b.d.what, 'due'); eq(b.d.ran, 0);
+});
+await t('STEP3 a source with no route to try is passed over once, never the head of every step', async () => {
+  const T = Date.now();
+  db.prepare('UPDATE sources SET last_try=? WHERE core=0').run(T + 1);
+  db.prepare("UPDATE sources SET last_try=0, methods='[]' WHERE id='capitalbrief'").run();
+  db.prepare("UPDATE sources SET last_try=2 WHERE id='nationals'").run();
+  const a = await req('POST', '/sources/step', { what: 'all', before: T, limit: 1 });
+  eq(a.d.ran, 0); eq(a.d.skipped, ['capitalbrief']); eq(a.d.remaining, 1);
+  const b = await req('POST', '/sources/step', { what: 'all', before: T, limit: 1 });
+  eq(b.d.results.map(r => r.id), ['nationals']); eq(b.d.remaining, 0);
+  db.prepare("UPDATE sources SET methods='[\"gnews\"]' WHERE id='capitalbrief'").run();
+  const big = await req('POST', '/sources/step', { what: 'all', before: Date.now() + 5, limit: 99 }); ok(big.d.ran <= 5, 'a step never grows past five: ' + big.d.ran);
+});
 await t('POST /sources/report lets a desktop collector record a render probe', async () => {
   const r = await req('POST', '/sources/report', { id: 'guild_org', ok: true, method: 'render', n: 9, ms: 1200, added: 3 });
   eq(r.d.source.method_ok, 'render');

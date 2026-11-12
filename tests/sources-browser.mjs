@@ -24,6 +24,7 @@ let sources = [
 ];
 const summary = () => { const s = { total: sources.length, enabled: sources.filter(x => x.enabled).length, core: 1, ok: 0, failing: 0, dead: 0, stale: 0, unverified: 0, off: 0, items24: 0, byTier: {}, byMethod: {} }; sources.forEach(x => { s[x.status]++; s.items24 += x.items24; if (x.method_ok && x.enabled) s.byMethod[x.method_ok] = (s.byMethod[x.method_ok] || 0) + 1; }); return s; };
 const calls = [];
+const step = { all: 10, due: 6, left: 0, n: 0, before: 0, delay: 0, fail: null };
 const stub = (url, method, body) => {
   const u = new URL(url); const p = u.pathname; const q = u.searchParams;
   calls.push({ p, method, body, q: Object.fromEntries(q.entries()) });
@@ -35,6 +36,15 @@ const stub = (url, method, body) => {
     { method: 'sitemap', ok: false, n: 0, ms: 300, status: 200, skipped: false, detail: 'sitemap entries are all older than 48h or have no usable title' },
     { method: 'gnews', ok: true, n: 1, ms: 900, status: 200, skipped: false, detail: '', sample: [{ title: 'Nationals unveil regional rail plan', link: 'https://news.google.com/rss/articles/x', date: '' }] },
     { method: 'render', ok: false, n: 0, ms: 0, status: 0, skipped: true, detail: 'render is not configured' }], items: 2, renderConfigured: false };
+  if (p === '/sources/step') {
+    // one step of the sweep the page repeats: four sources a step, the count that waits, the lines of this step
+    if (step.fail) { const f = step.fail; step.fail = null; return { ok: false, error: f, detail: f === 'db_busy' ? 'The database is busy right now.' : 'The worker could not sweep.' }; }
+    if (body.before !== step.before) { step.before = body.before; step.left = body.what === 'all' ? step.all : step.due; step.n = 0; }
+    const take = Math.min(4, step.left); if (!step.stuck) step.left -= take; step.n++;
+    const d = { ok: true, what: body.what === 'all' ? 'all' : 'due', before: body.before, ran: take, succeeded: Math.max(0, take - 1), failed: take ? 1 : 0, items: take * 3, added: take * 2, dead: [], skipped: [], results: [], remaining: step.left,
+      lines: take ? [{ kind: 'cmd', text: 'nationals: wp https://nationals.org.au step ' + step.n }, { kind: 'err', text: 'miningnews: sitemap - HTTP 403' }] : [] };
+    return step.delay ? new Promise(r => setTimeout(() => r(d), step.delay)) : d;
+  }
   if (p === '/sources/sweep') { if (body && body.ids && body.ids.length) return { ok: true, ran: 1, succeeded: 1, failed: 0, items: 2, added: 1, dead: [], results: [{ id: body.ids[0], name: 'The Nationals', ok: true, method: 'wp', items: 2, added: 1, tried: [{ method: 'wp', ok: true, n: 2, ms: 500, status: 200, skipped: false, detail: '' }] }] }; return { ok: true, job: 'j77', note: 'Sweeping in the worker.' }; }
   if (p === '/bridge/job') return { ok: true, id: 'j77', source: 'sources', status: 'done', agent: '', success: true, cursor: 3, result: { ok: true, ran: 50, succeeded: 31 }, lines: [{ id: 1, ts: NOW, kind: 'info', text: 'sweeping 50 sources (due now)' }, { id: 2, ts: NOW, kind: 'cmd', text: 'nationals: wp https://nationals.org.au/wp-json/wp/v2/posts' }, { id: 3, ts: NOW, kind: 'out', text: 'nationals: 2 items via wp (480ms)' }] };
   if (p === '/sources/update') { const s = sources.find(x => x.id === body.id); Object.assign(s, body.patch || body); if (body.enabled === false) s.status = 'off'; if (body.enabled === true) s.status = 'ok'; return { ok: true, source: s }; }
@@ -51,7 +61,7 @@ async function open(role) {
   page.on('pageerror', e => console.log('  [pageerror] ' + e.message.slice(0, 160)));
   await page.addInitScript(({ W, role }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', 'test-key'); if (role) window.AX_ROLE = role; window.confirm = () => true; }, { W, role });
   await page.route(/^https:\/\/(?!newsaus\.)(?!127\.0\.0\.1)[^/]+\//, route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
-  await page.route(W + '/**', async route => { const r = route.request(); let body = null; try { body = r.postDataJSON(); } catch (e) {} await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(stub(r.url(), r.method(), body)) }); });
+  await page.route(W + '/**', async route => { const r = route.request(); let body = null; try { body = r.postDataJSON(); } catch (e) {} await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(await stub(r.url(), r.method(), body)) }); });
   await page.goto('http://127.0.0.1:' + PORT + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof go === 'function' && typeof sourcesInit === 'function', null, { timeout: 15000 });
   await page.evaluate(() => go('sources'));
@@ -89,6 +99,22 @@ await t('the dead line is one sentence until asked; then the banner names the so
   eq(await texts(page, '.src-table .src-name .n'), ['MiningNews.net']);
   await page.selectOption('.src-filters select[aria-label="Status"]', '');
   await page.selectOption('.src-filters select:last-of-type', 'status');
+  await page.waitForFunction(() => document.querySelectorAll('.src-table tbody tr').length === 8);
+});
+/* 12 November 2026: 276 of 481 sources were not delivering and the only way to learn why was one drawer at a time. */
+await t('the banner says why the dark sources fail, by route tried, and a reason narrows the table to them', async () => {
+  await page.selectOption('.src-filters select[aria-label="Status"]', 'dead');
+  await page.waitForSelector('.src-why');
+  const why = await texts(page, '.src-why .src-link');
+  eq(why.slice(0, 2).sort(), ['Google News: Google News has nothing indexed (2)', 'news sitemap: HTTP 403 (2)'], 'the commonest reasons first, counted in sources');
+  ok(why.indexOf('feed: HTTP 404 (1)') >= 0 && why.indexOf('listing page: HTTP 403 (1)') >= 0, JSON.stringify(why));
+  await page.click('.src-why .src-link:has-text("news sitemap: HTTP 403")');
+  eq(await page.inputValue('.src-filters .src-q'), 'sitemap HTTP 403');
+  await page.waitForFunction(() => document.querySelectorAll('.src-table tbody tr').length === 1);
+  await page.selectOption('.src-filters select[aria-label="Status"]', '');
+  await page.waitForFunction(() => document.querySelectorAll('.src-table tbody tr').length === 2);
+  eq((await texts(page, '.src-table .src-name .n')).sort(), ['MiningNews.net', 'The Australian']);
+  await page.fill('.src-filters .src-q', '');
   await page.waitForFunction(() => document.querySelectorAll('.src-table tbody tr').length === 8);
 });
 await t('the table puts what needs attention first, and says which route delivers', async () => {
@@ -180,12 +206,65 @@ await t('Add source needs a name and a way in, then opens the new source', async
   const c = calls.filter(x => x.p === '/sources/add').pop(); eq(c.body.urls, { site: 'colacherald.com.au' }); eq(c.body.issues, ['regional']); eq(c.body.juris, 'vic');
   ok((await texts(page, '.src-table .src-name .n')).indexOf('Colac Herald') >= 0);
 });
-await t('Sweep what is due starts a job and the console tails it', async () => {
+/* 12 November 2026: "Sweep every source" ran as a job after the response and the worker stopped it at about
+   thirty seconds ("SWEEP EVERY SOURCE  FAILED  86 LINES"). The page now repeats a small step and never asks
+   for the whole registry in one request. */
+await t('Sweep what is due runs in steps inside the page, counting as it goes, and never starts a job', async () => {
+  const before = calls.length;
   await page.click('.src-actions button:has-text("Sweep what is due")');
   await page.waitForSelector('.sig-con:has-text("sweep what is due")');
-  await page.waitForSelector('.sig-line.cmd');
-  ok(/nationals: wp/.test(await page.textContent('.sig-line.cmd')));
-  const c = calls.filter(x => x.p === '/sources/sweep').pop(); eq(c.body, { ids: [] });
+  await page.waitForSelector('.sig-line:has-text("6 of 6 swept")');
+  await page.waitForSelector('.sig-con .sig-where:has-text("finished")');
+  const mine = calls.slice(before);
+  const steps = mine.filter(x => x.p === '/sources/step'); eq(steps.length, 2, 'four, then two');
+  eq(steps.map(x => x.body.what), ['due', 'due']); ok(steps[0].body.before > 0 && steps[0].body.before === steps[1].body.before, 'one walk, one starting time');
+  ok(!mine.some(x => x.p === '/sources/sweep' || x.p === '/bridge/run' || x.p === '/bridge/job'), 'no job behind the button');
+  ok(/nationals: wp/.test(await page.textContent('.sig-line.cmd')), 'each step shows what it asked');
+  ok((await texts(page, '.sig-line')).some(x => /4 of 6 swept: 3 delivered, 8 new in the archive/.test(x)), 'the running count');
+  ok(!(await page.$('.src-actions button[disabled]')), 'the buttons come back');
+});
+await t('Sweep every source walks the whole registry, and Stop halts it between steps', async () => {
+  step.delay = 350; step.all = 40; const before = calls.length;
+  await page.click('.src-actions button:has-text("Sweep every source")');
+  await page.waitForSelector('.sig-con:has-text("sweep every source")');
+  await page.waitForSelector('.sig-line:has-text("4 of 40 swept")');
+  ok(await page.$('.src-actions button[disabled]'), 'no second sweep while one runs');
+  await page.click('.sig-con button:has-text("Stop")');
+  await page.waitForSelector('.sig-line:has-text("stopped after")');
+  await page.waitForSelector('.sig-con .sig-where:has-text("finished")');
+  const n = calls.slice(before).filter(x => x.p === '/sources/step').length; ok(n >= 1 && n < 6, 'it stopped long before the registry was done: ' + n + ' steps of 10');
+  ok(calls.slice(before).filter(x => x.p === '/sources/step').every(x => x.body.what === 'all'));
+  step.delay = 0; step.all = 10; const b2 = calls.length;
+  await page.click('.src-actions button:has-text("Sweep every source")');
+  await page.waitForSelector('.sig-line:has-text("10 of 10 swept")');
+  await page.waitForSelector('.sig-line:has-text("done")');
+  eq(calls.slice(b2).filter(x => x.p === '/sources/step').length, 3, 'four, four, two');
+});
+await t('a step the worker refuses is said in words and the buttons come back', async () => {
+  step.fail = 'sources_failed';
+  await page.click('.src-actions button:has-text("Sweep what is due")');
+  await page.waitForSelector('.sig-line.err:has-text("The worker could not sweep.")');
+  await page.waitForSelector('.sig-con .sig-where:has-text("failed")');
+  ok(!(await page.$('.src-actions button[disabled]')), 'the buttons come back after a failure');
+  step.stuck = true;         // the sweeps run but their record is not written, so the same sources come round again
+  await page.click('.src-actions button:has-text("Sweep what is due")');
+  await page.waitForSelector('.sig-line.err:has-text("not recording that it did")');
+  step.stuck = false;
+  ok(calls.filter(x => x.p === '/sources/step').length < 60, 'a walk that cannot end is stopped by the page');
+  step.fail = 'not_found';   // the page published before the worker was deployed
+  await page.click('.src-actions button:has-text("Sweep every source")');
+  await page.waitForSelector('.sig-line.err:has-text("This worker is older than the page")');
+});
+await t('a busy database is waited out and the walk carries on from where it was', async () => {
+  await page.clock.install();
+  step.fail = 'db_busy'; const before = calls.length;
+  await page.click('.src-actions button:has-text("Sweep what is due")');
+  await page.waitForSelector('.sig-line:has-text("the database is busy; waiting 20 seconds")');
+  eq(calls.slice(before).filter(x => x.p === '/sources/step').length, 1, 'it waits, it does not hammer');
+  await page.clock.runFor(21000);
+  await page.waitForSelector('.sig-line:has-text("6 of 6 swept")');
+  await page.waitForSelector('.sig-con .sig-where:has-text("finished")');
+  eq(calls.slice(before).filter(x => x.p === '/sources/step').length, 3, 'the refused step, then four and two');
 });
 if (process.env.SHOT) { await page.click('.src-table tr:has-text("The Australian")'); await page.waitForSelector('.src-drawer:has-text("The Australian")'); await page.screenshot({ path: 'shot-sources.png', fullPage: false }); }
 await page.close();

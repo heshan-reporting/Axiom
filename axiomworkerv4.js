@@ -4653,6 +4653,8 @@ const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'w
 const SOURCE_JURIS = ['au', 'nsw', 'vic', 'qld', 'wa', 'sa', 'tas', 'act', 'nt'];
 const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render', 'public', 'process', 'lexicon', 'lemmy', 'hn', 'forum'];
 const SOURCES_PER_TICK = 50;        // registry sources swept per cron tick (the core is fetched separately)
+const SOURCES_STEP = 4;             // sources one step sweeps inside a request: one round of the pool, so a step ends when its slowest source does
+const SOURCES_STEP_MAX = 5;
 const SOURCE_DEAD_FAILS = 6;        // consecutive failed sweeps before a source is reported dead
 const SOURCE_WINDOW_H = 72;         // dated items older than this are not filed
 const SOURCE_FETCH_MS = 7000;       // per-request abort
@@ -5864,6 +5866,35 @@ async function sourceSweep(env, opts) {
   await log('info', out.succeeded + ' of ' + out.ran + ' delivered, ' + out.items + ' items seen, ' + out.added + ' new in the archive' + (out.dead.length ? ', ' + out.dead.length + ' reported dead' : '') + ' (' + out.ms + 'ms)');
   if (!ids.length) await kvPut(env.AXIOM_KV, 'sources_last_sweep', JSON.stringify({ at: now, ran: out.ran, succeeded: out.succeeded, failed: out.failed, items: out.items, added: out.added, ms: out.ms, all: !!opts.all }), 7 * 86400);
   return out;
+}
+/** One step of a sweep started from the app. A job the worker runs after its response is stopped at
+ *  about thirty seconds, which a registry of hundreds of sources never fits ("Sweep every source"
+ *  failed 86 lines in, 12 November 2026); a step sweeps a few sources inside the request and says how
+ *  many still wait, and the page repeats it. `before` is when the walk began: `all` takes the sources
+ *  not tried since then, `due` the ones that were due then, so a walk ends and never sweeps a source
+ *  twice. A source with no route to try is stamped and named, never left at the head of every step. */
+async function sourcesStep(env, p) {
+  p = p || {};
+  if (!(await ensureSources(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  const now = Date.now();
+  const all = p.what === 'all';
+  const before = Math.min(Math.max(0, Math.floor(Number(p.before) || 0)) || now, now);
+  const limit = Math.min(Math.max(parseInt(p.limit, 10) || SOURCES_STEP, 1), SOURCES_STEP_MAX);
+  const where = all ? 'enabled=1 AND core=0 AND COALESCE(last_try,0)<?' : 'enabled=1 AND core=0 AND COALESCE(next_due,0)<=?';
+  const order = all ? 'COALESCE(last_try,0), id' : 'COALESCE(next_due,0), id';
+  const rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE ' + where + ' ORDER BY ' + order + ' LIMIT ?').bind(before, limit).all()).results || [];
+  const srcs = rows.map(sourceRow);
+  const skipped = srcs.filter(s => !s.methods.length).map(s => s.id);
+  for (const id of skipped) { try { await env.MIND_DB.prepare('UPDATE sources SET last_try=?, next_due=?, last_error=? WHERE id=?').bind(now, now + 86400000, 'no route to try: add an address in the Sources view', id).run(); } catch (e) {} }
+  const ids = srcs.filter(s => s.methods.length).map(s => s.id);
+  const lines = [];
+  // the page writes its own running count, so each step's opening and closing lines are left out
+  const log = async (kind, text) => { if (kind !== 'info' && lines.length < 120) lines.push({ kind: String(kind || 'out'), text: String(text || '').slice(0, 300) }); };
+  let out = { ok: true, ran: 0, succeeded: 0, failed: 0, items: 0, added: 0, dead: [], results: [] };
+  if (ids.length) out = await sourceSweep(env, { ids, log });
+  if (out && out.ok === false) return out;
+  const left = await env.MIND_DB.prepare('SELECT COUNT(*) n FROM sources WHERE ' + where).bind(before).first();
+  return { ok: true, what: all ? 'all' : 'due', before, ran: out.ran, succeeded: out.succeeded, failed: out.failed, items: out.items, added: out.added, dead: out.dead || [], results: out.results || [], skipped, remaining: (left && left.n) || 0, lines, ms: Date.now() - now };
 }
 /** buildAllNews reports how each core feed fared; mirror that into the
  *  registry so one table shows the whole estate. Failures are logged; a
@@ -10060,7 +10091,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-12.studio-p64';
+const AXIOM_BUILD = '2026-11-12.studio-p65';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -20682,6 +20713,7 @@ const AXIOM_WORKER = {
     //    POST /sources/add {id?,name,tier,juris,issues,urls:{rss,wp,json,sitemap,home,site,gnews,podcast},methods?,schedule?,note?}   (full)
     //    POST /sources/update {id, ...patch}  POST /sources/delete {id}  POST /sources/import {sources:[...]}   (full)
     //    POST /sources/sweep {ids?|all}                    a few ids run inline; more become a job the console tails (full)
+    //    POST /sources/step {what: due|all, before, limit}  one step of a walk the page repeats: a few sources inside the request, and how many wait (full)
     if (path === '/sources' || path.startsWith('/sources/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let sb = {}; if (req.method === 'POST') { try { sb = await req.json(); } catch (e) { sb = {}; } }
@@ -20777,6 +20809,7 @@ const AXIOM_WORKER = {
           await env.MIND_DB.batch(sourceStmts(env, run, parseInt(sb.added, 10) || 0, Date.now()));
           return jsonResp({ ok: true, source: await sourceGet(env, id) });
         }
+        if (path === '/sources/step') { const st = await sourcesStep(env, sb); return jsonResp(st, st.ok === false ? 503 : 200); }
         if (path === '/sources/sweep') {
           const ids = (Array.isArray(sb.ids) ? sb.ids : (sb.id ? [sb.id] : [])).map(sourceIdClean).filter(Boolean);
           if (ids.length && ids.length <= 5) return jsonResp(await sourceSweep(env, { ids, detail: true }));

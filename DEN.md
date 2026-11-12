@@ -1092,3 +1092,21 @@ curl -sS -X POST -H "X-Axiom-Key: $AXIOM_KEY" https://newsaus.heshan-998.workers
 
 `{"ok":true,"made":["arc_items_kind_ts"],"ms":...}` is the answer wanted. `db_busy` means the database was mid-scan:
 wait a minute and ask again.
+
+
+### 9.8 A sweep from the app that finishes (12 November 2026; build `2026-11-12.studio-p65`, `sources.js?v=r2`)
+
+Seen live: **Sweep every source** in the Sources view ended "FAILED, 86 lines" with `worker_stopped`. The button
+started a job the worker ran after its response, and such a job is stopped at about thirty seconds; the registry holds
+481 sources. What was read in those seconds stayed; the rest waited for the tick, as they would have anyway.
+
+- The two buttons now repeat `POST /sources/step`: four sources inside the request, a running count, **Stop**. A walk
+  of the whole registry takes minutes, not seconds, because a failing source walks every route it has before it gives
+  up (eight seconds a route); the console says where it is the whole time.
+- The same view showed 205 sources delivering and 276 not (173 failing, 103 stopped), three of the new methods among
+  the delivering (forum feed 2, Hacker News 1, lexicon search 1). **Why the 276 fail was not visible from the sandbox.**
+  The banner over them now groups their last failures by route tried, counted in sources; a reason narrows the table to
+  the sources that say it. That line is the evidence the next fix needs: a systemic cause (a route timing out
+  everywhere, a site answering 403 to the worker's network) is one fix, a wrong address is a row to edit or switch off.
+- Since p62 a stopped source is asked once a day, so leaving them on costs little; switching off what is gone is the
+  owner's call, source by source.
