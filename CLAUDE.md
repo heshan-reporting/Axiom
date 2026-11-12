@@ -236,7 +236,9 @@ verifies each, and what was asked for and not built.
     became emerging, first-seen registered accounts and register entities (fourteen days), an issue at 2.5 times its
     baseline, a registered account's post at four times its usual, and **collection gaps** - a channel the desk
     relies on that delivered nothing, with why (not granted, switched off, paused at a verification, no collector).
-    Gaps lead the list: an empty table is never read as a quiet day.
+    Gaps lead the list, and an empty table is never read as a quiet day, **when the desk's `showGaps` is on**: since
+    decision D10 (12 November 2026, below and `DEN.md` s.11) the sixth check is off by default and nothing on screen
+    says what was not collected.
   - **The brief.** `POST /den/brief {desk, hours, pins, replace}` (full) is **one model call** (a second only when
     the first answer was not JSON; none after a budget or account refusal), answered through `denHeartbeat` (the
     request keeps its connection with a space every fifteen seconds, because a job run after the response would be
@@ -287,14 +289,16 @@ verifies each, and what was asked for and not built.
     `503 db_busy` in words on every Den route (`denBusy`, `DEN_BUSY`), never swallowed into an empty strip, and the
     page's `get()` asks again by itself twice (2.5 s, 6 s) and says so once. **Not measured on the live database**:
     the sandbox cannot reach it, so the reduction is reasoned from the queries, not timed.
-  - Harnesses: `tests/den-worker.mjs` (24), `tests/den-browser.mjs` (50, with axe at 1366, 1440 and 1920 for a
-    full and a read-only key; the last fifteen are the guided run, each opened with `{ guided: true }`),
+  - Harnesses: `tests/den-worker.mjs` (24), `tests/den-browser.mjs` (62, with axe at 1366, 1440 and 1920 for a
+    full and a read-only key; its main journey turns `showGaps` on, fifteen cases are the guided run, each opened
+    with `{ guided: true }`, and the last twelve are decision D10 with the option as it ships),
     `tests/den-inject-browser.mjs` (76: every read failing, answering a gateway page,
     answering the wrong shape, hanging and dropping, and every write failing and dropping, one at a time, the
     board, the strip and a decision in Guided among them), the
     recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
-    fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
-    1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
+    fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves the default
+    screen (Guided with the card, in dark and with triage done; the table; each other tab; Collection closed and
+    opened) at 1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
@@ -394,6 +398,48 @@ verifies each, and what was asked for and not built.
   `/den/collection` for the tiles' seven-day bars, the job console docked in the shell and dark in both themes,
   proposals drawn as cards, an index and switches in Options, and a Den section in `docs/styleguide.html`.
   Merged with main as page `?v=r49`, build `studio-p64`. `DEN.md` s.10 lists what was decided against and why.
+
+- **The guided run, and only what is working (12 November 2026; build `2026-11-12.studio-p65`, pages `den.js?v=r50`
+  to `?v=r53`, `den.css?v=r52`; `DEN.md` s.11, `prompts/annes-den-flow.md`). Decision D10, the owner: "A guided run
+  but do not show facebook and instagram not working or not connected.. just show only the stuff that it working".**
+  (The design notes called it D9; that number was taken by monitoring exports.) **Publish the page before or with
+  worker p65, never after it:** page r49 on worker p65 would say six checks ran and every channel delivered.
+  - **The option.** `options.showGaps` on a desk (`DEN_OPTIONS`, strict boolean, off for every desk; Options,
+    "Channels on screen"). Off: `denMissed` reports five checks (`checks: 5`; the `relied` figure is still counted
+    and cached, only the gap signals are gated), `denSys` / `denEvidence` / the `no_evidence` sentence say nothing
+    of a channel that was not read, and the page draws no reason for an absent figure (`gaps` in `docs/den.js`: an
+    absent figure is "-" or left out, the Facebook column only when a story carries `fb`). On: everything is as
+    releases 6 and 7 and s.10 describe, the main journey of `tests/den-browser.mjs` runs that way, and the rule
+    "gaps lead the list" holds again. Text written before p65 is not rewritten; Draft again is the remedy.
+  - **Worker, all additive.** On `/den/missed` and `/den/board?missed=1`: `checks`, `issue` on a spike, `issues` on
+    an emerging narrative, and `run {day, progress, brief}` (`null` when `to` is set) - `progress {total, kept,
+    aside, left}` is counted once in `denBoard` (a folded story is one decision), `brief {id, day, status,
+    revision, edited, written, cited, open, filed_by, filed_at}` with `written` the figure `brief_empty` tests
+    against 200, `cited` the row ids the sections cite and `open` the signal keys the brief neither cites nor names
+    (`denUncovered`, the same test filing uses). `copies: [ids]` (at most 40) on `POST /den/aside` and `/den/pin`:
+    a folded story is set aside, or cleared, in one request, with the mute key on the head only. On each channel
+    of `/den/collection`: `working` (`denChWorking`: delivered in seven days, and its collector neither switched
+    off nor paused), `howOn` (how it is read, naming only routes that are set) and `setup` (what switches it on).
+  - **The page.** A fresh profile opens Today in Guided (`ax_den_view`: `table` and `cards` are honoured, anything
+    else or nothing is `guided`): the rail (`nav.den-rail`, `#den-step-triage|write|file`, fed by `run` on every
+    tab), the header's one action (`#den-next`), the card (`#den-focus`; P, X, O, J from the card, K and U
+    anywhere in Guided; X sets aside at once as "not relevant"), "Up next", the tray (kept rows under the desk's
+    section titles, the signals; with a brief, "in the brief" / "not in the brief" by its citations and each
+    signal by `run.brief.open`), done states (`.den-done`). Rows left for later are `ax_den_later_<desk>_<day>`
+    (this computer only), a declined mute offer `ax_den_offer_no_<desk>`. The coverage line `div.den-cover` ("In
+    this window: News 8 X 2") is drawn in all three views. Collection lists only `working` channels, each
+    signed-in one with **Switch off**; everything else is inside one closed `details#den-more`, "Add or switch on a
+    channel" (channels to add, the switches as before, "To finish setting up" read from `/den/watch` on first
+    opening, "Recall, by channel", what is not built). The Brief's foot is `#den-file` ("File the brief") under a
+    readiness line; the File step, "Next: file the brief" and `AXUI.goto('den', {tab: 'brief', step: 'file'})`
+    move the focus there when today's brief holds 200 characters, and onto `#den-older` when the brief shown is
+    another day's.
+  - **Tests.** `tests/den-worker.mjs` DK21 to DK24; `open(w, key, { guided: true })` in `tests/den-fixture.mjs`
+    opens a fresh profile (without it the fixture chooses Table, so the older cases stay tests of the table);
+    `tests/den-browser.mjs` 62; `tests/den-inject-browser.mjs` 76; `node tests/run.mjs check` parses `den.js`. The
+    D10 case reads the text and every title and label drawn on every tab against the decision's phrase list
+    (`D10` in `tests/den-browser.mjs`); **a new sentence on the default screen that says what was not collected,
+    or why, fails it - put such a sentence inside the disclosure or behind `gaps`.**
 
 ## The research agent
 

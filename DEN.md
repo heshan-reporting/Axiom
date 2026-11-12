@@ -799,6 +799,9 @@ the agency holds, only a source a person has cleared, never a paywall worked aro
   covers reading it for monitoring. Whether a subscription's terms or the agency's copyright licence do cover that is
   for that person to know: the software records the answer.
 - **D9 Monitoring exports.** The importer is built; using it is the analyst's call.
+- **D10 Only what is working (the owner, 12 November 2026, after this hand-over).** By default the Den shows the
+  channels with rows for a desk and says nothing of the ones without; the reasons are inside Collection's one
+  disclosure, and a desk's `showGaps` option brings everything back. Section 11.
 
 ### 7.4 The owner's steps, in order
 
@@ -1141,3 +1144,163 @@ under "Get it out" rather than a menu: each is one press. Section order has no d
 **Not verifiable here.** The page was seen only on the fixture's invented rows. `:has()` carries the theme switch:
 it needs a browser from 2023 or later (Chrome 105, Safari 15.4, Firefox 121); an older one shows the Den's cards
 light inside the dark shell.
+
+## 11. The guided run, and only what is working (12 November 2026; worker build `2026-11-12.studio-p65`, pages `den.js?v=r50` to `?v=r53`, `den.css?v=r52`)
+
+**The decision (D10).** The owner was shown three directions for the flow of the page (`prompts/annes-den-flow.md`:
+a guided run, a command desk, a briefing document) and chose the first, with one condition. The owner's words, in
+full: "A guided run but do not show facebook and instagram not working or not connected.. just show only the stuff
+that it working". This is recorded as **D10**. A note on the number: the design notes and the first draft of the plan
+called it D9, but D9 was already taken (monitoring exports, 0.7 and 7.3), so it is D10 in this file, in `CLAUDE.md`
+and in every code comment.
+
+**What it means, as built.** A desk has one more option, `showGaps` (`options.showGaps`, a strict boolean, `false`
+for every desk and for a new one; no migration). Off, the Den shows the channels that have rows for the desk and says
+nothing of the ones that do not: no "delivered nothing", no "not granted", no "no collector", no chip, tile or title
+that explains an absent figure. On, every string and layout is as sections 6 and 10 describe. The switch is in
+Options, "Channels on screen": "Also show the channels with no rows". Saving it reads the strip and the board again
+at once.
+
+**What is hidden by default, and where each is still reachable.** Everything in the right-hand column is one press
+away for a person who is setting a channel up; nothing was deleted.
+
+| Hidden while `showGaps` is off | Where it is now |
+|---|---|
+| The strip's sixth check: a channel the desk relies on that delivered nothing, with why. The worker does not run it (`checks: 5`); the strip's empty state reads "None of the five checks found anything ..." and never "every channel this desk relies on delivered" | Options, the switch (the sixth check, gaps first, the folded "N not collected" mark) |
+| Today: "See what was collected, and why not" (now "Open Collection"); "no counts are held for these posts", "no counts held", "no Facebook reach held" and the titles that explained a "-"; "Nothing on this desk was collected ... not the same as a quiet day"; "No channel delivered a row"; "Comment text on Facebook and Instagram is collected by no layer"; the Facebook column and figure when no story on the board carries the figure | Options, the switch |
+| Watch: a registered account's `last_error` and "not yet" (now "-"); "No collector reads TikTok ..." (now "An account on TikTok is kept as a note.") | Collection, the disclosure, "To finish setting up" (each account or hashtag that failed or has not read, with its reason and a link to Watch) |
+| Collection: the tiles and rows of channels with no rows in seven days, switched off, or paused at a verification; "nothing in the last day", "switched off", "paused at a verification"; "Cannot reach: ..."; the "No Mac collector is connected" sentence; the Signed-in collection panel; a watched page's "failed", "not read yet" and "switched off" chips; the sentences on what is not built | Collection, the one disclosure **"Add or switch on a channel"** (`details#den-more`, closed by default): "Channels to add" (what switches each on first, then how it is read, what it cannot reach, its state now), the collector sentence, "Signed-in collection" exactly as before, "To finish setting up", "Recall, by channel", the not-built sentences |
+| Recall against the reports: a channel that held none of the links, and the list of misses | The disclosure, "Recall, by channel". The total line and the channels that held a link stay on the page |
+| The draft: the rule that a brief must say which channels were not read, the "SAY PLAINLY" lines and the empty group headers in the evidence, "no counts held" on a post, the old `no_evidence` sentence (`denSys`, `denEvidence`, `denBriefDraft`) | Options, the switch: on, a draft is written as before and the filing check lists the gap |
+| The view's note in `docs/index.html`: "Collection says which channels read, and why not" (now "Collection shows the channels delivering for this desk and where to add one") | - |
+
+**What is never hidden.**
+- The answer to something a person just did: a refused save, a failed keep, a job that could not run, "Stopped. It is
+  listed under Add or switch on a channel." D10 hides standing statements, not results.
+- The kill switch. Every listed channel that is read through a signed-in session (X, Facebook, Instagram, YouTube,
+  Reddit) has **Switch off** beside Collect now, on the default page. Off, the channel leaves the list and is
+  switched on again inside the disclosure.
+- What is there. A new line under Today's toolbar, in all three views and whatever the option: "In this window: News
+  8 X 2" (`div.den-cover`, from the board's own `byChannel`, largest first, not drawn when the window is empty).
+- A narrative whose stance has not been judged still shows "not read yet": that is about a judgment, not a channel.
+  A poll with no sponsor still says "sponsor not stated": that is about a source.
+
+**Which earlier rules it overrides by default.** Two rules of section 10's "What still holds" ("a missing count says
+why", and "an empty table is never read as a quiet day" as far as that was said by naming what was not collected)
+and section 6's "gaps lead the list". With `showGaps` on they hold again exactly as written, in Guided too: the
+strip is then drawn whole above the card, gaps first, each with its reason and "Open Collection", and Collection has
+no disclosure. What an empty desk says by default is neutral and true: "Nothing to decide yet. No story or post on
+this desk's issues is in this window. A brief can still be written by hand." It does not say the day was quiet.
+
+**Text written before the decision is not rewritten.** A draft or a filed brief from before build p65 keeps any "was
+not read" sentence it has. "Draft again" brings today's draft into line; a filed brief is a record and stays.
+
+**Definitions (one place decides each).**
+- **Decidable row**: one entry of the board's `media`, `social` or `actors` as listed (after folding, after the
+  150 / 90 / 60 caps). Narratives and Upcoming are not counted.
+- **Decided**: kept (pinned) or set aside. "Decide later" is not a decision.
+- **Progress**, counted once in the worker (`denBoard`, `progress {total, kept, aside, left}`): `kept` is the pinned
+  entries of the three lists, `left` the entries not pinned, `aside` the set-aside decisions in row units (a post
+  counts one; news counts one per fold key, and only when no live story still has that key), `total` their sum.
+- **Listed channel** (Collection's default tiles and table): `delivered.d7 > 0` for this desk and its signed-in
+  collector neither switched off nor paused at a verification (`denChWorking`, sent as `working`). A channel whose
+  Mac is simply not connected now stays listed, so it does not leave and return each night; nothing on a listed
+  channel says "delivering" unless it delivered in the last day, otherwise it shows its seven-day count.
+- **In this window** (the coverage line): channels with at least one row on the board.
+
+**The guided run.** A fresh profile opens Today in **Guided** (`ax_den_view`: `table` and `cards` are kept once
+chosen; anything else is Guided). The flow prompt drew four steps beginning with "Check coverage"; that step is
+what D10 hides, so the run has three.
+- **The rail** (`nav.den-rail`, "Today's run", above the strip, outside the tabs): Triage ("4 of 9 decided", ", N for
+  later", "done: K kept, A set aside", "nothing to decide"), Write ("not started", "draft", "edited", ", N kept rows
+  not in it"), File ("nothing to file yet" under 200 characters, "not filed", "filed by NAME, TIME"). A step opens
+  its area and never spends. Its figures come from `run` on the strip's answer, so they are there on every tab and
+  for the desk they were counted for.
+- **The header's one action** (`#den-next`): one step on from where the person is ("Next: write the brief, N not
+  decided", "Next: read the draft", "Next: file the brief", "Back to triage, N left", "Next: triage, N left", "Filed
+  today"; "Open the brief" for a read-only key). It opens an area; it never starts a draft.
+- **The card** (`#den-focus`): one row with what is held about it and nothing about what is not, then Keep for the
+  report, Set aside, Another reason (duplicate, foreign, old news, other), Open the source, Decide later, and
+  "Leave the other N for later". One decision is one request; a failed one changes nothing and is said. Undo is
+  offered for the last decision. A read-only key gets the card, its source and "Next row", and sends no write.
+- **The queue**: rows a signal is about first (an outlier post, a first-seen account's post), then rows tied to a
+  signal by issue or name, then the rest; inside each by reach, outlets and time. Rows left for later go last
+  (`ax_den_later_<desk>_<day>`, this computer only, never sent). "Up next" lists eight and any can be brought forward.
+- **The tray**: kept rows under the desk's own section titles, each with Take out, and the strip's signals with
+  whether a kept row carries each. Once today's brief exists the tray follows it: a kept row reads "in the brief" or
+  "not in the brief" (by the brief's citations), and each signal reads "In the brief" or "Not in the brief yet" by
+  the worker's own filing check (`run.brief.open`), so the tray and the filing dialog cannot disagree.
+- **Done states**: every row decided, an empty window, or only rows left for later; each has one button that opens
+  the brief and spends nothing.
+- **Keys**, from the card only: P keep, X set aside, O or Enter open the source, J decide later; K brings back the
+  row last left and U undoes, anywhere in Guided. One key typed during a decision is held for the next card.
+- **The mute offer** is a status line under the card, never an alert: "Mute it on this desk" or "Not now", and Not
+  now is remembered (`ax_den_offer_no_<desk>`).
+- **Two deliberate changes, in Guided only.** X sets a row aside in one press, as "not relevant" (the table still
+  asks for the reason first). Setting aside a folded story is one decision for every copy, in one request:
+  `copies: [ids]` on `POST /den/aside` (and on a clear through either route), so a story is never half set aside
+  and counts once toward the mute offer.
+- Table and Cards are as section 10 left them, with the rail and the coverage line added.
+
+**Write and File.** The brief is steps 2 and 3. The two bars at its foot are one region, `#den-file` ("File the
+brief"), under a line that says where it stands ("4 of 10 sections written. 1 sentence without evidence. 2 kept rows
+not in it. Unsaved changes."). The rail's third step, the header's "Next: file the brief" and
+`AXUI.goto('den', {tab: 'brief', step: 'file'})` put the focus on Mark as filed when today's brief holds 200
+characters or more, and move nothing otherwise. `GET /den/brief` answers the latest brief of any day, so an older one
+is said to be older (`#den-older`: "This is the brief for DAY. Today's has not been started.", with Draft the brief
+and Write it by hand); the File step lands on that notice, never on an older brief's Mark as filed.
+
+**The worker (build p65), all additive.** `showGaps` on a desk; on `/den/missed` and `/den/board?missed=1`:
+`checks` (5 or 6), `issue` on a spike, `issues` on an emerging narrative, and `run {day, progress, brief {id, day,
+status, revision, edited, written, cited, open, filed_by, filed_at}}` (`null` for a past window); `progress` on
+`/den/board`; `copies` on `/den/aside` and `/den/pin`; `working`, `howOn` and `setup` on each channel of
+`/den/collection`. The slow figure behind the sixth check is still counted and cached whatever the option, so
+switching it on reads from the cache. No route was removed and no field changed its meaning.
+
+**Release order.** Publish the page before or with worker p65, never after it: page r49 on worker p65 would say six
+checks ran and every channel delivered.
+
+**Proved here.** `tests/den-worker.mjs` 24 (DK21 the option, DK22 what follows it, DK23 `run`, DK24 `copies`; DK6,
+DK12, DK15 and DK19 changed to assert the default first and the gap with the option on), `tests/den-public-worker.mjs`
+12 unchanged, `tests/den-browser.mjs` 62, `tests/den-inject-browser.mjs` 76, `tests/studio-tokens-test.mjs` 4, `node
+tests/run.mjs check` 27 (it now parses `den.js`). In the browser harness the main journey turns `showGaps` on,
+because it asserts gaps; fifteen cases are the guided run on fresh profiles; twelve are D10 with the option as it
+ships. One of those reads every tab of a desk with rows and of an empty desk, in Guided, Table and Cards, and fails
+if the text that is drawn, or the title or label of anything drawn, matches
+`delivered nothing|not collected|not granted|not connected|No Mac collector|no collector|switched off|paused|not
+read|Cannot reach|refuses|collected by no layer|no Facebook reach|why not|nothing in the last day|no counts|was
+collected|not the same as a quiet day`; the Collection case proves the check can see, by reading the opened
+disclosure with it.
+The last is three whole-page gates on the default screen: a read-only key has no control that writes on any tab or
+inside the opened disclosure and sends no write; every control is named and nothing overflows; axe finds nothing
+serious or critical at 1366, 1440 and 1920 for a full and a read-only key, with Collection opened and Options also in
+dark. **Tests changed because the page did**: the cases that assert gaps turn the option on first; "every channel at
+a glance" became "every delivering channel"; Collect now for Bluesky and the switches are pressed inside the
+disclosure; the tray's mark for an uncited kept row is read as "not in the brief". No assertion was weakened.
+`tests/den-shots.mjs` now shoots the default screen (Guided with the card, in dark, and with triage done; the table;
+Brief with the File region; Watch; Collection closed and opened; Options with the switch) at 1366 x 768 and 1920 x
+1080, and every picture was looked at. The same screens with the option on are `01-today-gaps-on` and
+`02-collection-gaps-on` from the browser harness run with `SHOT=1`.
+
+**Where this differs from the plan, and why.**
+- A kept row the brief does not cite reads **"not in the brief"**, not "kept after the draft" (page `den.js?v=r53`).
+  The page knows what the brief cites; it does not know when a row was kept, and a draft is not bound to cite every
+  kept row, so the first wording was false for a row kept before a draft that left it out.
+- "To finish setting up" lists registered accounts, hashtags and watched pages. It lists no campaign counter:
+  `GET /social/petitions/counters` says nothing of a single counter's read, and the worker was not changed for it.
+- Parliamentary record, Hansard and the counters have no Collect now while the option is off: they have no collection
+  job, and the button could only answer `unknown_channel`.
+
+**One open point for the owner.** The disclosure's name is fixed by the decision as "Add or switch on a channel". A
+channel that is switched on and has no rows for the desk is therefore switched *off* from inside a disclosure whose
+name says "on". The kill switch for everything on screen is on the default page, so nothing listed is ever more than
+one press from off; if the name should also say "off", it is one string.
+
+**Left as it is, and worth a look.** Three standing phrases are not about a channel and were not in the decision's
+list, so they stay: the Interactions tile's "no read from yesterday to compare", a spike's "Not yet acknowledged",
+and a narrative's "not read yet". Subscriber outlets ("headlines only") and the job console are unchanged.
+
+**Not verifiable here.** Everything was seen on the fixture's invented rows with a stub model: no real draft was
+written under the new rule for the model ("write about what the evidence holds"), so what a real draft says about a
+thin window is unread. The live `/den/collection` was not seen: which channels are "listed" on the real desks
+depends on what each delivered in seven days.

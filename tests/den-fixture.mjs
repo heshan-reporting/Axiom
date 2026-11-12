@@ -12,6 +12,7 @@ const KEYS = { 'full-key': { n: 'Anne', r: 'full' }, 'read-key': { n: 'Reader', 
 const freePort = () => new Promise(r => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const up = port => new Promise(r => { const tryIt = n => { const c = net.connect(port, '127.0.0.1'); c.on('connect', () => { c.destroy(); r(true); }); c.on('error', () => (n > 60 ? r(false) : setTimeout(() => tryIt(n + 1), 120))); }; tryIt(0); });
 const PORT = await freePort(); const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1', '--directory', DOCS], { stdio: 'ignore' }); await up(PORT);
+process.on('exit', () => { try { server.kill(); } catch (e) {} });   // however the script ends (den-shots exits by itself, a throwaway script may crash), the file server goes with it
 export const SHOT = process.env.SHOT === '1'; export const SHOTS = new URL('./shots/den/', import.meta.url).pathname; if (SHOT) fs.mkdirSync(SHOTS, { recursive: true });
 
 let seq = 0;

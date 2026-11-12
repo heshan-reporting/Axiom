@@ -374,7 +374,7 @@
       <div class="den-tray" role="group" aria-label="Today's report">
         <div class="den-traybox" role="group" aria-labelledby="den-fill-h"><h3 id="den-fill-h">Today's report is filling</h3>
           ${groups.length ? groups.map(g => html`<div key=${g.key} class="den-trayg"><h4>${g.title}</h4>${g.note ? html`<p class="den-mono">${g.note}</p>` : null}<ul>${g.rows.map(x => html`<li key=${x.r.id}><span class="t">${headOf(x)}</span>
-            ${brief ? html`<span class=${'den-chip ' + (inBrief(x) ? 'pos' : 'warn')}>${inBrief(x) ? 'in the brief' : 'kept after the draft'}</span>` : null}${canWrite ? html`<button type="button" class="den-link" disabled=${busy} aria-label=${'Take out of the report: ' + headOf(x)} onClick=${() => takeOut(x)}>Take out</button>` : null}</li>`)}</ul></div>`)
+            ${brief ? html`<span class=${'den-chip ' + (inBrief(x) ? 'pos' : 'warn')}>${inBrief(x) ? 'in the brief' : 'not in the brief'}</span>` : null}${canWrite ? html`<button type="button" class="den-link" disabled=${busy} aria-label=${'Take out of the report: ' + headOf(x)} onClick=${() => takeOut(x)}>Take out</button>` : null}</li>`)}</ul></div>`)
             : html`<p class="den-quiet">Nothing is kept yet. A kept row is listed here, under its section of the report.</p>`}
           ${!brief ? html`<p class="den-mono">${p.kept} kept, ${p.aside} set aside. A draft is asked to cover the kept rows it reads: up to 30 stories, 30 posts and 20 actors' posts, kept rows first.${beyond ? ' ' + rowsN(beyond, true) + ' beyond that.' : ''}</p>`
             : filed ? html`<p class="den-mono">Today's brief is filed. Reopen it there to change it.</p>`

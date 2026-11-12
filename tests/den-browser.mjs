@@ -5,8 +5,10 @@
  *   regenerate a section, see the uncited warning, a conflict with another person, mark as filed, copy and download;
  *   then the keyboard, the Watch tab, Options, a read-only key, the empty and error states, a paused platform, a dropped
  *   connection mid-draft, and a reload with unsaved edits.
- *   The journey above is the table's: the fixture chooses Table for it. The guided run (decision D10), which a fresh
- *   profile opens in, has the fifteen cases at the end, each in its own world.
+ *   The journey above is the table's: the fixture chooses Table for it, and it turns the desk's showGaps on, because it
+ *   asserts gaps. The guided run (decision D10), which a fresh profile opens in, has fifteen cases after it, each in its
+ *   own world; the last twelve are D10 on the page with the option as it ships: nothing on screen says what was not
+ *   collected, Collection's one disclosure, the Options switch, Write and File, and the three whole-page gates.
  * Run: node --experimental-sqlite tests/den-browser.mjs   (SHOT=1 saves screenshots to tests/shots/den/) */
 import fs from 'node:fs';
 import { world, open, browser, t, ok, eq, txt, all, tab, desk, toast, shot, panel, finish, H, D, NOW } from './den-fixture.mjs';
@@ -514,7 +516,7 @@ await t('Guided: the three done states, and their button opens Brief without a m
   ok(await q.locator('.den-done').getByRole('button', { name: 'Go through the ' + N + ' left for later', exact: true }).isVisible()); await main(q).click(); await q.waitForSelector('#den-tab-brief[aria-selected="true"]'); await q.waitForSelector('#den-tabpanel .den-state');
   ok(/No brief has been started for this window/.test(await txt(q, '#den-tabpanel'))); eq([wl.calls.length, gPosts(q)], [0, []]); await gClean(q); await q.context().close();
 });
-await t('Guided: the tray follows the brief - in the brief, kept after the draft, each signal as the filing check reads it, and filed', async () => {
+await t('Guided: the tray follows the brief - in the brief, not in the brief, each signal as the filing check reads it, and filed', async () => {
   const wg = await world(); const b = await gBoard(wg); const levy = gRow(b, LEVY); await wg.F('POST', '/den/pin', { desk: 'aep_au', item: levy.id }); eq((await wg.F('POST', '/den/brief', { desk: 'aep_au' })).status, 200); eq(wg.calls.length, 1);
   const rb = (await gBoard(wg)).missed.run.brief; ok(rb && rb.status === 'draft' && rb.cited.indexOf(levy.id) >= 0 && rb.written >= 200 && rb.open.length > 0, 'the draft cites the kept story and leaves a signal open: ' + JSON.stringify(rb));
   const p = await open(wg, 'full-key', { guided: true }); const box = () => txt(p, '.den-traybox');
@@ -523,9 +525,9 @@ await t('Guided: the tray follows the brief - in the brief, kept after the draft
   // each signal reads as the worker's own filing check does
   const sig = await p.$$eval('#den-tray-signals > li', li => li.map(x => [x.querySelector('.den-t').textContent, /Not in the brief yet/.test(x.textContent) ? 'open' : /In the brief/.test(x.textContent) ? 'in' : '?']));
   eq(sig, b.missed.signals.map(s => [s.title, rb.open.indexOf(s.key) >= 0 ? 'open' : 'in'])); ok(sig.some(s => /Sentinel spike/.test(s[0]) && s[1] === 'open'), JSON.stringify(sig)); eq(await p.locator('#den-tray-signals button', { hasText: 'Bring forward' }).count(), 0);
-  // a row kept after the draft
+  // a row kept after the draft: the page knows only that the brief does not cite it, and says that
   await gBring(p, NOISY + 1); await gBtn(p, 'Keep for the report').click(); await gMoved(p, NOISY + 1);
-  ok(/Noisy outlet on the gas export tax 1 ?kept after the draft/.test(await box()) && /Harbour levy divides the Senate ?in the brief/.test(await box()), await box());
+  ok(/Noisy outlet on the gas export tax 1 ?not in the brief/.test(await box()) && /Harbour levy divides the Senate ?in the brief/.test(await box()), await box());
   ok(/1 kept row is not in the brief\. Draft again or regenerate a section there \(each is one model call, stated there\), or write them in\./.test(await box()), await box());
   await gRail(p, 'write', 'Step 2, Write: draft, 1 kept row not in it'); eq(await txt(p, '#den-next'), 'Next: read the draft');
   await p.locator('.den-tray').getByRole('button', { name: 'Open the brief', exact: true }).click(); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); await p.waitForSelector('.den-sec[data-section="summary"] textarea'); eq(wg.calls.length, 1, 'opening the brief asked a model');
@@ -640,6 +642,240 @@ await t('Guided passes axe, names every control and overflows nowhere at 1366, 1
   eq([await p.locator('.den-rail .den-stepb').count(), await p.locator('.den-trayg li').count(), await p.locator('.den-last button').count(), await p.locator('.den-nextb').count() > 0], [3, 1, 1, true]); await look('the card');
   await p.locator('.den-under button').click(); await p.waitForSelector('.den-guide .den-done'); eq(await gCard(p).count(), 0); await look('a done state');
   eq(bad, [], 'Guided'); await p.setViewportSize({ width: 1440, height: 900 }); await gClean(p); await p.context().close();
+});
+
+/* ---- decision D10 on the page (12 November 2026; DEN.md s.11): by default the Den shows what is working and says nothing
+ * of what is not. Every case is its own world with the option as it ships (showGaps off). What is hidden is one press
+ * away, inside Collection's one disclosure, and is asserted there. ---- */
+const D10 = /delivered nothing|not collected|not granted|not connected|No Mac collector|no collector|switched off|paused|not read|Cannot reach|refuses|collected by no layer|no Facebook reach|why not|nothing in the last day|no counts|was collected|not the same as a quiet day/i;
+// what a person can see or be told of the Den: its text as drawn (a closed disclosure and a hidden panel are not drawn), and the title and aria-label of every element that is drawn
+const dSeen = p => p.evaluate(() => { const v = document.querySelector('#v-den'); const drawn = e => !e.closest('[hidden]') && !e.closest('details:not([open]) > :not(summary)') && (typeof e.checkVisibility !== 'function' || e.checkVisibility());
+  return { text: v.innerText, said: Array.from(v.querySelectorAll('[title], [aria-label]')).filter(drawn).reduce((a, e) => a.concat([e.getAttribute('title'), e.getAttribute('aria-label')]), []).filter(Boolean) }; });
+const dSays = async (p, where) => { const s = await dSeen(p); const out = []; const m = D10.exec(s.text); if (m) out.push(where + ' says "' + s.text.slice(Math.max(0, m.index - 70), m.index + 70).replace(/\s+/g, ' ') + '"'); s.said.forEach(a => { if (D10.test(a)) out.push(where + ' has the title or label "' + a.slice(0, 160) + '"'); }); return out; };
+const dIdle = p => p.waitForFunction(() => !Array.from(document.querySelectorAll('#v-den .den-load')).some(e => !e.closest('[hidden]')));   // nothing that is drawn is still loading
+const DTAB = { today: '.den-guide #den-focus, .den-guide .den-done, #den-tabpanel .den-kpis', brief: '#den-tabpanel .den-state, .den-sec textarea', watch: 'section.den-panel[aria-label="Waiting for a person"]', collection: 'section.den-panel[aria-label="Channels"]', options: 'section.den-panel[aria-label="The desk"]' };
+const dTab = async (p, name) => { await tab(p, name); await p.waitForSelector(DTAB[name]); await dIdle(p); };
+const dView = async (p, view) => { await p.getByRole('button', { name: view, exact: true }).click(); await p.waitForSelector(view === 'Guided' ? '.den-guide #den-focus, .den-guide .den-done' : '#den-tabpanel .den-kpis'); await dIdle(p); };
+const dDesk = async (p, id, name) => { await desk(p, id); await p.waitForFunction(n => document.querySelector('.den-win').textContent.indexOf(n) === 0, name); await dIdle(p); };
+// opened, the disclosure reads the register for "To finish setting up": wait for that read to be asked and drawn
+const dMore = async p => { if (!(await p.$('details.den-more[open]'))) await p.locator('details.den-more > summary').click(); await p.waitForSelector('details.den-more[open] section.den-panel[aria-label="Signed-in collection"]');
+  for (let i = 0; i < 100 && !p.served.some(s => /^GET \/den\/watch\?ns=/.test(s)); i++) await p.waitForTimeout(50); await dIdle(p); await p.waitForTimeout(250); };
+const dShut = async p => { if (await p.$('details.den-more[open]')) await p.locator('details.den-more > summary').click(); await p.waitForSelector('details.den-more:not([open])'); };
+const dTiles = p => p.$$eval('.den-health .den-hc', e => e.map(x => [x.querySelector('.k').textContent, x.className.replace('den-hc', '').trim()])); const dListed = p => p.$$eval('section.den-panel[aria-label="Channels"] tr.den-row .den-t', e => e.map(x => x.textContent));
+const dIn = (p, sel) => p.evaluate(s => { const a = document.activeElement; return !!(a && a.closest(s)); }, sel);
+const FB_GAP = /Facebook delivered nothing/;
+
+await t('by default the strip draws no gap: listed, folded, read by itself on another tab, on an empty desk and in Guided (D10)', async () => {
+  const wd = await world(); const ms = (await wd.F('GET', '/den/missed?desk=aep_au')).body; eq([ms.checks, ms.signals.filter(s => s.sig === 'gap').length, ms.signals.length > 0], [5, 0, true], 'the worker ran a sixth check, or found nothing at all');
+  const p = await open(wd); await p.waitForSelector('.den-strip li'); const lines = await all(p, '.den-strip li'); eq(lines.length, ms.signals.length); ok(!lines.some(l => /delivered nothing|Not collected/.test(l)), lines.join(' | '));
+  ok(new RegExp('^Nothing critical missed ?' + ms.signals.length + ' to read ?computed, no model').test(await txt(p, '.den-strip header')), await txt(p, '.den-strip header'));
+  // folded, the header counts what is to read and has no "not collected" mark
+  await p.locator('.den-strip').getByRole('button', { name: 'Fold', exact: true }).click(); await p.waitForFunction(() => !document.querySelector('.den-strip li')); eq([await p.locator('.den-strip header .den-chip').count(), /not collected/.test(await txt(p, '.den-strip header'))], [0, false]);
+  await p.locator('.den-strip').getByRole('button', { name: 'Show', exact: true }).click(); await p.waitForSelector('.den-strip li');
+  // on another tab the strip asks for itself: the same answer
+  p.served.length = 0; await dTab(p, 'watch'); await p.waitForSelector('.den-strip li'); ok(p.served.some(s => /^GET \/den\/missed/.test(s)), 'the strip did not read for itself off Today'); ok(!(await all(p, '.den-strip li')).some(l => /delivered nothing|Not collected/.test(l)));
+  // an empty desk: five checks, and no sentence about what every channel delivered
+  await dTab(p, 'today'); await dDesk(p, 'mca_vic', 'MCA Victoria'); await p.waitForFunction(() => /five checks, nothing found/.test((document.querySelector('.den-strip header') || {}).textContent || ''));
+  const strip = await txt(p, '.den-strip'); ok(/None of the five checks found anything in this window: no spike, no emerging narrative, no first-seen actor, no issue above its baseline, and no post far above its account's usual\.$/.test(strip), strip); ok(!/six checks|every channel|delivered/.test(strip), strip);
+  await dView(p, 'Guided'); await p.waitForSelector('.den-strip.den-compact'); ok(/five checks, nothing found/.test(await txt(p, '.den-strip header')) && !(await p.$('.den-strip li')) && !(await p.$('.den-strip button')), await txt(p, '.den-strip header'));
+  eq(await dSays(p, 'the empty desk in Guided'), []); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('filing by default: the dialog lists the spike the brief leaves out, and no channel (D10)', async () => {
+  const wd = await world(); eq((await wd.F('POST', '/den/brief', { desk: 'aep_au' })).status, 200); const open0 = (await gBoard(wd)).missed.run.brief.open; ok(open0.length > 0 && !open0.some(k => /^G:/.test(k)), 'what the filing check holds open: ' + open0.join(', '));
+  const p = await open(wd); await dTab(p, 'brief'); await p.waitForSelector('.den-sec[data-section="summary"] textarea');
+  await p.getByRole('button', { name: 'Mark as filed', exact: true }).click(); await p.waitForSelector('[role="dialog"][aria-label="Before it is filed"]'); const d = await txt(p, '[role="dialog"]');
+  ok(/not in this brief/.test(d) && /Sentinel spike: Gas taxation/.test(d), d.slice(0, 300)); eq(await p.locator('[role="dialog"] ul.den-ev > li').count(), open0.length, 'the dialog lists what the worker\'s own check holds open');
+  ok(!/Facebook|Instagram|YouTube|Reddit|Bluesky/.test(d) && !D10.test(d), 'the dialog names a channel: ' + d);
+  await p.getByRole('button', { name: 'File anyway', exact: true }).click(); await p.waitForFunction(() => /Filed by Anne/.test((document.querySelector('#den-tabpanel section.den-panel:not([hidden]) header') || {}).textContent || ''));
+  eq((await wd.F('GET', '/den/brief?desk=aep_au')).body.brief.status, 'filed'); eq(await dSays(p, 'the filed brief'), []); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('nothing on screen says what was not collected, or why: every tab of a desk with rows and of an empty desk, in Guided, Table and Cards (D10)', async () => {
+  const wd = await world(); const bad = [];
+  // rows that each drew a reason before the decision: a post with no counts held, a story with no Facebook figure, a registered account whose read failed
+  await wd.push('sig_thread', [{ src: 'x', title: 'x post', body: 'A quiet word on the windfall tax on gas.', url: 'https://x.com/i/web/status/190000000000000777', ts: NOW - 2 * H, meta: { platform: 'x', issues: ['gastax'], id: 'pq', layers: [2] } }]);
+  eq(wd.env.MIND_DB.db.prepare("UPDATE den_watch SET last_error=? WHERE ns='aep' AND kind='account' AND platform='facebook'").run('ppca_missing: this app may not read public pages').changes, 1);
+  const b = await gBoard(wd); const bare = b.social.find(s => /A quiet word/.test(s.text)); ok(bare && !bare.total && b.media.some(m => m.fb) && b.media.some(m => !m.fb) && !b.narratives.length, 'the world holds a post with no counts, a story with no Facebook figure and no narrative');
+  const p = await open(wd, 'full-key', { guided: true });
+  // every string the decision replaced, by name: none is drawn anywhere
+  const OLD = ['no counts are held for these posts', 'Nothing on this desk was collected in this window', 'That is not the same as a quiet day', 'See what was collected, and why not', 'No channel delivered a row for this desk in this window', 'Comment text on Facebook and Instagram is collected by no layer', 'no Facebook reach held', 'no counts held', 'No Facebook reach is held for this story', 'No counts are held for this post', 'No read from yesterday to compare with', 'No comment under this post is held', 'was collected in this window', 'No collector reads', 'ppca_missing', 'Collection says which channels read, and why not'];
+  const look = async where => { await dIdle(p); (await dSays(p, where)).forEach(x => bad.push(x)); const s = await dSeen(p); const whole = s.text + '\n' + s.said.join('\n'); OLD.forEach(o => { if (whole.indexOf(o) >= 0) bad.push(where + ' still says "' + o + '"'); }); if (await p.$('#den-tabpanel .den-state.err')) bad.push(where + ' shows an error state'); };
+  const cell = async td => [(await td.textContent()).trim(), await td.getAttribute('title'), await td.locator('[title]').count()];
+  for (const [id, name] of [['aep_au', 'AEP national'], ['mca_vic', 'MCA Victoria']]) {
+    if (id !== 'aep_au') { await dTab(p, 'today'); await dDesk(p, id, name); }
+    for (const view of ['Guided', 'Table', 'Cards']) { await dTab(p, 'today'); await dView(p, view);
+      for (const area of view === 'Cards' ? ['today'] : ['today', 'brief', 'watch', 'collection', 'options']) { await dTab(p, area); const at = name + ', ' + view + ', ' + area; await look(at);
+        if (area === 'collection') { eq(await p.locator('.den-hc.bad, .den-hc.off').count(), 0, at + ': a tile is drawn as failing or off'); eq(await p.locator('details.den-more[open]').count(), 0, at + ': the disclosure is open'); }
+        if (area === 'watch' && id === 'aep_au') { await p.getByRole('tab', { name: /^Accounts/ }).click(); await p.waitForSelector('section.den-panel[aria-label="Accounts"] tr.den-row'); const fb = panel(p, 'Accounts').locator('tr.den-row', { hasText: 'harbourwatchpage' });
+          eq(await cell(fb.locator('td').nth(3)), ['-', null, 0], at + ': an account never read'); ok(!/not yet/.test(await txt(p, 'section.den-panel[aria-label="Accounts"]')), at + ': the register says "not yet"');
+          const add = panel(p, 'Add to the register'); await add.locator('select').first().selectOption('account'); await add.locator('select').nth(1).selectOption('tiktok'); eq(await add.locator('p.den-mono').textContent(), 'An account on TikTok is kept as a note.'); await look(at + ', the register\'s accounts'); await add.locator('select').first().selectOption('term'); await p.getByRole('tab', { name: /^Proposals/ }).click(); }
+        if (area === 'today' && id === 'aep_au' && view === 'Table') {
+          const cols = await p.$$eval('.den-col', e => e.map(x => x.getAttribute('aria-label'))); ok(cols.length === 12 && cols.some(l => /: none$/.test(l)) && cols.some(l => /\d (News|X)/.test(l)) && !cols.some(l => /nothing collected/.test(l)), 'a step of the chart with nothing in it ends ": none": ' + cols.join(' | '));
+          eq(await panel(p, 'Key narratives').locator('button.den-link').textContent(), 'Open Collection');
+          eq(await panel(p, 'Traditional media').locator('thead th').allTextContents(), ['Story', 'Outlet', 'Outlets', 'Facebook', 'When', '']); eq(await cell(panel(p, 'Traditional media').locator('tr.den-row', { hasText: 'Producers answer' }).locator('td').nth(3)), ['-', null, 0], 'a story with no Facebook figure');
+          const q = panel(p, 'Social').locator('tr.den-row', { hasText: 'A quiet word' }).locator('td'); eq([await cell(q.nth(2)), await cell(q.nth(3)), await cell(q.nth(4))], [['-', null, 0], ['-', null, 0], ['-', null, 0]], 'a post with no counts, no read from yesterday and no comment held');
+          eq(await txt(p, '.den-card[aria-label="Tone under the posts"] .den-body'), 'No comment under this window\'s posts is held, so there is no tone to show.'); }
+        if (area === 'today' && id === 'aep_au' && view === 'Cards') {
+          ok(/\d on Facebook/.test(await panel(p, 'Traditional media').locator('article.den-row', { hasText: LEVY }).locator('.den-mc-f').textContent()), 'a figure that is held is still drawn');
+          eq(await panel(p, 'Traditional media').locator('article.den-row', { hasText: 'Producers answer' }).locator('.den-mc-f').textContent(), '1 outletsubscriber', 'a story with no Facebook figure, as a card');
+          eq(await panel(p, 'Social').locator('article.den-row', { hasText: 'A quiet word' }).locator('.den-mc-f').textContent(), 'L2', 'a post with no counts, as a card'); }
+        if (area === 'today' && id === 'mca_vic' && view === 'Table') {
+          eq(await p.$eval('.den-kpi:nth-child(3)', e => [e.querySelector('.v').textContent, e.querySelector('.f').textContent, e.getAttribute('aria-label')]), ['-', '-', 'Interactions: -. Go to Social.']); eq(await p.locator('.den-col').count(), 0);
+          eq(await txt(p, '.den-card[aria-label="Volume through the window"] .den-body'), 'No story or post is on this desk in this window yet, so there is nothing to chart. Open Collection');
+          eq(await txt(p, '.den-card[aria-label="By channel"] .den-body'), 'No rows in this window yet.'); eq(await txt(p, '.den-card[aria-label="Tone under the posts"] .den-body'), 'No comment under this window\'s posts is held, so there is no tone to show.');
+          eq(await txt(p, 'section.den-panel[aria-label="Social"] .den-state'), 'No post on this desk\'s terms or from its registered accounts is in this window. Open Collection'); ok(/was filed in this window\. Open Collection$/.test(await txt(p, 'section.den-panel[aria-label="Traditional media"] .den-state'))); eq(await p.locator('.den-cover').count(), 0, 'no channel is in the window, so no coverage line'); }
+      } } }
+  // the note above the view folds, so it is read as text: it says what Collection shows now
+  const note = await p.$eval('#v-den > .note', e => e.textContent); ok(/Collection shows the channels delivering for this desk and where to add one\./.test(note) && !/why not/.test(note), note);
+  // and with a draft: the brief and the tray beside the card
+  await dTab(p, 'today'); await dDesk(p, 'aep_au', 'AEP national'); await dView(p, 'Guided'); eq((await wd.F('POST', '/den/brief', { desk: 'aep_au' })).status, 200); await gRefresh(p); await dTab(p, 'brief'); await p.waitForSelector('.den-sec[data-section="summary"] textarea'); await look('AEP national, with a draft, brief'); await dTab(p, 'today'); await p.waitForSelector('.den-guide #den-focus'); await look('AEP national, with a draft, Guided');
+  eq(bad, [], 'D10'); eq(p.errors, []); await p.context().close();
+});
+await t('Collection lists what delivers and nothing else; the rest, with its state and its reasons, is inside one closed disclosure (D10)', async () => {
+  const wd = await world(); const chans = (await wd.F('GET', '/den/collection?desk=aep_au')).body.channels; const on = chans.filter(c => c.working).map(c => c.label), rest = chans.filter(c => !c.working).map(c => c.label); eq(on, ['News and official sources', 'X']); ok(rest.indexOf('Facebook') >= 0 && rest.length === chans.length - 2);
+  const p = await open(wd); await dTab(p, 'collection'); const ch = panel(p, 'Channels'); const xRow = ch.locator('tr.den-row', { hasText: /^X/ });
+  eq([await dTiles(p), await dListed(p)], [[['News and official sources', 'ok'], ['X', 'ok']], on], 'tiles and rows are the channels delivering for this desk');
+  ok(/delivering - \d+ in 7 days/.test(await txt(p, '.den-health .den-hc:first-child .f')), await txt(p, '.den-health .den-hc:first-child'));
+  eq([await ch.locator('tr.den-row').first().getByRole('button', { name: 'Collect now', exact: true }).count(), await ch.locator('tr.den-row').first().getByRole('button', { name: 'Switch off', exact: true }).count(), await xRow.getByRole('button', { name: 'Collect now', exact: true }).count(), await xRow.getByRole('button', { name: 'Switch off', exact: true }).count()], [1, 0, 1, 1], 'the kill switch sits beside the signed-in channel that is listed');
+  ok(!/Cannot reach/.test(await ch.textContent()) && !/not granted|not set/.test(await ch.textContent()), 'how a listed channel is read names only routes that are set');
+  // the one disclosure: there, closed, and nothing inside it is drawn or was asked for
+  eq([await p.locator('details.den-more').count(), await p.locator('details.den-more[open]').count(), await txt(p, 'details.den-more > summary'), await p.locator('details.den-more section.den-panel').first().isVisible()], [1, 0, 'Add or switch on a channel', false]);
+  ok(!p.served.some(s => /^GET \/den\/watch/.test(s)), 'the register was read before the disclosure was opened'); eq(await dSays(p, 'Collection, closed'), []);
+  // Switch off on a listed channel takes it off the page and into the disclosure
+  await xRow.getByRole('button', { name: 'Switch off', exact: true }).click(); await p.waitForFunction(() => document.querySelectorAll('section.den-panel[aria-label="Channels"] tr.den-row').length === 1); eq([await dTiles(p), await dListed(p)], [[['News and official sources', 'ok']], ['News and official sources']]);
+  eq((await wd.F('GET', '/den/reach')).body.off, ['x']); eq(await dSays(p, 'Collection, closed, X switched off'), []);
+  await dMore(p); ok(p.served.some(s => /^GET \/den\/watch\?ns=aep/.test(s)), 'opening it reads the register'); ok((await dSays(p, 'opened')).some(x => /No Mac collector is connected/.test(x)) && (await dSays(p, 'opened')).some(x => /has the title or label/.test(x)), 'opened, the states and reasons are drawn, and the check above can see them'); const add = panel(p, 'Channels to add'); const sw = panel(p, 'Signed-in collection'); const chip = (pn, name) => pn.locator('tr', { hasText: name }).first().locator('.den-chip').first().textContent();
+  eq(await add.locator('tr.den-row .den-t:first-child').allTextContents().then(a => a.filter(x => rest.concat(['X']).indexOf(x) >= 0).sort()), rest.concat(['X']).sort(), 'every other channel is inside it'); eq([await chip(add, /^X/), await chip(sw, /^X/)], ['switched off', 'off']);
+  const fbAdd = add.locator('tr.den-row', { hasText: 'Facebook' }); ok(/Sign in to Facebook on the Mac collector and leave it running, then Collect now\./.test(await fbAdd.textContent()) && /not granted/.test(await fbAdd.textContent()) && /Cannot reach: Comment text/.test(await fbAdd.textContent()), 'inside it a channel says what switches it on, and its state and reason as before: ' + await fbAdd.textContent());
+  ok(/No Mac collector is connected/.test(await txt(p, 'details.den-more .den-notice')) && /Off stops every collector at once/.test(await sw.textContent()) && /collected by no layer|not collected|TikTok/.test(await txt(p, 'details.den-more > .den-more-b > p.den-mono')), 'the collector sentence, the switches and what was not built are inside it');
+  await panel(p, 'To finish setting up').locator('tr', { hasText: 'harbourwatchpage' }).waitFor(); ok(/harbourwatchpage ?An account on Facebook/.test(await txt(p, 'section.den-panel[aria-label="To finish setting up"]')) && /Not read yet\./.test(await txt(p, 'section.den-panel[aria-label="To finish setting up"]')), 'a registered account that has not read is listed with its reason: ' + await txt(p, 'section.den-panel[aria-label="To finish setting up"]'));
+  // switched on again from inside, it is listed again
+  await sw.locator('tr', { hasText: /^X/ }).getByRole('button', { name: 'Switch on', exact: true }).click(); await p.waitForFunction(() => document.querySelectorAll('section.den-panel[aria-label="Channels"] tr.den-row').length === 2); eq([await dListed(p), (await wd.F('GET', '/den/reach')).body.off], [on, []]);
+  // Facebook, which is not listed, is switched off and on from inside it
+  const fbSw = sw.locator('tr', { hasText: 'Facebook' }); eq(await chip(sw, 'Facebook'), 'allowed'); await fbSw.getByRole('button', { name: 'Switch off', exact: true }).click(); await p.waitForFunction(() => /off/.test(Array.from(document.querySelectorAll('section.den-panel[aria-label="Signed-in collection"] tr')).find(r => /Facebook/.test(r.textContent)).querySelector('.den-chip').textContent));
+  ok(/switched off/.test(await fbAdd.textContent()) && await fbAdd.getByRole('button', { name: 'Collect now', exact: true }).isDisabled(), 'off, it cannot be collected'); eq((await wd.F('GET', '/den/reach')).body.off, ['facebook']);
+  await fbSw.getByRole('button', { name: 'Switch on', exact: true }).click(); await p.waitForFunction(() => /allowed/.test(Array.from(document.querySelectorAll('section.den-panel[aria-label="Signed-in collection"] tr')).find(r => /Facebook/.test(r.textContent)).querySelector('.den-chip').textContent)); eq((await wd.F('GET', '/den/reach')).body.off, []);
+  // a platform paused at a verification: said inside the disclosure, and nowhere while it is closed
+  await wd.kv.set('reach_challenges', JSON.stringify({ facebook: { at: NOW - 2 * H, agent: 'mac-1', error: 'facebook_challenge' } })); await dShut(p); await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click(); await p.waitForTimeout(600); await dIdle(p); await p.waitForSelector('section.den-panel[aria-label="Channels"] tr.den-row');
+  await dShut(p); eq(await dSays(p, 'Collection, closed, with Facebook paused at a verification'), []); eq(await dListed(p), on);
+  await dMore(p); ok(/paused: verification/.test(await panel(p, 'Channels to add').locator('tr.den-row', { hasText: 'Facebook' }).textContent()) && /verification \d+ h ago/.test(await panel(p, 'Signed-in collection').textContent()), 'opened, the verification is said');
+  await wd.kv.delete('reach_challenges'); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('a watched page whose read fails, or that is stopped, shows "-" by default and is listed with its reason inside the disclosure (D10)', async () => {
+  const wd = await world(); const PAGE = 'Domestic Gas Reservation Bill 2026 inquiry', WHY = 'the site answered 403 to the reader'; ok((await wd.F('GET', '/den/process?desk=aep_au')).body.pages.some(x => x.name === PAGE), 'the seeded page is watched for this desk');
+  eq(wd.env.MIND_DB.db.prepare('UPDATE sources SET last_error=?, fails=2, last_try=? WHERE name=?').run(WHY, NOW - H, PAGE).changes, 1); eq((await wd.F('GET', '/den/process?desk=aep_au')).body.pages.find(x => x.name === PAGE).error, WHY);
+  eq(wd.env.MIND_DB.db.prepare("UPDATE den_watch SET last_error=? WHERE ns='aep' AND kind='account' AND platform='facebook'").run('ppca_missing: this app may not read public pages').changes, 1);
+  const p = await open(wd); await dTab(p, 'collection'); const pages = panel(p, 'Watched parliament pages'); const row = pages.locator('tr.den-row', { hasText: PAGE }); await row.waitFor();
+  eq([(await row.locator('td').nth(1).textContent()).trim(), (await row.locator('td').nth(3).textContent()).trim(), await row.locator('.den-chip').count()], ['-', '-', 0], 'a failed read is a dash, with no chip'); ok(!/403|failed|ppca_missing/.test(await dSeen(p).then(s => s.text + s.said.join(' '))), 'the failure is said on the default page'); eq(await dSays(p, 'Collection, closed, a page failing'), []);
+  ok(/Submitters' names are never read\.\s/.test((await dSeen(p)).text + ' ') && !/refuses the reader|change\.org/.test((await dSeen(p)).text), 'the two closing notes still say what is refused');
+  // a page added and then stopped: the answer to the press is said, and the row is a dash
+  await pages.getByLabel('Address of the page').fill('https://parliament.example.gov.au/committees/harbour-levy'); await pages.getByLabel('Its name, as the parliament writes it').fill('Harbour Levy Bill 2026 inquiry'); await pages.getByRole('button', { name: 'Watch this page' }).click();
+  const mine = pages.locator('tr.den-row', { hasText: 'Harbour Levy Bill 2026 inquiry' }); await mine.waitFor(); await mine.getByRole('button', { name: 'Stop', exact: true }).click(); await p.waitForFunction(() => /Stopped\. It is listed under Add or switch on a channel\./.test((document.querySelector('.toast, #toast') || {}).textContent || ''));
+  await mine.getByRole('button', { name: 'Stop', exact: true }).waitFor({ state: 'detached' }); eq([(await mine.locator('td').nth(1).textContent()).trim(), await mine.locator('.den-chip').count()], ['-', 0]); eq(await dSays(p, 'Collection, closed, a page stopped'), []);
+  // opened: each is listed with its reason and the place it is edited
+  await dMore(p); const todo = panel(p, 'To finish setting up'); await todo.locator('tr', { hasText: PAGE }).waitFor(); const lines = await all(p, 'section.den-panel[aria-label="To finish setting up"] tbody tr');
+  ok(lines.some(l => l.indexOf(PAGE) === 0 && l.indexOf('The last read failed: ' + WHY) > 0) && lines.some(l => /^Harbour Levy Bill 2026 inquiry ?A parliament page \| Stopped: /.test(l)) && lines.some(l => /^harbourwatchpage ?An account on Facebook \| ppca_missing/.test(l)), lines.join(' // '));
+  await todo.getByRole('button', { name: 'Watched parliament pages, for ' + PAGE, exact: true }).click(); ok(await dIn(p, 'section.den-panel[aria-label="Watched parliament pages"]'), 'the link moves to where the page is edited');
+  await todo.getByRole('button', { name: 'Open Watch, for harbourwatchpage', exact: true }).click(); await p.waitForSelector('#den-tab-watch[aria-selected="true"]'); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('recall: the channels that held links stay on the page; one that held none, and the misses, are inside the disclosure (D10)', async () => {
+  const wd = await world(); eq((await wd.F('POST', '/den/backtest', { desk: 'aep_au', result: { reports: 5, links: 100, held: 60, period: 'October 2026', byChannel: { news: { links: 60, held: 60 }, facebook: { links: 40, held: 0 } }, misses: [{ url: 'https://www.facebook.com/harbourwatchpage/posts/1', channel: 'facebook' }] } })).status, 200);
+  const p = await open(wd); await dTab(p, 'collection'); const rec = 'section.den-panel[aria-label="Recall against the reports"]'; await p.waitForSelector(rec + ' tbody tr');
+  ok(/60% - 60 of 100 links in 5 reports \(October 2026\)/.test(await txt(p, rec)), await txt(p, rec)); eq(await all(p, rec + ' tbody tr'), ['News | 60 | 60 | 100%'], 'only a channel that held a link is in the table');
+  const seen = await dSeen(p); const panelText = await p.$eval('#den-tabpanel', e => e.innerText); ok(!/Facebook/.test(panelText) && !seen.said.some(a => /Facebook/.test(a)), 'the default Collection names Facebook'); eq(await dSays(p, 'Collection, closed, with a recall result'), []);
+  await dMore(p); const by = 'section.den-panel[aria-label="Recall, by channel"]'; eq(await all(p, by + ' tbody tr'), ['Facebook | 40 | 0 | 0%']); ok(/1 of the links it did not hold/.test(await txt(p, by)) && /Facebook: https:\/\/www\.facebook\.com\/harbourwatchpage\/posts\/1/.test(await p.$eval(by, e => e.textContent)), await txt(p, by));
+  ok(/Facebook/.test(await p.$eval('#den-tabpanel', e => e.innerText)), 'opened, it is there to read'); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('the Facebook column and figure are drawn only when a story on the board carries the figure (D10)', async () => {
+  const wd = await world(); await wd.push('news', [1, 2].map(i => ({ src: 'minewire', title: 'Critical minerals strategy lands, part ' + i, body: 'A critical minerals processing plan was released this week.', url: 'https://minewire.example.com.au/' + i, ts: NOW - (2 + i) * H, meta: { issues: ['cm'], source: 'minewire' } })));
+  const mb = await gBoard(wd, 'mca_au'); ok(mb.media.length === 2 && !mb.media.some(m => m.fb), 'the MCA desk holds two stories and no Facebook figure'); ok((await gBoard(wd)).media.some(m => m.fb));
+  const p = await open(wd); const media = panel(p, 'Traditional media'); await media.locator('tr.den-row').first().waitFor(); eq(await media.locator('thead th').allTextContents(), ['Story', 'Outlet', 'Outlets', 'Facebook', 'When', ''], 'a story carries the figure, so the column is drawn');
+  await dDesk(p, 'mca_au', 'MCA national'); await media.locator('tr.den-row', { hasText: 'Critical minerals strategy lands, part 1' }).waitFor(); eq(await media.locator('thead th').allTextContents(), ['Story', 'Outlet', 'Outlets', 'When', ''], 'no story carries it: no column');
+  eq(await media.locator('tr.den-row').first().locator('td').count(), 5); ok(!/Facebook/.test(await media.textContent()));
+  await dView(p, 'Cards'); await media.locator('article.den-row').first().waitFor(); ok(!/Facebook/.test(await media.textContent()), 'nor a figure on the cards'); eq(await dSays(p, 'the MCA desk as cards'), []);
+  await dView(p, 'Table'); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('the coverage line says which channels are in this window, and names no channel that is not (D10)', async () => {
+  const wd = await world(); const b = await gBoard(wd); const want = Object.keys(b.byChannel).filter(k => b.byChannel[k] > 0).sort((x, y) => b.byChannel[y] - b.byChannel[x]).map(k => ({ news: 'News', x: 'X' }[k] || k) + ' ' + b.byChannel[k]); eq(want.map(x => x.split(' ')[0]), ['News', 'X']);
+  const p = await open(wd, 'full-key', { guided: true }); const line = async () => [await p.getAttribute('.den-cover', 'role'), await p.getAttribute('.den-cover', 'aria-label'), await p.$$eval('.den-cover .den-chip', e => e.map(x => x.textContent)), /^In this window: /.test(await txt(p, '.den-cover')), /Facebook|Instagram/.test(await txt(p, '.den-cover'))];
+  for (const view of ['Guided', 'Table', 'Cards']) { await dView(p, view); eq(await line(), ['group', 'Channels in this window', want, true, false], view); }
+  ok(await p.evaluate(() => !!(document.querySelector('.den-toolbar').compareDocumentPosition(document.querySelector('.den-cover')) & Node.DOCUMENT_POSITION_FOLLOWING)), 'the line is under the toolbar');
+  await dView(p, 'Guided'); await dDesk(p, 'mca_vic', 'MCA Victoria'); await p.waitForSelector('.den-guide .den-done'); eq(await p.locator('.den-cover').count(), 0, 'an empty window has no line'); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+  // with the desk's showGaps on the line is the same: it says what is there
+  const wo = await world(); await gapsOn(wo, ['aep_au']); const q = await open(wo); await q.waitForSelector('.den-cover'); eq(await q.$$eval('.den-cover .den-chip', e => e.map(x => x.textContent)), want); eq(q.errors, []); await q.context().close();
+});
+await t('Options: "Also show the channels with no rows" is saved on the desk, and the strip and Collection follow it at once, both ways (D10)', async () => {
+  const wd = await world(); const p = await open(wd); await p.waitForSelector('.den-strip li'); await p.evaluate(() => { window.__same = 1; }); const opt = async () => (await wd.F('GET', '/den/desks')).body.desks.find(x => x.id === 'aep_au').options.showGaps;
+  const gap = () => p.$$eval('.den-strip li', li => li.some(x => /Facebook delivered nothing/.test(x.textContent))); const sw = p.locator('section.den-panel[aria-label="Channels on screen"] label.den-switch input[type="checkbox"]');
+  await dTab(p, 'options'); await p.waitForSelector('.den-strip li'); eq([await sw.isChecked(), await gap(), await opt()], [false, false, false]); eq(await txt(p, 'section.den-panel[aria-label="Channels on screen"] label.den-switch'), 'Also show the channels with no rows');
+  ok(/Off, the default: the Den shows only channels with rows for this desk\. On: it also lists the other channels this desk relies on, each with its state and the reason\./.test(await txt(p, 'section.den-panel[aria-label="Channels on screen"]'))); eq(await dSays(p, 'Options'), []);
+  await p.getByRole('button', { name: 'Channels on screen', exact: true }).click(); ok(await dIn(p, 'section.den-panel[aria-label="Channels on screen"]'), 'the index does not reach the new panel');
+  // on: saved, and the strip reads again by itself
+  await sw.check(); ok(/Not saved/.test(await txt(p, '#den-tabpanel .den-optbar .den-save'))); await p.getByRole('button', { name: 'Save options', exact: true }).click(); await p.waitForFunction(() => Array.from(document.querySelectorAll('.den-strip li')).some(x => /Facebook delivered nothing/.test(x.textContent)), null, { timeout: 15000 });
+  eq([await opt(), await sw.isChecked(), FB_GAP.test((await all(p, '.den-strip li'))[0])], [true, true, true], 'the gap leads the strip once the option is on');
+  await dTab(p, 'collection'); eq([await p.locator('details.den-more').count(), (await dListed(p)).indexOf('Facebook') >= 0, await p.locator('.den-hc.bad').count() > 0], [0, true, true], 'on, Collection is as it was: every channel, its state, and no disclosure');
+  // off again: the gap leaves, the disclosure is back
+  await dTab(p, 'options'); await sw.uncheck(); await p.getByRole('button', { name: 'Save options', exact: true }).click(); await p.waitForFunction(() => document.querySelectorAll('.den-strip li').length > 0 && !Array.from(document.querySelectorAll('.den-strip li')).some(x => /delivered nothing/.test(x.textContent)), null, { timeout: 15000 });
+  eq([await opt(), await sw.isChecked(), await gap()], [false, false, false]); await dTab(p, 'collection'); eq([await p.locator('details.den-more').count(), await dListed(p), await p.locator('.den-hc.bad, .den-hc.off').count()], [1, ['News and official sources', 'X'], 0]); eq(await dSays(p, 'Collection, the option off again'), []);
+  eq([await p.evaluate(() => window.__same), p.served.filter(s => /index\.html/.test(s)).length], [1, 0], 'the page was loaded again'); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('File: step 3, the header\'s "Next: file the brief" and a goto with step file put the focus on Mark as filed; an empty brief moves nothing', async () => {
+  const wd = await world(); eq((await wd.F('POST', '/den/brief', { desk: 'aep_au' })).status, 200); eq((await wd.F('POST', '/den/brief/save', { desk: 'mca_au' })).status, 200);
+  const p = await open(wd); await gRail(p, 'file', 'Step 3, File: not filed'); const at = () => p.evaluate(() => { const a = document.activeElement; return [!!(a && a.closest('#den-file')), a ? a.textContent : '']; }); const onFile = () => p.waitForFunction(() => { const a = document.activeElement; return !!(a && a.closest('#den-file')); }, null, { timeout: 8000 }).catch(() => { throw new Error('the focus did not move into the File region'); });
+  // the rail's third step, from Today
+  await p.click('#den-step-file'); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); await onFile(); eq(await at(), [true, 'Mark as filed']);
+  eq(await p.$$eval('.den-rail .den-stepb', e => e.map(x => x.getAttribute('aria-current'))), [null, null, 'step'], 'the rail does not say the person is at File');
+  eq([await p.getAttribute('#den-file', 'role'), await p.getAttribute('#den-file', 'aria-label'), await p.locator('#den-file .den-bar').count(), await p.$$eval('#den-tabpanel .den-stephead', e => e.map(x => x.textContent.replace(/\s+/g, ' ').trim())), await p.$$eval('#den-tabpanel .den-stephead', e => e.every(x => x.getAttribute('aria-hidden') === 'true'))], ['group', 'File the brief', 2, ['2 Write', '3 File'], true]);
+  ok(/^\d+ of \d+ sections written\./.test(await txt(p, '#den-file > p.den-mono')), await txt(p, '#den-file > p.den-mono'));
+  // the header, on Brief
+  await p.click('#den-step-write'); await p.focus('#den-step-write'); eq([(await at())[0], await p.getAttribute('#den-step-write', 'aria-current'), await txt(p, '#den-next')], [false, 'step', 'Next: file the brief']); await p.click('#den-next'); await onFile(); eq(await at(), [true, 'Mark as filed']);
+  // a goto from elsewhere in the app's own way
+  await dTab(p, 'today'); eq(await txt(p, '#den-next'), 'Next: read the draft'); await p.evaluate(() => window.AXUI.goto('den', { tab: 'brief', step: 'file' })); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); await onFile(); eq(await at(), [true, 'Mark as filed']); eq(gPosts(p), [], 'moving the focus wrote something');
+  // a brief started by hand and still empty: there is nothing to file, and the focus stays where the person put it
+  await dTab(p, 'today'); await dDesk(p, 'mca_au', 'MCA national'); await gRail(p, 'file', 'Step 3, File: nothing to file yet'); await gRail(p, 'write', 'Step 2, Write: draft');
+  await p.click('#den-step-file'); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); await p.waitForSelector('.den-sec textarea'); await p.waitForSelector('#den-file'); await dIdle(p); await p.waitForTimeout(700);
+  eq([(await at())[0], await p.evaluate(() => document.activeElement.id), await p.$$eval('.den-rail .den-stepb', e => e.map(x => x.getAttribute('aria-current'))), await p.locator('#den-next').count()], [false, 'den-step-file', [null, 'step', null], 0], 'an empty brief took the focus into the File region');
+  await dTab(p, 'today'); await p.evaluate(() => window.AXUI.goto('den', { tab: 'brief', step: 'file' })); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); await p.waitForSelector('#den-file'); await p.waitForTimeout(700); eq((await at())[0], false, 'a goto took the focus into the File region of an empty brief');
+  eq([wd.calls.length, gPosts(p)], [1, []]); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('an older brief is not today\'s to file: the notice says whose day it is, step 3 lands on the notice, and Write it by hand starts today\'s', async () => {
+  const wd = await world(); const made = (await wd.F('POST', '/den/brief/save', { desk: 'mca_au' })).body.brief; const today = made.day; const old = new Date(Date.parse(today + 'T00:00:00Z') - 2 * D).toISOString().slice(0, 10);
+  eq(wd.env.MIND_DB.db.prepare('UPDATE den_briefs SET day=? WHERE id=?').run(old, made.id).changes, 1); eq([(await wd.F('GET', '/den/brief?desk=mca_au')).body.brief.day, (await gBoard(wd, 'mca_au')).missed.run.day, (await gBoard(wd, 'mca_au')).missed.run.brief], [old, today, null]);
+  const p = await open(wd); await dDesk(p, 'mca_au', 'MCA national'); await gRail(p, 'write', 'Step 2, Write: not started'); await gRail(p, 'file', 'Step 3, File: nothing to file yet'); await dTab(p, 'brief'); await p.waitForSelector('#den-older');
+  ok(new RegExp('^This is the brief for ' + old + '\\. Today\'s has not been started\\.').test(await txt(p, '#den-older')), await txt(p, '#den-older')); eq([await p.getAttribute('#den-older', 'role'), await p.locator('#den-older').getByRole('button', { name: 'Draft the brief (1 model call)', exact: true }).count(), await p.locator('#den-older').getByRole('button', { name: 'Write it by hand', exact: true }).count()], ['status', 1, 1]);
+  ok(/One model call/.test(await txt(p, '#den-older')), 'the draft states its cost'); eq([await p.locator('#den-tabpanel .den-stephead').count(), await p.getAttribute('#den-file', 'aria-label')], [0, 'File the brief for ' + old], 'an older brief is not marked as today\'s Write and File');
+  // step 3, and a goto: the notice takes the focus, never that brief's Mark as filed
+  await p.focus('#den-tab-brief'); await p.click('#den-step-file'); await p.waitForFunction(() => document.activeElement && document.activeElement.id === 'den-older', null, { timeout: 8000 }).catch(() => { throw new Error('step 3 did not put the focus on the older brief\'s notice'); });
+  await dTab(p, 'today'); await p.evaluate(() => window.AXUI.goto('den', { tab: 'brief', step: 'file' })); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); await p.waitForFunction(() => document.activeElement && document.activeElement.id === 'den-older', null, { timeout: 8000 }).catch(() => { throw new Error('a goto did not put the focus on the older brief\'s notice'); });
+  eq(await p.getAttribute('#den-step-file', 'aria-current'), null, 'the rail says the person is at File on a brief that is not today\'s');
+  // Write it by hand starts today's
+  await p.locator('#den-older').getByRole('button', { name: 'Write it by hand', exact: true }).click(); await p.waitForSelector('#den-older', { state: 'detached' }); await gRail(p, 'write', 'Step 2, Write: draft'); eq(await p.getAttribute('#den-file', 'aria-label'), 'File the brief');
+  eq([(await wd.F('GET', '/den/brief?desk=mca_au')).body.brief.day, wd.env.MIND_DB.db.prepare("SELECT day FROM den_briefs WHERE desk='mca_au' ORDER BY day").all().map(r => r.day), wd.calls.length], [today, [old, today], 0], 'today\'s brief was started beside the older one, with no model call');
+  eq(await p.$$eval('#den-tabpanel .den-stephead', e => e.map(x => x.textContent.replace(/\s+/g, ' ').trim())), ['2 Write', '3 File']); eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+await t('the default screen, whole: a read-only key has no control that writes on any tab or inside the disclosure; every control is named, nothing overflows and axe passes at 1366, 1440 and 1920', async () => {
+  const wd = await world(); const b = await gBoard(wd); await wd.F('POST', '/den/pin', { desk: 'aep_au', item: gRow(b, 'Producers answer the windfall tax push').id }); await wd.F('POST', '/den/aside', { desk: 'aep_au', item: gRow(b, NOISY + 4).id, reason: 'not relevant' }); const bad = [];
+  // the states of the default screen: Today both ways, every other tab, and Collection with its disclosure opened
+  const STATES = [['Today in Guided', async p => { await dTab(p, 'today'); await dView(p, 'Guided'); }, true], ['Today as a table', async p => { await dTab(p, 'today'); await dView(p, 'Table'); }, true], ['Brief', p => dTab(p, 'brief'), false], ['Watch', p => dTab(p, 'watch'), false],
+    ['Collection, closed', async p => { await dTab(p, 'collection'); await dShut(p); }, true], ['Collection, opened', async p => { await dTab(p, 'collection'); await dMore(p); }, true], ['Options', p => dTab(p, 'options'), true]];
+  const WRITES = /Collect now|Switch on|Switch off|Keep for the report|Set aside|Take out/;
+  for (const [who, key] of [['a full key', 'full-key'], ['a read-only key', 'read-key']]) { const p = await open(wd, key, { guided: true }); if (key === 'read-key') await p.waitForFunction(() => window.AX_ROLE === 'read');
+    await p.evaluate(s => { const e = document.createElement('script'); e.textContent = s; document.head.appendChild(e); }, AXE_SRC);
+    const look = async at => {
+      const over = await p.evaluate(() => Array.from(document.querySelectorAll('#den-root section.den-panel, #den-root .den-strip, #den-root .den-head, #den-root .den-tabs, #den-root .den-rail, #den-root .den-guide, #den-root .den-cover, #den-root details.den-more')).filter(e => !e.closest('[hidden]') && e.getBoundingClientRect().right > document.documentElement.clientWidth + 1).map(e => e.getAttribute('aria-label') || e.className).concat(document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 ? ['the page'] : []));
+      if (over.length) bad.push(at + ' overflows: ' + over.join(', '));
+      const unnamed = await p.evaluate(() => Array.from(document.querySelectorAll('#den-root button, #den-root input, #den-root select, #den-root textarea, #den-root a[href], #den-root summary')).filter(e => { const lab = e.getAttribute('aria-label') || (e.labels && e.labels[0] && e.labels[0].textContent) || e.textContent || e.getAttribute('title') || ''; return !lab.trim(); }).map(e => e.outerHTML.slice(0, 120)));
+      if (unnamed.length) bad.push(at + ' has unnamed controls: ' + unnamed.join(' '));
+      (await axeBad(p)).forEach(x => bad.push(at + ': ' + x)); };
+    for (const wdt of [1366, 1440, 1920]) { await p.setViewportSize({ width: wdt, height: 900 });
+      for (const [name, go, axeToo] of STATES) { await go(p); const at = who + ', ' + name + ' at ' + wdt; if (axeToo || wdt === 1366) await look(at);
+        if (key === 'read-key') { const n = await p.locator('#den-root button', { hasText: WRITES }).count(); if (n) bad.push(at + ' shows ' + n + ' control' + (n === 1 ? '' : 's') + ' that write: ' + (await p.locator('#den-root button', { hasText: WRITES }).allTextContents()).join(', ')); } }
+      // Collection opened and Options, in dark too
+      await p.getByRole('button', { name: 'Dark', exact: true }).click(); await p.waitForFunction(() => document.getElementById('den-root').dataset.theme === 'dark'); for (const i of [5, 6]) { await STATES[i][1](p); await look(who + ', ' + STATES[i][0] + ', dark at ' + wdt); }
+      await p.getByRole('button', { name: 'Light', exact: true }).click(); await p.waitForFunction(() => document.getElementById('den-root').dataset.theme === 'light'); }
+    if (key === 'full-key') { await STATES[0][1](p); eq([await p.locator('.den-tray').getByRole('button', { name: /^Take out of the report/ }).count(), await gBtn(p, 'Keep for the report').count()], [1, 1], 'a full key has the controls the read-only key must not'); await STATES[5][1](p); ok(await p.locator('#den-root button', { hasText: WRITES }).count() >= 5, 'and Collection\'s, with the disclosure opened'); }
+    else { eq(p.served.filter(s => /^POST \/den\//.test(s)), [], 'the read-only key sent a write'); await STATES[0][1](p); eq(await p.$$eval('.den-trayg li .t', e => e.map(x => x.textContent)), ['Producers answer the windfall tax push'], 'the read-only key still sees what is kept'); }
+    eq(p.errors, [], who + ': an uncaught error reached the page'); await p.setViewportSize({ width: 1440, height: 900 }); await p.context().close(); }
+  eq(bad, [], 'the default screen');
 });
 
 await finish();
