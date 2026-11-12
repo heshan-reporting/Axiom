@@ -612,6 +612,30 @@ X_STOPPED = 'no longer offering X: '
 X_BACK = 'X search works again: offering X again'
 
 
+BUSY_WAIT = 60.0      # a busy database is not helped by asking it again every fifteen seconds
+
+
+def http_reason(code, body, headers=None, poll=15.0):
+    """What the worker said when it refused a poll, in one line, and how long to wait. The worker answers refusals as
+    JSON with a code, a sentence and often an id to quote; an answer that is not JSON is a gateway's page, not the
+    worker's, and its markup is not printed. Nothing here can carry the key: only the worker's own words are read."""
+    d = None
+    try: d = json.loads(body)
+    except Exception: d = None
+    rid = ''
+    try: rid = str((headers or {}).get('X-Request-Id') or '')
+    except Exception: rid = ''
+    if not isinstance(d, dict):
+        return 'HTTP %s, and the answer is not the worker\'s own (a gateway or network page)' % code, poll
+    err = str(d.get('error') or '')[:60]; detail = ' '.join(str(d.get('detail') or '').split())[:260]; rid = str(d.get('requestId') or rid)[:40]
+    if err == 'db_busy':
+        return 'the worker\'s database is busy (%s)' % (detail or 'too much is reading it at once'), max(poll, BUSY_WAIT)
+    line = 'worker said HTTP %s' % code
+    if err: line += ' (%s%s)' % (err, (': ' + detail) if detail else '')
+    if rid: line += ' [id %s]' % rid
+    return line, poll
+
+
 def serve(worker, key, agent, fixed, poll=15.0, once=False, say=print, echo=True, sleep=time.sleep, clock=time.time, rounds=None):
     """Stay connected: offer what this machine can read, take a job when there is one, look again at what can be read
     every ten minutes. `rounds`, `sleep` and `clock` exist so the loop can be driven by a test."""
@@ -648,12 +672,13 @@ def serve(worker, key, agent, fixed, poll=15.0, once=False, say=print, echo=True
             # a job just ran: check again straight away in case more are queued
         except urllib.error.HTTPError as e:
             body = ''
-            try: body = e.read().decode()[:200]
+            try: body = e.read().decode('utf-8', 'replace')[:2000]
             except Exception: pass
             if e.code in (401, 403):
-                sys.exit('AXIOM refused the key (HTTP %s). Use a full-access key: %s' % (e.code, body))
-            say('worker said HTTP %s; retrying in %ds' % (e.code, int(poll)))
-            sleep(poll)
+                sys.exit('AXIOM refused the key (HTTP %s). Use a full-access key: %s' % (e.code, body[:200]))
+            why, wait = http_reason(e.code, body, e.headers, poll)
+            say('%s; retrying in %ds' % (why, int(wait)))
+            sleep(wait)
         except KeyboardInterrupt:
             raise
         except Exception as e:

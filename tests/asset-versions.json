@@ -3,9 +3,25 @@
   "v": "r45",
   "sha": "3c52d4a530d5e86f"
  },
+ "axiom-ds.css": {
+  "v": "r1",
+  "sha": "acc6f28732a5397d"
+ },
  "ax-ui.js": {
   "v": "r4",
   "sha": "06f2aab5bc7c7f9c"
+ },
+ "signals.js": {
+  "v": "r1",
+  "sha": "cd1115b558401dcd"
+ },
+ "release.js": {
+  "v": "r1",
+  "sha": "ca611eba7ab4abcd"
+ },
+ "topics.js": {
+  "v": "r1",
+  "sha": "edef3cbaf542b877"
  },
  "content.js": {
   "v": "r3",
@@ -79,8 +95,28 @@
   "v": "r45",
   "sha": "c2fdd7cec9c075a4"
  },
+ "sources.js": {
+  "v": "r1",
+  "sha": "12a8ff4b8c73b7f5"
+ },
  "den.js": {
   "v": "r48",
   "sha": "db012bd4d79fb280"
+ },
+ "sentiment.js": {
+  "v": "r1",
+  "sha": "99bc6121d7cbbc8b"
+ },
+ "narratives.js": {
+  "v": "r1",
+  "sha": "ad2977781ea0f27f"
+ },
+ "overview.js": {
+  "v": "r1",
+  "sha": "5dda64a9307ede00"
+ },
+ "scope.js": {
+  "v": "r1",
+  "sha": "27979c4b6aa607c8"
  }
 }

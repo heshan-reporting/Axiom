@@ -43,7 +43,9 @@ const stub = (url, method, body) => {
     { title: 'Reverse the changes to fuel tax credits for regional businesses', url: 'https://www.aph.gov.au/e-petitions/petition/EN7001', site: 'aph', juris: 'au', issues: ['ftc', 'mining'], signatures: 4212, closes: '12 November 2026', growth24: 412, growth7: null, excerpt: 'We the undersigned call on the House...' },
     { title: 'Ban duck hunting in Victoria', url: 'https://www.aph.gov.au/e-petitions/petition/EN7002', site: 'aph', juris: 'au', issues: ['regional'], signatures: 910, closes: '', growth24: null, growth7: null, excerpt: '' }] };
   if (p === '/social/sweep') return { ok: true, job: 'jx1', id: 'jx1', platform: body.platform, where: 'worker' };
-  if (p === '/bridge/run') return { ok: true, id: 'jp1', source: body.source, where: 'worker' };
+  if (p === '/bridge/run') return { ok: true, id: body.source === 'community' ? 'jc1' : 'jp1', source: body.source, where: 'worker' };
+  // the community job has its own answer: with the petitions one, its console line was still on screen and satisfied the next case's wait
+  if (p === '/bridge/job' && q.get('id') === 'jc1') return { ok: true, id: 'jc1', source: 'community', status: 'done', agent: '', success: true, cursor: 2, result: { ok: true, threads: 3, comments: 4, threadRows: 3, commentRows: 4 }, lines: [{ id: 1, ts: NOW, kind: 'cmd', text: 'GET aussie.zone/api/v3/post/list' }, { id: 2, ts: NOW, kind: 'out', text: '3 community threads kept' }] };
   if (p === '/bridge/job') { const id = q.get('id'); return { ok: true, id, source: id === 'jx1' ? 'x' : 'petitions', status: 'done', agent: '', success: true, cursor: 2, result: id === 'jx1' ? { ok: true, threads: 9, comments: 0, threadRows: 4, commentRows: 0 } : { ok: true, threads: 2, comments: 0, threadRows: 2, commentRows: 0, read: 2 }, lines: [{ id: 1, ts: NOW, kind: 'cmd', text: id === 'jx1' ? 'GET syndication.twitter.com/srv/timeline-profile/screen-name/AlboMP' : 'GET https://www.aph.gov.au/e-petitions' }, { id: 2, ts: NOW, kind: 'out', text: id === 'jx1' ? 'AlboMP: 20 posts in the timeline, 9 in the window' : '2 petitions listed' }] }; }
   return { ok: true };
 };
@@ -130,6 +132,7 @@ await t('the community tabs (Lemmy, Hacker News, Forums, Web comments) list thro
   await page.click('.rd-ctl button:has-text("Sweep")'); 
   for (let i = 0; i < 50 && !calls.slice(before).some(c => c.p === '/bridge/run'); i++) await page.waitForTimeout(100);
   const run = calls.slice(before).find(c => c.p === '/bridge/run'); ok(run, 'Sweep starts a job'); eq(run.body.source, 'community', 'one job reads every community source');
+  await page.waitForSelector('.rd-res', { timeout: 15000 });   // the job is followed to its end here, so nothing of it is still running when the next case starts
 });
 await t('the Petitions tab ranks by growth, filters by issue, and reads the pages on demand', async () => {
   await page.click('.sig-tab:has-text("Petitions")');

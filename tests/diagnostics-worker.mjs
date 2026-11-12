@@ -25,6 +25,27 @@ await T.t('an unhandled failure answers 500 internal_error with the request id, 
   ok(/"level":"error"/.test(line) && /\/studio\/status/.test(line), line);
   ok(!/AIzaSyFAKEFAKEFAKE|abcdefghijklmnopqrstuvwxyz0123456789/.test(logs.join('\n')), 'no secret in any log line: ' + line);
 });
+await T.t('a busy database is 503 db_busy in words on any route, and a database error says it is the database', async () => {
+  // the Mac collector's poll answered a bare 500 on the live worker (12 November 2026): outside Anne's Den a database
+  // that would not answer was reported as "something failed", with no way for the collector or its owner to tell why
+  const w3 = await workerEnv({ keys: { 'full-key': { n: 'Heshan', r: 'full' } } }); await w3.call('GET', '/bridge/status', null, 'full-key');
+  const db = w3.env.MIND_DB.db; const orig = db.prepare.bind(db); let boom = null;
+  db.prepare = sql => { if (boom && /bridge_jobs/.test(String(sql))) throw new Error(boom); return orig(sql); };
+  let busy, bad; try {
+    boom = 'D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window. Try again';
+    busy = await w3.call('GET', '/bridge/next?agent=macbook&sources=reddit,render,facebook,ytsearch', null, 'full-key');
+    boom = 'D1_ERROR: no such column: claimed: SQLITE_ERROR';
+    bad = await w3.call('GET', '/bridge/next?agent=macbook&sources=reddit', null, 'full-key');
+  } finally { db.prepare = orig; }
+  eq([busy.status, busy.body.error, busy.body.retry, busy.body.was], [503, 'db_busy', true, 'bridge_failed'], busy.text.slice(0, 200)); ok(/database is busy/i.test(busy.body.detail) && busy.headers.get('X-Request-Id'), busy.text.slice(0, 200));
+  eq([bad.status, bad.body.error], [500, 'bridge_failed'], bad.text.slice(0, 200)); ok(/no such column: claimed/.test(bad.body.detail), 'any other database error keeps the area\'s code and the database\'s own words, for the collector to print: ' + bad.text.slice(0, 240));
+  const fine = await w3.call('GET', '/bridge/next?agent=macbook&sources=reddit', null, 'full-key'); eq([fine.status, fine.body.ok], [200, true], 'and the route answers again when the database does');
+  // a busy database nothing caught on the way up is the same answer, with the id
+  const w4 = await workerEnv(); const realLog2 = console.log; console.log = () => {};
+  Object.defineProperty(w4.env, 'AXIOM_KEYS', { configurable: true, get() { throw new Error('D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window. Try again'); } });
+  let up; try { up = await w4.call('GET', '/studio/status', null, 'full-key'); } finally { console.log = realLog2; w4.restore(); }
+  eq([up.status, up.body.error, up.body.retry], [503, 'db_busy', true]); eq(up.body.requestId, up.headers.get('X-Request-Id'));
+});
 await T.t('redaction strikes keys from URLs, bearer tokens, provider key shapes and key headers, and leaves the rest', async () => {
   const { axRedact } = w.mod.__test;
   const out = axRedact('GET ' + SECRET_URL + ' ' + SECRET_AUTH + ' X-Axiom-Key: k_live_12345678 token=abc123&q=fuel EAAGm0PX4ZCpsBAFAKEFAKEFAKEFAKEFAKE');

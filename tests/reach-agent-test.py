@@ -146,6 +146,30 @@ full = rx.x_unavailable({'twitter-cli': '0.8.5', 'xclienttransaction': '1.0.3', 
 t('the whole message still fits a console line and keeps the cause', len(full) <= 1200 and 'x-client-transaction-id' in full and full.index('Nothing to do') < full.index('x-client-transaction-id'), len(full))
 t('reading the versions never raises when twitter-cli is absent', rx.x_versions() == {} or isinstance(rx.x_versions(), dict))
 
+# ---- the worker refuses a poll: the agent says why, not only the number ----------------------------------------------
+# (12 November 2026: the owner's agent printed "worker said HTTP 500; retrying in 15s" and nothing else)
+import urllib.error
+def http_err(code, body):
+    raw = body if isinstance(body, bytes) else json.dumps(body).encode()
+    return urllib.error.HTTPError('https://x.workers.test/bridge/next', code, 'err', {}, io.BytesIO(raw))
+w = setup(0); broken['v'] = False; said.clear(); slept = []; nth = {'n': 0}; real_poll = agent.poll_once
+def poll_refused(*a, **k):
+    nth['n'] += 1
+    if nth['n'] == 1: raise http_err(503, {'ok': False, 'error': 'db_busy', 'retry': True, 'detail': 'The database is busy right now: too much is reading it at once. Nothing was changed. Try again in a few seconds.', 'requestId': 'aaaa1111bbbb2222'})
+    if nth['n'] == 2: raise http_err(500, {'ok': False, 'error': 'internal_error', 'detail': 'Something failed on the worker; nothing more was done. Quote this id when reporting it.', 'requestId': 'cccc3333dddd4444'})
+    if nth['n'] == 3: raise http_err(502, b'<html><body>Bad gateway</body></html>')
+    return None
+agent.poll_once = poll_refused
+agent.serve('https://x.workers.test', 'SECRETKEY123', 'macbook', ['reddit'], poll=15, say=said.append, echo=False, sleep=slept.append, clock=lambda: 9000.0, rounds=4)
+agent.poll_once = real_poll
+busy = [s for s in said if 'database is busy' in s]
+t('a busy database is said in words, and the agent waits a minute instead of asking every fifteen seconds', len(busy) == 1 and slept[0] >= 60, (said, slept))
+inner = [s for s in said if 'HTTP 500' in s]
+t('a failure on the worker carries its code, its sentence and the id to quote', len(inner) == 1 and 'internal_error' in inner[0] and 'cccc3333dddd4444' in inner[0] and 'Something failed on the worker' in inner[0], said)
+gate = [s for s in said if 'HTTP 502' in s]
+t('an answer that is not the worker\'s (a gateway page) is said as that, without its markup', len(gate) == 1 and '<html' not in gate[0] and 'not the worker' in gate[0], said)
+t('the loop carries on after each, and never prints the key', nth['n'] == 4 and 'SECRETKEY123' not in ' '.join(said), (nth, said))
+
 # ---- launchd: the background agent runs with the Python that installed it --------------------------------------------
 cmd = agent.launchd_command('/Users/someone/Axiom', '/Users/someone/.axiom-reach/venv/bin/python')
 t('the background agent uses the collector\'s own Python, so it sees Playwright and yt-dlp', cmd == "cd '/Users/someone/Axiom' && '/Users/someone/.axiom-reach/venv/bin/python' tools/reach-agent.py --quiet", cmd)

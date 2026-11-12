@@ -816,7 +816,26 @@ because it exists. **Every address and every answer shape below is unverified un
 - Not built, and why: a forum with no feed of its own is not read page by page (the older listing readers still
   take thread titles from Whirlpool, BigFooty, HotCopper and PropertyChat as kind `forum`); Disqus, Facebook-plugin and publisher-hosted comment systems are not read (no public,
   keyless interface); Reddit and X stay where they were (the Mac). Nothing signed-in was added.
-- Harnesses: `tests/widenet-worker.mjs` (11), the community tabs case in `tests/signals-browser.mjs` (9).
+- Harnesses: `tests/widenet-worker.mjs` (12), the community tabs case in `tests/signals-browser.mjs` (9).
+- **Published and not seen (12 November 2026).** `signals.js`, `sources.js` and six other islands, and `axiom-ds.css`,
+  were loaded with no `?v=` at all, so a browser kept its old copies and the new tabs reached nobody who had opened the
+  app before. Every one of the page's own scripts and stylesheets now carries a marker (`?v=r1` for those nine), and
+  `tests/asset-versions.mjs` fails on any that does not (`unversioned()`; the vendored libraries are pinned files and are
+  left out). **A change to any island needs its `?v=` bumped in `docs/index.html`, then `--write`.** The same push
+  showed `tests/den-reach-worker.mjs` RR8 failing in CI only: jobs created inside one millisecond share the time part
+  of their id, so their order by `(created, id)` is random; the test names the waiting jobs by id now.
+- **"worker said HTTP 500" (build `2026-11-12.studio-p63`; 12 November 2026).** The owner's collector printed the
+  number and nothing else. The bridge routes answer a failure as `500 bridge_failed` with the reason in `detail`, and
+  the collector threw that away: `http_reason()` in `tools/reach-agent.py` now prints the worker's code, its sentence
+  and the id to quote (a gateway's page is said as "not the worker's own", its markup never printed; the key is never
+  read). A database that will not answer is `503 db_busy` in words **on every route**, not only Anne's Den: `jsonResp`
+  turns any 5xx whose detail is the database's overload sentence into it (`was` keeps the area's code), the request
+  wrapper does the same for an error nothing caught, and the collector waits `BUSY_WAIT` = 60 seconds on it instead of
+  asking again in fifteen. **The live cause was not seen from the sandbox**: the route answers correctly here for the
+  four channels that Mac offered, so the next run of the collector is what names it. One read was bounded on the way:
+  the comment pass looks through `WP_COMMENT_SOURCES` = 12 WordPress sites a run, in turn (KV `wpc_cur`), since that
+  read looks inside `meta`. Harnesses: the busy-database case in `tests/diagnostics-worker.mjs` (4), the refused-poll
+  cases in `tests/reach-agent-test.py` (45), WN12 in `tests/widenet-worker.mjs` (12).
 
 ## Sentiment by party, person, organisation and topic (Phase 3)
 

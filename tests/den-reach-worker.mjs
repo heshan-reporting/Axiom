@@ -145,7 +145,7 @@ await S.t('RR8 a collector reports that X search is unavailable', async () => {
   const r = await done(w, first.id, 'macbook', { ok: false, error: 'x_unavailable', detail: 'X search is unavailable on this machine. To try on this Mac: `uv tool upgrade twitter-cli` ...' });
   eq(r.status, 200);
   const st = jobs(w).filter(j => j.source === 'x'); eq(st.map(j => j.status), ['failed', 'failed', 'failed', 'failed', 'failed'], 'the four still waiting are not left for the collector to fail one by one');
-  const res = st.slice(1).map(j => JSON.parse(j.result)); ok(res.every(x => x.error === 'no_collector' && x.why === 'x_unavailable' && REMEDY.test(x.detail)), JSON.stringify(res[0]));
+  const res = st.filter(j => j.id !== first.id).map(j => JSON.parse(j.result)); eq(res.length, 4); ok(res.every(x => x.error === 'no_collector' && x.why === 'x_unavailable' && REMEDY.test(x.detail)), JSON.stringify(res[0]));
   ok(/X search/.test(res[0].detail) && /rechecks every ten minutes/.test(res[0].detail) && res[0].detail.indexOf('uv tool upgrade') < 260, 'what to do comes first: ' + res[0].detail);
   const ag = (await F(w, 'GET', '/bridge/status')).body.agents.find(a => a.agent === 'macbook');
   ok(ag.sources.indexOf('x') < 0 && ag.down.indexOf('x') >= 0 && ag.sources.indexOf('reddit') >= 0, 'the collector no longer counts as an X collector: ' + JSON.stringify(ag));

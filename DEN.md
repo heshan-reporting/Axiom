@@ -1040,3 +1040,22 @@ delivered. To add a forum, a Lemmy instance or a Hacker News word: Sources, Add 
 - **More Reddit from the cloud, X search, Facebook and Instagram.** Unchanged: the Mac collector, as sections 3 to 3.3
   say.
 - **Paywalled bodies.** Unchanged: headlines only unless a source is cleared (decision D8).
+
+### 9.5 Published and not seen (12 November 2026)
+
+The owner could not see the new Signals tabs after the merge. GitHub Pages had published the commit; the page loaded
+`signals.js` and `sources.js` (and six other islands, and `axiom-ds.css`) with no release marker, so a browser that had
+them kept the old copies. Each now carries `?v=r1` and the check in `tests/asset-versions.mjs` refuses a page script or
+stylesheet without one. Until a browser has loaded the page once after this release, a hard refresh (Cmd+Shift+R) shows
+the new files. The tabs come from the page alone; the Coverage rows, the Community tier in Sources and anything a Sweep
+collects need the worker at build p62 (`tools/deploy-worker.sh`).
+
+### 9.6 The collector's "HTTP 500" (12 November 2026; build `2026-11-12.studio-p63`)
+
+The owner's Mac connected (offering Reddit, render, Facebook and YouTube search) and then printed "worker said HTTP
+500; retrying in 15s". The worker had answered with a reason; the collector did not print it. It does now, with the id
+to quote. A database that is too busy to answer says so (`503 db_busy`) on every route, and the collector waits a
+minute on that answer. What actually failed on the live worker is not known here: the same poll answers correctly
+against this build in the sandbox, so the cause is live state (most likely the database refusing the claim, as it
+refused Anne's Den the day before). **The next line the collector prints is the evidence.** If it says the database
+is busy most of the time, the tags-by-item table of s.6.9 is no longer optional.

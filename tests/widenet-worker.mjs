@@ -16,6 +16,7 @@
  *   WN10 the community job reads the community sources first, then the comments, and can be started from Signals
  *   WN11 a source that keeps failing waits longer each time (a day at most), a success restores its schedule, and the
  *        number of sources a tick reads is a var
+ *   WN12 the comment pass reads a bounded number of WordPress sites a run, in turn
  * Run: node --experimental-sqlite tests/widenet-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 
@@ -203,6 +204,17 @@ await S.t('WN11 room for the wider registry: a source that keeps failing waits l
   // the number of sources a tick reads is the owner's to raise (var SOURCES_PER_TICK), within bounds
   const T_ = w.mod.__test; eq([T_.sourcesPerTick({}), T_.sourcesPerTick({ SOURCES_PER_TICK: '80' }), T_.sourcesPerTick({ SOURCES_PER_TICK: '9999' }), T_.sourcesPerTick({ SOURCES_PER_TICK: 'lots' })], [50, 80, 150, 50]);
   const st = (await F(w, 'GET', '/sources', null, 'read-key')).body; eq(st.perTick, 50);
+});
+
+await S.t('WN12 the comment pass looks through a few WordPress sites a run, in turn, never all at once', async () => {
+  const w = await mk(); noRobots(w); const T_ = w.mod.__test; const N = T_.WP_COMMENT_SOURCES; ok(N >= 4 && N <= 20, 'a bounded number: ' + N);
+  await F(w, 'GET', '/sources', null, 'read-key'); const db = w.env.MIND_DB.db; db.prepare("UPDATE sources SET method_ok=''").run();
+  for (let i = 0; i < N + 5; i++) { await add(w, { id: 'wpx' + String(i).padStart(2, '0'), name: 'WP ' + i, tier: 'sector', urls: { wp: 'https://wp' + i + '.example.com.au' } }); }
+  db.prepare("UPDATE sources SET method_ok='wp' WHERE id LIKE 'wpx%'").run();
+  const orig = db.prepare.bind(db); const asked = []; db.prepare = sql => { const q = String(sql); const m = /kind='news' AND src IN \(([?,]+)\)/.exec(q); if (m) asked.push(m[1].split(',').length); return orig(sql); };
+  try { await T_.communityEnrich(w.env, {}); await T_.communityEnrich(w.env, {}); } finally { db.prepare = orig; }
+  eq(asked, [N, N], 'each run asks about ' + N + ' sites, not all ' + (N + 5));
+  eq(Number(await w.env.AXIOM_KV.get('wpc_cur')), (2 * N) % (N + 5), 'and the next run starts where this one stopped');
 });
 
 const r = S.done(); process.exit(r.fail ? 1 : 0);

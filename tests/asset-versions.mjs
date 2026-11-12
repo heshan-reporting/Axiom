@@ -15,8 +15,17 @@ export function assets() {
   }
   return out;
 }
+/** The page's own scripts and stylesheets loaded with no release query at all (the vendored libraries are pinned files and
+ *  are left out). Such a file is cached under an address that never changes, so a release that edits it reaches nobody who has
+ *  the old copy: the Signals tabs of build p62 were published and not seen for exactly this reason (12 November 2026). */
+export function unversioned() {
+  const html = fs.readFileSync(path.join(ROOT, 'docs', 'index.html'), 'utf8'); const out = [];
+  for (const m of html.matchAll(/(?:src|href)="([^"?#:]+\.(?:js|css))"/g)) { const f = m[1]; if (/^vendor\//.test(f) || !fs.existsSync(path.join(ROOT, 'docs', f))) continue; if (out.indexOf(f) < 0) out.push(f); }
+  return out;
+}
 export function problems() {
   const now = assets(); const rec = fs.existsSync(REC) ? JSON.parse(fs.readFileSync(REC, 'utf8')) : {}; const bad = [];
+  unversioned().forEach(f => bad.push(f + ': loaded with no ?v= at all, so a browser keeps its old copy for ever (add ?v=r1 in docs/index.html, then --write)'));
   for (const f of Object.keys(now)) {
     const r = rec[f];
     if (!r) { bad.push(f + ': not recorded (run node tests/asset-versions.mjs --write)'); continue; }

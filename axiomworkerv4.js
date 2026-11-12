@@ -196,6 +196,9 @@ const AX_ERROR_DETAIL = {
   url_or_name_required: 'Give an address or a name.',
 };
 function jsonResp(data, status = 200) {
+  // A database that would not answer is said as that, on every route: the areas' own catches answer 500 `<area>_failed`
+  // with the runtime's sentence, which told a collector polling every fifteen seconds nothing it could act on.
+  if (status >= 500 && data && typeof data === 'object' && !Array.isArray(data) && typeof data.error === 'string' && data.error !== 'db_busy' && denBusy(data.detail)) { data = Object.assign({}, DEN_BUSY, { was: data.error }); status = 503; }
   if (status >= 400 && data && typeof data === 'object' && !Array.isArray(data) && typeof data.error === 'string' && !data.detail && AX_ERROR_DETAIL[data.error]) data = Object.assign({}, data, { detail: AX_ERROR_DETAIL[data.error] });
   return new Response(JSON.stringify(data), { status, headers: CORS });
 }
@@ -5468,6 +5471,7 @@ async function srcRender(env, src) {
 const LEX_PER_RUN = { gnews: 12, gdelt: 3 };
 const LEMMY_HOST_RX = /^[a-z0-9][a-z0-9.-]{1,80}\.[a-z]{2,24}(\/c\/[a-z0-9_]{1,60})?$/;
 const COMMUNITY_POLITICS_RX = /politic|auspol/i;
+const WP_COMMENT_SOURCES = 12;                 // WordPress sites whose articles are looked through for comments in one run, in turn
 const WP_COMMENT_WAIT_MS = 3 * 3600000;      // an article is asked for its comments once, after readers have had this long
 function mdText(s) { return String(s || '').replace(/```[\s\S]*?```/g, ' ').replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^[>#]+\s*/gm, '').replace(/\*+|~~|`/g, '').replace(/\s+/g, ' ').trim(); }
 function gdeltDate(s) { const m = String(s || '').match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/); return m ? m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6] + 'Z' : ''; }
@@ -5605,7 +5609,11 @@ async function communityEnrich(env, opts) {
   // WordPress sites already read through their own public API: the comments under an article on a client issue
   const wps = ((await env.MIND_DB.prepare("SELECT id, name, urls FROM sources WHERE method_ok='wp' AND enabled=1 LIMIT 80").all()).results) || [];
   const base = {}; wps.forEach(s => { let u = {}; try { u = JSON.parse(s.urls || '{}'); } catch (e) { u = {}; } if (u.wp) base[s.id] = { root: String(u.wp).replace(/\/+$/, ''), name: s.name }; });
-  const ids = Object.keys(base);
+  // a few sites a run, in turn: the read below looks inside `meta`, which sits after the article's text in the row, so
+  // asking it of every WordPress source at once is the kind of scan that overloaded the database on 11 November
+  const every = Object.keys(base).sort(); const cur = every.length ? (Number(await kvGet(env.AXIOM_KV, 'wpc_cur')) || 0) % every.length : 0;
+  const ids = every.length <= WP_COMMENT_SOURCES ? every : Array.from({ length: WP_COMMENT_SOURCES }, (x, i) => every[(cur + i) % every.length]);
+  if (every.length > WP_COMMENT_SOURCES) await kvPut(env.AXIOM_KV, 'wpc_cur', String((cur + WP_COMMENT_SOURCES) % every.length), 30 * 86400);
   if (ids.length) {
     const arts = ((await env.MIND_DB.prepare("SELECT id, src, title, url, ts, meta FROM arc_items WHERE kind='news' AND src IN (" + ids.map(() => '?').join(',') + ") AND ts>? AND ts<? AND json_extract(meta,'$.wp') IS NOT NULL AND json_extract(meta,'$.wpc') IS NULL AND json_array_length(COALESCE(json_extract(meta,'$.issues'),'[]'))>0 ORDER BY ts DESC LIMIT ?").bind(...ids, since, now - WP_COMMENT_WAIT_MS, per).all()).results) || [];
     for (const a of arts) {
@@ -10019,7 +10027,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-11.studio-p62';
+const AXIOM_BUILD = '2026-11-12.studio-p63';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -18008,7 +18016,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { communityEnrich, communitySweep, sourcesPerTick, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -18036,7 +18044,9 @@ const AXIOM_WORKER = {
     try { res = await AXIOM_WORKER.handle(req, env, ctx); const gg = AX_GUEST_GATES.get(req); if (gg && gg.refused) { const r = axGuestRefusal('guest_live_project'); res = new Response(JSON.stringify(r.body), { status: r.status, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) }); } }
     catch (e) {
       console.log(JSON.stringify({ rid, level: 'error', method: req.method, path, err: axRedact((e && e.message) || e).slice(0, 300) }));
-      res = new Response(JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done. Quote this id when reporting it.', requestId: rid }), { status: 500, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) });
+      res = denBusy(e)
+        ? new Response(JSON.stringify(Object.assign({}, DEN_BUSY, { requestId: rid })), { status: 503, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) })
+        : new Response(JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done. Quote this id when reporting it.', requestId: rid }), { status: 500, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) });
     }
     try {
       const out = new Response(res.body, res); out.headers.set('X-Request-Id', rid);
