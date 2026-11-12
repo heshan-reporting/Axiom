@@ -381,7 +381,7 @@ button.den-deskcard:focus-visible,.den-deskitem:focus-visible{outline:2px solid 
 .den-step.is-done .den-stepb .n{background:var(--den-pos-bg);border-color:var(--den-pos);color:var(--den-pos)}
 .den-strip.den-compact>header{padding:7px 14px}
 .den-guide{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,360px);gap:var(--den-gap);align-items:start;margin:0 0 var(--den-gap)}
-.den-guide:focus{outline:0}
+.den-guide:focus,#den-tabpanel:focus{outline:0}
 .den-guide-main{min-width:0;display:flex;flex-direction:column;gap:10px}
 .den-focus{min-width:0;border:1px solid var(--den-line2);border-radius:var(--den-r-lg);background:var(--den-card);box-shadow:var(--den-sh2);padding:16px 18px 14px}
 .den-focus-h{display:flex;align-items:center;gap:10px;margin:0 0 10px}
@@ -399,7 +399,9 @@ button.den-deskcard:focus-visible,.den-deskitem:focus-visible{outline:2px solid 
 .den-done p b{display:block;font-family:var(--den-num);font-size:17px;font-weight:700;color:var(--den-ink)}
 .den-done .den-focus-a{border-top:0;padding-top:0;gap:8px 14px}
 .den-last{display:flex;flex-wrap:wrap;gap:4px 16px;padding:0 4px;font-size:13px;color:var(--den-ink1)}
-.den-last:empty{display:none}
+/* the two status lines stay in the page when they have nothing to say, so that what is put into them is read out: empty,
+   each takes no room (its negative margin gives back the column's gap) */
+.den-last:empty,.den-say:empty{margin-top:-10px}
 .den-offer{border:1px solid var(--den-line);border-left:3px solid var(--den-warn);border-radius:var(--den-r-sm);background:var(--den-warn-bg);padding:10px 14px;font-size:13px;color:var(--den-ink1)}
 .den-offer .den-mini{margin:8px 6px 0 0}
 .den-next{border:1px solid var(--den-line);border-radius:var(--den-r);background:var(--den-card);box-shadow:var(--den-sh1);padding:11px 8px 8px;min-width:0}

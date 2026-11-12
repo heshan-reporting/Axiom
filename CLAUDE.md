@@ -289,12 +289,12 @@ verifies each, and what was asked for and not built.
     `503 db_busy` in words on every Den route (`denBusy`, `DEN_BUSY`), never swallowed into an empty strip, and the
     page's `get()` asks again by itself twice (2.5 s, 6 s) and says so once. **Not measured on the live database**:
     the sandbox cannot reach it, so the reduction is reasoned from the queries, not timed.
-  - Harnesses: `tests/den-worker.mjs` (24), `tests/den-browser.mjs` (62, with axe at 1366, 1440 and 1920 for a
-    full and a read-only key; its main journey turns `showGaps` on, fifteen cases are the guided run, each opened
-    with `{ guided: true }`, and the last twelve are decision D10 with the option as it ships),
-    `tests/den-inject-browser.mjs` (76: every read failing, answering a gateway page,
+  - Harnesses: `tests/den-worker.mjs` (24), `tests/den-browser.mjs` (66, with axe at 1366, 1440 and 1920 for a
+    full and a read-only key; its main journey turns `showGaps` on, eighteen cases are the guided run, each opened
+    with `{ guided: true }`, and the last thirteen are decision D10 with the option as it ships),
+    `tests/den-inject-browser.mjs` (81: every read failing, answering a gateway page,
     answering the wrong shape, hanging and dropping, and every write failing and dropping, one at a time, the
-    board, the strip and a decision in Guided among them), the
+    board, the strip, the register as Collection's disclosure reads it and a decision in Guided among them), the
     recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves the default
     screen (Guided with the card, in dark and with triage done; the table; each other tab; Collection closed and
@@ -400,7 +400,7 @@ verifies each, and what was asked for and not built.
   Merged with main as page `?v=r49`, build `studio-p64`. `DEN.md` s.10 lists what was decided against and why.
 
 - **The guided run, and only what is working (12 November 2026; build `2026-11-12.studio-p65`, pages `den.js?v=r50`
-  to `?v=r53`, `den.css?v=r52`; `DEN.md` s.11, `prompts/annes-den-flow.md`). Decision D10, the owner: "A guided run
+  to `?v=r54`, `den.css?v=r53`; `DEN.md` s.11, `prompts/annes-den-flow.md`). Decision D10, the owner: "A guided run
   but do not show facebook and instagram not working or not connected.. just show only the stuff that it working".**
   (The design notes called it D9; that number was taken by monitoring exports.) **Publish the page before or with
   worker p65, never after it:** page r49 on worker p65 would say six checks ran and every channel delivered.
@@ -436,10 +436,21 @@ verifies each, and what was asked for and not built.
     another day's.
   - **Tests.** `tests/den-worker.mjs` DK21 to DK24; `open(w, key, { guided: true })` in `tests/den-fixture.mjs`
     opens a fresh profile (without it the fixture chooses Table, so the older cases stay tests of the table);
-    `tests/den-browser.mjs` 62; `tests/den-inject-browser.mjs` 76; `node tests/run.mjs check` parses `den.js`. The
+    `tests/den-browser.mjs` 66; `tests/den-inject-browser.mjs` 81; `node tests/run.mjs check` parses `den.js`. The
     D10 case reads the text and every title and label drawn on every tab against the decision's phrase list
     (`D10` in `tests/den-browser.mjs`); **a new sentence on the default screen that says what was not collected,
     or why, fails it - put such a sentence inside the disclosure or behind `gaps`.**
+  - **After review (page `den.js?v=r54`, `den.css?v=r53`; `DEN.md` s.11, "After review").** `useLoad` refuses a
+    loader made for another key, so a reload kept by something that outlived a change of desk lands nothing (a
+    component that awaits and then reloads must not rely on that alone: Guided also stops at `alive`). The board's
+    hand-over to the strip (`boardStrip`) ends when Today is left and on `pickDesk`; `onRun` takes no answer for a
+    desk that is not shown, and a failed strip read reports `{failed: true}` so the rail never says "reading" for
+    good. Guided ignores `e.repeat`; a failed decision is also said in `.den-last` ("Not saved: ..."); the mute
+    offer is put into `.den-say`, a status line that is always in the page. `#den-tabpanel` takes the focus when a
+    change of tab removed the control that had it. The listed channel's Switch off is `switchOff` (one way: it only
+    adds to the off list, says where the channel went and moves the focus to `#den-more > summary`); `toggle` is the
+    disclosure's alone. A listed channel no collector offers is said inside the disclosure ("Listed above, and where
+    each stands now"); Subscriber outlets has "Switch off subscriber news" while an outlet is cleared.
 
 ## The research agent
 

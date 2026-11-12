@@ -1145,7 +1145,7 @@ under "Get it out" rather than a menu: each is one press. Section order has no d
 it needs a browser from 2023 or later (Chrome 105, Safari 15.4, Firefox 121); an older one shows the Den's cards
 light inside the dark shell.
 
-## 11. The guided run, and only what is working (12 November 2026; worker build `2026-11-12.studio-p65`, pages `den.js?v=r50` to `?v=r53`, `den.css?v=r52`)
+## 11. The guided run, and only what is working (12 November 2026; worker build `2026-11-12.studio-p65`, pages `den.js?v=r50` to `?v=r54`, `den.css?v=r53`)
 
 **The decision (D10).** The owner was shown three directions for the flow of the page (`prompts/annes-den-flow.md`:
 a guided run, a command desk, a briefing document) and chose the first, with one condition. The owner's words, in
@@ -1179,7 +1179,9 @@ away for a person who is setting a channel up; nothing was deleted.
   listed under Add or switch on a channel." D10 hides standing statements, not results.
 - The kill switch. Every listed channel that is read through a signed-in session (X, Facebook, Instagram, YouTube,
   Reddit) has **Switch off** beside Collect now, on the default page. Off, the channel leaves the list and is
-  switched on again inside the disclosure.
+  switched on again inside the disclosure; the press is answered ("Switched off. X is listed under Add or switch on
+  a channel.") and the focus goes to the disclosure. That switch only ever adds to the off list. While a subscriber
+  outlet is cleared, the Subscriber outlets panel has **Switch off subscriber news** for the same reason.
 - What is there. A new line under Today's toolbar, in all three views and whatever the option: "In this window: News
   8 X 2" (`div.den-cover`, from the board's own `byChannel`, largest first, not drawn when the window is empty).
 - A narrative whose stance has not been judged still shows "not read yet": that is about a judgment, not a channel.
@@ -1233,7 +1235,8 @@ what D10 hides, so the run has three.
 - **Done states**: every row decided, an empty window, or only rows left for later; each has one button that opens
   the brief and spends nothing.
 - **Keys**, from the card only: P keep, X set aside, O or Enter open the source, J decide later; K brings back the
-  row last left and U undoes, anywhere in Guided. One key typed during a decision is held for the next card.
+  row last left and U undoes, anywhere in Guided. One key typed during a decision is held for the next card. A key
+  held down counts once: its repeats decide nothing.
 - **The mute offer** is a status line under the card, never an alert: "Mute it on this desk" or "Not now", and Not
   now is remembered (`ax_den_offer_no_<desk>`).
 - **Two deliberate changes, in Guided only.** X sets a row aside in one press, as "not relevant" (the table still
@@ -1262,9 +1265,9 @@ checks ran and every channel delivered.
 
 **Proved here.** `tests/den-worker.mjs` 24 (DK21 the option, DK22 what follows it, DK23 `run`, DK24 `copies`; DK6,
 DK12, DK15 and DK19 changed to assert the default first and the gap with the option on), `tests/den-public-worker.mjs`
-12 unchanged, `tests/den-browser.mjs` 62, `tests/den-inject-browser.mjs` 76, `tests/studio-tokens-test.mjs` 4, `node
+12 unchanged, `tests/den-browser.mjs` 66, `tests/den-inject-browser.mjs` 81, `tests/studio-tokens-test.mjs` 4, `node
 tests/run.mjs check` 27 (it now parses `den.js`). In the browser harness the main journey turns `showGaps` on,
-because it asserts gaps; fifteen cases are the guided run on fresh profiles; twelve are D10 with the option as it
+because it asserts gaps; eighteen cases are the guided run on fresh profiles; thirteen are D10 with the option as it
 ships. One of those reads every tab of a desk with rows and of an empty desk, in Guided, Table and Cards, and fails
 if the text that is drawn, or the title or label of anything drawn, matches
 `delivered nothing|not collected|not granted|not connected|No Mac collector|no collector|switched off|paused|not
@@ -1296,9 +1299,45 @@ channel that is switched on and has no rows for the desk is therefore switched *
 name says "on". The kill switch for everything on screen is on the default page, so nothing listed is ever more than
 one press from off; if the name should also say "off", it is one string.
 
-**Left as it is, and worth a look.** Three standing phrases are not about a channel and were not in the decision's
-list, so they stay: the Interactions tile's "no read from yesterday to compare", a spike's "Not yet acknowledged",
-and a narrative's "not read yet". Subscriber outlets ("headlines only") and the job console are unchanged.
+**Left as it is, and worth a look.** Two standing phrases are not about a channel and were not in the decision's
+list, so they stay: a spike's "Not yet acknowledged" and a narrative's "not read yet". (The Interactions tile's "no
+read from yesterday to compare" was a third; since r54 it is drawn only with the option on, like the same words in
+the Social table.) Subscriber outlets ("headlines only") and the job console are unchanged.
+
+**After review (page `den.js?v=r54`, `den.css?v=r53`; no worker change).** What a review of the change found, each
+checked against the code and fixed with a test that fails without it:
+- *A reload made for the last desk landed on this one.* A decision in Guided still in flight when the desk was
+  changed armed its timer after the card had gone, and the read it started was the last desk's: the board then
+  drew "Loading today's evidence" for good and the strip showed the other desk's signals. `useLoad` now refuses a
+  loader made for another key (which also closes the same path from a table row's Pin and "Put it back"), and
+  Guided touches nothing after it is left.
+- *The rail.* Today opened after the desk was changed on another tab was handed the last desk's strip, and the rail
+  fell to "reading": the hand-over ends when Today is left and on a change of desk, and an answer for a desk that
+  is not shown is not taken. A strip read that failed left "reading" for good: it now reports the failure and the
+  steps show no state. The focus asked for by "Next: triage" ends with the visit it was asked on. `aria-current`
+  goes to File only when the focus was moved there, and back to Write when the person goes into a section.
+- *Guided.* A key held down decides one row (`e.repeat`). A decision that fails just after one that was saved no
+  longer cancels the read that confirms the saved one, and is said on the status line as well as in the toast
+  ("Not saved: ..."). A read that takes the row off the card hands the focus to the card that takes its place when
+  the old one had it. The card names its signal in words ("Signal: TITLE"); an "Up next" button is named by what it
+  shows (where it is from, the headline, "left for later" or "signal"). The two status lines (`.den-last`, and
+  `.den-say`, which holds the mute offer) are in the page before they have anything to say. The compact strip says
+  the signals are "listed with the card", which is true under 1100 px too. Yesterday's rows left for later are not
+  carried into today when the day turns with the page open.
+- *The focus at the hand-off.* The done state's button and the header's action leave the page when Brief opens:
+  the focus then goes to `#den-tabpanel` (never when the page opens, never when something still holds it). "Write
+  it by hand" and "Draft the brief" on an older brief's notice hand the focus to the new brief's first section.
+- *Collection.* On a worker older than p65 the page applies the worker's own test (delivered in seven days, not off,
+  not paused), so a channel that is off is never listed with a button named "Switch off" that would have switched
+  it on. A listed channel whose signed-in read no collector offers now is said inside the disclosure ("Listed
+  above, and where each stands now"). A registered public Facebook group that has not read is listed under "To
+  finish setting up".
+- *Tests that could not fail.* DK24's cut at forty now puts held copies behind the cut and holds the database to
+  100 variables; a post titled with a story's headline proves both kind guards. The D10 case draws an actor's post
+  with no counts and a narrative with no stance (that chip, and only it, is taken out before the phrase list is
+  applied). The dark axe pass is of the screen with gaps drawn again, and Cards are drawn and checked with the
+  option on. The whole-page gate waits for the disclosure's own read of this visit, and checks names and overflow on
+  every tab at all three widths. The inject harness fails the register read that the disclosure makes.
 
 **Not verifiable here.** Everything was seen on the fixture's invented rows with a stub model: no real draft was
 written under the new rule for the model ("write about what the evidence holds"), so what a real draft says about a

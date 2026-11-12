@@ -5,7 +5,8 @@
  * nothing is spent. The cases written before the guided run (decision D10) are tests of the table; Guided, which a fresh
  * profile opens in, has its own: the board in all five modes, the strip in all five when the board comes without it, a
  * keep and a set-aside failing and dropping, the board answering without the strip, and the read after a decision
- * failing. 76 cases. Run: node --experimental-sqlite tests/den-inject-browser.mjs */
+ * failing. The register is read a second way, when Collection's one disclosure is opened: that read has its five too.
+ * 81 cases. Run: node --experimental-sqlite tests/den-inject-browser.mjs */
 import { world, open, t, ok, eq, txt, tab, toast, finish } from './den-fixture.mjs';
 
 console.log('den-inject-browser harness (every Den route failing, slow and malformed, one at a time)');
@@ -13,7 +14,10 @@ const w = await world(); await w.F('POST', '/den/brief', { desk: 'aep_au' }); aw
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const READS = [['the desks', /^\/den\/desks/, 'today'], ['the board', /^\/den\/board/, 'today'], ['the strip', /^\/den\/missed/, 'brief'], ['the brief', /^\/den\/brief\?/, 'brief'], ['the register', /^\/den\/watch\?/, 'watch'], ['the lexicon', /^\/den\/lexicon/, 'watch'], ['the themes', /^\/den\/themes/, 'watch'], ['collection', /^\/den\/collection/, 'collection'],
   // [3] how the page is opened, [4] what a healthy page shows: Guided has one card (or its done state) where the table has rows
-  ['the board in Guided', /^\/den\/board/, 'today', { guided: true }, '#den-focus, .den-done']];
+  ['the board in Guided', /^\/den\/board/, 'today', { guided: true }, '#den-focus, .den-done'],
+  // [5] a step after the tab opens. The register is read again when Collection's disclosure is opened, for "To finish setting up": the
+  // failure is said inside the disclosure, and the world's never-read Facebook account is listed once the read answers
+  ['the register, from Collection\'s disclosure', /^\/den\/watch\?/, 'collection', null, 'details.den-more[open] section.den-panel[aria-label="To finish setting up"] tbody tr', async page => { await page.locator('#den-root details.den-more > summary').click(); await page.waitForSelector('#den-root details.den-more[open] section.den-panel[aria-label="Signed-in collection"]'); }]];
 const MODES = {
   failing: async route => { await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done.', requestId: 'r1' }) }); return true; },
   'a gateway page': async route => { await route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' }); return true; },
@@ -27,14 +31,16 @@ const said = page => page.evaluate(() => Array.from(document.querySelectorAll('#
 const seen = (page, sel) => page.waitForSelector(sel.split(', ').map(x => '#den-root ' + x + ':visible').join(', '), { timeout: 20000 });
 const healthy = { today: 'section.den-panel[aria-label="Traditional media"] tr.den-row', brief: '.den-sec[data-section="summary"] textarea', watch: 'section.den-panel[aria-label="Waiting for a person"]', collection: 'section.den-panel[aria-label="Channels"] tr.den-row' };
 
-for (const [name, rx, where, how, good] of READS) for (const mode of Object.keys(MODES)) {
+for (const [name, rx, where, how, good, step] of READS) for (const mode of Object.keys(MODES)) {
   await t(name + ', ' + mode + ': the page stays up, says so, and recovers', async () => {
     let on = true; w.hooks = [async (route, r, path) => (on && r.method() === 'GET' && rx.test(path) ? MODES[mode](route) : false)];
     const page = await open(w, 'full-key', Object.assign({ view: 'command' }, how || {})); page.removeAllListeners('pageerror'); const errs = []; page.on('pageerror', e => errs.push(e.message));
     try {
       await page.evaluate(() => go('den')); await page.waitForSelector('#den-root > *', { timeout: 15000 }); if (await page.$('#den-tab-' + where)) await tab(page, where).catch(() => {});
+      if (step) await step(page);
       if (mode === 'slow') { await seen(page, good || healthy[where]); ok(await alive(page)); eq(errs, []); return; }
       await sleep(900); ok(await alive(page), 'the page is blank'); const msg = await said(page);
+      if (step) { ok(/^The register could not be loaded\./.test(await txt(page, 'details.den-more[open] section.den-panel[aria-label="To finish setting up"] .den-state.err')), 'the failure is not said inside the disclosure'); ok(await page.locator('section.den-panel[aria-label="Channels"] tr.den-row').count() >= 1, 'the channels that deliver left the page with it'); }
       ok(/could not be loaded|could not be refreshed|stopped working|connection to AXIOM dropped|not with what this page asked for|Something failed on the worker/.test(msg), 'nothing on the page says what failed: [' + msg.slice(0, 200) + ']');
       if (name !== 'the desks') ok(await page.$('button.den-deskcard'), 'the header is gone');
       eq(errs, [], 'an uncaught error reached the page');
@@ -69,6 +75,8 @@ const GUIDED = { open: { guided: true }, healthy: '#den-focus, .den-done' };
 // what Guided shows: the card, what is next, the tray, the last decision, and the counts in the toolbar, the rail and the header
 const guided = async p => { await p.waitForFunction(() => / decided/.test((document.querySelector('#den-step-triage') || { getAttribute: () => '' }).getAttribute('aria-label') || '') && document.querySelector('#den-focus').getAttribute('aria-busy') !== 'true');
   return p.evaluate(() => ['#den-focus .den-focus-t', '.den-next', '.den-traybox', '.den-last', '.den-toolbar .den-note', '#den-next'].map(s => (document.querySelector(s) || {}).textContent || '').concat([document.querySelector('#den-step-triage').getAttribute('aria-label')])); };
+// after a decision that failed: everything as it was, but for the status line (the fourth), which was empty and now says the failure in words
+const sameButSaid = async (p, msg) => { const now = await guided(p); const rest = a => a.filter((x, i) => i !== 3); eq(rest(now), rest(p.was), msg); eq(p.was[3], ''); ok(/^Not saved: (Something failed on the worker|The connection to AXIOM dropped)/.test(now[3]), 'the status line does not say it failed: [' + now[3] + ']'); };
 const WRITES = [
   ['a pin', /^\/den\/pin/, 'today', async p => { await p.locator('section.den-panel[aria-label="Traditional media"] tr.den-row').first().getByRole('button', { name: 'Pin' }).click(); }, async p => eq(await p.locator('tr.den-row.pinned').count(), 0, 'the row shows a pin that was not saved')],
   ['a set-aside', /^\/den\/aside/, 'today', async p => { const r = p.locator('section.den-panel[aria-label="Traditional media"] tr.den-row').first(); await r.getByRole('button', { name: 'Set aside' }).click(); await r.getByRole('button', { name: 'Set aside' }).click(); }, async p => ok(await p.locator('section.den-panel[aria-label="Traditional media"] tr.den-row').count() >= 7, 'the row left the board though the set-aside failed')],
@@ -81,9 +89,10 @@ const WRITES = [
   ['a switch', /^\/den\/reach/, 'collection', async p => { await p.locator('details.den-more > summary').click(); await p.locator('section.den-panel[aria-label="Signed-in collection"] tr', { hasText: 'Facebook' }).getByRole('button', { name: 'Switch off' }).click(); }, async p => ok(/allowed/.test(await p.locator('section.den-panel[aria-label="Signed-in collection"] tr', { hasText: 'Facebook' }).textContent()), 'it shows as switched off')],
   ['the options', /^\/den\/desk\/update/, 'options', async p => { await p.locator('section.den-panel[aria-label="The desk"] input[type="number"]').fill('36'); await p.getByRole('button', { name: 'Save options' }).click(); }, async p => { eq(await p.inputValue('section.den-panel[aria-label="The desk"] input[type="number"]'), '36', 'what was typed is gone'); ok(/Not saved/.test(await txt(p, '.den-optbar .den-save'))); }],
   // "collect now" and "a switch" open Collection's one disclosure first: by default (D10) a channel with no rows for the desk, and the switches, are inside it
-  // [5] how the page is opened and what a healthy page shows. In Guided a decision that fails leaves the card, the queue, the tray and every count as they were.
-  ['a keep in Guided', /^\/den\/pin/, 'today', async p => { p.was = await guided(p); await p.locator('#den-focus').getByRole('button', { name: 'Keep for the report', exact: true }).click(); }, async p => { eq(await guided(p), p.was, 'the card or a count moved though the keep failed'); ok(await p.locator('#den-focus').getByRole('button', { name: 'Keep for the report', exact: true }).isEnabled(), 'the card stayed locked'); }, GUIDED],
-  ['a set-aside in Guided', /^\/den\/aside/, 'today', async p => { p.was = await guided(p); await p.locator('#den-focus').getByRole('button', { name: 'Set aside', exact: true }).click(); }, async p => { eq(await guided(p), p.was, 'the card or a count moved though the set-aside failed'); ok(await p.locator('#den-focus').getByRole('button', { name: 'Set aside', exact: true }).isEnabled(), 'the card stayed locked'); }, GUIDED],
+  // [5] how the page is opened and what a healthy page shows. In Guided a decision that fails leaves the card, the queue, the tray and every count as they
+  // were, and is said on the status line under the card as well as in the toast.
+  ['a keep in Guided', /^\/den\/pin/, 'today', async p => { p.was = await guided(p); await p.locator('#den-focus').getByRole('button', { name: 'Keep for the report', exact: true }).click(); }, async p => { await sameButSaid(p, 'the card or a count moved though the keep failed'); ok(await p.locator('#den-focus').getByRole('button', { name: 'Keep for the report', exact: true }).isEnabled(), 'the card stayed locked'); }, GUIDED],
+  ['a set-aside in Guided', /^\/den\/aside/, 'today', async p => { p.was = await guided(p); await p.locator('#den-focus').getByRole('button', { name: 'Set aside', exact: true }).click(); }, async p => { await sameButSaid(p, 'the card or a count moved though the set-aside failed'); ok(await p.locator('#den-focus').getByRole('button', { name: 'Set aside', exact: true }).isEnabled(), 'the card stayed locked'); }, GUIDED],
 ];
 for (const [name, rx, where, act, check, how] of WRITES) for (const mode of ['failing', 'dropped']) {
   await t(name + ', ' + mode + ': it is said, nothing is lost, and nothing pretends to have happened', async () => {

@@ -50,8 +50,10 @@
   function useLoad(fn, deps, key) {
     const [st, setSt] = useState({ data: null, err: '', loading: true, asked: 0 }); const seq = useRef(0); const last = useRef(key); const has = useRef(false); has.current = !!st.data;
     // reload() answers a promise: true only when its own answer landed. asked is when the read behind what is shown was
-    // sent, so a decision made after it can be told from one the read already holds.
-    const load = useCallback(() => { const n = ++seq.current; const asked = Date.now(); setSt(s => ({ data: s.data, err: '', loading: true, asked: s.asked }));
+    // sent, so a decision made after it can be told from one the read already holds. A loader made for another key (the
+    // last desk's reload, kept by something that outlived the change of desk) asks nothing and lands nothing: it would
+    // supersede this desk's read and put the last desk's answer in its place.
+    const load = useCallback(() => { if (last.current !== key) return Promise.resolve(false); const n = ++seq.current; const asked = Date.now(); setSt(s => ({ data: s.data, err: '', loading: true, asked: s.asked }));
       return Promise.resolve().then(fn).then(d => { if (n !== seq.current) return false; setSt({ data: d, err: '', loading: false, asked }); return true; }, e => { if (n === seq.current) setSt(s => ({ data: s.data, err: say(e), loading: false, asked: s.asked })); return false; }); }, deps);   // eslint-disable-line
     // another desk clears what is shown; a refresh of the same desk keeps it on screen until the new read lands
     useEffect(() => { if (last.current !== key) { last.current = key; setSt({ data: null, err: '', loading: true, asked: 0 }); } load(); }, deps);   // eslint-disable-line
@@ -101,13 +103,14 @@
     const fold = () => { ls.set('ax_den_strip', !open); setOpen(!open); };
     // the day's run rides on the strip's answer (worker p65): the rail and the header read it on every tab. An answer says
     // which desk it is for, so a late one for the last desk is never shown on this one.
-    useEffect(() => { if (onRun && m.data) onRun({ desk: m.data.desk || deskId, run: m.data.run || null }); }, [m.data]);   // eslint-disable-line
+    // A read that failed is said too, with no run: the rail then prints no state, and never "reading" for good.
+    useEffect(() => { if (!onRun) return; if (m.data) onRun({ desk: m.data.desk || deskId, run: m.data.run || null }); else if (m.err) onRun({ desk: deskId, run: null, failed: true }); }, [m.data, m.err]);   // eslint-disable-line
     if (!m.data && !m.err) return html`<section class="den-strip" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3></header><${Loading} what="the checks" /></section>`;
     if (m.err && !m.data) return html`<section class="den-strip" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3></header><${Failed} what="The checks" err=${m.err} onRetry=${m.reload} /></section>`;
     const s = m.data.signals || [];
     const five = m.data.checks === 5;   // decision D10: the sixth check, collection gaps, runs only when the desk's showGaps is on; a worker that does not say ran all six
-    // in Guided the signals are listed beside the card, in the tray: the strip is its header line alone
-    if (compact) return html`<section class="den-strip den-compact" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3><span class="den-mono">${s.length ? s.length + ' to read, listed beside the card' : five ? 'five checks, nothing found' : 'six checks, nothing found'}</span><span class="den-spacer"></span><span class="den-mono" title="Computed from the archive. No model is asked.">computed, no model</span></header></section>`;
+    // in Guided the signals are listed with the card (beside it, and under it on a narrow screen): the strip is its header line alone
+    if (compact) return html`<section class="den-strip den-compact" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3><span class="den-mono">${s.length ? s.length + ' to read, listed with the card' : five ? 'five checks, nothing found' : 'six checks, nothing found'}</span><span class="den-spacer"></span><span class="den-mono" title="Computed from the archive. No model is asked.">computed, no model</span></header></section>`;
     return html`<section class="den-strip" aria-label="Nothing critical missed">
       <header><h3>Nothing critical missed</h3><span class="den-mono">${s.length ? s.length + ' to read' : five ? 'five checks, nothing found' : 'six checks, nothing found'}</span>${!open && s.some(x => x.sig === 'gap') ? html`<span class="den-chip warn">${s.filter(x => x.sig === 'gap').length} not collected</span>` : null}<span class="den-spacer"></span><span class="den-mono" title="Computed from the archive. No model is asked.">computed, no model</span>
         <button class="den-mini" aria-expanded=${open ? 'true' : 'false'} aria-controls="den-strip-list" onClick=${fold}>${open ? 'Fold' : 'Show'}</button></header>
@@ -146,7 +149,7 @@
       <div class="den-kpis" role="group" aria-label="The window in figures">
         ${tile(1, 'Stories', fmtN(c.media), c.news === c.media ? 'none carried by a second outlet' : fmtN(c.news) + ' filed, counting syndicated copies', 'Traditional media')}
         ${tile(2, 'Social posts', fmtN(c.social), c.underMinimum ? fmtN(c.underMinimum) + ' more under the desk minimum' : 'on this desk\'s terms and accounts', 'Social')}
-        ${tile(3, 'Interactions', m.held ? fmtN(m.total) : '-', !m.held ? (gaps ? 'no counts are held for these posts' : '-') : m.hasGrowth ? 'against yesterday\'s read' : 'no read from yesterday to compare', 'Social', m.held && m.hasGrowth && m.growth ? { up: m.growth > 0, text: (m.growth > 0 ? '+' : '-') + fmtN(Math.abs(m.growth)) } : null)}
+        ${tile(3, 'Interactions', m.held ? fmtN(m.total) : '-', !m.held ? (gaps ? 'no counts are held for these posts' : '-') : m.hasGrowth ? 'against yesterday\'s read' : gaps ? 'no read from yesterday to compare' : '-', 'Social', m.held && m.hasGrowth && m.growth ? { up: m.growth > 0, text: (m.growth > 0 ? '+' : '-') + fmtN(Math.abs(m.growth)) } : null)}
         ${tile(7, 'Narratives moving', fmtN(c.narratives), m.hostile ? m.hostile + ' read as hostile to the client' : 'none read as hostile', 'Key narratives')}
         ${tile(5, 'In the report', fmtN((d.pinned || []).length), fmtN(c.aside) + ' set aside' + (c.muted ? ', ' + fmtN(c.muted) + ' muted' : ''), 'Traditional media')}
       </div>
@@ -242,13 +245,14 @@
   function Guided({ d: d0, desk, canWrite, setTab, b, later, setLater, bump, brief, unconfirmed }) {
     const [at, setAt] = useState(null); const [last, setLast] = useState(null); const [busy, setBusy] = useState(false); const [pending, setPending] = useState([]); const [note, setNote] = useState('');
     const [offer, setOffer] = useState(null); const [why, setWhy] = useState(''); const [own_, setOwn] = useState(''); const [foc, setFoc] = useState(0);
-    const root = useRef(null); const held = useRef(''); const timer = useRef(0); const going = useRef(false); const bRef = useRef(b); bRef.current = b;
+    const root = useRef(null); const held = useRef(''); const timer = useRef(0); const going = useRef(false); const bRef = useRef(b); bRef.current = b; const alive = useRef(true); const wasIn = useRef(false);
     const d = useMemo(() => applyPending(d0, pending), [d0, pending]);
     // what was laid over the answer goes back to the loader, so the rail, the header and the board's footer count the same rows
     useEffect(() => { if (d !== d0) bRef.current.set(d); }, [d, d0]);
     // a read sent after a decision was saved holds that decision: it is confirmed, and leaves the list
     useEffect(() => { if (pending.some(e => b.asked >= e.at)) setPending(q => q.filter(e => !(b.asked >= e.at))); }, [b.asked, pending]);
-    useEffect(() => () => clearTimeout(timer.current), []);
+    // left (another desk, another view, another tab): no timer waits, and a request still in flight touches nothing when it answers
+    useEffect(() => () => { alive.current = false; clearTimeout(timer.current); }, []);
     // the board is told while a decision waits to be confirmed: if this view is left first, the board reads again itself
     useEffect(() => { if (unconfirmed) unconfirmed.current = pending.length > 0; }, [pending]);   // eslint-disable-line
     const sigs = d.missed && d.missed.ok === true && Array.isArray(d.missed.signals) ? d.missed.signals : null; const p = progOf(d);
@@ -262,7 +266,10 @@
     const open = useMemo(() => queue.filter(x => later.indexOf(x.r.id) < 0), [queue, later]);
     // which row shows: the one being read stays until it is decided or left, so a refresh never swaps the card under a person
     const cur = (at != null && open.find(x => x.r.id === at)) || open[0] || null; const curId = cur ? cur.r.id : null;
-    useEffect(() => { if (curId === at) return; if (at != null && !all.some(x => x.r.id === at && !x.r.pinned)) setNote('That row is already decided. ' + p.left + ' left.'); setAt(curId); }, [curId, at]);   // eslint-disable-line
+    // whether the focus is inside the card as it stands, read before this render is drawn: a read that takes the row away
+    // removes the card that held the focus, and the card that takes its place is given it (the keys act from the card)
+    wasIn.current = !!(root.current && (c => c && c.contains(document.activeElement))(root.current.querySelector('#den-focus')));
+    useEffect(() => { if (curId === at) return; if (at != null && !all.some(x => x.r.id === at && !x.r.pinned)) setNote('That row is already decided. ' + p.left + ' left.'); if (at != null && wasIn.current) focus(); setAt(curId); }, [curId, at]);   // eslint-disable-line
     useEffect(() => { setWhy(''); setOwn(''); }, [curId]);
     // a row left for later that has since been decided, muted or has left the window is no longer waiting
     useEffect(() => { if (!later.length) return; const und = new Set(all.filter(x => !x.r.pinned).map(x => x.r.id)); const keep = later.filter(id => und.has(id)); if (keep.length !== later.length) setLater(keep); }, [all, later]);   // eslint-disable-line
@@ -276,9 +283,11 @@
     const act = async (path, body, entry, done) => {
       if (going.current || !canWrite) return; going.current = true; setBusy(true); const wasReading = bRef.current.loading; bRef.current.drop(); clearTimeout(timer.current);
       const card = root.current && root.current.querySelector('#den-focus'); if (card && root.current.contains(document.activeElement)) card.focus();   // its buttons are about to be disabled: the focus stays on the card
-      let res = null; try { res = await call(path, Object.assign({ desk: desk.id }, body)); } catch (e) { toastMsg(say(e), true); }
+      let res = null, bad = ''; try { res = await call(path, Object.assign({ desk: desk.id }, body)); } catch (e) { bad = say(e); toastMsg(bad, true); }
+      if (!alive.current) return;
       going.current = false; setBusy(false);
-      if (!res) { held.current = ''; if (wasReading) reload(); focus(); return; }
+      // a failure is said on the status line too (it is always there to be read out), and the read an earlier decision was waiting for is asked again
+      if (!res) { held.current = ''; setNote('Not saved: ' + bad); if (wasReading || pending.length) reload(); focus(); return; }
       const e = Object.assign({ at: Date.now(), n: 1 + (res.copies || []).length }, entry);
       setPending(q => q.filter(y => y.id !== e.id).concat([e])); setNote(''); done(res); reload(); focus(); };
     const declined = () => { const v = ls.get('ax_den_offer_no_' + desk.id, []); return Array.isArray(v) ? v : []; };
@@ -291,7 +300,7 @@
     const takeOut = x => act('/den/pin', Object.assign({ item: x.r.id, clear: true }, copies(x)), { id: x.r.id, kind: 'unpin', ids: idsOf(x) }, () => { if (last && last.x.r.id === x.r.id) setLast(null); setNote('Taken out of the report, and back in the queue: ' + sayOf(x) + '.'); });
     const mute = async on => { const o = offer; if (!o) return;
       if (!on) { ls.set('ax_den_offer_no_' + desk.id, declined().concat([o.kind + ':' + o.value]).slice(-200)); setOffer(null); return focus(); }
-      try { await call('/den/mute', { desk: desk.id, kind: o.kind, value: o.value }); toastMsg('Muted on this desk'); setOffer(null); setAt(null); bRef.current.reload(); bump('desk'); } catch (e) { toastMsg(say(e), true); } focus(); };
+      try { await call('/den/mute', { desk: desk.id, kind: o.kind, value: o.value }); toastMsg('Muted on this desk'); bump('desk'); if (!alive.current) return; setOffer(null); setAt(null); bRef.current.reload(); } catch (e) { toastMsg(say(e), true); } if (alive.current) focus(); };
     // left for later: kept on this computer only, never sent
     const leave = x => { setLater(later.filter(i => i !== x.r.id).concat([x.r.id])); setAt(null); setNote('Left for later: ' + sayOf(x) + '.'); focus(); };
     const leaveAll = () => { setLater(later.concat(open.map(x => x.r.id))); setAt(null); setNote(''); focus(); };
@@ -303,8 +312,8 @@
     useEffect(() => { if (busy) return; const k = held.current; held.current = ''; if (!k || !cur) return; if (k === 'p') keep(cur); else if (k === 'x') aside(cur, ASIDE[0]); else if (k === 'j') leave(cur); }, [busy, curId]);   // eslint-disable-line
     /* Keys, never while typing and never with a modifier. p keep, x set aside as not relevant, o (or Enter on the card
        itself) open the source, j leave for later: only while the focus is inside the card. k brings back the row last
-       left and u undoes the last decision anywhere in the guide. */
-    const onKey = e => { const t = e.target; if (!t || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return; if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+       left and u undoes the last decision anywhere in the guide. A key held down counts once: its repeats decide nothing. */
+    const onKey = e => { if (e.repeat) return; const t = e.target; if (!t || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return; if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (k === 'u') { if (canWrite && last && !going.current) { e.preventDefault(); undo(); } return; }
       if (k === 'k') { if (later.length && !going.current) { e.preventDefault(); back(); } return; }
@@ -334,7 +343,7 @@
         : { mark: ini(r.who), col: serCol(serKey(r.platform)), meta: html`<b>${r.who}</b> - ${r.role === 'mp' ? 'MP' + (r.party ? ', ' + r.party : '') : r.role === 'org' ? 'organisation' : r.role} - ${CH[r.platform] || r.platform} - ${aest(r.ts)}`, body: null, figs: r.total > 0 ? fig('interactions', fmtN(r.total)) : null };
       return html`<article key=${r.id} class="den-focus" id="den-focus" tabIndex="0" aria-busy=${busy ? 'true' : 'false'} aria-label=${'Next to decide, ' + n + ' of ' + open.length + ': ' + kind + ': ' + headOf(x)}>
         <div class="den-focus-h"><span class="den-mc-av" aria-hidden="true" style=${{ background: parts.col }}>${parts.mark}</span><div class="den-mc-m">${parts.meta}</div><span class="den-spacer"></span><span class="den-mono">${n} of ${open.length}</span></div>
-        <div class="den-t den-focus-t">${r.title || r.text}</div>${parts.body}
+        <div class="den-t den-focus-t">${r.title || r.text}</div>${parts.body}${tie.sig ? html`<span class="den-sub den-focus-sig">Signal: ${tie.sig.title}</span>` : null}
         <div class="den-mc-f">${parts.figs}${chips}</div>
         ${canWrite ? html`<div class="den-focus-a">
           <button type="button" class="den-mini primary" disabled=${busy} title="A draft is asked to cover a kept row" onClick=${() => keep(x)}>Keep for the report</button>
@@ -366,9 +375,10 @@
         ${cur ? card(cur) : done()}
         ${cur && canWrite && open.length > 1 ? html`<div class="den-under"><button type="button" class="den-link" disabled=${busy} onClick=${leaveAll}>Leave the other ${open.length} for later</button></div>` : null}
         <div class="den-last" role="status" aria-live="polite">${last ? html`<span>${last.kind === 'pin' ? 'Kept for the report' : 'Set aside (' + last.reason + ')'}: ${sayOf(last.x)}. ${canWrite ? html`<button type="button" class="den-link" disabled=${busy} onClick=${undo}>Undo</button>` : null}</span>` : null}${note ? html`<span>${note}</span>` : null}</div>
-        ${offer ? html`<div class="den-offer" role="status"><span>${offer.text} A mute hides its rows on this desk only, and can be removed in Options.</span><div><button type="button" class="den-mini" onClick=${() => mute(true)}>Mute it on this desk</button><button type="button" class="den-mini" onClick=${() => mute(false)}>Not now</button></div></div>` : null}
-        ${nxt.length ? html`<div class="den-next" role="group" aria-labelledby="den-next-h"><h3 id="den-next-h">Up next</h3><ol>${nxt.map(x => html`<li key=${x.r.id}><button type="button" class="den-nextb" aria-label=${'Bring forward: ' + kindOf(x) + ': ' + headOf(x)} onClick=${() => bring([x.r.id])}>
-          <span class="k">${x.list === 'media' ? x.r.outlet : x.list === 'actors' ? x.r.who : CH[x.r.platform] || x.r.platform}</span><span class="t">${headOf(x)}</span>${later.indexOf(x.r.id) >= 0 ? html`<span class="den-chip">left for later</span>` : (ties.get(x.r.id) || {}).sig ? html`<span class="den-chip acc">Signal</span>` : null}</button></li>`)}</ol>
+        <div class="den-say" role="status">${offer ? html`<div class="den-offer"><span>${offer.text} A mute hides its rows on this desk only, and can be removed in Options.</span><div><button type="button" class="den-mini" onClick=${() => mute(true)}>Mute it on this desk</button><button type="button" class="den-mini" onClick=${() => mute(false)}>Not now</button></div></div>` : null}</div>
+        ${nxt.length ? html`<div class="den-next" role="group" aria-labelledby="den-next-h"><h3 id="den-next-h">Up next</h3><ol>${nxt.map(x => { const from = x.list === 'media' ? x.r.outlet : x.list === 'actors' ? x.r.who : CH[x.r.platform] || x.r.platform; const mark = later.indexOf(x.r.id) >= 0 ? 'left for later' : (ties.get(x.r.id) || {}).sig ? 'Signal' : '';
+          return html`<li key=${x.r.id}><button type="button" class="den-nextb" aria-label=${'Bring forward: ' + kindOf(x) + ': ' + (x.list === 'actors' || !from ? '' : from + ', ') + headOf(x) + (mark ? ', ' + mark.toLowerCase() : '')} onClick=${() => bring([x.r.id])}>
+          <span class="k">${from}</span><span class="t">${headOf(x)}</span>${mark ? html`<span class=${'den-chip' + (mark === 'Signal' ? ' acc' : '')}>${mark}</span>` : null}</button></li>`; })}</ol>
           ${more > 0 ? html`<p class="den-mono">and ${more} more</p>` : null}</div>` : null}
       </div>
       <div class="den-tray" role="group" aria-label="Today's report">
@@ -395,6 +405,8 @@
     const b = useLoad(() => get('/den/board?' + q({ desk: desk.id, missed: 1 }), 'counts'), [desk.id, tick], desk.id);
     useEffect(() => { if (!onStrip) return; const ms = b.data ? b.data.missed : null; const good = !!(ms && ms.ok === true && Array.isArray(ms.signals));
       onStrip({ data: good ? ms : null, loading: b.loading, err: b.err, reload: b.reload }); }, [b.data, b.loading, b.err]);   // eslint-disable-line
+    // Today left: the strip asks for itself again, and the next visit is never handed this visit's answer (it may be another desk's by then)
+    useEffect(() => () => { if (onStrip) onStrip(null); }, []);   // eslint-disable-line
     const [offer, setOffer] = useState(null); const [showAside, setShowAside] = useState(false); const root = useRef(null); const unconfirmed = useRef(false);
     // Guided lays its last decisions over the answer and reads again a moment later; left for Table or Cards before that, the read is made here
     useEffect(() => { if (view !== 'guided' && unconfirmed.current) { unconfirmed.current = false; b.reload(); } }, [view]);   // eslint-disable-line
@@ -514,7 +526,7 @@
         : html`<div style=${{ marginTop: '8px' }}><button class="den-mini" disabled=${busy || dirty} title=${dirty ? 'Save your edit first' : 'One model call, counted against today\'s Den budget'} onClick=${() => setAsk(true)}>Regenerate this section</button></div>`) : null}
     </div>`;
   }
-  function BriefPanel({ desk, tick, bump, budget, canWrite, setTab, onBrief, day, fileAsk, onFileDone, missing }) {
+  function BriefPanel({ desk, tick, bump, budget, canWrite, setTab, onBrief, day, fileAsk, onFileDone, onSection, missing }) {
     const [evSel, setEvSel] = useState(null); useEffect(() => { if (evSel) { const e = document.getElementById('den-ev-' + evSel); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' }); } }, [evSel]);
     const wk = b => 'ax_den_work_' + b.id;
     const L = useLoad(() => get('/den/brief?' + q({ desk: desk.id }), 'brief'), [desk.id, tick], desk.id);
@@ -533,11 +545,17 @@
        so the notice above it takes the focus; today's brief with something to file takes it into the File region, on its
        main button when that can be pressed; anything less moves nothing. Never while the person is typing. */
     const older = !!(brief && day && brief.day !== day);
-    useEffect(() => { if (!fileAsk || !L.data || !day) return; if (onFileDone) onFileDone();
+    useEffect(() => { if (!fileAsk || !L.data || !day) return;
       const written = brief ? Object.keys(brief.sections || {}).map(k => (brief.sections[k] || {}).text || '').join('\n').replace(/\s/g, '').length : 0;
       const el = older ? document.getElementById('den-older') : brief && written >= 200 ? document.getElementById('den-file') : null; const a = document.activeElement;
-      if (!el || (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.closest('#den-tabpanel'))) return;
-      if (el.scrollIntoView) el.scrollIntoView({ block: 'center' }); const main = older ? null : el.querySelector('.den-mini.primary:not(:disabled)'); (main || el).focus({ preventScroll: true }); }, [fileAsk, !!L.data, day, brief && brief.id]);   // eslint-disable-line
+      const can = !!el && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.closest('#den-tabpanel'));
+      if (can) { if (el.scrollIntoView) el.scrollIntoView({ block: 'center' }); const main = older ? null : el.querySelector('.den-mini.primary:not(:disabled)'); (main || el).focus({ preventScroll: true }); }
+      // the rail's "you are here" goes to File only when the person was taken there
+      if (onFileDone) onFileDone(can && !older); }, [fileAsk, !!L.data, day, brief && brief.id]);   // eslint-disable-line
+    // "Write it by hand" and "Draft the brief" on an older brief's notice make today's brief, and the notice that held the
+    // pressed button goes: the focus is handed to the first section of the new brief (or the area, when there is none)
+    const toNew = useRef(false);
+    useEffect(() => { if (!toNew.current) return; toNew.current = false; const p = document.getElementById('den-tabpanel'); const el = p && (p.querySelector('.den-sec textarea.den-ta') || p); if (el) el.focus(); }, [brief && brief.id]);   // eslint-disable-line
     const texts = b => { const o = {}; desk.sections.forEach(s => { if (s.kind !== 'sources') o[s.id] = (b.sections[s.id] && b.sections[s.id].text) || ''; }); return o; };
     // open the brief: this person's unsaved words, if any were kept on this computer, come back over it
     useEffect(() => { workRef.current = work; }, [work]);
@@ -563,11 +581,11 @@
     const keepMine = () => { const t = conflict.theirs; const kept = ls.get(wk(t), null); if (kept) ls.set(wk(t), Object.assign({}, kept, { revision: t.revision })); setWork(w => Object.assign({}, w, { revision: t.revision })); L.set({ ok: true, brief: t }); setConflict(null); setSave({ s: 'dirty', msg: 'Your words are kept. Save to put them over theirs.' }); };
     const takeTheirs = () => { const t = conflict.theirs; ls.del(wk(t)); L.set({ ok: true, brief: t }); setWork({ id: t.id, revision: t.revision, sections: texts(t), ratings: t.ratings }); setConflict(null); setRestored(false); setSave({ s: 'idle', msg: '' }); };
     const guard = async (name, fn) => { if (busy) return; setBusy(name); setDropped(false); try { await fn(); } catch (e) { if (!e.code && !e.status) setDropped(true); else if (e.code === 'conflict' && e.body && e.body.brief) { setConflict({ theirs: e.body.brief }); toastMsg('Someone else changed this brief first.', true); } else toastMsg(say(e), true); } setBusy(''); bump('budget'); };
-    const draft = replace => guard('draft', async () => { const d = await call('/den/brief', { desk: desk.id, replace: !!replace }); L.set({ ok: true, brief: d.brief }); toastMsg('Drafted from ' + Object.keys(d.brief.evidence).length + ' rows of evidence' + ((d.dropped || []).length ? '; ' + d.dropped.length + ' citation' + (d.dropped.length === 1 ? ' the evidence never gave was removed' : 's the evidence never gave were removed') : '')); });
+    const draft = replace => guard('draft', async () => { const was = older && !replace; const d = await call('/den/brief', { desk: desk.id, replace: !!replace }); toNew.current = was; L.set({ ok: true, brief: d.brief }); toastMsg('Drafted from ' + Object.keys(d.brief.evidence).length + ' rows of evidence' + ((d.dropped || []).length ? '; ' + d.dropped.length + ' citation' + (d.dropped.length === 1 ? ' the evidence never gave was removed' : 's the evidence never gave were removed') : '')); });
     const regen = (section, instruction, force) => guard('section', async () => { const d = await call('/den/brief/section', { id: brief.id, section, revision: brief.revision, instruction, force: !!force }); L.set({ ok: true, brief: d.brief }); toastMsg('Section written again'); });
     const file = ack => guard('file', async () => { try { const d = await call('/den/brief/file', { id: brief.id, revision: brief.revision, acknowledge: !!ack }); setAsk(null); L.set({ ok: true, brief: d.brief }); toastMsg('Marked as filed'); bump('filed'); } catch (e) { if (e.code === 'uncited_signals') { setAsk(e.body); return; } throw e; } });
     const reopen = () => guard('file', async () => { const d = await call('/den/brief/file', { id: brief.id, reopen: true }); L.set({ ok: true, brief: d.brief }); });
-    const start = () => guard('hand', async () => { const d = await call('/den/brief/save', { desk: desk.id }); L.set({ ok: true, brief: d.brief }); });
+    const start = () => guard('hand', async () => { const was = older; const d = await call('/den/brief/save', { desk: desk.id }); toNew.current = was; L.set({ ok: true, brief: d.brief }); });
     const fname = ext => (desk.id + '-' + brief.day + (brief.status === 'filed' ? '' : '-draft') + '.' + ext);
     const download = async fmt => { try { const t = await getText('/den/brief?' + q({ id: brief.id, format: fmt })); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: fmt === 'html' ? 'text/html' : 'text/markdown' })); a.download = fname(fmt); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); } catch (e) { toastMsg(say(e), true); } };
     const copy = async fmt => { try { const t = await getText('/den/brief?' + q({ id: brief.id, format: fmt === 'rich' ? 'html' : 'slack' }));
@@ -591,7 +609,7 @@
     const nWritten = others.filter(s => String((work ? work.sections[s.id] : (brief.sections[s.id] || {}).text) || '').trim()).length;
     const standing = [nWritten + ' of ' + others.length + ' section' + (others.length === 1 ? '' : 's') + ' written.', flags ? flags + ' sentence' + (flags === 1 ? '' : 's') + ' without evidence.' : '', !older && missing ? missing + ' kept row' + (missing === 1 ? '' : 's') + ' not in it.' : '', dirty ? 'Unsaved changes.' : ''].filter(Boolean).join(' ');
     const stepHead = (n, name) => (older ? null : html`<div class="den-stephead" aria-hidden="true"><span class="n">${n}</span> ${name}</div>`);
-    return html`<div>
+    return html`<div onFocus=${e => { if (onSection && e.target && e.target.closest && e.target.closest('.den-sec')) onSection(); }}>
       ${droppedNote}
       ${older ? html`<div class="den-notice" role="status" tabIndex="-1" id="den-older">This is the brief for ${brief.day}. Today's has not been started.
         ${canWrite ? html`<div><button class="den-mini primary" disabled=${!!busy || !left || dirty} title=${dirty ? 'Save your edits first' : ''} onClick=${() => draft(false)}>${busy === 'draft' ? 'Drafting (a minute or two)...' : 'Draft the brief (1 model call)'}</button><button class="den-mini" disabled=${!!busy || dirty} title=${dirty ? 'Save your edits first' : ''} onClick=${start}>Write it by hand</button><span class="den-sub">${left ? cost : 'Today\'s Den model calls are used. A brief can still be written by hand.'}</span></div>` : null}</div>` : null}
@@ -719,6 +737,11 @@
     const want = opened && !gaps; const R = useLoad(() => (want ? get('/den/watch?' + q({ ns: desk.ns }), 'watch') : Promise.resolve(null)), [desk.ns, tick, want], desk.ns);
     const collect = async ch => { setBusy(ch.id); try { const d = await call('/den/collect', { desk: desk.id, channel: ch.collect }); setJob({ id: d.id, status: d.where === 'desktop' ? 'queued' : 'running', lines: [], title: ch.label + (d.where === 'desktop' ? ' (waiting for the Mac collector)' : '') }); tailJob(d.id, j => setJob(o => (o && o.id === d.id ? Object.assign({}, o, j) : o)), () => { C.reload(); bump('collected'); }); } catch (e) { toastMsg(say(e), true); } setBusy(''); };
     const toggle = async src => { const off = (C.data.reach.off || []).slice(); const i = off.indexOf(src); if (i >= 0) off.splice(i, 1); else off.push(src); setBusy('sw'); try { await call('/den/reach', { off }); C.reload(); } catch (e) { toastMsg(say(e), true); } setBusy(''); };
+    /* The kill switch on the default screen: one way only. It adds the source to the off list and never takes one out, so
+       it cannot switch anything on whatever the page was told. What it switched off leaves the screen, so it says where
+       that went and hands the focus to the disclosure that now holds it. */
+    const switchOff = async (src, label) => { const off = (C.data.reach.off || []).slice(); if (off.indexOf(src) < 0) off.push(src); setBusy('sw'); let done = false; try { await call('/den/reach', { off }); done = true; } catch (e) { toastMsg(say(e), true); } setBusy(''); if (!done) return;
+      toastMsg('Switched off. ' + label + ' is listed under Add or switch on a channel.'); const s = document.querySelector('#den-more > summary'); if (s) s.focus(); C.reload(); };
     if (C.loading && !C.data) return html`<${Loading} what="collection" />`;
     if (C.err && !C.data) return html`<${Failed} what="Collection" err=${C.err} onRetry=${C.reload} />`;
     const d = C.data; const live = (d.reach.agents || []).filter(a => a.live); const bt = d.backtest;
@@ -729,14 +752,20 @@
             <td class="act">${canWrite ? html`<button class="den-mini" disabled=${busy === 'sw'} aria-pressed=${off ? 'true' : 'false'} onClick=${() => toggle(src)}>${off ? 'Switch on' : 'Switch off'}</button>` : null}</td></tr>`; })}</tbody></table>
           <div class="den-state">A platform collects only after a person has signed in to it on the Mac. Instagram hashtags: ${d.hashtags.used} of ${d.hashtags.limit} used in the last ${d.hashtags.windowDays} days.</div>
         <//>`;
-    const outlets = html`<${Panel} title="Subscriber outlets" note="Read through the agency's own subscription, once cleared" flush=${true}>
+    const outlets = action => html`<${Panel} title="Subscriber outlets" note="Read through the agency's own subscription, once cleared" flush=${true} actions=${action || null}>
           ${d.gated.length ? html`<table class="den-table"><thead><tr><th>Outlet</th><th>Access</th><th>Cleared</th></tr></thead><tbody>${d.gated.slice(0, 30).map(g => html`<tr key=${g.id}><td>${g.name}</td><td>${g.access}</td><td>${g.cleared ? html`<span class="den-chip pos">by ${g.cleared_by}</span>` : html`<span class="den-chip">headlines only</span>`}</td></tr>`)}</tbody></table>` : html`<${Empty}>No paid outlet is in the Source Registry.<//>`}
           <div class="den-state">Clearance is recorded on the source: <button class="den-link" onClick=${() => window.AXUI.goto('sources', {})}>open Sources</button>.</div>
         <//>`;
     if (!gaps) {
       /* Listed: the worker's own test (the channel delivered for this desk in seven days, and its signed-in collector is neither
-         switched off nor paused at a verification). An older worker does not send it, and the seven-day count stands in. */
-      const listed = d.channels.filter(c => (typeof c.working === 'boolean' ? c.working : c.delivered.d7 > 0)); const rest = d.channels.filter(c => listed.indexOf(c) < 0);
+         switched off nor paused at a verification). An older worker does not send it, and the page applies the same test to
+         what that worker does send. */
+      const listed = d.channels.filter(c => (typeof c.working === 'boolean' ? c.working : c.delivered.d7 > 0 && !(c.collector && (c.collector.off || c.collector.challenge)))); const rest = d.channels.filter(c => listed.indexOf(c) < 0);
+      // listed above for its rows of the week, with a signed-in read that no collector offers now: where it stands is said inside the disclosure
+      const waitingOn = listed.filter(c => c.collector && !c.collector.offered);
+      // subscriber news is read through a signed-in session too: while an outlet is cleared and it is not already off, its stop is beside the outlets
+      const gatedStop = canWrite && (d.reach.off || []).indexOf('gated') < 0 && d.gated.some(g => g.cleared)
+        ? html`<button class="den-mini" disabled=${busy === 'sw'} title="Stops the reading of subscriber outlets on every collector at once. It is switched on again under Add or switch on a channel." onClick=${() => switchOff('gated', 'Subscriber news')}>Switch off subscriber news</button>` : null;
       const spark = c => (Array.isArray(c.delivered.days) && c.delivered.d7 ? html`<span class="den-spark" role="img" aria-label=${'The last seven days, oldest first: ' + c.delivered.days.join(', ')}>${c.delivered.days.map((n, i) => html`<i key=${i} style=${{ height: Math.max(8, (n / Math.max.apply(null, c.delivered.days.concat([1]))) * 100) + '%' }} class=${n ? '' : 'z'}></i>`)}</span>` : null);
       const accounts = c => (c.accounts != null ? html`<span class="den-sub">${c.accounts} registered account${c.accounts === 1 ? '' : 's'}</span>` : null);
       const nowChip = c => (c.collector && c.collector.offered ? html`<span class="den-chip pos">a collector is connected</span>` : !c.collector || c.worker ? html`<span class="den-chip pos">from the worker</span>` : null);
@@ -749,8 +778,8 @@
          or has not happened, a parliament page that failed, was never read or was stopped - each with its reason and the
          place it is edited. (The counters' route says nothing of a single counter's read, so none can be listed.) */
       const chName = p => (p === 'any' ? 'any channel' : CH[p] || p);
-      const todo = ((R.data && R.data.watch) || []).filter(r => (r.kind === 'account' || r.kind === 'hashtag') && r.status === 'active' && (r.last_error || !r.last_ok))
-        .map(r => ({ key: 'w' + r.id, what: (r.kind === 'hashtag' ? '#' : '') + r.value, sub: (r.kind === 'hashtag' ? 'A hashtag on ' : 'An account on ') + chName(r.platform), why: r.last_error || (/^(tiktok|threads|linkedin)$/.test(r.platform) ? 'No collector reads ' + chName(r.platform) + ': it is kept as a note and collects nothing.' : 'Not read yet.'), go: () => setTab && setTab('watch'), goName: 'Open Watch' }))
+      const todo = ((R.data && R.data.watch) || []).filter(r => (r.kind === 'account' || r.kind === 'hashtag' || r.kind === 'group') && r.status === 'active' && (r.last_error || !r.last_ok))
+        .map(r => ({ key: 'w' + r.id, what: (r.kind === 'hashtag' ? '#' : '') + r.value, sub: r.kind === 'group' ? 'A public Facebook group' : (r.kind === 'hashtag' ? 'A hashtag on ' : 'An account on ') + chName(r.platform), why: r.last_error || (/^(tiktok|threads|linkedin)$/.test(r.platform) ? 'No collector reads ' + chName(r.platform) + ': it is kept as a note and collects nothing.' : 'Not read yet.'), go: () => setTab && setTab('watch'), goName: 'Open Watch' }))
         .concat(pubTodo.map(p => ({ key: 'p' + p.id, what: p.name, sub: 'A parliament page', why: p.why, go: p.stopped ? () => window.AXUI.goto('sources', {}) : () => toPanel('Watched parliament pages'), goName: p.stopped ? 'Open Sources' : 'Watched parliament pages' })));
       return html`<div>
         ${live.length || !canWrite ? html`<div class=${'den-notice' + (live.length ? ' good' : '')} role="status">${live.length ? live.length + ' collector' + (live.length === 1 ? ' is' : 's are') + ' connected (' + live.map(a => a.agent).join(', ') + '). ' : ''}${canWrite ? '' : 'Your key is read-only: collecting and the switches need a full key.'}</div>` : null}
@@ -760,7 +789,7 @@
           ${listed.length ? html`<table class="den-table"><thead><tr><th>Channel</th><th>How it is read</th><th>Now</th><th class="num">Last day</th><th class="num">7 days</th><th>Last delivered</th><th></th></tr></thead><tbody>
           ${listed.map(c => html`<tr key=${c.id} class="den-row"><td><span class="den-t">${c.label}</span>${accounts(c)}</td><td>${typeof c.howOn === 'string' ? c.howOn : ''}</td><td>${nowChip(c)}</td>
             <td class="num">${fmtN(c.delivered.d1 || 0)}</td><td class="num">${fmtN(c.delivered.d7)}</td><td class="den-mono">${c.delivered.last ? since(c.delivered.last) : '-'}${c.delivered.layers.length ? ' (L' + c.delivered.layers.join(', L') + ')' : ''}</td>
-            <td class="act">${collectBtn(c)}${canWrite && c.collector ? html` <button class="den-mini" disabled=${busy === 'sw'} title=${'Stops the signed-in collection of ' + c.label + ' on every collector at once. It is switched on again under Add or switch on a channel.'} onClick=${() => toggle(c.collector.source)}>Switch off</button>` : null}</td></tr>`)}</tbody></table>`
+            <td class="act">${collectBtn(c)}${canWrite && c.collector ? html` <button class="den-mini" disabled=${busy === 'sw'} title=${'Stops the signed-in collection of ' + c.label + ' on every collector at once. It is switched on again under Add or switch on a channel.'} onClick=${() => switchOff(c.collector.source, c.label)}>Switch off</button>` : null}</td></tr>`)}</tbody></table>`
           : html`<${Empty}>Channels appear here as they deliver. Add or switch one on below.<//>`}
         <//>
         <details class="den-more" id="den-more" onToggle=${e => { if (e.currentTarget.open) setOpened(true); }}><summary class="den-link">Add or switch on a channel</summary><div class="den-more-b">
@@ -769,6 +798,10 @@
             <table class="den-table"><thead><tr><th>Channel</th><th>How to add it</th><th>Now</th><th></th></tr></thead><tbody>
             ${rest.map(c => html`<tr key=${c.id} class="den-row"><td><span class="den-t">${c.label}</span>${accounts(c)}</td><td>${c.setup ? html`<span class="den-t">${c.setup}</span>` : null}<span class="den-sub">${c.how}</span>${c.cannot ? html`<span class="den-sub">Cannot reach: ${c.cannot}</span>` : null}</td><td>${state(c)}</td>
               <td class="act">${collectBtn(c)}</td></tr>`)}</tbody></table>
+          <//>` : null}
+          ${waitingOn.length ? html`<${Panel} title="Listed above, and where each stands now" note="Delivered in the last seven days; its signed-in read is not running now" flush=${true}>
+            <table class="den-table"><thead><tr><th>Channel</th><th>Now</th><th>What starts it again</th></tr></thead><tbody>
+            ${waitingOn.map(c => html`<tr key=${c.id}><td><span class="den-t">${c.label}</span></td><td>${state(c)}<span class="den-sub">No Mac collector offers it now: the Mac is off, the agent is not running, or nobody is signed in to it there.</span></td><td>${c.setup || ''}</td></tr>`)}</tbody></table>
           <//>` : null}
           ${signedIn}
           ${R.err && !R.data ? html`<${Panel} title="To finish setting up"><${Failed} what="The register" err=${R.err} onRetry=${R.reload} /><//>`
@@ -782,7 +815,7 @@
           <//>` : null}
           <p class="den-mono">${(d.notBuilt || []).join(' ')}</p>
         </div></details>
-        ${outlets}
+        ${outlets(gatedStop)}
         <${PublicRecord} desk=${desk} tick=${tick} canWrite=${canWrite} gaps=${false} onTodo=${setPubTodo} />
         <${Panel} title="Recall against the reports" note="Of the links in filed reports, how many AXIOM held at the time">
           ${bt ? html`<div><p><b class="den-t">${bt.share}%</b> - ${fmtN(bt.held)} of ${fmtN(bt.links)} links in ${bt.reports} reports${bt.period ? ' (' + bt.period + ')' : ''}; measured ${since(bt.at)} by ${bt.by}.</p>${btHeld.length ? btTable(btHeld) : null}</div>`
@@ -802,7 +835,7 @@
       <//>
       <div class="den-grid2">
         ${signedIn}
-        ${outlets}
+        ${outlets()}
       </div>
       <${PublicRecord} desk=${desk} tick=${tick} canWrite=${canWrite} gaps=${true} />
       <${Panel} title="Recall against the reports" note="Of the links in filed reports, how many AXIOM held at the time">
@@ -922,24 +955,31 @@
        rows a person left for later, kept on this computer by desk and day and never sent. */
     const [view, setViewRaw] = useState(() => { const v = ls.get('ax_den_view', 'guided'); return v === 'table' || v === 'cards' ? v : 'guided'; }); const setView = v => { setViewRaw(v); ls.set('ax_den_view', v); };
     const [run, setRun] = useState(null); const [briefNow, setBriefNow] = useState(null); const [later, setLaterRaw] = useState({ desk: '', day: '', ids: NONE }); const [keptRows, setKeptRows] = useState(null); const [focusAsk, setFocusAsk] = useState(0); const [fileAsk, setFileAsk] = useState(0); const [fileStep, setFileStep] = useState(false);
-    // an answer with no run (an older worker) never blanks a run already known for that desk
-    const onRun = useCallback(r => setRun(p => (r.run || !(p && p.desk === r.desk && p.run) ? r : p)), []);
+    // an answer with no run (an older worker, a read that failed) never blanks a run already known for that desk, and an
+    // answer for a desk that is not the one shown (handed over late, after the desk was changed) is not taken at all
+    const deskRef = useRef(''); const onRun = useCallback(r => { if (deskRef.current && r.desk !== deskRef.current) return; setRun(p => (r.run || !(p && p.desk === r.desk && p.run) ? r : p)); }, []);
     // the worker says what this key may do a moment after the page opens: the controls follow it
     useEffect(() => { const f = () => setRole(window.AX_ROLE); window.addEventListener('ax:role', f); return () => window.removeEventListener('ax:role', f); }, []);
     const canWrite = canWriteNow();
     const setTab = t => { if (TABS.some(x => x[0] === t)) { setTabRaw(t); ls.set('ax_den_tab', t); } };
-    const desks = (D.data && D.data.desks) || []; const desk = desks.find(d => d.id === deskId) || desks[0] || null;
+    const desks = (D.data && D.data.desks) || []; const desk = desks.find(d => d.id === deskId) || desks[0] || null; deskRef.current = desk ? desk.id : '';
     useEffect(() => { if (D.data) setBudget(D.data.budget); }, [D.data]);
     useEffect(() => { if (tab === 'brief') setBriefSeen(true); }, [tab]);
-    // the File step: asking for it opens Brief and asks the Brief panel for the focus (it knows the brief that is loaded);
-    // leaving Brief ends it, and the rail's "you are here" goes back to where the person is
-    const goFile = () => { setFileStep(true); setFileAsk(n => n + 1); };
-    useEffect(() => { if (tab !== 'brief') { setFileStep(false); setFileAsk(0); } }, [tab]);
+    // the File step: asking for it opens Brief and asks the Brief panel for the focus (it knows the brief that is loaded).
+    // The rail's "you are here" goes to File only when the panel says the focus went there, and back to Write when the
+    // person goes into a section; leaving Brief ends it. A focus asked for on Today ends with that visit too.
+    const goFile = () => setFileAsk(n => n + 1);
+    useEffect(() => { if (tab !== 'brief') { setFileStep(false); setFileAsk(0); } if (tab !== 'today') setFocusAsk(0); }, [tab]);
+    // a change of area takes the pressed control away when it belonged to the area left (the done state's button, the
+    // header's action once there is no next step): the focus then goes to the area that opened, never to nowhere. Not when
+    // the page opens, and not when the focus is still on something (the menu, the rail, a step that moved it itself).
+    const tabSeen = useRef(false);
+    useEffect(() => { if (!tabSeen.current) { tabSeen.current = true; return; } const a = document.activeElement; if (a && a !== document.body) return; const el = document.getElementById('den-tabpanel'); if (el) el.focus({ preventScroll: true }); }, [tab]);
     useEffect(() => { if (desk && desk.id !== deskId) setDeskId(desk.id); }, [desk && desk.id]);   // eslint-disable-line
     const runNow = desk && run && run.desk === desk.id ? run.run : null; const day = runNow ? String(runNow.day || '') : ''; const laterKey = dy => 'ax_den_later_' + desk.id + '_' + dy;
     // the rows left for later: held in memory until the day is known, then kept under this desk and day. Another day's
     // list is of a window that has passed, and is removed.
-    useEffect(() => { if (!desk) return; const mem = later.desk === desk.id ? later.ids : NONE;
+    useEffect(() => { if (!desk) return; const mem = later.desk === desk.id && !later.day ? later.ids : NONE;   // only what was left while the day was not yet known: a list already kept under another day is not carried into this one
       if (!day) { if (later.desk !== desk.id) setLaterRaw({ desk: desk.id, day: '', ids: NONE }); return; }
       if (later.desk === desk.id && later.day === day) return;
       const st = ls.get(laterKey(day), []); const ids = (Array.isArray(st) ? st : []).filter(x => typeof x === 'number'); mem.forEach(x => { if (ids.indexOf(x) < 0) ids.push(x); }); if (mem.length) ls.set(laterKey(day), ids);
@@ -953,7 +993,7 @@
     if (D.loading && !D.data) return html`<${Loading} what="the desks" />`;
     if (D.err && !D.data) return html`<${Failed} what="The desks" err=${D.err} onRetry=${D.reload} />`;
     if (!desk) return html`<${Empty}><b>No desk is set up.</b> A desk is a client, a region and a report format. Ask an admin to add one.<//>`;
-    const pickDesk = id => { setDeskId(id); ls.set('ax_den_desk', id); setTick(t => t + 1); setFileStep(false); setFileAsk(0); };
+    const pickDesk = id => { setDeskId(id); ls.set('ax_den_desk', id); setTick(t => t + 1); setFileStep(false); setFileAsk(0); setFocusAsk(0); setBoardStrip(null); };
     const laterIds = later.desk === desk.id ? later.ids : NONE; const setLater = ids => { setLaterRaw({ desk: desk.id, day, ids }); if (day) { if (ids.length) ls.set(laterKey(day), ids); else ls.del(laterKey(day)); } };
     // today's brief: the Brief panel's own word when it is for this desk and day and no older than the worker's, else the worker's
     const answered = !!(run && run.desk === desk.id); const prog = runNow ? runNow.progress : null; const rb = runNow ? runNow.brief : null; const bn = runNow && briefNow && !briefNow.none && briefNow.desk === desk.id && briefNow.day === day ? briefNow : null;
@@ -996,10 +1036,10 @@
         <button type="button" class="den-stepb" id=${'den-step-' + s[0]} aria-current=${s[3] ? 'step' : null} aria-label=${'Step ' + (i + 1) + ', ' + s[1] + (s[5] ? ': ' + s[5] : '')} onClick=${() => { setTab(s[2]); if (s[0] === 'file') goFile(); else setFileStep(false); }}>
           <span class="n" aria-hidden="true">${i + 1}</span><span class="l">${s[1]}</span>${s[5] ? html`<span class="s">${s[5]}</span>` : null}</button></li>`)}</ol></nav>
       <${Boundary} name="The strip" resetKey=${desk.id + tick}><${Strip} deskId=${desk.id} setTab=${setTab} tick=${tick} handed=${tab === 'today' ? (boardStrip || STRIP_PENDING) : undefined} onRun=${onRun} compact=${compact} /><//>
-      <div role="tabpanel" id="den-tabpanel" aria-labelledby=${'den-tab-' + tab}>
+      <div role="tabpanel" id="den-tabpanel" tabIndex="-1" aria-labelledby=${'den-tab-' + tab}>
         <${Boundary} name=${TABS.find(t => t[0] === tab)[1]} resetKey=${desk.id + tab}>
           ${tab === 'today' ? html`<${Board} desk=${desk} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} onStrip=${setBoardStrip} view=${view} setView=${setView} later=${laterIds} setLater=${setLater} brief=${todayBrief} onKept=${setKeptRows} focusAsk=${focusAsk} onFocused=${() => setFocusAsk(0)} />` : null}
-          ${briefSeen || tab === 'brief' ? html`<div hidden=${tab !== 'brief'}><${BriefPanel} key=${desk.id} desk=${desk} tick=${tick} bump=${bump} budget=${budget} canWrite=${canWrite} setTab=${setTab} onBrief=${setBriefNow} day=${day} fileAsk=${fileAsk} onFileDone=${() => setFileAsk(0)} missing=${missing} /></div>` : null}
+          ${briefSeen || tab === 'brief' ? html`<div hidden=${tab !== 'brief'}><${BriefPanel} key=${desk.id} desk=${desk} tick=${tick} bump=${bump} budget=${budget} canWrite=${canWrite} setTab=${setTab} onBrief=${setBriefNow} day=${day} fileAsk=${fileAsk} onFileDone=${moved => { setFileAsk(0); setFileStep(!!moved); }} onSection=${() => setFileStep(false)} missing=${missing} /></div>` : null}
           ${tab === 'watch' ? html`<${WatchPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} />` : null}
           ${tab === 'collection' ? html`<${CollectionPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} setJob=${setJob} setTab=${setTab} />` : null}
           ${tab === 'options' ? html`<${OptionsPanel} desk=${desk} canWrite=${canWrite} onSaved=${d => { D.set(Object.assign({}, D.data, { desks: desks.map(x => (x.id === d.id ? d : x)) })); if (d.id === desk.id && (d.options.showGaps === true) !== (desk.options.showGaps === true)) setTick(t => t + 1); }} onCreated=${d => { D.set(Object.assign({}, D.data, { desks: desks.concat([d]) })); pickDesk(d.id); toastMsg(d.name + ' is ready') ; }} />` : null}

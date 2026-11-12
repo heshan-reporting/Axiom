@@ -473,7 +473,21 @@ await S.t('DK24 a folded story is one decision', async () => {
   // without copies a clear is the one row, as before; a pin never takes copies
   const c3 = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: C.id, clear: true }); eq(['copies' in c3.body, marks().length], [false, 2], 'no copies sent: the one row'); eq((await board(w, 'aep_au')).media.filter(x => /resume/.test(x.title)).map(x => x.copies.length), [1], 'so only the head comes back, which is why a folded story sends its copies');
   await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: C.id, clear: true, copies: C.copies }); const p1 = await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: A.id, copies: A.copies }); eq([p1.status, p1.body.mark, 'copies' in p1.body, marks()], [200, 'pin', false, [[A.id, 'pin', '']]], 'a pin is the head\'s alone');
-  const many = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: U.id, reason: 'not relevant', copies: Array.from({ length: 200 }, (_, i) => 500000 + i) }); eq([many.status, many.body.copies], [200, []], 'a long list is cut at forty and none of it is held');
+  // a copy is a story, and so is its head: a post that carries the story's very headline (a link post usually does) is neither
+  await push(w, 'sig_thread', [post({ title: 'Harbour levy talks resume on Monday', url: 'https://x.com/i/web/status/190000000000000032' })]); const P = itemBy(w, 'https://x.com/i/web/status/190000000000000032'); const markOf = id => marks().filter(k => k[0] === id).map(k => k[1]);
+  ok((await board(w, 'aep_au')).social.some(x => x.id === P) && db.prepare('SELECT kind, title FROM arc_items WHERE id=?').get(P).title === C.title, 'the world holds a post titled as the story is');
+  const g1 = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: P, reason: 'not relevant', copies: C.copies }); eq([g1.status, g1.body.copies, markOf(P), marks().filter(k => C.copies.indexOf(k[0]) >= 0)], [200, [], ['aside'], []], 'a post set aside takes no story with it, whatever its title');
+  await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: P, clear: true });
+  const g2 = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: C.id, reason: 'not relevant', copies: C.copies.concat([P]) }); eq([g2.status, g2.body.copies.slice().sort(), markOf(P)], [200, C.copies.slice(1).sort(), []], 'and a story set aside takes its copies, never the post that carries its headline');
+  ok((await board(w, 'aep_au')).social.some(x => x.id === P), 'which is still on the board');
+  // a long list is cut at forty: what lies past the cut is not taken, on a set-aside and on a clear. The database here refuses a
+  // statement of more than 100 variables, as D1 does, so a list sent whole would fail and not merely find nothing
+  w.env.MIND_DB.maxVars = 100; const pad = Array.from({ length: 40 }, (_, i) => 500000 + i);
+  const many = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: B.id, reason: 'not relevant', copies: pad.concat(B.copies) }); eq([many.status, many.body.copies, marks().filter(k => B.copies.indexOf(k[0]) >= 0).map(k => k[0])], [200, [], [B.id]], 'a long list is cut at forty: the copies behind the cut are not set aside');
+  eq((await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: U.id, reason: 'not relevant', copies: Array.from({ length: 200 }, (_, i) => 500000 + i) })).status, 200, 'two hundred ids are never sent to the database whole');
+  await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: B.id, reason: 'not relevant', copies: B.copies }); eq(marks().filter(k => B.copies.indexOf(k[0]) >= 0).length, 3);
+  const cut = await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: B.id, clear: true, copies: pad.concat(B.copies) }); eq([cut.status, marks().filter(k => B.copies.indexOf(k[0]) >= 0).map(k => k[0])], [200, B.copies.slice(1).sort((x, y) => x - y)], 'and on a clear: the marks behind the cut stand');
+  eq((await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: U.id, clear: true, copies: Array.from({ length: 200 }, (_, i) => 500000 + i) })).status, 200); eq(markOf(U.id), [], 'a clear with two hundred ids still clears its row'); w.env.MIND_DB.maxVars = 0;
   // a read key
   const before = JSON.stringify(marks()); eq((await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: B.id, reason: 'not relevant', copies: B.copies }, 'read-key')).status, 403); eq((await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: A.id, clear: true, copies: A.copies }, 'read-key')).status, 403); eq(JSON.stringify(marks()), before, 'a read key writes and clears nothing');
 });
