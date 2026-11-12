@@ -462,7 +462,7 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, 
     }
     const t0 = Date.now();
     try {
-      const r = await fetch(AU_FEEDS[key], {
+      const r = await cfetch(AU_FEEDS[key], {
         headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
         signal: AbortSignal.timeout ? AbortSignal.timeout(FEED_TIMEOUT) : undefined,
         cf: { cacheTtl: 120, cacheEverything: true },
@@ -655,7 +655,7 @@ async function buildAnalysis(env, hours = 72) {
 /** Safe fetch that never throws - returns { ok, html, status } */
 async function safeFetch(url, opts = {}) {
   try {
-    const r = await fetch(url, opts);
+    const r = await cfetch(url, opts);
     if (!r.ok) return { ok: false, html: '', status: r.status };
     const html = await r.text();
     return { ok: true, html, status: r.status };
@@ -1604,12 +1604,153 @@ function abortAfter(ms) {
   try { return AbortSignal.timeout(ms); } catch { return undefined; }
 }
 
+// ==============================================================================
+// ONE COLLECTOR FETCH. Every collector's outbound GET goes through cfetch():
+//   - a timeout on every request (CF_TIMEOUT_MS unless the caller names one);
+//   - ONE retry, after a backoff with jitter, on a network error or a 5xx - GET and
+//     HEAD only, never a POST (a write repeated is a write doubled);
+//   - the service's own rate-limit headers are read on every answer: Retry-After,
+//     (x-)ratelimit-remaining / -reset, and Meta's X-App-Usage,
+//     X-Business-Use-Case-Usage and X-Ad-Account-Usage. A short wait is waited once;
+//     a long one is recorded and the service is not asked again until it has passed
+//     (cfLimited), so a sweep stops in words instead of collecting thirty refusals.
+// It returns the Response; a caller keeps its own reading of status and body.
+// Never an evasion: no changed identity, no second route, no retry past a refusal.
+// ==============================================================================
+const CF_TIMEOUT_MS = 12000;        // a request with no timeout of its own
+const CF_BACKOFF_MS = 500;          // first backoff; doubled a try, plus up to half as much jitter
+const CF_WAIT_INLINE_MS = 3000;     // a Retry-After this short is waited inside the request, once
+const CF_LIMIT_DEFAULT_S = 300;     // a 429 that names no wait
+const CF_LIMIT_MAX_S = 86400;
+const CF_META_PAUSE_PCT = 95;       // Meta usage at which we stop asking before Meta stops answering
+const CF_LIMIT_429 = { 'api.linkedin.com': 3600 };   // LinkedIn sends no header; its limits are daily (midnight UTC)
+const CF_RATE = new Map();          // key (host, or host#object) -> { until, why, at }
+const CF_SEEN = new Map();          // host -> { at, status, remaining, reset, usage }
+const CF_LOADED = new Map();        // host -> when the shared record was last read
+let CF_ENV = null;                  // set by the request and cron entry points: the KV for shared limits, the test sleep
+function cfSleep(ms) { if (CF_ENV && typeof CF_ENV.__collectSleep === 'function') return CF_ENV.__collectSleep(ms); return new Promise(res => setTimeout(res, ms)); }
+function cfHost(url) { try { return new URL(String(url && url.url ? url.url : url)).hostname.toLowerCase(); } catch (e) { return 'unknown'; } }
+function cfBackoff(n) { const b = CF_BACKOFF_MS * Math.pow(2, n); return Math.round(b + Math.random() * b / 2); }
+function cfClock(ms) { return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'; }
+/** Retry-After: seconds, or an HTTP date. null when absent or unreadable. */
+function cfRetryAfter(v, now) {
+  if (v == null || v === '') return null; const s = String(v).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) return Math.max(0, Number(s));
+  const t = Date.parse(s); return isFinite(t) ? Math.max(0, (t - now) / 1000) : null;
+}
+/** A reset header: seconds from now (Reddit), an epoch in seconds (Bluesky, GitHub) or a date (Mastodon). */
+function cfReset(v, now) {
+  if (v == null || v === '') return null; const s = String(v).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) { const n = Number(s); return n > 1e9 ? Math.max(0, n - now / 1000) : n; }
+  const t = Date.parse(s); return isFinite(t) ? Math.max(0, (t - now) / 1000) : null;
+}
+function cfJsonHeader(h, name) { try { const v = h.get(name); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
+function cfPct(o) { return Math.max(0, ...['call_count', 'total_cputime', 'total_time', 'acc_id_util_pct'].map(k => Number(o && o[k]) || 0)); }
+/** What one answer says about the limit: { wait (seconds, when the answer itself was a refusal), limits: [{ key, secs, why }] }. */
+function cfRead(host, url, r, now) {
+  const h = r.headers; const out = { wait: null, limits: [] };
+  const ra = cfRetryAfter(h.get('retry-after'), now);
+  const remRaw = h.get('x-ratelimit-remaining') != null ? h.get('x-ratelimit-remaining') : h.get('ratelimit-remaining');
+  const rem = remRaw == null || remRaw === '' || !isFinite(Number(remRaw)) ? null : Number(remRaw);
+  const reset = cfReset(h.get('x-ratelimit-reset') != null ? h.get('x-ratelimit-reset') : h.get('ratelimit-reset'), now);
+  const seen = { at: now, status: r.status }; if (rem != null) seen.remaining = rem; if (reset != null) seen.reset = Math.round(reset);
+  const throttled = r.status === 429 || (r.status === 503 && ra != null);
+  if (throttled) {
+    out.wait = ra != null ? ra : (reset != null ? reset : (CF_LIMIT_429[host] || CF_LIMIT_DEFAULT_S));
+    out.limits.push({ key: host, secs: out.wait, why: 'HTTP ' + r.status + (ra != null ? ' with Retry-After ' + Math.round(ra) + 's' : reset != null ? ', allowance back in ' + Math.round(reset) + 's' : ', no wait named') });
+  } else if (rem != null && rem < 1 && reset != null && reset > 0) {
+    out.limits.push({ key: host, secs: reset, why: 'the allowance is used up (remaining ' + rem + '), back in ' + Math.round(reset) + 's' });
+  }
+  if (host === 'graph.facebook.com') {
+    const app = cfJsonHeader(h, 'x-app-usage'); const usage = {};
+    if (app) { const p = cfPct(app); usage.app = p; if (p >= CF_META_PAUSE_PCT) out.limits.push({ key: host, secs: p >= 100 ? 900 : 300, why: 'the app is at ' + p + '% of its Graph API allowance (X-App-Usage)' }); }
+    const buc = cfJsonHeader(h, 'x-business-use-case-usage');
+    if (buc && typeof buc === 'object') Object.keys(buc).forEach(id => (Array.isArray(buc[id]) ? buc[id] : []).forEach(u => {
+      const p = cfPct(u); const regain = Number(u && u.estimated_time_to_regain_access) || 0; usage['buc:' + id] = Math.max(usage['buc:' + id] || 0, p);
+      if (regain > 0 || p >= CF_META_PAUSE_PCT) out.limits.push({ key: host + '#' + id, secs: regain > 0 ? regain * 60 : (p >= 100 ? 900 : 300), why: 'object ' + id + ' is at ' + p + '% of its ' + String((u && u.type) || 'business') + ' allowance' + (regain > 0 ? ', access back in about ' + regain + ' min' : '') + ' (X-Business-Use-Case-Usage)' });
+    }));
+    const acc = cfJsonHeader(h, 'x-ad-account-usage'); const act = (String(url).match(/\/act_(\d+)/) || [])[1];
+    if (acc && act) { const p = cfPct(acc); usage['act:' + act] = p; if (p >= CF_META_PAUSE_PCT) out.limits.push({ key: host + '#' + act, secs: Number(acc.reset_time_duration) || 300, why: 'ad account ' + act + ' is at ' + p + '% of its allowance (X-Ad-Account-Usage)' }); }
+    if (Object.keys(usage).length) seen.usage = usage;
+  }
+  if (seen.remaining != null || seen.usage || throttled) CF_SEEN.set(host, seen);
+  return out;
+}
+/** Record that a service is not to be asked until a time. Shared across isolates (KV `rl_<host>`) when asked. */
+async function cfLimit(key, secs, why, shared) {
+  const s = Math.min(Math.max(Math.ceil(Number(secs) || CF_LIMIT_DEFAULT_S), 1), CF_LIMIT_MAX_S); const now = Date.now();
+  const cur = CF_RATE.get(key); const until = now + s * 1000;
+  if (!cur || cur.until < until) CF_RATE.set(key, { until, why: String(why || '').slice(0, 200), at: now });
+  if (shared && CF_ENV && CF_ENV.AXIOM_KV && s >= 30) {
+    const host = key.split('#')[0]; const doc = {};
+    CF_RATE.forEach((v, k) => { if (k.split('#')[0] === host && v.until > now) doc[k] = v; });
+    const ttl = Math.max(60, Math.ceil((Math.max(...Object.keys(doc).map(k => doc[k].until)) - now) / 1000));
+    try { await kvPut(CF_ENV.AXIOM_KV, 'rl_' + host, JSON.stringify(doc), ttl); } catch (e) {}
+  }
+}
+/** The limit in force for this request, or null. A limit on one object (host#id) holds only requests that name it. */
+async function cfLimited(host, url, shared) {
+  const now = Date.now();
+  if (shared && CF_ENV && CF_ENV.AXIOM_KV && now - (CF_LOADED.get(host) || 0) > 60000) {
+    CF_LOADED.set(host, now);
+    try { const doc = JSON.parse((await kvGet(CF_ENV.AXIOM_KV, 'rl_' + host)) || '{}'); Object.keys(doc || {}).forEach(k => { const v = doc[k]; const c = CF_RATE.get(k); if (v && v.until > now && (!c || c.until < v.until)) CF_RATE.set(k, v); }); } catch (e) {}
+  }
+  let hit = null; const u = String(url).split('access_token=')[0];
+  CF_RATE.forEach((v, k) => {
+    if (v.until <= now) { CF_RATE.delete(k); return; }
+    const parts = k.split('#'); if (parts[0] !== host) return;
+    if (parts[1] && !new RegExp('(^|[^0-9])' + parts[1].replace(/[^A-Za-z0-9_]/g, '') + '([^0-9]|$)').test(u)) return;
+    if (!hit || v.until > hit.until) hit = v;
+  });
+  return hit;
+}
+function cfLimits() {
+  const now = Date.now(); const limits = [];
+  CF_RATE.forEach((v, k) => { if (v.until > now) limits.push({ key: k, until: v.until, untilText: cfClock(v.until), secondsLeft: Math.ceil((v.until - now) / 1000), why: v.why }); });
+  const seen = []; CF_SEEN.forEach((v, k) => seen.push(Object.assign({ host: k }, v)));
+  return { limits, seen };
+}
+/** fetch() for collectors. o: { ms, retry (0|1), retryTimeout (false: a timeout is not retried), shared, noLimit, beforeRetry }. */
+async function cfetch(url, init, o) {
+  o = o || {}; init = init || {};
+  const method = String(init.method || 'GET').toUpperCase(); const host = cfHost(url);
+  let left = o.retry != null ? Math.max(0, Math.min(1, Number(o.retry) || 0)) : (method === 'GET' || method === 'HEAD' ? 1 : 0);
+  if (!o.noLimit) {
+    const lim = await cfLimited(host, url, !!o.shared);
+    if (lim) { const e = new Error('rate_limited: ' + host + ' is not asked again until ' + cfClock(lim.until) + ' (' + lim.why + ')'); e.code = 'rate_limited'; e.until = lim.until; e.tries = 0; throw e; }
+  }
+  for (let n = 0; ; n++) {
+    const opts = Object.assign({}, init);
+    if (o.ms || !init.signal) opts.signal = abortAfter(o.ms || CF_TIMEOUT_MS);
+    let r;
+    try { r = await fetch(url, opts); }
+    catch (e) {
+      const timed = /timeout|abort/i.test(String((e && e.name) || '') + ' ' + String((e && e.message) || e));
+      if (left > 0 && !(timed && o.retryTimeout === false)) { left--; await cfSleep(cfBackoff(n)); if (o.beforeRetry) await o.beforeRetry(); continue; }
+      try { e.tries = n + 1; } catch (x) {}
+      throw e;
+    }
+    const rd = cfRead(host, url, r, Date.now());
+    if (rd.wait != null && !o.noLimit && left > 0 && rd.wait * 1000 <= CF_WAIT_INLINE_MS) {
+      left--; try { if (r.body) await r.body.cancel(); } catch (e) {}
+      await cfSleep(Math.ceil(rd.wait * 1000) + Math.round(Math.random() * 250)); if (o.beforeRetry) await o.beforeRetry(); continue;
+    }
+    if (!o.noLimit) for (const l of rd.limits) await cfLimit(l.key, l.secs, l.why, !!o.shared);
+    if (r.status >= 500 && rd.wait == null && left > 0) {
+      left--; try { if (r.body) await r.body.cancel(); } catch (e) {}
+      await cfSleep(cfBackoff(n)); if (o.beforeRetry) await o.beforeRetry(); continue;
+    }
+    try { r.cfTries = n + 1; } catch (e) {}
+    return r;
+  }
+}
+
 async function socialMastodon(tag) {
   const instances = ['aus.social', 'mastodon.social'];
   const posts = [];
   await Promise.all(instances.map(async (inst) => {
     try {
-      const r = await fetch('https://' + inst + '/api/v1/timelines/tag/' + tag + '?limit=20',
+      const r = await cfetch('https://' + inst + '/api/v1/timelines/tag/' + tag + '?limit=20',
         { headers: { 'User-Agent': 'AXIOM/6.0' }, signal: abortAfter(6000) });
       if (!r.ok) return;
       const arr = await r.json();
@@ -1645,7 +1786,7 @@ async function socialReddit(tag) {
   const posts = [];
   try {
     // api.reddit.com + descriptive UA: the www host 403s generic cloud UAs.
-    const r = await fetch('https://api.reddit.com/r/' + subs + '/hot?limit=30&raw_json=1',
+    const r = await cfetch('https://api.reddit.com/r/' + subs + '/hot?limit=30&raw_json=1',
       { headers: { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' }, signal: abortAfter(6000) });
     if (!r.ok) return posts;
     const d = await r.json();
@@ -1676,7 +1817,7 @@ const OPPADS_AU = /australia|australian|\bnsw\b|victoria|queensland|tasmania|can
 async function socialRedditPoliticalAds() {
   const out = [];
   try {
-    const r = await fetch('https://api.reddit.com/r/RedditPoliticalAds/new?limit=100&raw_json=1',
+    const r = await cfetch('https://api.reddit.com/r/RedditPoliticalAds/new?limit=100&raw_json=1',
       { headers: { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' }, signal: abortAfter(6000) });
     if (!r.ok) return out;
     const d = await r.json();
@@ -1713,11 +1854,30 @@ function metaAccounts(env) {
     return { acct: /^act_/.test(acct) ? acct : 'act_' + acct, ns: clean || 'cmm' };
   });
 }
+const META_THROTTLE_CODES = [4, 17, 32, 341, 613];   // app, user, page, application and custom rate limits; 80000-80014 are the business-use-case ones
 async function metaGet(url) {
-  const r = await fetch(url, { signal: abortAfter(20000) });
-  const d = await r.json().catch(() => ({}));
-  if (d.error) throw new Error(String(d.error.message || d.error.type || 'graph_error').slice(0, 160));
+  const r = await cfetch(url, {}, { ms: 20000, shared: true });
+  const text = await r.text(); let d = null; try { d = JSON.parse(text); } catch (e) { d = null; }
+  const er = d && d.error;
+  if (er) {
+    const code = Number(er.code) || 0; const msg = String(er.message || er.type || 'graph_error').slice(0, 160);
+    if (code === 190 || r.status === 401) { const e = new Error('meta_token_invalid: Meta says the access token has expired or been revoked (code ' + (code || r.status) + '). A System User token cannot be renewed from here: issue a new one and set the secret again. Meta said: ' + msg.slice(0, 100)); e.code = 'meta_token_invalid'; throw e; }
+    if (META_THROTTLE_CODES.indexOf(code) >= 0 || (code >= 80000 && code <= 80014)) {
+      const obj = (String(url).split('?')[0].match(/\/v\d+\.\d+\/(?:act_)?(\d{5,})/) || [])[1];
+      if (!(await cfLimited('graph.facebook.com', url, true))) await cfLimit('graph.facebook.com' + (obj && code !== 4 && code !== 17 ? '#' + obj : ''), 900, 'Graph error ' + code + ': ' + msg.slice(0, 80), true);
+      const e = new Error('meta_rate_limited: Meta is throttling ' + (obj ? 'object ' + obj : 'the app') + ' (code ' + code + '); not asked again for a while. Meta said: ' + msg.slice(0, 100)); e.code = 'rate_limited'; throw e;
+    }
+    const e = new Error(msg + (code ? ' (code ' + code + ')' : '')); e.graph = code; throw e;
+  }
+  if (!r.ok || !d) throw new Error('meta_http_' + r.status + ': the Graph API answered ' + (d ? 'an error with no detail' : 'something that is not JSON') + (r.cfTries > 1 ? ' (asked ' + r.cfTries + ' times)' : ''));
   return d;
+}
+/** A Graph list followed through paging.next, at most `max` pages. { pages, capped }: capped is true when Meta had
+ *  more than was read, so a sweep can say so instead of looking complete. */
+async function metaPaged(url, max, onPage) {
+  let pages = 0; let next = url;
+  while (next && pages < max) { const d = await metaGet(next); pages++; await onPage(d); next = d.paging && d.paging.next ? d.paging.next : null; }
+  return { pages, capped: !!next };
 }
 function metaActions(list, type) {
   const a = (list || []).find(x => x.action_type === type);
@@ -1752,6 +1912,7 @@ async function metaInsights(env, since, until) {
         });
         url = d.paging && d.paging.next ? d.paging.next : null;
       }
+      if (url) (out.capped = out.capped || []).push(a.acct + ': stopped after 20 pages of insights (' + rows.length + ' rows) and Meta had more; ask for a shorter date range');
       out.accounts++;
       // archive in slices (archiveItems caps a batch at 150)
       for (let i = 0; i < rows.length; i += 150) out.rows += await archiveItems(env, 'campaign', rows.slice(i, i + 150));
@@ -1760,6 +1921,7 @@ async function metaInsights(env, since, until) {
   return out;
 }
 /** Sweep the Meta Ad Library for AU political/issue ads on each client issue. */
+const META_ADLIB_PAGES = 3;      // pages of 100 ads a term a run
 async function metaAdLibrary(env) {
   if (!env.META_USER_TOKEN) return { ok: false, error: 'meta_user_token_missing' };
   const terms = {};
@@ -1771,8 +1933,9 @@ async function metaAdLibrary(env) {
     try {
       const url = META_API + '/ads_archive?ad_reached_countries=' + encodeURIComponent('["AU"]') + '&ad_type=POLITICAL_AND_ISSUE_ADS&ad_active_status=ALL&search_terms=' + encodeURIComponent(label)
         + '&fields=id,page_name,bylines,ad_creative_bodies,ad_creative_link_titles,ad_delivery_start_time,ad_delivery_stop_time,spend,impressions,currency,ad_snapshot_url,publisher_platforms&limit=100&access_token=' + encodeURIComponent(env.META_USER_TOKEN);
-      const d = await metaGet(url);
-      const rows = (d.data || []).map(x => ({
+      const got = []; const pg = await metaPaged(url, META_ADLIB_PAGES, async d => { (d.data || []).forEach(x => got.push(x)); });
+      if (pg.capped) (out.capped = out.capped || []).push(label + ': read ' + got.length + ' ads (' + pg.pages + ' pages) and the Ad Library had more');
+      const rows = got.map(x => ({
         src: 'meta', title: (x.page_name || 'unknown page') + ': ' + ((x.ad_creative_link_titles || [])[0] || (x.ad_creative_bodies || [''])[0] || 'ad').slice(0, 200),
         body: ((x.ad_creative_bodies || []).join(' | ')).slice(0, 2000) + '\nSpend ' + (x.spend ? x.spend.lower_bound + '-' + (x.spend.upper_bound || '') + ' ' + (x.currency || '') : '?') + ', impressions ' + (x.impressions ? x.impressions.lower_bound + '-' + (x.impressions.upper_bound || '') : '?') + '. Paid for by: ' + (x.bylines || '?') + '. Platforms: ' + ((x.publisher_platforms || []).join(', ')) + '. Running ' + (x.ad_delivery_start_time || '?') + ' to ' + (x.ad_delivery_stop_time || 'now') + '.',
         url: x.ad_snapshot_url || ('x:oppads:meta:' + x.id), author: x.page_name || '',
@@ -1805,6 +1968,7 @@ async function metaAdPosts(env, acct) {
     const sid = ad.creative && ad.creative.effective_object_story_id;
     if (sid && !posts.has(sid)) posts.set(sid, { ad: ad.name || ad.id, id: ad.id || '', campaign: (ad.campaign && ad.campaign.name) || '' });
   });
+  posts.capped = !!(ads.paging && ads.paging.next);   // more than 200 live ads: the rest were not looked at
   return posts;
 }
 async function metaComments(env, perAccount = 40) {
@@ -1816,11 +1980,14 @@ async function metaComments(env, perAccount = 40) {
   for (const a of accts) {
     try {
       const posts = await metaAdPosts(env, a.acct);
+      if (posts.capped) (out.capped = out.capped || []).push(a.acct + ': more than 200 live ads; only the first 200 were looked at');
+      if (posts.size > perAccount) (out.capped = out.capped || []).push(a.acct + ': ' + posts.size + ' posts behind its ads, ' + perAccount + ' read this run');
       let n = 0;
       for (const [sid, ctx] of posts) {
         if (n++ >= perAccount) break;
         try {
           const c = await metaGet(META_API + '/' + sid + '/comments?fields=id,message,created_time,like_count,comment_count&order=reverse_chronological&limit=100' + tok);
+          if (c.paging && c.paging.next) (out.capped = out.capped || []).push(sid + ': the newest 100 comments were read and the post has more');
           const rows = (c.data || []).filter(x => x.message && x.message.trim()).map(x => ({
             src: 'meta', title: 'Comment on "' + String(ctx.ad).slice(0, 80) + '"', body: String(x.message).slice(0, 2000),
             url: 'x:comment:meta:' + x.id, author: '', tone: commentTone(x.message),
@@ -2001,8 +2168,14 @@ async function redditGet(env, path, timeoutMs) {
   const q = path + (path.indexOf('?') < 0 ? '?' : '&') + 'raw_json=1';
   const tok = await redditToken(env);
   if (tok) {
-    const r = await fetch('https://oauth.reddit.com' + q, { headers: Object.assign({ 'Authorization': 'Bearer ' + tok }, REDDIT_UA), signal: abortAfter(timeoutMs || 9000) });
-    if (r.status === 401) { try { await env.AXIOM_KV.delete('reddit_token'); } catch (e) {} throw new Error('reddit_oauth_401'); }
+    let r = await cfetch('https://oauth.reddit.com' + q, { headers: Object.assign({ 'Authorization': 'Bearer ' + tok }, REDDIT_UA) }, { ms: timeoutMs || 9000, shared: true });
+    if (r.status === 401) {
+      // the cached token was revoked or expired early: one new token, one more ask, then the failure by name
+      try { await env.AXIOM_KV.delete('reddit_token'); } catch (e) {}
+      const fresh = await redditToken(env);
+      r = await cfetch('https://oauth.reddit.com' + q, { headers: Object.assign({ 'Authorization': 'Bearer ' + fresh }, REDDIT_UA) }, { ms: timeoutMs || 9000, shared: true, retry: 0 });
+      if (r.status === 401) { try { await env.AXIOM_KV.delete('reddit_token'); } catch (e) {} throw new Error('reddit_oauth_401: Reddit refused a freshly issued token; check REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET'); }
+    }
     if (r.status === 429) throw new Error('reddit_rate_limited');
     if (!r.ok) throw new Error('reddit_' + r.status);
     return r.json();
@@ -2012,7 +2185,8 @@ async function redditGet(env, path, timeoutMs) {
     try {
       // the reddit.com hosts want an explicit .json suffix; api.reddit.com does not
       const url = host + (host.indexOf('api.') > 0 ? q : q.replace('?', '.json?'));
-      const r = await fetch(url, { headers: REDDIT_UA, signal: abortAfter(timeoutMs || 9000) });
+      // the three hosts are this reader's own fallback, so no second ask of one host
+      const r = await cfetch(url, { headers: REDDIT_UA }, { ms: timeoutMs || 9000, retry: 0 });
       if (r.status === 429) { last = 'reddit_rate_limited'; break; }
       if (!r.ok) { last = 'reddit_' + r.status; continue; }
       return await r.json();
@@ -2292,7 +2466,7 @@ async function socialBsky(tag) {
   const posts = [];
   try {
     // Public AppView search - no auth required.
-    const r = await fetch('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=' +
+    const r = await cfetch('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=' +
       encodeURIComponent('#' + tag) + '&limit=25&sort=latest',
       { headers: { 'User-Agent': 'AXIOM/6.0' }, signal: abortAfter(6000) });
     if (!r.ok) return posts;
@@ -2624,63 +2798,154 @@ function liOrgs(env) {
     return { urn: id, ns: ns };
   }).filter(o => /^urn:li:organization:\d+$/.test(o.urn));
 }
-async function liGet(env, path) {
-  const r = await fetch(LI_API + path, { headers: {
-    'Authorization': 'Bearer ' + env.LINKEDIN_TOKEN,
-    'LinkedIn-Version': String(env.LINKEDIN_VERSION || '202409'),
-    'X-Restli-Protocol-Version': '2.0.0',
-  }, signal: abortAfter(20000) });
+/* LinkedIn retires a monthly API version about a year after it ships, so a fixed default dies on its own. With no
+ * LINKEDIN_VERSION var the version three months back is sent (recent enough to exist, old enough to have shipped);
+ * a version LinkedIn refuses is said in words with the var to set. */
+function liVersion(env, now) {
+  const v = String((env && env.LINKEDIN_VERSION) || '').replace(/[^0-9]/g, ''); if (/^20\d{4}$/.test(v)) return v;
+  const d = new Date(now || Date.now()); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 3);
+  return String(d.getUTCFullYear()) + String(d.getUTCMonth() + 1).padStart(2, '0');
+}
+/** The access token: the secret, or the one a refresh made (KV `li_token`). */
+async function liToken(env) { const t = await kvGet(env.AXIOM_KV, 'li_token'); return t || env.LINKEDIN_TOKEN || ''; }
+/** A new access token from LINKEDIN_REFRESH_TOKEN (with LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET); null when not set up. */
+async function liRefresh(env) {
+  if (!env.LINKEDIN_REFRESH_TOKEN || !env.LINKEDIN_CLIENT_ID || !env.LINKEDIN_CLIENT_SECRET) return null;
+  const r = await cfetch('https://www.linkedin.com/oauth/v2/accessToken', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(env.LINKEDIN_REFRESH_TOKEN) + '&client_id=' + encodeURIComponent(env.LINKEDIN_CLIENT_ID) + '&client_secret=' + encodeURIComponent(env.LINKEDIN_CLIENT_SECRET) }, { ms: 15000, noLimit: true });
   const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.access_token) throw new Error('linkedin_refresh_' + r.status + (d && d.error ? ': ' + String(d.error_description || d.error).slice(0, 100) : ''));
+  await kvPut(env.AXIOM_KV, 'li_token', d.access_token, Math.max(300, Math.min((Number(d.expires_in) || 3600) - 300, 365 * 86400)));
+  return d.access_token;
+}
+async function liGet(env, path, again) {
+  const ver = liVersion(env);
+  const r = await cfetch(LI_API + path, { headers: {
+    'Authorization': 'Bearer ' + (await liToken(env)),
+    'LinkedIn-Version': ver,
+    'X-Restli-Protocol-Version': '2.0.0',
+  } }, { ms: 20000, shared: true });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 && !again) {
+    let fresh = null; try { fresh = await liRefresh(env); } catch (e) { throw new Error('linkedin_401: the token was refused and the refresh failed (' + String(e.message || e).slice(0, 100) + ')'); }
+    if (fresh) return liGet(env, path, true);
+    throw new Error('linkedin_token_invalid: LinkedIn refused the token (401). It has expired or been revoked: set a new LINKEDIN_TOKEN, or set LINKEDIN_REFRESH_TOKEN with LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET so the worker renews it itself.');
+  }
+  if (r.status === 426 || /NONEXISTENT_VERSION|VERSION_MISSING/i.test(String((d && (d.code || d.message)) || ''))) throw new Error('linkedin_version: LinkedIn does not serve API version ' + ver + '. Set the var LINKEDIN_VERSION to a current one (YYYYMM).');
+  if (r.status === 429) throw new Error('linkedin_rate_limited: LinkedIn answered 429 (its limits reset at midnight UTC); not asked again for an hour.');
   if (!r.ok) throw new Error('linkedin_' + r.status + (d && d.message ? ': ' + String(d.message).slice(0, 120) : ''));
   return d;
+}
+/** Posts with their counts: new ones are inserted, ones already held get today's counts (the archive's insert is
+ *  url-deduped, so without this a post kept the counts of the day it was first seen), and each gets the day's
+ *  `sig_eng` snapshot in the shape signalsIngest writes, which is what growth against yesterday reads. */
+async function sigEngFile(env, rows) {
+  const out = { inserted: 0, updated: 0 }; if (!rows.length || !env.MIND_DB) return out;
+  const now = Date.now(); const held = new Map();
+  for (let i = 0; i < rows.length; i += 90) {
+    const part = rows.slice(i, i + 90).map(r => r.url);
+    try { (((await env.MIND_DB.prepare("SELECT id, url, meta FROM arc_items WHERE kind='sig_thread' AND url IN (" + part.map(() => '?').join(',') + ')').bind(...part).all()).results) || []).forEach(r => held.set(r.url, r)); } catch (e) {}
+  }
+  const fresh = [], stmts = [];
+  rows.forEach(row => {
+    row.meta.eng_at = now; const old = held.get(row.url);
+    if (old) {
+      let m = {}; try { m = JSON.parse(old.meta || '{}') || {}; } catch (e) { m = {}; }
+      m.eng = row.meta.eng; m.eng_at = now; m.score = row.meta.score; m.comments = row.meta.comments; if (row.meta.reactions) m.reactions = row.meta.reactions; if (row.meta.stats) m.stats = row.meta.stats;
+      stmts.push(env.MIND_DB.prepare('UPDATE arc_items SET meta=?, seen=? WHERE id=?').bind(jsonFit(m, 1500), now, old.id));
+    } else fresh.push(row);
+    stmts.push(env.MIND_DB.prepare("INSERT INTO arc_items(kind,src,title,body,url,author,tone,meta,ts,seen) VALUES('sig_eng',?,'','',?,'',NULL,?,?,?) ON CONFLICT(kind,url) DO UPDATE SET meta=excluded.meta, ts=excluded.ts, seen=excluded.seen WHERE excluded.ts >= arc_items.ts")
+      .bind(row.src, 'x:eng:' + arcHash(row.url) + ':' + auDayKey(now), JSON.stringify({ u: row.url, platform: row.src, ns: row.meta.ns || '', eng: row.meta.eng, eng_at: now }), now, now));
+    if (old) out.updated++;
+  });
+  for (let i = 0; i < fresh.length; i += 150) out.inserted += await archiveItems(env, 'sig_thread', fresh.slice(i, i + 150));
+  for (let i = 0; i < stmts.length; i += 50) { try { await env.MIND_DB.batch(stmts.slice(i, i + 50)); } catch (e) {} }
+  return out;
+}
+const LI_POST_PAGES = 3;        // pages of posts an organisation a run
+const LI_COMMENT_PAGES = 2;     // pages of comments a post
+/** Counts for an organisation's own posts from the Community Management API's share statistics (impressions, clicks,
+ *  likes, comments, shares). Twenty posts a request. Needs the admin scope on the page; a refusal is said once and the
+ *  posts are still filed. { byUrn, error } */
+async function liShareStats(env, orgUrn, urns) {
+  const byUrn = {}; let error = '';
+  const kinds = { ugcPosts: urns.filter(u => /^urn:li:ugcPost:/.test(u)), shares: urns.filter(u => /^urn:li:share:/.test(u)) };
+  for (const k of Object.keys(kinds)) for (let i = 0; i < kinds[k].length; i += 20) {
+    const part = kinds[k].slice(i, i + 20);
+    try {
+      const d = await liGet(env, '/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=' + encodeURIComponent(orgUrn) + '&' + k + '=List(' + part.map(encodeURIComponent).join(',') + ')');
+      (d.elements || []).forEach(e => { const u = e.ugcPost || e.share; const t = e.totalShareStatistics || {}; if (u) byUrn[u] = { likes: Number(t.likeCount) || 0, comments: Number(t.commentCount) || 0, shares: Number(t.shareCount) || 0, impressions: Number(t.impressionCount) || 0, clicks: Number(t.clickCount) || 0, unique: Number(t.uniqueImpressionsCount) || 0 }; });
+    } catch (e) { error = String(e.message || e).slice(0, 200); if (/linkedin_(401|403|token|version|rate)/.test(error)) return { byUrn, error }; }
+  }
+  return { byUrn, error };
 }
 async function linkedinSweep(env, opts) {
   opts = opts || {};
   const log = opts.log || (async () => {});
-  if (!env.LINKEDIN_TOKEN) return { ok: false, error: 'linkedin_not_configured', detail: 'Set the worker secret LINKEDIN_TOKEN (a LinkedIn token with r_organization_social for the pages you administer) and the var LINKEDIN_ORGS, e.g. "urn:li:organization:123:mca,456:aep".' };
+  if (!env.LINKEDIN_TOKEN) return { ok: false, error: 'linkedin_not_configured', detail: 'Set the worker secret LINKEDIN_TOKEN (a LinkedIn token with r_organization_social for the pages you administer; rw_organization_admin as well for the engagement counts) and the var LINKEDIN_ORGS, e.g. "urn:li:organization:123:mca,456:aep".' };
   const orgs = liOrgs(env);
   if (!orgs.length) return { ok: false, error: 'linkedin_no_orgs', detail: 'Set LINKEDIN_ORGS to your organisation URNs with their client namespace, e.g. "urn:li:organization:123:mca".' };
   const perOrg = Math.min(Math.max(parseInt(opts.posts, 10) || 20, 1), 50);
   const perPost = Math.min(Math.max(parseInt(opts.commentsPer, 10) || 50, 5), 100);
-  const out = { ok: true, platform: 'linkedin', orgs: orgs.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, errors: [] };
+  const maxPages = Math.min(Math.max(parseInt(opts.pages, 10) || 1, 1), LI_POST_PAGES);
+  const out = { ok: true, platform: 'linkedin', orgs: orgs.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, updated: 0, withCounts: 0, capped: [], errors: [] };
   const trows = [], crows = [];
   for (const org of orgs) {
-    const q = '/posts?author=' + encodeURIComponent(org.urn) + '&q=author&count=' + perOrg + '&sortBy=LAST_MODIFIED';
-    await log('cmd', 'GET api.linkedin.com/rest' + q);
-    let posts = [];
-    try {
-      const d = await liGet(env, q);
-      posts = d.elements || [];
-      await log('out', org.urn + ': ' + posts.length + ' posts');
-    } catch (e) { const m = String(e.message || e).slice(0, 160); out.errors.push(org.urn + ': ' + m); await log('err', m); continue; }
+    let posts = [], stop = false, more = false;
+    for (let page = 0; page < maxPages && !stop; page++) {
+      const q = '/posts?author=' + encodeURIComponent(org.urn) + '&q=author&count=' + perOrg + '&start=' + (page * perOrg) + '&sortBy=LAST_MODIFIED';
+      await log('cmd', 'GET api.linkedin.com/rest' + q);
+      try {
+        const d = await liGet(env, q); const els = d.elements || []; posts = posts.concat(els);
+        const total = Number(d.paging && d.paging.total) || 0; const next = ((d.paging && d.paging.links) || []).some(l => l && l.rel === 'next');
+        more = next || total > posts.length || (!total && els.length === perOrg); if (!more || !els.length) stop = true;
+        await log('out', org.urn + ': ' + els.length + ' posts' + (page ? ' (page ' + (page + 1) + ')' : ''));
+      } catch (e) { const m = String(e.message || e).slice(0, 200); out.errors.push(org.urn + ': ' + m); await log('err', m); stop = true; more = false; }
+    }
+    if (more) { const c = org.urn + ': ' + posts.length + ' posts read and LinkedIn had more'; out.capped.push(c); await log('info', 'cap: ' + c); }
+    if (!posts.length) continue;
+    const stats = await liShareStats(env, org.urn, posts.map(p => String(p.id || '')).filter(Boolean));
+    if (stats.error) { const m = 'engagement counts not read for ' + org.urn + ': ' + stats.error; out.errors.push(m); await log('err', m); }
     for (const p of posts) {
       const urn = String(p.id || '');
       const body = String((p.commentary != null ? p.commentary : (p.specificContent && JSON.stringify(p.specificContent))) || '').slice(0, 4000);
+      const st = stats.byUrn[urn] || null;
       const thread = { platform: 'linkedin', id: urn, title: body.split('\n')[0].slice(0, 200) || 'LinkedIn post',
-        body: body, page: org.urn, page_name: '', score: 0, comments: 0, ns: org.ns,
+        body: body, page: org.urn, page_name: '', score: st ? st.likes : 0, comments: st ? st.comments : 0, ns: org.ns,
         url: 'https://www.linkedin.com/feed/update/' + urn, ts: Number(p.createdAt || p.firstPublishedAt || 0) || Date.now() };
       thread.issues = issueTag(thread.title + ' ' + thread.body);
-      trows.push(sigThreadRow(thread));
+      const row = sigThreadRow(thread);
+      if (st) { engRow(row, { likes: st.likes, reposts: st.shares, replies: st.comments, views: st.impressions }); row.meta.stats = { impressions: st.impressions, clicks: st.clicks, unique: st.unique }; out.withCounts++; }
+      trows.push(row);
       out.threads++;
-      const cq = '/socialActions/' + encodeURIComponent(urn) + '/comments?count=' + perPost;
-      await log('cmd', 'GET api.linkedin.com/rest/socialActions/' + urn.slice(0, 40) + '/comments');
-      try {
-        const cd = await liGet(env, cq);
-        const els = cd.elements || [];
-        await log('out', els.length + ' comments on ' + urn.slice(-12));
-        els.forEach(c => {
-          const text = String((c.message && c.message.text) || '').trim();
-          if (!text) return;
-          crows.push(sigCommentRow({ platform: 'linkedin', id: String(c.id || c.$URN || Math.random().toString(36).slice(2)), body: text,
-            score: (c.likesSummary && c.likesSummary.totalLikes) || 0, ts: (c.created && c.created.time) || Date.now(), ns: org.ns }, thread));
-          out.comments++;
-        });
-      } catch (e) { const m = String(e.message || e).slice(0, 160); out.errors.push(urn + ': ' + m); await log('err', m); }
+      let got = 0, total = 0;
+      for (let cp = 0; cp < LI_COMMENT_PAGES; cp++) {
+        const cq = '/socialActions/' + encodeURIComponent(urn) + '/comments?count=' + perPost + '&start=' + (cp * perPost);
+        await log('cmd', 'GET api.linkedin.com/rest/socialActions/' + urn.slice(0, 40) + '/comments' + (cp ? ' start=' + (cp * perPost) : ''));
+        try {
+          const cd = await liGet(env, cq);
+          const els = cd.elements || []; total = Number(cd.paging && cd.paging.total) || total; got += els.length;
+          await log('out', els.length + ' comments on ' + urn.slice(-12));
+          els.forEach(c => {
+            const text = String((c.message && c.message.text) || '').trim();
+            if (!text) return;
+            crows.push(sigCommentRow({ platform: 'linkedin', id: String(c.id || c.$URN || Math.random().toString(36).slice(2)), body: text,
+              score: (c.likesSummary && c.likesSummary.totalLikes) || 0, ts: (c.created && c.created.time) || Date.now(), ns: org.ns }, thread));
+            out.comments++;
+          });
+          if (els.length < perPost || (total && got >= total)) break;
+        } catch (e) { const m = String(e.message || e).slice(0, 160); out.errors.push(urn + ': ' + m); await log('err', m); break; }
+      }
+      if (total > got) out.capped.push(urn + ': ' + got + ' of ' + total + ' comments read');
+      if (out.errors.some(m => /linkedin_(token_invalid|401|version|rate_limited)|rate_limited:/.test(m))) break;
     }
   }
-  const filed = await sigFile(env, trows, crows);
-  out.threadRows = filed.threadRows; out.commentRows = filed.commentRows;
-  await log('info', 'filed ' + out.threadRows + ' posts and ' + out.commentRows + ' comments');
+  const withEng = trows.filter(r => r.meta.eng), plain = trows.filter(r => !r.meta.eng);
+  const e = await sigEngFile(env, withEng); const filed = await sigFile(env, plain, crows);
+  out.threadRows = filed.threadRows + e.inserted; out.updated = e.updated; out.commentRows = filed.commentRows;
+  if (!out.capped.length) delete out.capped;
+  await log('info', 'filed ' + out.threadRows + ' new posts and ' + out.commentRows + ' comments; counts refreshed on ' + out.updated);
+  if (!out.threads && out.errors.length) { out.ok = false; out.detail = 'Nothing was collected. ' + out.errors[0]; }
   return out;
 }
 
@@ -2693,6 +2958,14 @@ function metaPages(env) {
     return { id: String(id || '').replace(/[^0-9]/g, ''), ns: (ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'cmm' };
   }).filter(p => p.id);
 }
+const META_ORGANIC_PAGES = 2;     // pages of posts a Page a run
+const META_COMMENT_PAGES = 3;     // pages of comments a post (the first rides with the post)
+function metaReactionFields() { return META_REACTIONS.map(t => 'reactions.type(' + t + ').limit(0).summary(total_count).as(r_' + t.toLowerCase() + ')').join(','); }
+function metaReactionMix(p) { const mix = {}; META_REACTIONS.forEach(t => { mix[t.toLowerCase()] = (((p['r_' + t.toLowerCase()] || {}).summary || {}).total_count) || 0; }); return mix; }
+/** Our own Pages (META_PAGES), through the Graph API with the token those Pages are assigned to: each post with its
+ *  engagement counts (reactions by type, comments, shares) and its comments, and the Instagram business account linked to
+ *  each Page (its media with likes and comment counts, and the comments). Counts are refreshed on every run and
+ *  snapshotted daily. Nobody is named: a commenter's name is never asked for. */
 async function metaOrganicSweep(env, opts) {
   opts = opts || {};
   const log = opts.log || (async () => {});
@@ -2702,33 +2975,80 @@ async function metaOrganicSweep(env, opts) {
   const perPage = Math.min(Math.max(parseInt(opts.posts, 10) || 25, 1), 100);
   const perPost = Math.min(Math.max(parseInt(opts.commentsPer, 10) || 50, 5), 100);
   const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN);
-  const out = { ok: true, platform: 'meta', pages: pages.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, errors: [] };
+  const out = { ok: true, platform: 'meta', pages: pages.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, updated: 0, instagram: { accounts: 0, threads: 0, comments: 0 }, capped: [], errors: [] };
   const trows = [], crows = [];
+  const fatal = m => /meta_token_invalid|meta_rate_limited|rate_limited:/.test(m);
+  const cap = async c => { out.capped.push(c); await log('info', 'cap: ' + c); };
+  let stopAll = false;
   for (const pg of pages) {
-    const url = META_API + '/' + pg.id + '/posts?fields=id,message,created_time,permalink_url,shares,comments.limit(' + perPost + '){id,message,created_time,like_count},reactions.summary(true).limit(0)&limit=' + perPage + tok;
-    await log('cmd', 'GET graph.facebook.com/' + pg.id + '/posts?fields=message,comments{...}&limit=' + perPage);
-    let posts = [];
-    try { const d = await metaGet(url); posts = d.data || []; await log('out', 'page ' + pg.id + ': ' + posts.length + ' posts'); }
-    catch (e) { const m = String(e.message || e).slice(0, 160); out.errors.push(pg.id + ': ' + m); await log('err', m); continue; }
+    if (stopAll) break;
+    // -- the Page's own posts -------------------------------------------------
+    const url = META_API + '/' + pg.id + '/posts?fields=' + encodeURIComponent('id,message,created_time,permalink_url,shares,comments.limit(' + perPost + ').summary(total_count){id,message,created_time,like_count,comment_count},reactions.summary(total_count).limit(0),' + metaReactionFields()) + '&limit=' + perPage + tok;
+    await log('cmd', 'GET graph.facebook.com/' + pg.id + '/posts?fields=message,shares,reactions by type,comments{...}&limit=' + perPage);
+    const posts = [];
+    try {
+      const r = await metaPaged(url, META_ORGANIC_PAGES, async d => { (d.data || []).forEach(p => posts.push(p)); });
+      await log('out', 'page ' + pg.id + ': ' + posts.length + ' posts');
+      if (r.capped) await cap('page ' + pg.id + ': ' + posts.length + ' posts read and the Page had more');
+    } catch (e) { const m = String(e.message || e).slice(0, 200); out.errors.push(pg.id + ': ' + m); await log('err', m); if (fatal(m)) { stopAll = true; break; } continue; }
     for (const p of posts) {
       const body = String(p.message || '').slice(0, 4000);
-      const cs = ((p.comments || {}).data || []).filter(c => c.message && c.message.trim());
+      const cmt = p.comments || {}; let cs = (cmt.data || []).slice();
+      const total = Number((cmt.summary || {}).total_count) || 0;
+      let next = cmt.paging && cmt.paging.next ? cmt.paging.next : null;
+      if (next) { try { const r = await metaPaged(next, META_COMMENT_PAGES - 1, async d => { (d.data || []).forEach(c => cs.push(c)); }); next = r.capped; } catch (e) { const m = String(e.message || e).slice(0, 160); out.errors.push(String(p.id) + ' comments: ' + m); if (fatal(m)) stopAll = true; } }
+      if (next || total > cs.length) await cap(String(p.id) + ': ' + cs.length + ' of ' + (total || 'more') + ' comments read (replies to comments are counted by Meta and not read here)');
+      cs = cs.filter(c => c.message && c.message.trim());
+      const mix = metaReactionMix(p); const reactions = Number(((p.reactions || {}).summary || {}).total_count) || 0; const shares = Number((p.shares || {}).count) || 0;
       const thread = { platform: 'meta', id: String(p.id || ''), title: body.split('\n')[0].slice(0, 200) || 'Facebook post', body: body,
-        page: pg.id, ns: pg.ns, score: ((p.reactions || {}).summary || {}).total_count || 0, comments: cs.length,
+        page: pg.id, ns: pg.ns, score: reactions, comments: total || cs.length,
         url: p.permalink_url || ('https://www.facebook.com/' + p.id), ts: Date.parse(p.created_time || '') || Date.now() };
       thread.issues = issueTag(thread.title + ' ' + thread.body);
-      trows.push(sigThreadRow(thread)); out.threads++;
+      const row = engRow(sigThreadRow(thread), { likes: reactions, reposts: shares, replies: total || cs.length });
+      row.meta.reactions = mix; row.meta.layer = 1; row.meta.own = 1;
+      trows.push(row); out.threads++;
       cs.forEach(c => {
         crows.push(sigCommentRow({ platform: 'meta', id: String(c.id || ''), body: String(c.message), score: c.like_count || 0,
           ts: Date.parse(c.created_time || '') || Date.now(), ns: pg.ns }, thread));
         out.comments++;
       });
-      await log('out', String(p.id).slice(-10) + ': ' + cs.length + ' comments');
+      await log('out', String(p.id).slice(-10) + ': ' + reactions + ' reactions, ' + shares + ' shares, ' + cs.length + ' comments');
+      if (stopAll) break;
+    }
+    if (stopAll || opts.instagram === false) continue;
+    // -- the Instagram business account linked to the Page ---------------------
+    let ig = null;
+    try { const d = await metaGet(META_API + '/' + pg.id + '?fields=instagram_business_account' + tok); ig = d.instagram_business_account && d.instagram_business_account.id ? String(d.instagram_business_account.id) : null; }
+    catch (e) { const m = String(e.message || e).slice(0, 200); out.errors.push('instagram for page ' + pg.id + ': ' + m); await log('err', m); if (fatal(m)) stopAll = true; continue; }
+    if (!ig) { await log('info', 'page ' + pg.id + ' has no Instagram business account linked'); continue; }
+    await log('cmd', 'GET graph.facebook.com/' + ig + '/media?fields=caption,like_count,comments_count,comments{...}&limit=' + perPage);
+    const media = [];
+    try {
+      const r = await metaPaged(META_API + '/' + ig + '/media?fields=' + encodeURIComponent('id,caption,media_type,permalink,timestamp,like_count,comments_count,comments.limit(' + perPost + '){id,text,timestamp,like_count}') + '&limit=' + perPage + tok, META_ORGANIC_PAGES, async d => { (d.data || []).forEach(x => media.push(x)); });
+      out.instagram.accounts++; await log('out', 'instagram ' + ig + ': ' + media.length + ' posts');
+      if (r.capped) await cap('instagram ' + ig + ': ' + media.length + ' posts read and the account had more');
+    } catch (e) {
+      const raw = String(e.message || e); const m = /\(#10\)|\(#200\)|permission/i.test(raw) ? 'Meta refused the Instagram account linked to page ' + pg.id + ': the token needs instagram_basic (and instagram_manage_comments for the comments) with that account assigned. Meta said: ' + raw.slice(0, 120) : raw.slice(0, 200);
+      out.errors.push('instagram ' + ig + ': ' + m); await log('err', m); if (fatal(raw)) stopAll = true; continue;
+    }
+    for (const x of media) {
+      const body = String(x.caption || '').slice(0, 4000); const cmt = x.comments || {};
+      const cs = (cmt.data || []).filter(c => c.text && String(c.text).trim()); const total = Number(x.comments_count) || 0;
+      if ((cmt.paging && cmt.paging.next) || total > (cmt.data || []).length) await cap('instagram ' + String(x.id) + ': ' + (cmt.data || []).length + ' of ' + (total || 'more') + ' comments read');
+      const thread = { platform: 'instagram', id: String(x.id || ''), title: body.split('\n')[0].slice(0, 200) || 'Instagram post', body: body,
+        page: ig, ns: pg.ns, score: Number(x.like_count) || 0, comments: total, url: x.permalink || ('x:sig:instagram:' + x.id), ts: Date.parse(x.timestamp || '') || Date.now() };
+      thread.issues = issueTag(thread.title + ' ' + thread.body);
+      const row = engRow(sigThreadRow(thread), { likes: Number(x.like_count) || 0, replies: total });
+      row.meta.layer = 1; row.meta.own = 1; row.meta.media = String(x.media_type || '').toLowerCase();
+      trows.push(row); out.instagram.threads++;
+      cs.forEach(c => { crows.push(sigCommentRow({ platform: 'instagram', id: String(c.id || ''), body: String(c.text), score: c.like_count || 0, ts: Date.parse(c.timestamp || '') || Date.now(), ns: pg.ns }, thread)); out.instagram.comments++; });
     }
   }
-  const filed = await sigFile(env, trows, crows);
-  out.threadRows = filed.threadRows; out.commentRows = filed.commentRows;
-  await log('info', 'filed ' + out.threadRows + ' posts and ' + out.commentRows + ' comments');
+  const e = await sigEngFile(env, trows); const filed = await sigFile(env, [], crows);
+  out.threadRows = e.inserted; out.updated = e.updated; out.commentRows = filed.commentRows;
+  if (!out.capped.length) delete out.capped;
+  await log('info', 'filed ' + out.threadRows + ' new posts and ' + out.commentRows + ' new comments; counts refreshed on ' + out.updated + ' posts already held');
+  if (!out.threads && !out.instagram.threads && out.errors.length) { out.ok = false; out.detail = 'Nothing was collected. ' + out.errors[0]; }
   return out;
 }
 
@@ -2794,7 +3114,7 @@ async function sifaPull(env) {
   if (!env.SIFA_TOKEN) return { ok: false, error: 'sifa_not_configured', detail: 'Set the worker secret SIFA_TOKEN (the bearer token SIFA issued) and, if the address differs, the var SIFA_URL.' };
   const url = env.SIFA_URL || SIFA_URL_DEFAULT;
   try {
-    const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + env.SIFA_TOKEN, 'Accept': 'application/json', 'User-Agent': 'AXIOM/5.0 (topics)' }, signal: abortAfter(15000) });
+    const r = await cfetch(url, { headers: { 'Authorization': 'Bearer ' + env.SIFA_TOKEN, 'Accept': 'application/json', 'User-Agent': 'AXIOM/5.0 (topics)' }, signal: abortAfter(15000) });
     const text = await r.text();
     let raw = null; try { raw = JSON.parse(text); } catch (e) { raw = null; }
     if (!r.ok) return { ok: false, error: 'sifa_' + r.status, status: r.status, detail: 'SIFA answered HTTP ' + r.status + ': ' + text.slice(0, 200) };
@@ -2836,7 +3156,7 @@ async function mpsSync(env) {
   if (!(await ensureTopics(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
   let d;
   try {
-    const r = await fetch('https://query.wikidata.org/sparql?format=json&query=' + encodeURIComponent(WD_MP_QUERY), {
+    const r = await cfetch('https://query.wikidata.org/sparql?format=json&query=' + encodeURIComponent(WD_MP_QUERY), {
       headers: { 'Accept': 'application/sparql-results+json', 'User-Agent': 'AXIOM/5.0 (Australian political intelligence; wearecuriousminds.com)' }, signal: abortAfter(25000) });
     if (!r.ok) return { ok: false, error: 'wikidata_' + r.status, detail: 'Wikidata answered HTTP ' + r.status };
     d = await r.json();
@@ -2879,7 +3199,7 @@ async function mpsList(env, opts) {
 async function hansardSearch(env, kw, max) {
   if (!env.OPENAUSTRALIA_KEY) return { ok: false, items: [], detail: 'set OPENAUSTRALIA_KEY (free, openaustralia.org.au/api) to search Hansard' };
   try {
-    const r = await fetch('https://www.openaustralia.org.au/api/getHansard?key=' + encodeURIComponent(env.OPENAUSTRALIA_KEY) + '&search=' + encodeURIComponent(kw) + '&num=' + (max || 20) + '&order=d&output=js',
+    const r = await cfetch('https://www.openaustralia.org.au/api/getHansard?key=' + encodeURIComponent(env.OPENAUSTRALIA_KEY) + '&search=' + encodeURIComponent(kw) + '&num=' + (max || 20) + '&order=d&output=js',
       { headers: { 'User-Agent': 'AXIOM/5.0' }, signal: abortAfter(12000) });
     if (!r.ok) return { ok: false, items: [], detail: 'OpenAustralia HTTP ' + r.status };
     const d = await r.json();
@@ -4651,7 +4971,7 @@ function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) +
 let SOURCES_READY = false;
 const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'wire', 'independent', 'official', 'party', 'polling', 'thinktank', 'sector', 'podcast', 'video', 'newsletter', 'community', 'sweep'];
 const SOURCE_JURIS = ['au', 'nsw', 'vic', 'qld', 'wa', 'sa', 'tas', 'act', 'nt'];
-const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render', 'public', 'process', 'lexicon', 'lemmy', 'hn', 'forum'];
+const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render', 'public', 'process', 'lexicon', 'lemmy', 'hn', 'forum', 'official'];
 const SOURCES_PER_TICK = 50;        // registry sources swept per cron tick (the core is fetched separately)
 const SOURCE_DEAD_FAILS = 6;        // consecutive failed sweeps before a source is reported dead
 const SOURCE_WINDOW_H = 72;         // dated items older than this are not filed
@@ -5002,6 +5322,10 @@ const SOURCE_SEED_EXT = [
   // -- p62, a wider net: sweeps that follow the lexicon (x), community sources (l Lemmy instance, k Hacker News words, f a
   //    forum's own feed), and outlets not yet held (site only: Google News and the site's own sitemap are the routes).
   //    Nothing here is verified until a sweep proves it --
+  // -- p65: official datasets read through their own public APIs (o). Both answered from the build machine on 12 November
+  //    2026; what they deliver on the worker is proven by the first sweep --
+  ['off_frl', 'Federal Register of Legislation: new laws and instruments', 'official', 'au', '', { o: 'frl' }, 180],
+  ['off_austender', 'AusTender: contract notices', 'official', 'au', '', { o: 'austender' }, 360],
   ['lex_gnews', 'Lexicon sweep: Google News', 'sweep', 'au', '', { x: 'gnews' }, 30],
   ['lex_gdelt', 'Lexicon sweep: GDELT', 'sweep', 'au', '', { x: 'gdelt' }, 60],
   ['lemmy_aussiezone', 'Lemmy: aussie.zone', 'community', 'au', '', { l: 'aussie.zone' }, 60],
@@ -5116,6 +5440,7 @@ function sourceMethods(urls, explicit) {
   if (urls.site || urls.gnews) m.push('gnews');
   if (urls.home) m.push('render');
   if (urls.lexicon) m.push('lexicon');
+  if (urls.official) m.push('official');
   if (urls.lemmy) m.push('lemmy');
   if (urls.hn) m.push('hn');
   if (urls.forum) m.push('forum');
@@ -5136,7 +5461,7 @@ function sourceSeed() {
     if (u.r) urls.rss = u.r; if (u.w) urls.wp = u.w; if (u.j) urls.json = u.j; if (u.m) urls.sitemap = u.m;
     if (u.p) urls.podcast = u.p; if (u.h) urls.home = u.h; if (u.s) urls.site = u.s; if (u.g) urls.gnews = u.g;
     if (u.y) urls.youtube = u.y; if (u.n) urls.substack = u.n; if (u.b) urls.public = u.b;
-    if (u.x) urls.lexicon = u.x; if (u.l) urls.lemmy = u.l; if (u.k) urls.hn = u.k; if (u.f) urls.forum = u.f;
+    if (u.x) urls.lexicon = u.x; if (u.l) urls.lemmy = u.l; if (u.k) urls.hn = u.k; if (u.f) urls.forum = u.f; if (u.o) urls.official = u.o;
     out.push({ id: r[0], name: r[1], tier: r[2], juris: r[3], issues: String(r[4] || '').split(/[,\s]+/).filter(Boolean), methods: sourceMethods(urls, null), urls, schedule: r[6] || SOURCE_SCHED[r[2]] || 60, core: false });
   });
   PROCESS_SEED.forEach(r => out.push({ id: r[0], name: r[1], tier: 'official', juris: r[2], issues: String(r[6] || '').split(',').filter(Boolean), methods: ['process'], urls: { process: r[5], ptype: r[4], house: r[3] }, schedule: 360, core: false }));
@@ -5257,6 +5582,7 @@ function sourceSanitize(b, cur) {
     if (u.gnews) urls.gnews = String(u.gnews).trim().slice(0, 200);
     if (u.podcast) urls.podcast = String(u.podcast).trim().slice(0, 120);
     if (u.lexicon && (u.lexicon === 'gnews' || u.lexicon === 'gdelt')) urls.lexicon = u.lexicon;
+    if (u.official && OFFICIAL_SETS[String(u.official)]) urls.official = String(u.official);
     if (u.lemmy && LEMMY_HOST_RX.test(String(u.lemmy).trim().toLowerCase())) urls.lemmy = String(u.lemmy).trim().toLowerCase();
     if (u.hn) { const wds = String(u.hn).split(',').map(x => x.replace(/[^A-Za-z0-9 -]/g, '').trim()).filter(Boolean).slice(0, 4); if (wds.length) urls.hn = wds.join(','); }
     if (urls.process) { if (PROCESS_TYPES.indexOf(String(u.ptype)) >= 0) urls.ptype = String(u.ptype); if (u.house && PROCESS_HOUSES.indexOf(String(u.house)) >= 0) urls.house = String(u.house); }
@@ -5294,8 +5620,9 @@ async function sourcesCoreOffRefresh(env) {
 async function srcFetch(url, accept, ms) {
   const t0 = Date.now();
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': BROWSER_UA, 'Accept': accept || '*/*', 'Accept-Language': 'en-AU,en;q=0.8' },
-      signal: abortAfter(ms || SOURCE_FETCH_MS), cf: { cacheTtl: 300, cacheEverything: true }, redirect: 'follow' });
+    // one more ask after a 5xx or a dropped connection; a timeout already spent its seven seconds and is not asked again
+    const r = await cfetch(url, { headers: { 'User-Agent': BROWSER_UA, 'Accept': accept || '*/*', 'Accept-Language': 'en-AU,en;q=0.8' },
+      cf: { cacheTtl: 300, cacheEverything: true }, redirect: 'follow' }, { ms: ms || SOURCE_FETCH_MS, retryTimeout: false });
     const text = r.ok ? (await r.text()).slice(0, 1500000) : '';
     return { ok: r.ok, status: r.status, text, ms: Date.now() - t0, ctype: (r.headers.get('content-type') || '').toLowerCase(), url: r.url || url };
   } catch (e) {
@@ -5544,6 +5871,60 @@ async function srcLexicon(env, src) {
   if (!answered) return { ok: false, items: [], status: 0, refused, detail: ('no term was answered. ' + errs.slice(0, 2).join('; ')).slice(0, 160) };
   return { ok: true, items, status: 200, quiet: !items.length, asked: terms.length, answered };
 }
+/* ---- Official datasets (p65) ------------------------------------------------------------------------------------------
+ * Source Registry method `official` (urls.official = frl | austender): a government register's own public API, read
+ * through pubFetch like every other public source (robots.txt, the honest user agent, ten seconds a host, a refusal
+ * backed off a day). Only a record that carries a client issue is kept, as a headline and a link.
+ *   frl        the Federal Register of Legislation's API: the newest registered Acts and instruments by title
+ *   austender  AusTender's Open Contracting feed: contract notices published in the last day, by what was bought
+ * A contact person's name is never read. */
+const OFFICIAL_FRL_TOP = 200;           // the newest titles read a run
+const OFFICIAL_OCDS_PAGES = 2;          // pages of contract notices a run
+const OFFICIAL_SETS = {
+  frl: { where: 'api.prod.legislation.gov.au/v1/titles <the newest ' + OFFICIAL_FRL_TOP + ' registered>', outlet: 'Federal Register of Legislation' },
+  austender: { where: 'api.tenders.gov.au/ocds/findByDates/contractPublished <the last day>', outlet: 'AusTender' },
+};
+function officialZ(ms) { return new Date(ms).toISOString().slice(0, 19) + 'Z'; }
+async function srcOfficial(env, src) {
+  const set = String((src.urls || {}).official || ''); const def = OFFICIAL_SETS[set];
+  if (!def) return { ok: false, items: [], detail: 'unknown official dataset: ' + set.slice(0, 30) };
+  const items = []; const seen = new Set(); let read = 0; let capped = '';
+  const keep = it => { if (!it.title || !it.link || seen.has(it.link) || !issueTag(it.title + ' ' + (it.desc || '')).length) return; seen.add(it.link); it.outlet = def.outlet; items.push(it); };
+  if (set === 'frl') {
+    const f = await pubFetch(env, 'https://api.prod.legislation.gov.au/v1/titles?$top=' + OFFICIAL_FRL_TOP + '&$orderby=' + encodeURIComponent('asMadeRegisteredAt desc') + '&$select=id,name,makingDate,asMadeRegisteredAt,collection,status', { accept: 'application/json,*/*', ms: 15000 });
+    if (!f.ok) return { ok: false, items: [], status: f.status || 0, refused: !!f.refused, detail: String(f.error || 'failed').slice(0, 160) };
+    const d = pubJson(f);
+    if (!d || !Array.isArray(d.value)) return { ok: false, items: [], status: 200, detail: 'the register did not answer with a list of titles: ' + f.text.replace(/\s+/g, ' ').slice(0, 70) };
+    read = d.value.length;
+    d.value.forEach(t => { const id = String((t && t.id) || '').replace(/[^A-Za-z0-9]/g, ''); if (!id) return;
+      keep({ title: String(t.name || '').replace(/\s+/g, ' ').trim().slice(0, 300), link: 'https://www.legislation.gov.au/' + id, date: String(t.asMadeRegisteredAt || t.makingDate || ''), desc: [String(t.collection || '').replace(/([a-z])([A-Z])/g, '$1 $2'), String(t.status || '').replace(/([a-z])([A-Z])/g, '$1 $2')].filter(Boolean).join(', ') }); });
+    const oldest = Math.min(...d.value.map(t => Date.parse(String((t && (t.asMadeRegisteredAt || t.makingDate)) || '')) || Date.now()));
+    // a full page whose oldest title is newer than this source's own interval: titles registered between two runs were not all
+    // read. The register's times carry no zone, so twelve hours are allowed either way before saying so.
+    if (read >= OFFICIAL_FRL_TOP && oldest > Date.now() - (Number(src.schedule) || 180) * 60000 - 12 * 3600000) capped = 'the newest ' + read + ' titles were read and more were registered since the last run';
+  } else {
+    const now = Date.now(); let url = 'https://api.tenders.gov.au/ocds/findByDates/contractPublished/' + officialZ(now - 86400000) + '/' + officialZ(now);
+    for (let page = 0; url && page < OFFICIAL_OCDS_PAGES; page++) {
+      const f = await pubFetch(env, url, { accept: 'application/json,*/*', ms: 20000 });
+      if (!f.ok) { if (!page) return { ok: false, items: [], status: f.status || 0, refused: !!f.refused, detail: String(f.error || 'failed').slice(0, 160) }; capped = 'page ' + (page + 1) + ' was not read: ' + String(f.error || '').slice(0, 80); url = ''; break; }
+      const d = pubJson(f);
+      if (!d || !Array.isArray(d.releases)) { if (!page) return { ok: false, items: [], status: 200, detail: 'AusTender did not answer with a list of releases: ' + f.text.replace(/\s+/g, ' ').slice(0, 70) }; break; }
+      read += d.releases.length;
+      d.releases.forEach(r => (Array.isArray(r && r.contracts) ? r.contracts : []).forEach(c => {
+        const cn = String((c && c.id) || '').replace(/[^A-Za-z0-9-]/g, ''); const what = String((c && c.description) || '').replace(/\s+/g, ' ').trim(); if (!cn || !what) return;
+        const agency = ((r.parties || []).find(p => p && Array.isArray(p.roles) && p.roles.indexOf('procuringEntity') >= 0) || {}).name || '';
+        const supplier = ((((r.awards || [])[0] || {}).suppliers || [])[0] || {}).name || '';
+        const amount = Number(c.value && c.value.amount) || 0;
+        keep({ title: (what + (agency ? ' - ' + agency : '')).slice(0, 300), link: 'https://www.tenders.gov.au/Search/KeywordSearch?keyword=' + encodeURIComponent(cn), date: String(c.dateSigned || r.date || ''),
+          desc: 'Contract notice ' + cn + (supplier ? ', supplier ' + String(supplier).slice(0, 80) : '') + (amount ? ', ' + String((c.value && c.value.currency) || 'AUD') + ' ' + Math.round(amount).toLocaleString('en-AU') : '') });
+      }));
+      const next = d.links && d.links.next ? String(d.links.next) : '';
+      url = /^https:\/\/api\.tenders\.gov\.au\//.test(next) ? next : '';
+    }
+    if (url) capped = read + ' notices were read (' + OFFICIAL_OCDS_PAGES + ' pages) and AusTender had more for the day';
+  }
+  return { ok: true, items, status: 200, quiet: !items.length, read, capped: capped || undefined, detail: capped ? 'cap: ' + capped : undefined };
+}
 /** Source Registry method `lemmy` (urls.lemmy = an instance's host, or host/c/community): the instance's own posts,
  *  newest first. A post is kept when it carries a client issue or comes from a politics community. */
 async function srcLemmy(env, src) {
@@ -5701,6 +6082,7 @@ async function srcMethod(env, m, src) {
   if (m === 'public') return u.public ? srcPublic(env, src) : { ok: false, items: [], skipped: true, detail: 'no public page' };
   if (m === 'process') return u.process ? srcProcess(env, src) : { ok: false, items: [], skipped: true, detail: 'no parliament page' };
   if (m === 'lexicon') return u.lexicon ? srcLexicon(env, src) : { ok: false, items: [], skipped: true, detail: 'no news index named' };
+  if (m === 'official') return u.official ? srcOfficial(env, src) : { ok: false, items: [], skipped: true, detail: 'no official dataset named' };
   if (m === 'lemmy') return u.lemmy ? srcLemmy(env, src) : { ok: false, items: [], skipped: true, detail: 'no Lemmy instance' };
   if (m === 'hn') return u.hn ? srcHn(env, src) : { ok: false, items: [], skipped: true, detail: 'no words for Hacker News' };
   if (m === 'forum') return u.forum ? srcForum(env, src) : { ok: false, items: [], skipped: true, detail: 'no forum feed' };
@@ -5713,6 +6095,7 @@ function srcTarget(src, m) {
   if (m === 'sitemap') return u.sitemap || ('https://' + siteHost(u.site) + '/robots.txt'); if (m === 'podcast') return 'itunes.apple.com/search "' + (u.podcast || '') + '"';
   if (m === 'html' || m === 'render') return u.home || ''; if (m === 'public') return u.public || ''; if (m === 'process') return u.process || ''; if (m === 'gnews') return 'news.google.com/rss/search ' + (u.gnews || ('site:' + siteHost(u.site)));
   if (m === 'lexicon') return (u.lexicon === 'gdelt' ? 'api.gdeltproject.org' : 'news.google.com/rss/search') + ' <the next ' + (LEX_PER_RUN[u.lexicon] || LEX_PER_RUN.gnews) + ' lexicon terms>';
+  if (m === 'official') return (OFFICIAL_SETS[u.official] || {}).where || '';
   if (m === 'lemmy') return String(u.lemmy || '').split('/')[0] + '/api/v3/post/list'; if (m === 'hn') return 'hn.algolia.com/api/v1/search_by_date ' + (u.hn || ''); if (m === 'forum') return u.forum || '';
   return '';
 }
@@ -6213,9 +6596,9 @@ const SOCIAL_PACE = 350;   // ms between calls to one service
 async function socialJson(url, init, ms) {
   const t0 = Date.now();
   try {
-    const opts = { headers: Object.assign({ 'User-Agent': BROWSER_UA, 'Accept': 'application/json,*/*', 'Accept-Language': 'en-AU,en;q=0.8' }, (init && init.headers) || {}), signal: abortAfter(ms || 9000) };
+    const opts = { headers: Object.assign({ 'User-Agent': BROWSER_UA, 'Accept': 'application/json,*/*', 'Accept-Language': 'en-AU,en;q=0.8' }, (init && init.headers) || {}) };
     if (init && init.method) { opts.method = init.method; opts.body = init.body; }
-    const r = await fetch(url, opts);
+    const r = await cfetch(url, opts, { ms: ms || 9000 });
     const text = await r.text();
     let json = null; try { json = JSON.parse(text); } catch (e) { json = null; }
     const msg = json && (json.message || (json.error && (json.error.message || json.error))) ? ': ' + String(json.message || json.error.message || json.error).slice(0, 80) : '';
@@ -6238,7 +6621,7 @@ function bskyNorm(p, q) {
 async function bskySearch(q, limit, sinceIso) {
   const r = await socialJson(BSKY_API + 'app.bsky.feed.searchPosts?q=' + encodeURIComponent(q) + '&limit=' + Math.min(Math.max(limit || 40, 1), 100) + '&sort=latest' + (sinceIso ? '&since=' + encodeURIComponent(sinceIso) : ''));
   if (!r.ok) return { ok: false, posts: [], detail: r.error };
-  return { ok: true, posts: ((r.json || {}).posts || []).map(p => bskyNorm(p, q)) };
+  return { ok: true, posts: ((r.json || {}).posts || []).map(p => bskyNorm(p, q)), more: !!(r.json || {}).cursor };
 }
 async function bskyThread(uri, depth) {
   const r = await socialJson(BSKY_API + 'app.bsky.feed.getPostThread?uri=' + encodeURIComponent(uri) + '&depth=' + (depth || 6) + '&parentHeight=0');
@@ -6266,7 +6649,8 @@ async function bskySweep(env, opts) {
     let kept = 0;
     r.posts.forEach(p => { out.found++; if (!p.text || seen.has(p.uri)) return; if (!auRelevant('', p.text, q)) return; seen.set(p.uri, p); kept++; });
     out.kept += kept;
-    await log('out', r.posts.length + ' hits, ' + kept + ' Australian kept');
+    if (r.more) (out.capped = out.capped || []).push('"' + q + '": the newest ' + r.posts.length + ' posts were read and Bluesky had more in the window');
+    await log('out', r.posts.length + ' hits, ' + kept + ' Australian kept' + (r.more ? ' (more in the window than one page)' : ''));
     await rdSleep(SOCIAL_PACE);
   }
   const posts = Array.from(seen.values());
@@ -6323,6 +6707,7 @@ async function mastodonSweep(env, opts) {
       if (!r.ok) { out.errors.push(inst + ' #' + tag + ': ' + r.detail); await log('err', inst + ' #' + tag + ': ' + r.detail); if (/HTTP (0|5\d\d)|timed out/.test(r.detail)) { dead = true; break; } await rdSleep(SOCIAL_PACE); continue; }
       let kept = 0;
       r.posts.forEach(p => { out.found++; if (!p.text || p.ts < since || seen.has(p.url)) return; seen.set(p.url, p); kept++; });
+      if (r.posts.length >= 40 && Math.min(...r.posts.map(p => p.ts)) >= since) (out.capped = out.capped || []).push(inst + ' #' + tag + ': one page of 40 read and the tag had more in the window');
       await log('out', r.posts.length + ' posts, ' + kept + ' new');
       await rdSleep(SOCIAL_PACE);
     }
@@ -6434,7 +6819,7 @@ async function xSyndSweep(env, opts) {
 async function fetchYt(url, ms) {
   const t0 = Date.now();
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'en-AU,en;q=0.8', 'Cookie': YT_CONSENT }, signal: abortAfter(ms || 10000), redirect: 'follow' });
+    const r = await cfetch(url, { headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'en-AU,en;q=0.8', 'Cookie': YT_CONSENT }, redirect: 'follow' }, { ms: ms || 10000 });
     const text = r.ok ? (await r.text()).slice(0, 3000000) : '';
     return { ok: r.ok, status: r.status, text, ms: Date.now() - t0, url: r.url || url };
   } catch (e) { const s = String((e && e.name) || '') + ' ' + String((e && e.message) || e); return { ok: false, status: 0, text: '', ms: Date.now() - t0, error: /timeout|abort/i.test(s) ? 'timed out' : s.trim().slice(0, 90) }; }
@@ -7324,6 +7709,7 @@ async function fbPublicSweep(env, opts) {
     try {
       const d = await metaGet(META_API + '/' + encodeURIComponent(p.value) + '/posts?fields=' + encodeURIComponent('id,message,created_time,permalink_url,shares,reactions.summary(true).limit(0),comments.summary(true).limit(0)') + '&limit=25' + tok);
       const posts = d.data || []; await log('out', p.value + ': ' + posts.length + ' posts');
+      if (d.paging && d.paging.next) (out.capped = out.capped || []).push(p.value + ': the newest ' + posts.length + ' posts were read and the page had more');
       posts.forEach(x => (byNs[p.ns] = byNs[p.ns] || []).push({ platform: 'facebook', url: /^\d+_\d+$/.test(String(x.id || '')) ? 'https://www.facebook.com/' + x.id : x.permalink_url, text: x.message || '', ts: x.created_time,
         eng: { likes: ((x.reactions || {}).summary || {}).total_count, comments: ((x.comments || {}).summary || {}).total_count, shares: (x.shares || {}).count }, watch: p.id }));
     } catch (e) {
@@ -8434,7 +8820,10 @@ async function pubRefuse(env, host, status, why) {
 }
 async function pubRaw(env, url, accept, ms) {
   const u = new URL(url); await pubPace(env, u.hostname.toLowerCase());
-  try { const r = await fetch(url, { headers: { 'User-Agent': pubUA(env), 'Accept': accept || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'en-AU,en;q=0.8' }, signal: abortAfter(ms || 15000), redirect: 'follow' });
+  // a 5xx or a dropped connection is asked once more, after the host's own ten seconds; a refusal (401, 403, 429, a challenge)
+  // is never asked again and is pubFetch's to record, so the shared limiter stands aside here (noLimit)
+  try { const r = await cfetch(url, { headers: { 'User-Agent': pubUA(env), 'Accept': accept || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'en-AU,en;q=0.8' }, redirect: 'follow' },
+      { ms: ms || 15000, retryTimeout: false, noLimit: true, beforeRetry: () => pubPace(env, u.hostname.toLowerCase()) });
     const text = r.status === 200 ? (await r.text()).slice(0, 1500000) : ''; return { status: r.status, text };
   } catch (e) { const s = String((e && e.name) || '') + ' ' + String((e && e.message) || e); return { status: 0, text: '', error: /timeout|abort/i.test(s) ? 'timed out' : s.trim().slice(0, 90) }; }
 }
@@ -10060,7 +10449,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-12.studio-p64';
+const AXIOM_BUILD = '2026-11-12.studio-p65';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -17775,7 +18164,7 @@ async function claudeMsg(env, system, user, maxTok, timeoutMs, model, acct) {
 async function gnewsSweep(qq, hours, max) {
   try {
     const when = hours <= 24 ? ('when:' + hours + 'h') : ('when:' + Math.ceil(hours / 24) + 'd');
-    const r = await fetch('https://news.google.com/rss/search?q=' + encodeURIComponent(qq + ' ' + when) + '&hl=en-AU&gl=AU&ceid=AU:en', {
+    const r = await cfetch('https://news.google.com/rss/search?q=' + encodeURIComponent(qq + ' ' + when) + '&hl=en-AU&gl=AU&ceid=AU:en', {
       headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/xml,text/xml,*/*' },
       signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
     });
@@ -17789,7 +18178,7 @@ async function gnewsSweep(qq, hours, max) {
 }
 async function pageGrab(url) {
   try {
-    const r = await fetch(url, {
+    const r = await cfetch(url, {
       headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/html,application/xhtml+xml,*/*' },
       signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
       cf: { cacheTtl: 600 },
@@ -18049,7 +18438,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -18071,6 +18460,7 @@ function axRedact(s) {
  * strings are never logged. */
 const AXIOM_WORKER = {
   async fetch(req, env, ctx) {
+    CF_ENV = env;
     const rid = String(crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/-/g, '').slice(0, 16);
     const t0 = Date.now(); let path = ''; try { path = new URL(req.url).pathname; } catch (e) {}
     let res;
@@ -18190,7 +18580,7 @@ const AXIOM_WORKER = {
       const cached = await kvGet(env.AXIOM_KV, cacheKey);
       if (cached) return new Response(cached, { headers: CORS });
       try {
-        const r = await fetch('https://trends.google.com/trending/rss?geo=' + geo, {
+        const r = await cfetch('https://trends.google.com/trending/rss?geo=' + geo, {
           headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/xml,text/xml,*/*' },
         });
         if (!r.ok) return jsonResp({ error: 'trends_' + r.status }, 502);
@@ -18315,7 +18705,7 @@ const AXIOM_WORKER = {
         // to the last good answer rather than handing its notice to the user.
         let text = '', d = null, limited = false;
         for (let attempt = 0; attempt < 3; attempt++) {
-          const r = await fetch('https://api.gdeltproject.org/api/v2/doc/doc?' + p, { headers: { 'User-Agent': 'AXIOM/5.0' } });
+          const r = await cfetch('https://api.gdeltproject.org/api/v2/doc/doc?' + p, { headers: { 'User-Agent': 'AXIOM/5.0' } });
           text = await r.text();
           try { d = JSON.parse(text); break; } catch (e) { d = null; }
           limited = r.status === 429 || /limit requests to one every|rate limit|too many requests/i.test(text);
@@ -18350,7 +18740,7 @@ const AXIOM_WORKER = {
       const cached = await kvGet(env.AXIOM_KV, cacheKey);
       if (cached) return new Response(cached, { headers: CORS });
       try {
-        const r = await fetch(
+        const r = await cfetch(
           'https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/all-agents/' +
           encodeURIComponent(article) + '/daily/' + fmt(start) + '/' + fmt(end),
           { headers: { 'User-Agent': 'AXIOM/5.0 (AU political attention dashboard)' } });
@@ -18370,7 +18760,7 @@ const AXIOM_WORKER = {
       try {
         if (cached) { ppl = JSON.parse(cached); }
         else {
-          const r = await fetch('https://theyvoteforyou.org.au/api/v1/people.json?key=' + env.TVFY_KEY, { headers: { 'User-Agent': 'AXIOM/5.0' } });
+          const r = await cfetch('https://theyvoteforyou.org.au/api/v1/people.json?key=' + env.TVFY_KEY, { headers: { 'User-Agent': 'AXIOM/5.0' } });
           const d = await r.json();
           ppl = (Array.isArray(d) ? d : []).map(x => ({
             id: x.id,
@@ -18393,7 +18783,7 @@ const AXIOM_WORKER = {
     if (path === '/reddit') {
       try {
         // api.reddit.com + a descriptive UA: the www host 403s generic cloud UAs.
-        const r = await fetch(
+        const r = await cfetch(
           `https://api.reddit.com/r/${encodeURIComponent(sr)}/search` +
           `?q=${encodeURIComponent(q)}&sort=top&limit=10&restrict_sr=on&t=month&raw_json=1`,
           { headers: { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' }, signal: abortAfter(8000) }
@@ -18408,7 +18798,7 @@ const AXIOM_WORKER = {
     if (path === '/reddit-comments') {
       const permalink = reqUrl.searchParams.get('p') || '';
       try {
-        const r = await fetch(
+        const r = await cfetch(
           `https://api.reddit.com${permalink}.json?limit=6&depth=1&raw_json=1`,
           { headers: { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' }, signal: abortAfter(8000) }
         );
@@ -18422,7 +18812,7 @@ const AXIOM_WORKER = {
     if (path === '/guardian') {
       if (!env.GUARDIAN_KEY) return jsonResp({ error: 'no_guardian_key' }, 500);
       try {
-        const r = await fetch(
+        const r = await cfetch(
           `https://content.guardianapis.com/search` +
           `?q=${encodeURIComponent(q)}` +
           `&tag=world%2Faustralia,australia-news%2Faustralia-news` +
@@ -18444,7 +18834,7 @@ const AXIOM_WORKER = {
       const cached = await kvGet(env.AXIOM_KV, cacheKey);
       if (cached) return new Response(cached, { headers: CORS });
       try {
-        const r   = await fetch(rssUrl, { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' } });
+        const r   = await cfetch(rssUrl, { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' } });
         const xml = await r.text();
         const items = parseFeedXml(xml);
         const out = JSON.stringify({ items });
@@ -20586,6 +20976,7 @@ const AXIOM_WORKER = {
       let ob = {}; if (req.method === 'POST') { try { ob = await req.json(); } catch (e) { ob = {}; } }
       try {
         await ensureArchive(env);
+        if (path === '/social/limits' && req.method === 'GET') return jsonResp(Object.assign({ ok: true, note: 'Limits and usage as this isolate has seen them; limits on Meta, LinkedIn and Reddit (OAuth) are shared through KV.' }, cfLimits()));
         if (path === '/social/coverage' && req.method === 'GET') return jsonResp(await socialCoverage(env, reqUrl.searchParams.get('probe') === '1'));
         if (path === '/social/petitions' && req.method === 'GET') return jsonResp(await petitionsList(env, { issue: reqUrl.searchParams.get('issue') || '', juris: reqUrl.searchParams.get('juris') || '', days: reqUrl.searchParams.get('days') || 30 }));
         if (path === '/social/petitions/counters') { if (req.method === 'GET') return jsonResp({ ok: true, counters: await petitionCounters(env) }); const r = await petitionCounterEdit(env, ob, auth.name); const st = r.ok === false ? (r.status || 400) : 200; if (r.status) delete r.status; return jsonResp(r, st); }
@@ -21721,7 +22112,7 @@ const AXIOM_WORKER = {
         const when = hours <= 24 ? `when:${hours}h` : `when:${Math.ceil(hours / 24)}d`;
         const gnUrl = 'https://news.google.com/rss/search?q=' +
           encodeURIComponent(qq + ' ' + when) + '&hl=en-AU&gl=AU&ceid=AU:en';
-        const r = await fetch(gnUrl, {
+        const r = await cfetch(gnUrl, {
           headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/xml,text/xml,*/*' },
           signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
         });
@@ -21749,7 +22140,7 @@ const AXIOM_WORKER = {
 
     if (path === '/whirlpool') {
       try {
-        const r = await fetch(
+        const r = await cfetch(
           `https://forums.whirlpool.net.au/search?q=${encodeURIComponent(q)}&forum=0`,
           { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/html' } }
         );
@@ -21787,7 +22178,7 @@ const AXIOM_WORKER = {
       const seen    = new Set();
       try {
         const searchUrl = q ? `https://www.bigfooty.com/forum/search/?q=${encodeURIComponent(q)}&t=post&c[node]=229&o=date` : `https://www.bigfooty.com/forum/forums/australian-politics.229/`;
-        const r = await fetch(searchUrl, { headers: hdrs });
+        const r = await cfetch(searchUrl, { headers: hdrs });
         const html = await r.text();
         const titleRe = /<h[123][^>]*class="[^"]*(?:contentRow-title|thread-title|structItem-title)[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
         for (const m of html.matchAll(titleRe)) {
@@ -21802,7 +22193,7 @@ const AXIOM_WORKER = {
       } catch {}
       if (threads.length < 3) {
         try {
-          const r = await fetch('https://www.bigfooty.com/forum/forums/australian-politics.229/', { headers: hdrs });
+          const r = await cfetch('https://www.bigfooty.com/forum/forums/australian-politics.229/', { headers: hdrs });
           const html = await r.text();
           const re = /<a[^>]+href="(https:\/\/www\.bigfooty\.com\/forum\/threads\/[^"?#]+)"[^>]*>([\s\S]*?)<\/a>/g;
           for (const m of html.matchAll(re)) { const text = stripHtml(m[2]); if (text && text.length > 5 && !seen.has(text)) { seen.add(text); threads.push({ text, url: m[1] }); } if (threads.length >= 12) break; }
@@ -21822,14 +22213,14 @@ const AXIOM_WORKER = {
       const threads = [];
       const seen    = new Set();
       try {
-        const r = await fetch('https://hotcopper.com.au/discussions/politics/', { headers: hdrs });
+        const r = await cfetch('https://hotcopper.com.au/discussions/politics/', { headers: hdrs });
         const html = await r.text();
         const patterns = [/<a[^>]+href="(\/threads\/[^"?#]+)"[^>]*class="[^"]*title[^"]*"[^>]*>([\s\S]*?)<\/a>/g, /<a[^>]+class="[^"]*(?:title|thread-link|subject)[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g, /href="(\/(?:threads|topics|discussions)\/[^"?#]{10,})"[^>]*>([\s\S]{8,80}?)<\/a>/g];
         for (const re of patterns) { for (const m of html.matchAll(re)) { const text = stripHtml(m[2]); if (text && text.length > 6 && !seen.has(text)) { seen.add(text); const href = m[1].startsWith('http') ? m[1] : 'https://hotcopper.com.au' + m[1]; threads.push({ text, url: href }); } if (threads.length >= 15) break; } if (threads.length >= 5) break; }
       } catch {}
       if (threads.length < 3 && q) {
         try {
-          const r = await fetch(`https://hotcopper.com.au/search/?q=${encodeURIComponent(q)}&type=post&prefixid=politics`, { headers: hdrs });
+          const r = await cfetch(`https://hotcopper.com.au/search/?q=${encodeURIComponent(q)}&type=post&prefixid=politics`, { headers: hdrs });
           const html = await r.text();
           const re = /href="(\/threads\/[^"?#]+)"[^>]*>([\s\S]{6,120}?)<\/a>/g;
           for (const m of html.matchAll(re)) { const text = stripHtml(m[2]); if (text && text.length > 5 && !seen.has(text)) { seen.add(text); threads.push({ text, url: 'https://hotcopper.com.au' + m[1] }); } if (threads.length >= 12) break; }
@@ -21851,9 +22242,9 @@ const AXIOM_WORKER = {
       const seen    = new Set();
       const topicRe = /href="(YaBB\.pl\?num=\d+[^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
       const addFromHtml = (html) => { for (const m of html.matchAll(topicRe)) { const text = stripHtml(m[2]); if (!text || text.length < 5 || /^(reply|quote|more|back|top|next|prev|\d+)$/i.test(text)) continue; if (!seen.has(text)) { seen.add(text); threads.push({ text, url: 'https://www.ozpolitic.com/forum/' + m[1] }); } if (threads.length >= 15) break; } };
-      if (q) { try { const r = await fetch(`https://www.ozpolitic.com/forum/YaBB.pl?action=search2;search=${encodeURIComponent(q)};searchtype=1;maxresults=15`, { headers: hdrs }); if (r.ok) addFromHtml(await r.text()); } catch {} }
-      if (threads.length < 3) { try { const r = await fetch('https://www.ozpolitic.com/forum/YaBB.pl?action=recent', { headers: hdrs }); if (r.ok) addFromHtml(await r.text()); } catch {} }
-      if (threads.length < 3) { try { const r = await fetch('https://www.ozpolitic.com/forum/YaBB.pl', { headers: hdrs }); if (r.ok) addFromHtml(await r.text()); } catch {} }
+      if (q) { try { const r = await cfetch(`https://www.ozpolitic.com/forum/YaBB.pl?action=search2;search=${encodeURIComponent(q)};searchtype=1;maxresults=15`, { headers: hdrs }); if (r.ok) addFromHtml(await r.text()); } catch {} }
+      if (threads.length < 3) { try { const r = await cfetch('https://www.ozpolitic.com/forum/YaBB.pl?action=recent', { headers: hdrs }); if (r.ok) addFromHtml(await r.text()); } catch {} }
+      if (threads.length < 3) { try { const r = await cfetch('https://www.ozpolitic.com/forum/YaBB.pl', { headers: hdrs }); if (r.ok) addFromHtml(await r.text()); } catch {} }
       const result = q && threads.length > 3 ? threads.filter(t => q.toLowerCase().split(' ').some(w => w.length > 2 && t.text.toLowerCase().includes(w))) : threads;
       const final = result.length > 0 ? result : threads;
       const out = JSON.stringify({ threads: final.slice(0, 10), source: 'ozpolitic' });
@@ -21866,7 +22257,7 @@ const AXIOM_WORKER = {
       const cached = await kvGet(env.AXIOM_KV, cacheKey);
       if (cached) return new Response(cached, { headers: CORS });
       try {
-        const r = await fetch('https://www.ozpolitic.com/forum/YaBB.pl?action=RSSrecent', { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,text/xml,application/xml,*/*' } });
+        const r = await cfetch('https://www.ozpolitic.com/forum/YaBB.pl?action=RSSrecent', { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,text/xml,application/xml,*/*' } });
         if (!r.ok) return jsonResp({ items: [], error: `ozpolitic_rss_${r.status}` });
         const xml = await r.text();
         const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(m => {
@@ -22139,7 +22530,7 @@ const AXIOM_WORKER = {
       // -- FETCH HELPERS -----------------------------------------------------
       const get = async (url, hdrs={}) => {
         try {
-          const r = await fetch(url, {
+          const r = await cfetch(url, {
             headers: { 'User-Agent': BROWSER_UA, ...hdrs },
             cf: { cacheTtl: 60 },
           });
@@ -22728,6 +23119,7 @@ export default AXIOM_WORKER;
 //   crons = ["0 21 * * *"]    <- daily at 7am AEST (21:00 UTC)
 // ==============================================================================
 async function handleScheduled(env) {
+  CF_ENV = env;
   console.log('AXIOM Auto-Collect triggered at', new Date().toISOString());
   try { await deskLexiconLoad(env, true); } catch (e) {}   // the desks' approved terms tag everything this tick collects
   // before anything reads the archive: the index that makes those reads walk a window, not a whole kind (made once)
@@ -22848,7 +23240,7 @@ async function handleScheduled(env) {
 
     // HackerNews
     try {
-      const r = await fetch(`https://hn.algolia.com/api/v1/search?query=${encoded}+australia&tags=story&hitsPerPage=5`,
+      const r = await cfetch(`https://hn.algolia.com/api/v1/search?query=${encoded}+australia&tags=story&hitsPerPage=5`,
         { headers: { 'User-Agent': 'AXIOM-Cron/4.0' } });
       if (r.ok) { const d = await r.json(); (d.hits||[]).forEach(h => items.push({ src:'hn', text:h.title, author:h.author, score:h.points||0, url:`https://news.ycombinator.com/item?id=${h.objectID}`, date:h.created_at, topic })); }
     } catch {}
@@ -22856,7 +23248,7 @@ async function handleScheduled(env) {
     // Reddit
     for (const sr of ['AustralianPolitics','australia','AusFinance']) {
       try {
-        const r = await fetch(`https://www.reddit.com/r/${sr}/search.json?q=${encoded}&sort=top&limit=5&restrict_sr=on&t=week`,
+        const r = await cfetch(`https://www.reddit.com/r/${sr}/search.json?q=${encoded}&sort=top&limit=5&restrict_sr=on&t=week`,
           { headers: { 'User-Agent': 'AXIOM-Cron/4.0' } });
         if (r.ok) { const d = await r.json(); (d?.data?.children||[]).forEach(p => items.push({ src:'reddit', sr, text:p.data.title+(p.data.selftext?' - '+p.data.selftext.slice(0,200):''), author:p.data.author, score:p.data.score, url:'https://reddit.com'+p.data.permalink, date:new Date(p.data.created_utc*1000).toISOString(), topic })); }
       } catch {}
@@ -22865,7 +23257,7 @@ async function handleScheduled(env) {
     // Guardian
     if (env.GUARDIAN_KEY) {
       try {
-        const r = await fetch(`https://content.guardianapis.com/search?q=${encoded}&tag=australia-news%2Faustralia-news&page-size=5&api-key=${env.GUARDIAN_KEY}`);
+        const r = await cfetch(`https://content.guardianapis.com/search?q=${encoded}&tag=australia-news%2Faustralia-news&page-size=5&api-key=${env.GUARDIAN_KEY}`);
         if (r.ok) { const d = await r.json(); (d?.response?.results||[]).forEach(a => items.push({ src:'guardian', text:a.webTitle, author:'Guardian AU', score:0, url:a.webUrl, date:a.webPublicationDate, topic })); }
       } catch {}
     }
@@ -22895,7 +23287,7 @@ async function handleScheduled(env) {
 
   // Refresh RSS caches
   for (const [key, url] of Object.entries({ abc:'https://www.abc.net.au/news/feed/51120/rss.xml', guardian:'https://www.theguardian.com/australia-news/rss', sbs:'https://www.sbs.com.au/news/feed' })) {
-    try { const r=await fetch(url,{headers:{'User-Agent':'AXIOM-Cron/4.0'}});if(r.ok){const xml=await r.text();const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(m=>{const b=m[1];return{title:stripHtml((b.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1]||'')),link:(b.match(/<link[^>]*href="([^"]+)"/)??b.match(/<link[^>]*>(https?[^<]+)<\/link>/)??[])[1]?.trim(),date:(b.match(/<pubDate>([\s\S]*?)<\/pubDate>/)??[])[1]?.trim()};}).filter(i=>i.title);await kvPut(env.AXIOM_KV,'rss_'+key,JSON.stringify({items}),3600);} } catch {}
+    try { const r=await cfetch(url,{headers:{'User-Agent':'AXIOM-Cron/4.0'}});if(r.ok){const xml=await r.text();const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(m=>{const b=m[1];return{title:stripHtml((b.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1]||'')),link:(b.match(/<link[^>]*href="([^"]+)"/)??b.match(/<link[^>]*>(https?[^<]+)<\/link>/)??[])[1]?.trim(),date:(b.match(/<pubDate>([\s\S]*?)<\/pubDate>/)??[])[1]?.trim()};}).filter(i=>i.title);await kvPut(env.AXIOM_KV,'rss_'+key,JSON.stringify({items}),3600);} } catch {}
   }
 
   console.log(`AXIOM Cron complete: ${totalItems} items across ${topicsArr.length} topics`);

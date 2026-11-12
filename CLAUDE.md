@@ -854,6 +854,76 @@ because it exists. **Every address and every answer shape below is unverified un
   Still whole-kind by design, and small today: reads with no window (`/signals/status`, held comments by thread).
   Harness: `tests/archive-index-worker.mjs` (4).
 
+## Collection hardening (build `2026-11-12.studio-p65`, page `sources.js?v=r2`; branch `worktree-collection-hardening`, not deployed)
+
+At the owner's request (12 November 2026): every collector audited for rate limits, a refused token, retry, timeouts
+and pagination; Meta and LinkedIn engagement through their own APIs; two official datasets. No signed-in source was
+added and nothing here works around a refusal. **Every Meta, LinkedIn and Reddit answer in the tests is a stand-in in
+the documented shape; the two official datasets answered from the build machine, not from the worker.**
+
+- **One collector fetch, `cfetch(url, init, {ms, retry, retryTimeout, shared, noLimit, beforeRetry})`.** Every
+  collector's outbound request goes through it (`tests/collect-hardening-worker.mjs` CH15 fails on a bare `fetch(`
+  outside the model providers, messaging, the render service and `axFetchPublic`): a timeout on every request
+  (`CF_TIMEOUT_MS` = 12 s unless named); **one** retry after a backoff with jitter on a network error or a 5xx, GET and
+  HEAD only, never a POST; the rate headers read on every answer - `Retry-After` (seconds or a date),
+  `(x-)ratelimit-remaining` / `-reset` (Reddit's seconds, Bluesky's epoch, Mastodon's date), Meta's `X-App-Usage`,
+  `X-Business-Use-Case-Usage` and `X-Ad-Account-Usage`. A wait of three seconds or less is waited once; a longer one
+  is recorded (`cfLimit`) and the service is not asked again until it has passed (`rate_limited:` with the time), per
+  isolate for every host and through KV `rl_<host>` for Meta, LinkedIn and Reddit OAuth (`shared`). A Meta limit on one
+  object (`graph.facebook.com#<id>`) holds only requests that name it; the app at 95% of its allowance pauses the host.
+  `GET /social/limits` (read) lists limits in force and the usage last seen.
+- **Who uses it how.** `srcFetch` (the registry): retry on 5xx and dropped connections, not on a timeout (it already
+  spent its seven seconds). `pubRaw`: the same, the retry waits the host's ten seconds first, and a refusal (401, 403,
+  429, a challenge) is still never asked again - `noLimit`, the refusal is `pubFetch`'s to record. `redditGet`: a 401
+  deletes the cached token, takes one new one and asks once more (`reddit_oauth_401` after that); the three anonymous
+  hosts are their own fallback and are not retried. `socialJson`, `fetchYt`, `safeFetch`, the core feeds and the older
+  inline readers (Trends, GDELT, Wikipedia pageviews, TheyVoteForYou, Guardian, the forums, the feed proxy, Hacker
+  News) all go through it, which is where about twenty of them got a timeout they never had.
+- **Meta.** `metaGet` checks the status (a gateway page is `meta_http_<status>`, never an empty success), names an
+  expired or revoked token (`meta_token_invalid`: a System User token cannot be renewed from the worker) and a
+  throttle named in the body (codes 4, 17, 32, 341, 613, 80000-80014: `meta_rate_limited`, recorded like a header).
+  `metaPaged(url, max, onPage)` follows `paging.next` and answers `capped`.
+- **LinkedIn.** `liVersion(env)`: `LINKEDIN_VERSION` when set, else the month three months back (the old fixed
+  default, 202409, is past LinkedIn's one-year support and would be refused; **whether the rolling default always names
+  a shipped version is not verified** - a refused version is `linkedin_version` with the var to set). A 401 is
+  `linkedin_token_invalid` in words, or renewed once when `LINKEDIN_REFRESH_TOKEN`, `LINKEDIN_CLIENT_ID` and
+  `LINKEDIN_CLIENT_SECRET` are set (`liRefresh`, KV `li_token`).
+- **Pagination says when it stopped short**: `capped[]` on the sweep's answer (and in the job log as `cap:`) from Meta
+  insights (20 pages), the Ad Library (`META_ADLIB_PAGES` = 3 a term, it read one before), ad comments (the newest 100
+  a post; more than 200 live ads; more posts than a run reads), our own Pages and Instagram, LinkedIn posts and
+  comments, other organisations' Pages, Bluesky (a cursor) and Mastodon (a full page still inside the window).
+- **Our own Pages (`metaOrganicSweep`, `META_PAGES`).** Each post with reactions by type (`meta.reactions`), shares and
+  the comment total (`meta.eng {likes, reposts, replies}`), `META_ORGANIC_PAGES` = 2 pages of posts and
+  `META_COMMENT_PAGES` = 3 of comments, and **the Instagram business account linked to each Page** (its media with
+  likes and comment counts, and the comments; needs instagram_basic, and instagram_manage_comments for comment text;
+  `opts.instagram === false` skips it; a refusal there is said in words and the Facebook half still files). Rows are
+  `meta.layer: 1`, `meta.own: 1`. **`sigEngFile`**: the archive's insert is url-deduped, so a post used to keep the
+  counts of the day it was first seen; counts are now refreshed on every run and snapshotted daily as `sig_eng`, the
+  shape Anne's Den reads growth from. A commenter's name is never asked for.
+- **LinkedIn engagement (`linkedinSweep`).** `liShareStats`: `organizationalEntityShareStatistics` for the
+  organisation's own posts, twenty a request (likes, comments, shares, impressions, clicks; `meta.eng`, `meta.stats`;
+  needs the admin scope - a refusal is said once and the posts still file), posts paged by `start` up to
+  `LI_POST_PAGES` = 3 (`opts.pages`, one by default), comments up to `LI_COMMENT_PAGES` = 2. Only organisations in
+  `LINKEDIN_ORGS`; there is still no scraping path.
+- **Source Registry method `official`** (`urls.official` = `frl` | `austender`; seed key `o`; `srcOfficial`, through
+  `pubFetch`): `off_frl`, the Federal Register of Legislation's API (the newest 200 registered titles; a title on a
+  client issue is a headline linking to legislation.gov.au), and `off_austender`, AusTender's Open Contracting feed
+  (contract notices of the last day by what was bought, the agency, the supplier and the amount; the link is a keyword
+  search for the contract number, **its address form unverified**; a contact person is never read). Considered and
+  not built: the ABS Data API and data.gov.au (both answered; indicator series and dataset listings, not rows on an
+  issue); aph.gov.au refuses automated requests from the build machine (a WAF page) and is left to the routes that
+  already read it.
+- **The Mac collectors** (`http_json` in `tools/reach-reddit.py` and `tools/reach_social.py`, `http_retry`): a GET is
+  asked once more after a 5xx, a dropped connection or a timeout; a POST only when the worker said it did not take it
+  (429, 503), since a write whose answer was lost may have landed; `Retry-After` is waited, thirty seconds at most; the
+  job claim (`/bridge/next`) is never asked twice. The signed-in channels' own rules are unchanged: a verification
+  still stops the sweep and pauses the platform a day, and nothing retries past a refusal.
+- Harnesses: `tests/collect-hardening-worker.mjs` (17), `tests/reach-http-test.py` (24). `tests/worker-env.mjs` passes
+  the backoff at once (`__collectSleep`).
+- **To switch on after a deploy** (none of it runs without these): `META_PAGES` with the Pages assigned to the token;
+  instagram_basic on that token for the Instagram half; rw_organization_admin on the LinkedIn token for counts; and
+  read `GET /social/limits` and each sweep's `capped` after the first run.
+
 ## Sentiment by party, person, organisation and topic (Phase 3)
 
 Every number is a sum over rows in D1 `sent_entities`, each pointing at the
