@@ -83,7 +83,7 @@ body:has(#v-den.on) .content{padding-top:6px}
 .den-lab{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--den-ink2)}
 .den-lab select,.den-lab input,.den-lab textarea,.den-in{font-family:var(--den-font);font-size:13px;color:var(--den-ink);background:var(--den-card);border:1px solid var(--den-line2);border-radius:var(--den-r-sm);padding:6px 9px;min-height:32px;box-shadow:var(--den-sh1)}
 .den-lab select:hover,.den-in:hover{border-color:var(--den-ink3)}
-.den-lab select:focus-visible,.den-lab input:focus-visible,.den-in:focus-visible,.den-ta:focus-visible,.den-row:focus-visible,.den-tab:focus-visible,.den-link:focus-visible,.den-mini:focus-visible,.den-kpi:focus-visible,.den-col:focus-visible{outline:2px solid var(--den-ac);outline-offset:1px}
+.den-lab select:focus-visible,.den-lab input:focus-visible,.den-in:focus-visible,.den-ta:focus-visible,.den-row:focus-visible,.den-tab:focus-visible,.den-link:focus-visible,.den-mini:focus-visible,.den-kpi:focus-visible,.den-col:focus-visible,.den-stepb:focus-visible,.den-focus:focus-visible,.den-nextb:focus-visible,.den-done:focus-visible{outline:2px solid var(--den-ac);outline-offset:1px}
 .den-spacer{flex:1}
 
 /* ---- segmented tabs (inside a panel) ---- */
@@ -365,3 +365,63 @@ button.den-deskcard:focus-visible,.den-deskitem:focus-visible{outline:2px solid 
 #den-root .sig-con{--den-con:#0E121B; --ln:#2A3344; --t0:#F2F5FA; --t1:#C9D0DB; --t2:#9AA4B3; --t3:#8791A0; --x-ac-hi:#8FB9FF; --x-neg:#F08A86; --x-pos:#6FCF9C; --x-warn:#E5A662; --x-ink0:#F2F5FA; --x-ink1:#C9D0DB; --x-ink2:#9AA4B3; --x-ink3:#8791A0; background:var(--den-con);color:var(--t1)}
 .den-deskcard>span:nth-child(2){min-width:0;flex:1}
 .den-optbar{box-shadow:0 -6px 16px rgba(15,23,42,.06)}
+
+/* ---- the guided run (decision D10, DEN.md s.11): the day's three steps, one row at a time, the report filling beside it.
+   Tokens only, so the dark theme follows; nothing here moves. ---- */
+.den-rail{margin:0 0 var(--den-gap)}
+.den-rail ol{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.den-step{min-width:0}
+.den-stepb{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 10px;align-items:center;width:100%;min-height:48px;text-align:left;font-family:var(--den-font);background:var(--den-soft);border:1px solid var(--den-line);border-radius:var(--den-r);padding:7px 12px;cursor:pointer;color:var(--den-ink1)}
+.den-stepb:hover{background:var(--den-hover);border-color:var(--den-line2)}
+.den-stepb .n{grid-row:1/3;width:26px;height:26px;border-radius:var(--den-r-pill);display:grid;place-items:center;font-family:var(--den-num);font-weight:700;font-size:13px;background:var(--den-card);border:1px solid var(--den-line2);color:var(--den-ink)}
+.den-stepb .l{font-weight:600;font-size:13.5px;color:var(--den-ink)}
+.den-stepb .s{font-size:12px;color:var(--den-ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.den-step.is-now .den-stepb{background:var(--den-card);border-color:var(--den-ink3);box-shadow:var(--den-sh1)}
+.den-step.is-now .den-stepb .n{background:var(--den-btn);border-color:var(--den-btn);color:var(--den-btn-ink)}
+.den-step.is-done .den-stepb .n{background:var(--den-pos-bg);border-color:var(--den-pos);color:var(--den-pos)}
+.den-strip.den-compact>header{padding:7px 14px}
+.den-guide{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,360px);gap:var(--den-gap);align-items:start;margin:0 0 var(--den-gap)}
+.den-guide:focus{outline:0}
+.den-guide-main{min-width:0;display:flex;flex-direction:column;gap:10px}
+.den-focus{min-width:0;border:1px solid var(--den-line2);border-radius:var(--den-r-lg);background:var(--den-card);box-shadow:var(--den-sh2);padding:16px 18px 14px}
+.den-focus-h{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.den-focus-h .den-mc-av{flex:none;margin-top:0}
+.den-focus-t{display:block;font-family:var(--den-num);font-size:19px;font-weight:700;letter-spacing:-.015em;line-height:1.35;color:var(--den-ink);overflow-wrap:anywhere}
+.den-focus-s{margin:8px 0 0;max-width:76ch;font-size:14px;line-height:1.6;color:var(--den-ink1);overflow-wrap:anywhere}
+.den-focus .den-sub{font-size:12.5px;margin-top:6px}
+.den-focus .den-mc-f{margin-top:12px}
+.den-focus-a{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--den-line)}
+.den-focus-a .den-in{max-width:190px}
+.den-under{font-size:12.5px;padding:0 4px}
+.den-done{border:1px solid var(--den-line);border-left:3px solid var(--den-line2);border-radius:var(--den-r);background:var(--den-card);box-shadow:var(--den-sh1);padding:16px 18px 14px}
+.den-done.is-done{border-left-color:var(--den-pos)}
+.den-done p{margin:0;font-size:14px;line-height:1.6;color:var(--den-ink1)}
+.den-done p b{display:block;font-family:var(--den-num);font-size:17px;font-weight:700;color:var(--den-ink)}
+.den-done .den-focus-a{border-top:0;padding-top:0;gap:8px 14px}
+.den-last{display:flex;flex-wrap:wrap;gap:4px 16px;padding:0 4px;font-size:13px;color:var(--den-ink1)}
+.den-last:empty{display:none}
+.den-offer{border:1px solid var(--den-line);border-left:3px solid var(--den-warn);border-radius:var(--den-r-sm);background:var(--den-warn-bg);padding:10px 14px;font-size:13px;color:var(--den-ink1)}
+.den-offer .den-mini{margin:8px 6px 0 0}
+.den-next{border:1px solid var(--den-line);border-radius:var(--den-r);background:var(--den-card);box-shadow:var(--den-sh1);padding:11px 8px 8px;min-width:0}
+.den-next h3,.den-traybox h3{font-family:var(--den-font);font-size:14.5px;font-weight:600;color:var(--den-ink);margin:0 6px 6px}
+.den-next ol{list-style:none;margin:0;padding:0}
+.den-nextb{display:grid;grid-template-columns:118px minmax(0,1fr) auto;gap:10px;align-items:baseline;width:100%;text-align:left;font-family:var(--den-font);font-size:13px;background:none;border:0;border-radius:var(--den-r-sm);padding:6px;cursor:pointer;color:var(--den-ink1)}
+.den-nextb:hover{background:var(--den-hover)}
+.den-nextb .k{font-size:12px;color:var(--den-ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.den-nextb .t{color:var(--den-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.den-next p{margin:4px 6px 0}
+.den-tray{display:flex;flex-direction:column;gap:var(--den-gap);min-width:0}
+.den-traybox{min-width:0;border:1px solid var(--den-line);border-radius:var(--den-r);background:var(--den-soft);padding:12px 14px}
+.den-traybox h3{margin:0 0 8px}
+.den-traybox h4{font-family:var(--den-font);font-size:12px;font-weight:600;color:var(--den-ink2);margin:10px 0 2px}
+.den-traybox ul{list-style:none;margin:0;padding:0}
+.den-traybox p{margin:8px 0 0}
+.den-traybox p .den-mini{display:block;margin:8px 0 0}
+.den-trayg li{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--den-line);font-size:13px}
+.den-trayg li .t{flex:1 1 100%;color:var(--den-ink);font-weight:500;overflow-wrap:anywhere}
+#den-tray-signals li{display:flex;flex-direction:column;gap:3px;padding:9px 0;border-top:1px solid var(--den-line);font-size:13px}
+#den-tray-signals li:first-child{border-top:0;padding-top:0}
+#den-tray-signals li:last-child{padding-bottom:0}
+#den-tray-signals .d{font-size:12.5px;color:var(--den-ink2)}
+#den-tray-signals .a{display:flex;flex-wrap:wrap;gap:2px 12px;align-items:baseline;font-size:12.5px}
+@media(max-width:1100px){.den-guide{grid-template-columns:1fr}.den-rail ol{grid-template-columns:1fr}}

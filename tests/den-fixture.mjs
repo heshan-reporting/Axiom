@@ -38,8 +38,14 @@ export const browser = await chromium.launch();
 export async function open(w, key, o) {
   o = o || {}; const ctx = await browser.newContext({ viewport: { width: o.width || 1440, height: o.height || 900 }, acceptDownloads: true }); await ctx.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
   const page = await ctx.newPage(); page.errors = []; page.on('pageerror', e => { page.errors.push(e.message); console.log('  [pageerror] ' + e.message.slice(0, 200)); });
-  await page.addInitScript(({ W, key }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', key); window.confirm = () => true; }, { W, key: key || 'full-key' });
-  await page.route(/^https:\/\/(?!newsaus\.)[^/]+\//, route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+  // o.view is the APP's view (the inject reads open on 'command' and walk to the Den). The Den's own row view is another
+  // thing: a fresh profile opens Today in Guided (decision D10), and the cases written before it are tests of the table, so
+  // the table is chosen for them unless a case asks for { guided: true }. Set only when absent: a reload keeps a choice
+  // made in the page.
+  const denView = o.guided ? null : 'table';
+  await page.addInitScript(({ W, key, denView }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', key); if (denView && localStorage.getItem('ax_den_view') == null) localStorage.setItem('ax_den_view', JSON.stringify(denView)); window.confirm = () => true; }, { W, key: key || 'full-key', denView });
+  // on the context, not the page: a source opened in a new tab is stubbed too
+  await ctx.route(/^https:\/\/(?!newsaus\.)[^/]+\//, route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   w.hooks = w.hooks || []; page.served = [];
   await page.route(W + '/**', async route => { const r = route.request(); const u = new URL(r.url()); const path = u.pathname + u.search; page.served.push(r.method() + ' ' + path);
     for (const h of w.hooks) { const done = await h(route, r, path); if (done) return; }
@@ -47,7 +53,9 @@ export async function open(w, key, o) {
     catch (e) { await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'fixture_failed', detail: String(e.message) }) }); } });
   await page.goto('http://127.0.0.1:' + PORT + '/index.html#v=' + (o.view || 'den'), { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof go === 'function' && typeof denInit === 'function', null, { timeout: 20000 });
-  if (!o.view) { await page.evaluate(() => go('den')); await page.waitForSelector('#den-app', { timeout: 20000 }); await page.waitForSelector('.den-strip ul, .den-strip .den-state', { timeout: 20000 }); }
+  if (!o.view) { await page.evaluate(() => go('den')); await page.waitForSelector('#den-app', { timeout: 20000 });
+    // in Guided the strip is one line (neither a list nor a state), so the card or the done state is what says the page is ready
+    await page.waitForSelector(o.guided ? '.den-guide #den-focus, .den-guide .den-done, #den-tabpanel .den-state.err' : '.den-strip ul, .den-strip .den-state', { timeout: 20000 }); }
   return page;
 }
 let pass = 0, fail = 0; const failures = [];

@@ -47,12 +47,16 @@
   /* One loader for every panel: data, the error in words, and a reload. A reply that arrives after a newer request was
      sent is dropped, so a slow answer for the last desk never lands on this one. */
   function useLoad(fn, deps, key) {
-    const [st, setSt] = useState({ data: null, err: '', loading: true }); const seq = useRef(0); const last = useRef(key);
-    const load = useCallback(() => { const n = ++seq.current; setSt(s => ({ data: s.data, err: '', loading: true }));
-      Promise.resolve().then(fn).then(d => { if (n === seq.current) setSt({ data: d, err: '', loading: false }); }, e => { if (n === seq.current) setSt(s => ({ data: s.data, err: say(e), loading: false })); }); }, deps);   // eslint-disable-line
+    const [st, setSt] = useState({ data: null, err: '', loading: true, asked: 0 }); const seq = useRef(0); const last = useRef(key); const has = useRef(false); has.current = !!st.data;
+    // reload() answers a promise: true only when its own answer landed. asked is when the read behind what is shown was
+    // sent, so a decision made after it can be told from one the read already holds.
+    const load = useCallback(() => { const n = ++seq.current; const asked = Date.now(); setSt(s => ({ data: s.data, err: '', loading: true, asked: s.asked }));
+      return Promise.resolve().then(fn).then(d => { if (n !== seq.current) return false; setSt({ data: d, err: '', loading: false, asked }); return true; }, e => { if (n === seq.current) setSt(s => ({ data: s.data, err: say(e), loading: false, asked: s.asked })); return false; }); }, deps);   // eslint-disable-line
     // another desk clears what is shown; a refresh of the same desk keeps it on screen until the new read lands
-    useEffect(() => { if (last.current !== key) { last.current = key; setSt({ data: null, err: '', loading: true }); } load(); }, deps);   // eslint-disable-line
-    return Object.assign({ reload: load, set: d => setSt({ data: d, err: '', loading: false }) }, st);
+    useEffect(() => { if (last.current !== key) { last.current = key; setSt({ data: null, err: '', loading: true, asked: 0 }); } load(); }, deps);   // eslint-disable-line
+    // drop(): a read in flight never lands (a person has just decided over what is shown). Only once something is shown.
+    const drop = useCallback(() => { if (!has.current) return; seq.current++; setSt(s => (s.loading ? Object.assign({}, s, { loading: false }) : s)); }, []);
+    return Object.assign({ reload: load, drop, set: d => setSt(s => ({ data: d, err: '', loading: false, asked: s.asked })) }, st);
   }
   const Loading = ({ what }) => html`<div class="den-state den-load" role="status"><span class="den-sk" aria-hidden="true"></span><span class="den-sk" aria-hidden="true"></span><span class="den-sk" aria-hidden="true"></span>Loading ${what || ''}...</div>`;
   const Failed = ({ what, err, onRetry }) => html`<div class="den-state err" role="alert"><b>${what} could not be loaded.</b> ${err} ${onRetry ? html`<button class="den-mini" onClick=${onRetry}>Try again</button>` : null}</div>`;
@@ -87,17 +91,22 @@
   const STRIP_PENDING = { data: null, loading: true, err: '', reload() {} };
   /* On Today the board's own answer carries the strip (one read of the window, not two). The strip asks for itself on the
      other tabs, and on Today only when the board came back without it: the board failed, or took too long to say. */
-  function Strip({ deskId, setTab, tick, handed }) {
+  function Strip({ deskId, setTab, tick, handed, onRun, compact }) {
     const [late, setLate] = useState(false); const waiting = !!(handed && handed.loading && !handed.data);
     useEffect(() => { setLate(false); if (!waiting) return; const t = setTimeout(() => setLate(true), 20000); return () => clearTimeout(t); }, [waiting, deskId, tick]);
     const need = !handed || late || (!handed.loading && !handed.data);
     const self = useLoad(() => (need ? get('/den/missed?' + q({ desk: deskId }), 'signals') : Promise.resolve(null)), [deskId, tick, need], deskId);
     const m = need ? self : handed; const [open, setOpen] = useState(() => ls.get('ax_den_strip', true) !== false);
     const fold = () => { ls.set('ax_den_strip', !open); setOpen(!open); };
+    // the day's run rides on the strip's answer (worker p65): the rail and the header read it on every tab. An answer says
+    // which desk it is for, so a late one for the last desk is never shown on this one.
+    useEffect(() => { if (onRun && m.data) onRun({ desk: m.data.desk || deskId, run: m.data.run || null }); }, [m.data]);   // eslint-disable-line
     if (!m.data && !m.err) return html`<section class="den-strip" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3></header><${Loading} what="the checks" /></section>`;
     if (m.err && !m.data) return html`<section class="den-strip" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3></header><${Failed} what="The checks" err=${m.err} onRetry=${m.reload} /></section>`;
     const s = m.data.signals || [];
     const five = m.data.checks === 5;   // decision D10: the sixth check, collection gaps, runs only when the desk's showGaps is on; a worker that does not say ran all six
+    // in Guided the signals are listed beside the card, in the tray: the strip is its header line alone
+    if (compact) return html`<section class="den-strip den-compact" aria-label="Nothing critical missed"><header><h3>Nothing critical missed</h3><span class="den-mono">${s.length ? s.length + ' to read, listed beside the card' : five ? 'five checks, nothing found' : 'six checks, nothing found'}</span><span class="den-spacer"></span><span class="den-mono" title="Computed from the archive. No model is asked.">computed, no model</span></header></section>`;
     return html`<section class="den-strip" aria-label="Nothing critical missed">
       <header><h3>Nothing critical missed</h3><span class="den-mono">${s.length ? s.length + ' to read' : five ? 'five checks, nothing found' : 'six checks, nothing found'}</span>${!open && s.some(x => x.sig === 'gap') ? html`<span class="den-chip warn">${s.filter(x => x.sig === 'gap').length} not collected</span>` : null}<span class="den-spacer"></span><span class="den-mono" title="Computed from the archive. No model is asked.">computed, no model</span>
         <button class="den-mini" aria-expanded=${open ? 'true' : 'false'} aria-controls="den-strip-list" onClick=${fold}>${open ? 'Fold' : 'Show'}</button></header>
@@ -180,23 +189,233 @@
       <button class="den-mini" disabled=${busy} title="Take it off this desk's board, with a reason" onClick=${() => setAsk(true)}>Set aside</button>${' '}
       ${web(r.url) ? html`<a class="den-link" href=${web(r.url)} target="_blank" rel="noopener" aria-label=${'Open the source of this ' + kind}>Open</a>` : null}</span>`;
   }
-  function Board({ desk, tick, bump, setTab, canWrite, onStrip }) {
+  /* ---- The guided run (decision D10, 12 November 2026; DEN.md s.11). Today one row at a time: the card to decide, what
+     was just decided with its Undo, what comes next, and beside it the report as it fills and the strip's signals. No
+     model is asked, and every decision is one request to a route the table already uses. ---- */
+  const LISTS = ['media', 'social', 'actors']; const NONE = [];
+  const fbSum = fb => (fb ? (+fb.reactions || 0) + (+fb.comments || 0) + (+fb.shares || 0) : 0);
+  const listed = d => LISTS.reduce((a, l) => a.concat((d[l] || []).map(r => ({ r, list: l }))), []);
+  const kindOf = x => (x.list === 'media' ? 'story' : x.list === 'actors' ? 'post by ' + x.r.who : 'post');
+  const headOf = x => String(x.r.title || x.r.text || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const sayOf = x => headOf(x).replace(/[.\s]+$/, '');   // inside a sentence that ends with its own full stop
+  /* Every copy of a folded story is one row here: its ids are what a decision, an Undo and a citation are matched on. */
+  const idsOf = x => (x.list === 'media' && Array.isArray(x.r.copies) && x.r.copies.length ? x.r.copies : [x.r.id]);
+  const evName = o => (o.tab ? 'Open Collection' : o.view ? 'Open in ' + o.view.charAt(0).toUpperCase() + o.view.slice(1) : 'Open the post');
+  /* How a row is tied to a signal: 2 when the signal is about this very row (a post far above its account's usual, a
+     first-seen account's own post), 1 by issue or by the name in its words, 0 not at all. */
+  function tieOf(s, x) {
+    const r = x.r; const iss = r.issues || []; const key = String(s.key || '');
+    if (s.sig === 'outlier') return key === 'S:' + r.id ? 2 : 0;
+    if (s.sig === 'first_seen' && key.charAt(0) === 'W' && (s.cover || []).some(c => c === 'S:' + r.id || c === 'P:' + r.id)) return 2;
+    if (s.sig === 'burst') return iss.indexOf(key.slice(2)) >= 0 ? 1 : 0;
+    if (s.sig === 'spike') return s.issue && iss.indexOf(s.issue) >= 0 ? 1 : 0;
+    if (s.sig === 'emerging') return (s.issues || []).some(i => iss.indexOf(i) >= 0) ? 1 : 0;
+    if (s.sig === 'first_seen') { const w = String((s.words || [])[0] || '').toLowerCase(); return w && [r.title, r.summary, r.text, r.who].join(' ').toLowerCase().indexOf(w) >= 0 ? 1 : 0; }
+    return 0;
+  }
+  /* The day's progress in row units: the worker's own count when it sends one (p65), counted from the lists otherwise. */
+  function progOf(d) {
+    const p = (d.missed && d.missed.run && d.missed.run.progress) || d.progress; if (p) return p;
+    const all = listed(d); const kept = all.filter(x => x.r.pinned).length; const aside = (d.counts && +d.counts.aside) || 0; return { total: all.length + aside, kept, aside, left: all.length - kept };
+  }
+  /* Decisions the board has not confirmed yet, laid over an answer: a kept row is marked, a set-aside row leaves, a
+     cleared one comes back, and the counts move with them. Each step changes nothing when the answer already holds the
+     decision, so laying them over a newer answer is safe. The answer itself is never changed: what is touched is copied. */
+  function applyPending(d, pending) {
+    if (!pending.length) return d; let o = d; const mine = {};
+    const mut = k => { if (o === d) o = Object.assign({}, d); if (!mine[k]) { mine[k] = 1; o[k] = Array.isArray(o[k]) ? o[k].slice() : Object.assign({}, o[k]); } return o[k]; };
+    const moved = (p, dk, da, dl) => { const q = { kept: Math.max(0, (+p.kept || 0) + dk), aside: Math.max(0, (+p.aside || 0) + da), left: Math.max(0, (+p.left || 0) + dl) }; q.total = q.kept + q.aside + q.left; return q; };
+    const move = (dk, da, dl) => { if (o === d) o = Object.assign({}, d); if (o.progress) o.progress = moved(o.progress, dk, da, dl);
+      if (o.missed && o.missed.run && o.missed.run.progress) o.missed = Object.assign({}, o.missed, { run: Object.assign({}, o.missed.run, { progress: moved(o.missed.run.progress, dk, da, dl) }) }); };
+    const find = id => { for (const l of LISTS) { const i = (o[l] || []).findIndex(r => r.id === id); if (i >= 0) return [l, i]; } return null; };
+    const count = (k, n) => { if (o.counts && k in o.counts) mut('counts')[k] = Math.max(0, (+o.counts[k] || 0) + n); };
+    const unpin = ids => { if (Array.isArray(o.pinned) && o.pinned.some(i => ids.indexOf(i) >= 0)) o.pinned = mut('pinned').filter(i => ids.indexOf(i) < 0); };
+    pending.forEach(e => { const at = find(e.id); const row = at ? o[at[0]][at[1]] : null;
+      if (e.kind === 'pin' && row && !row.pinned) { mut(at[0])[at[1]] = Object.assign({}, row, { pinned: true }); move(1, 0, -1); if (Array.isArray(o.pinned) && o.pinned.indexOf(e.id) < 0) mut('pinned').push(e.id); }
+      else if (e.kind === 'unpin' && row && row.pinned) { mut(at[0])[at[1]] = Object.assign({}, row, { pinned: false }); move(-1, 0, 1); unpin(e.ids); }
+      else if (e.kind === 'aside' && row) { mut(at[0]).splice(at[1], 1); move(row.pinned ? -1 : 0, 1, row.pinned ? 0 : -1); count('aside', e.n); count(at[0], -1); unpin(e.ids); }
+      else if (e.kind === 'unaside' && !row && e.row) { mut(e.row.list).unshift(Object.assign({}, e.row.r, { pinned: false })); move(0, -1, 1); count('aside', -e.n); count(e.row.list, 1); } });
+    return o;
+  }
+  function Guided({ d: d0, desk, canWrite, setTab, b, later, setLater, bump, brief, unconfirmed }) {
+    const [at, setAt] = useState(null); const [last, setLast] = useState(null); const [busy, setBusy] = useState(false); const [pending, setPending] = useState([]); const [note, setNote] = useState('');
+    const [offer, setOffer] = useState(null); const [why, setWhy] = useState(''); const [own_, setOwn] = useState(''); const [foc, setFoc] = useState(0);
+    const root = useRef(null); const held = useRef(''); const timer = useRef(0); const going = useRef(false); const bRef = useRef(b); bRef.current = b;
+    const d = useMemo(() => applyPending(d0, pending), [d0, pending]);
+    // what was laid over the answer goes back to the loader, so the rail, the header and the board's footer count the same rows
+    useEffect(() => { if (d !== d0) bRef.current.set(d); }, [d, d0]);
+    // a read sent after a decision was saved holds that decision: it is confirmed, and leaves the list
+    useEffect(() => { if (pending.some(e => b.asked >= e.at)) setPending(q => q.filter(e => !(b.asked >= e.at))); }, [b.asked, pending]);
+    useEffect(() => () => clearTimeout(timer.current), []);
+    // the board is told while a decision waits to be confirmed: if this view is left first, the board reads again itself
+    useEffect(() => { if (unconfirmed) unconfirmed.current = pending.length > 0; }, [pending]);   // eslint-disable-line
+    const sigs = d.missed && d.missed.ok === true && Array.isArray(d.missed.signals) ? d.missed.signals : null; const p = progOf(d);
+    const all = useMemo(() => listed(d), [d]);
+    const ties = useMemo(() => { const m = new Map(); all.forEach(x => { let rank = 0, sig = null; (sigs || []).forEach(s => { const t = tieOf(s, x); if (t > rank) { rank = t; sig = s; } }); m.set(x.r.id, { rank, sig }); }); return m; }, [all, sigs]);
+    /* The queue: rows tied to a signal first (the very row, then by issue or name), then by reach, by outlets, by time.
+       What a person left for later goes last, in the order it was left. */
+    const queue = useMemo(() => { const reach = x => (x.list === 'media' ? fbSum(x.r.fb) : +x.r.total || 0); const li = x => later.indexOf(x.r.id);
+      return all.filter(x => !x.r.pinned).sort((x, y) => { const a = li(x), c = li(y); if ((a >= 0) !== (c >= 0)) return a >= 0 ? 1 : -1; if (a >= 0) return a - c;
+        return (ties.get(y.r.id).rank - ties.get(x.r.id).rank) || (reach(y) - reach(x)) || ((+y.r.n || 0) - (+x.r.n || 0)) || ((+y.r.ts || 0) - (+x.r.ts || 0)); }); }, [all, ties, later]);
+    const open = useMemo(() => queue.filter(x => later.indexOf(x.r.id) < 0), [queue, later]);
+    // which row shows: the one being read stays until it is decided or left, so a refresh never swaps the card under a person
+    const cur = (at != null && open.find(x => x.r.id === at)) || open[0] || null; const curId = cur ? cur.r.id : null;
+    useEffect(() => { if (curId === at) return; if (at != null && !all.some(x => x.r.id === at && !x.r.pinned)) setNote('That row is already decided. ' + p.left + ' left.'); setAt(curId); }, [curId, at]);   // eslint-disable-line
+    useEffect(() => { setWhy(''); setOwn(''); }, [curId]);
+    // a row left for later that has since been decided, muted or has left the window is no longer waiting
+    useEffect(() => { if (!later.length) return; const und = new Set(all.filter(x => !x.r.pinned).map(x => x.r.id)); const keep = later.filter(id => und.has(id)); if (keep.length !== later.length) setLater(keep); }, [all, later]);   // eslint-disable-line
+    // focus, one rule: after an action here it goes to the card, or to the done state's main button. Never when the page opens.
+    useEffect(() => { if (!foc || !root.current) return; const el = root.current.querySelector('#den-focus') || root.current.querySelector('.den-done .den-mini.primary'); if (el) el.focus(); }, [foc]);
+    const focus = () => setFoc(n => n + 1);
+    const reload = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!going.current) bRef.current.reload(); }, 1500); };
+    /* One decision, one request. A read in flight is dropped first, so it cannot land over the decision; the board is read
+       again 1.5 seconds after the last one, and what is not yet confirmed is laid over whatever answer lands. A failure
+       changes nothing on screen and is said. */
+    const act = async (path, body, entry, done) => {
+      if (going.current || !canWrite) return; going.current = true; setBusy(true); const wasReading = bRef.current.loading; bRef.current.drop(); clearTimeout(timer.current);
+      const card = root.current && root.current.querySelector('#den-focus'); if (card && root.current.contains(document.activeElement)) card.focus();   // its buttons are about to be disabled: the focus stays on the card
+      let res = null; try { res = await call(path, Object.assign({ desk: desk.id }, body)); } catch (e) { toastMsg(say(e), true); }
+      going.current = false; setBusy(false);
+      if (!res) { held.current = ''; if (wasReading) reload(); focus(); return; }
+      const e = Object.assign({ at: Date.now(), n: 1 + (res.copies || []).length }, entry);
+      setPending(q => q.filter(y => y.id !== e.id).concat([e])); setNote(''); done(res); reload(); focus(); };
+    const declined = () => { const v = ls.get('ax_den_offer_no_' + desk.id, []); return Array.isArray(v) ? v : []; };
+    const copies = x => (x.list === 'media' ? { copies: x.r.copies || [] } : {});   // a folded story is one decision: every copy goes in the one request
+    const keep = x => act('/den/pin', { item: x.r.id }, { id: x.r.id, kind: 'pin', ids: idsOf(x) }, () => { setLast({ x, kind: 'pin' }); setAt(null); });
+    const aside = (x, reason) => act('/den/aside', Object.assign({ item: x.r.id, reason }, copies(x)), { id: x.r.id, kind: 'aside', ids: idsOf(x) }, res => { setLast({ x, kind: 'aside', reason }); setAt(null);
+      if (res.offer && declined().indexOf(res.offer.kind + ':' + res.offer.value) < 0) setOffer(res.offer); });
+    const undo = () => { const l = last; if (!l) return; act(l.kind === 'pin' ? '/den/pin' : '/den/aside', Object.assign({ item: l.x.r.id, clear: true }, copies(l.x)), { id: l.x.r.id, kind: l.kind === 'pin' ? 'unpin' : 'unaside', ids: idsOf(l.x), row: l.x },
+      () => { setLast(null); if (later.indexOf(l.x.r.id) >= 0) setLater(later.filter(i => i !== l.x.r.id)); setAt(l.x.r.id); setNote('Undone. Back on the card: ' + sayOf(l.x) + '.'); }); };
+    const takeOut = x => act('/den/pin', Object.assign({ item: x.r.id, clear: true }, copies(x)), { id: x.r.id, kind: 'unpin', ids: idsOf(x) }, () => { if (last && last.x.r.id === x.r.id) setLast(null); setNote('Taken out of the report, and back in the queue: ' + sayOf(x) + '.'); });
+    const mute = async on => { const o = offer; if (!o) return;
+      if (!on) { ls.set('ax_den_offer_no_' + desk.id, declined().concat([o.kind + ':' + o.value]).slice(-200)); setOffer(null); return focus(); }
+      try { await call('/den/mute', { desk: desk.id, kind: o.kind, value: o.value }); toastMsg('Muted on this desk'); setOffer(null); setAt(null); bRef.current.reload(); bump('desk'); } catch (e) { toastMsg(say(e), true); } focus(); };
+    // left for later: kept on this computer only, never sent
+    const leave = x => { setLater(later.filter(i => i !== x.r.id).concat([x.r.id])); setAt(null); setNote('Left for later: ' + sayOf(x) + '.'); focus(); };
+    const leaveAll = () => { setLater(later.concat(open.map(x => x.r.id))); setAt(null); setNote(''); focus(); };
+    const back = () => { if (!later.length) return; const id = later[later.length - 1]; setLater(later.slice(0, -1)); setAt(id); setNote(''); focus(); };
+    const bring = ids => { if (!ids.length) return; if (ids.some(i => later.indexOf(i) >= 0)) setLater(later.filter(i => ids.indexOf(i) < 0)); setAt(ids[0]); setNote(''); focus(); };
+    const through = () => { setLater([]); setAt(null); setNote(''); focus(); };
+    const nextRow = () => { if (open.length > 1) setAt(open[(open.indexOf(cur) + 1) % open.length].r.id); focus(); };
+    // one key typed while a decision is in flight is held, and applied to the card that shows next
+    useEffect(() => { if (busy) return; const k = held.current; held.current = ''; if (!k || !cur) return; if (k === 'p') keep(cur); else if (k === 'x') aside(cur, ASIDE[0]); else if (k === 'j') leave(cur); }, [busy, curId]);   // eslint-disable-line
+    /* Keys, never while typing and never with a modifier. p keep, x set aside as not relevant, o (or Enter on the card
+       itself) open the source, j leave for later: only while the focus is inside the card. k brings back the row last
+       left and u undoes the last decision anywhere in the guide. */
+    const onKey = e => { const t = e.target; if (!t || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return; if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (k === 'u') { if (canWrite && last && !going.current) { e.preventDefault(); undo(); } return; }
+      if (k === 'k') { if (later.length && !going.current) { e.preventDefault(); back(); } return; }
+      if (!cur || !(t.closest && t.closest('#den-focus'))) return;
+      if (going.current) { if (canWrite && !held.current && (k === 'p' || k === 'x' || k === 'j')) { held.current = k; e.preventDefault(); } return; }
+      if (k === 'p' && canWrite) { e.preventDefault(); keep(cur); }
+      else if (k === 'x' && canWrite) { e.preventDefault(); aside(cur, ASIDE[0]); }
+      else if (k === 'j') { e.preventDefault(); if (canWrite) leave(cur); else nextRow(); }
+      else if (k === 'o' || (k === 'Enter' && t.id === 'den-focus')) { const a = root.current && root.current.querySelector('#den-focus a.den-focus-src'); if (a) { e.preventDefault(); a.click(); } } };
+
+    const lab = id => (desk.issues.find(i => i.id === id) || {}).label || id; const fig = (label, value) => html`<span><b>${value}</b> ${label}</span>`;
+    const ini = v => String(v || '?').replace(/^the\s+/i, '').charAt(0).toUpperCase();
+    const tone = h => html`<span class=${'den-chip ' + (h.tone < -0.2 ? 'neg' : h.tone > 0.2 ? 'pos' : '')}>${h.tone < -0.2 ? 'hostile' : h.tone > 0.2 ? 'warm' : 'mixed'}</span>`;
+    const filed = !!(brief && brief.status === 'filed'); const cited = brief && Array.isArray(brief.cited) ? brief.cited : NONE; const inBrief = x => idsOf(x).some(i => cited.indexOf(i) >= 0);
+    const mainLabel = filed ? 'Open the filed brief' : brief || !canWrite ? 'Open the brief' : 'Write the brief';
+    const main = html`<button type="button" class="den-mini primary" onClick=${() => setTab('brief')}>${mainLabel}</button>`;
+    /* The card. An absent figure is left out, never explained. */
+    const card = x => { const r = x.r; const kind = kindOf(x); const tie = ties.get(r.id) || {}; const n = open.indexOf(x) + 1; const src = web(r.url);
+      const chips = html`${(r.issues || []).map(i => html`<span key=${i} class="den-chip">${lab(i)}</span>`)}${tie.sig ? html`<span class="den-chip acc" title=${tie.sig.title}>Signal</span>` : null}`;
+      const parts = x.list === 'media' ? { mark: ini(r.outlet), col: serCol('news'), meta: html`<b>${r.outlet}</b>${r.tier ? ' - ' + r.tier + (r.juris && r.juris !== 'au' ? ', ' + r.juris.toUpperCase() : '') : ''} - ${aest(r.ts)}`,
+          body: html`${r.summary && r.summary !== r.title ? html`<p class="den-focus-s">${r.summary}</p>` : null}${r.n > 1 ? html`<span class="den-sub">also in ${r.outlets.slice(1, 6).join(', ')}${r.n > 6 ? ' and ' + (r.n - 6) + ' more' : ''}</span>` : null}
+            ${r.claim ? html`<span class="den-sub">${r.claim.kind === 'poll' ? 'A poll' : 'An estimate'}${r.claim.pollster ? ' by ' + r.claim.pollster : ''}: ${/^sponsor not stated$/i.test(r.claim.sponsor || '') || !r.claim.sponsor ? 'sponsor not stated' : 'for ' + r.claim.sponsor}${r.claim.n ? ', ' + fmtN(r.claim.n) + ' asked' : ''}</span>` : null}`,
+          figs: html`${fig(r.n === 1 ? 'outlet' : 'outlets', r.n || 1)}${r.fb ? fig('on Facebook', fmtN(fbSum(r.fb))) : null}${r.gated ? html`<span class="den-chip warn" title="Read through the agency's subscription. A brief quotes at most thirty words.">subscriber</span>` : r.full ? html`<span class="den-chip" title="The full text is held">full text</span>` : null}` }
+        : x.list === 'social' ? { mark: ini(CH[r.platform] || r.platform), col: serCol(serKey(r.platform)), meta: html`<b>${CH[r.platform] || r.platform}</b>${r.sub ? ' - r/' + r.sub : ''} - ${aest(r.ts)}`,
+          body: r.term || r.hashtag ? html`<span class="den-sub">found by ${r.hashtag ? '#' + r.hashtag : '"' + r.term + '"'}</span>` : r.registered ? html`<span class="den-sub">a registered account</span>` : null,
+          figs: html`${r.total > 0 ? fig('interactions', fmtN(r.total)) : null}${r.growth == null ? null : fig('since yesterday', (r.growth > 0 ? '+' : '') + fmtN(r.growth))}${r.held ? html`<span><b>${r.held.n}</b> comments held ${tone(r.held)}</span>` : null}${(r.layers || []).map(l => html`<span key=${l} class="den-chip" title=${l === 1 ? 'Layer 1: an official route' : l === 2 ? 'Layer 2: a signed-in collector on the Mac' : 'Layer 3: a keyless read from the worker'}>L${l}</span>`)}` }
+        : { mark: ini(r.who), col: serCol(serKey(r.platform)), meta: html`<b>${r.who}</b> - ${r.role === 'mp' ? 'MP' + (r.party ? ', ' + r.party : '') : r.role === 'org' ? 'organisation' : r.role} - ${CH[r.platform] || r.platform} - ${aest(r.ts)}`, body: null, figs: r.total > 0 ? fig('interactions', fmtN(r.total)) : null };
+      return html`<article key=${r.id} class="den-focus" id="den-focus" tabIndex="0" aria-busy=${busy ? 'true' : 'false'} aria-label=${'Next to decide, ' + n + ' of ' + open.length + ': ' + kind + ': ' + headOf(x)}>
+        <div class="den-focus-h"><span class="den-mc-av" aria-hidden="true" style=${{ background: parts.col }}>${parts.mark}</span><div class="den-mc-m">${parts.meta}</div><span class="den-spacer"></span><span class="den-mono">${n} of ${open.length}</span></div>
+        <div class="den-t den-focus-t">${r.title || r.text}</div>${parts.body}
+        <div class="den-mc-f">${parts.figs}${chips}</div>
+        ${canWrite ? html`<div class="den-focus-a">
+          <button type="button" class="den-mini primary" disabled=${busy} title="A draft is asked to cover a kept row" onClick=${() => keep(x)}>Keep for the report</button>
+          <button type="button" class="den-mini" disabled=${busy} title="Takes it off this desk's board as not relevant. Another reason is beside it." onClick=${() => aside(x, ASIDE[0])}>Set aside</button>
+          <select class="den-in" value=${why} disabled=${busy} aria-label="Another reason" onChange=${e => setWhy(e.target.value)}><option value="">Another reason</option>${ASIDE.slice(1).map(a => html`<option key=${a} value=${a}>${a}</option>`)}<option value="other">other (say why)</option></select>
+          ${why === 'other' ? html`<input class="den-in" value=${own_} maxlength="200" placeholder="Why" aria-label="Your reason" onInput=${e => setOwn(e.target.value)} />` : null}
+          ${why ? html`<button type="button" class="den-mini" disabled=${busy || (why === 'other' && own_.trim().length < 3)} onClick=${() => aside(x, why === 'other' ? own_.trim() : why)}>Use this reason</button>` : null}
+          <span class="den-spacer"></span>
+          ${src ? html`<a class="den-link den-focus-src" href=${src} target="_blank" rel="noopener" aria-label=${'Open the source of this ' + kind}>Open the source</a>` : null}
+          <button type="button" class="den-mini" disabled=${busy} title="Kept on this computer: it comes round again after the others" onClick=${() => leave(x)}>Decide later</button>
+        </div>` : html`<div class="den-focus-a">${src ? html`<a class="den-link den-focus-src" href=${src} target="_blank" rel="noopener" aria-label=${'Open the source of this ' + kind}>Open the source</a>` : null}
+          <button type="button" class="den-mini" onClick=${nextRow}>Next row</button><span class="den-mono">Your key is read-only: keeping and setting aside need a full key.</span></div>`}
+      </article>`; };
+    const waiting = queue.length - open.length;   // rows left for later
+    const done = () => html`<div class=${'den-done' + (p.total && !waiting ? ' is-done' : '')} tabIndex="-1">
+      ${!p.total ? html`<p><b>Nothing to decide yet.</b> No story or post on this desk's issues is in this window. A brief can still be written by hand.</p><div class="den-focus-a">${main}<button type="button" class="den-link" onClick=${() => setTab('collection')}>Open Collection</button></div>`
+        : waiting ? html`<p><b>${waiting} left for later.</b> ${p.kept} kept, ${p.aside} set aside.</p><div class="den-focus-a">${main}<button type="button" class="den-link" onClick=${through}>Go through the ${waiting} left for later</button></div>`
+        : html`<p><b>Triage is done.</b> ${p.kept} kept for the report, ${p.aside} set aside.${p.kept ? '' : ' Nothing is kept: a draft will choose from the whole window.'}</p><div class="den-focus-a">${main}</div>`}</div>`;
+    const nxt = cur ? queue.filter(x => x !== cur).slice(0, 8) : NONE; const more = cur ? queue.length - 1 - nxt.length : 0;
+    // the report filling: kept rows under the desk's own section titles, in the desk's order
+    const kept = all.filter(x => x.r.pinned); const groups = []; const homed = {};
+    desk.sections.forEach(s => { if (LISTS.indexOf(s.kind) < 0 || homed[s.kind] || (desk.options.hidden || []).indexOf(s.id) >= 0) return; homed[s.kind] = 1; const rows = kept.filter(x => x.list === s.kind); if (rows.length) groups.push({ key: s.id, title: s.title, rows }); });
+    const other = kept.filter(x => !homed[x.list]); if (other.length) groups.push({ key: '_other', title: 'Other kept rows', rows: other, note: 'This report has no section of their own; a draft still reads them.' });
+    const beyond = Math.max(0, kept.filter(x => x.list === 'media').length - 30) + Math.max(0, kept.filter(x => x.list === 'social').length - 30) + Math.max(0, kept.filter(x => x.list === 'actors').length - 20);
+    const outside = brief ? kept.filter(x => !inBrief(x)).length : 0; const rowsN = (n, are) => n + (n === 1 ? ' kept row ' + (are ? 'is' : '') : ' kept rows ' + (are ? 'are' : '')).replace(/\s+$/, '');
+    const openKeys = brief && Array.isArray(brief.open) ? brief.open : null; const five = !d.missed || d.missed.checks === 5;
+    return html`<div class="den-guide" ref=${root} tabIndex="-1" onKeyDown=${onKey}>
+      <div class="den-guide-main">
+        ${cur ? card(cur) : done()}
+        ${cur && canWrite && open.length > 1 ? html`<div class="den-under"><button type="button" class="den-link" disabled=${busy} onClick=${leaveAll}>Leave the other ${open.length} for later</button></div>` : null}
+        <div class="den-last" role="status" aria-live="polite">${last ? html`<span>${last.kind === 'pin' ? 'Kept for the report' : 'Set aside (' + last.reason + ')'}: ${sayOf(last.x)}. ${canWrite ? html`<button type="button" class="den-link" disabled=${busy} onClick=${undo}>Undo</button>` : null}</span>` : null}${note ? html`<span>${note}</span>` : null}</div>
+        ${offer ? html`<div class="den-offer" role="status"><span>${offer.text} A mute hides its rows on this desk only, and can be removed in Options.</span><div><button type="button" class="den-mini" onClick=${() => mute(true)}>Mute it on this desk</button><button type="button" class="den-mini" onClick=${() => mute(false)}>Not now</button></div></div>` : null}
+        ${nxt.length ? html`<div class="den-next" role="group" aria-labelledby="den-next-h"><h3 id="den-next-h">Up next</h3><ol>${nxt.map(x => html`<li key=${x.r.id}><button type="button" class="den-nextb" aria-label=${'Bring forward: ' + kindOf(x) + ': ' + headOf(x)} onClick=${() => bring([x.r.id])}>
+          <span class="k">${x.list === 'media' ? x.r.outlet : x.list === 'actors' ? x.r.who : CH[x.r.platform] || x.r.platform}</span><span class="t">${headOf(x)}</span>${later.indexOf(x.r.id) >= 0 ? html`<span class="den-chip">left for later</span>` : (ties.get(x.r.id) || {}).sig ? html`<span class="den-chip acc">Signal</span>` : null}</button></li>`)}</ol>
+          ${more > 0 ? html`<p class="den-mono">and ${more} more</p>` : null}</div>` : null}
+      </div>
+      <div class="den-tray" role="group" aria-label="Today's report">
+        <div class="den-traybox" role="group" aria-labelledby="den-fill-h"><h3 id="den-fill-h">Today's report is filling</h3>
+          ${groups.length ? groups.map(g => html`<div key=${g.key} class="den-trayg"><h4>${g.title}</h4>${g.note ? html`<p class="den-mono">${g.note}</p>` : null}<ul>${g.rows.map(x => html`<li key=${x.r.id}><span class="t">${headOf(x)}</span>
+            ${brief ? html`<span class=${'den-chip ' + (inBrief(x) ? 'pos' : 'warn')}>${inBrief(x) ? 'in the brief' : 'kept after the draft'}</span>` : null}${canWrite ? html`<button type="button" class="den-link" disabled=${busy} aria-label=${'Take out of the report: ' + headOf(x)} onClick=${() => takeOut(x)}>Take out</button>` : null}</li>`)}</ul></div>`)
+            : html`<p class="den-quiet">Nothing is kept yet. A kept row is listed here, under its section of the report.</p>`}
+          ${!brief ? html`<p class="den-mono">${p.kept} kept, ${p.aside} set aside. A draft is asked to cover the kept rows it reads: up to 30 stories, 30 posts and 20 actors' posts, kept rows first.${beyond ? ' ' + rowsN(beyond, true) + ' beyond that.' : ''}</p>`
+            : filed ? html`<p class="den-mono">Today's brief is filed. Reopen it there to change it.</p>`
+            : outside ? html`<p class="den-mono">${rowsN(outside, true)} not in the brief. Draft again or regenerate a section there (each is one model call, stated there), or write them in. <button type="button" class="den-mini" onClick=${() => setTab('brief')}>Open the brief</button></p>`
+            : html`<p class="den-mono">${p.kept} kept, ${p.aside} set aside.${kept.length ? ' Every kept row is in the brief.' : ''}</p>`}
+        </div>
+        ${sigs ? html`<div class="den-traybox" role="group" aria-labelledby="den-sig-h"><h3 id="den-sig-h">Nothing critical missed</h3><ul id="den-tray-signals">
+          ${sigs.length ? sigs.map(s => { const k = kept.some(x => tieOf(s, x) > 0); const w = queue.filter(x => tieOf(s, x) > 0); const st = openKeys ? (openKeys.indexOf(s.key) < 0 ? ['In the brief', 'pos'] : ['Not in the brief yet', 'warn']) : k ? ['Kept', 'pos'] : ['Nothing kept yet', ''];
+            return html`<li key=${s.key}><div><span class=${'den-chip ' + (SIG[s.sig] || ['', ''])[1]}>${(SIG[s.sig] || [s.sig])[0]}</span> <span class=${'den-chip ' + st[1]}>${st[0]}</span></div><span class="den-t">${s.title}</span><span class="d">${s.detail}</span>
+              <div class="a">${openKeys ? null : w.length ? html`<span class="den-mono">${w.length} in the queue ${w.length === 1 ? 'carries' : 'carry'} it</span><button type="button" class="den-link" aria-label=${'Bring forward the rows for: ' + s.title} onClick=${() => bring(w.map(x => x.r.id))}>Bring forward</button>` : k ? null : html`<span class="den-mono">No row to keep: the brief has to say it.</span>`}
+                ${s.open && (s.open.tab || s.open.view || s.open.url) ? html`<button type="button" class="den-link" onClick=${() => openEvidence(s.open, setTab)} aria-label=${'Open the evidence for: ' + s.title}>${evName(s.open)}</button>` : null}</div></li>`; })
+            : html`<li class="den-quiet">${five ? 'The five checks found nothing in this window.' : 'The six checks found nothing in this window.'}</li>`}</ul></div>` : null}
+      </div>
+    </div>`;
+  }
+
+  function Board({ desk, tick, bump, setTab, canWrite, onStrip, view, setView, later, setLater, brief, onKept, focusAsk, onFocused }) {
     const b = useLoad(() => get('/den/board?' + q({ desk: desk.id, missed: 1 }), 'counts'), [desk.id, tick], desk.id);
     useEffect(() => { if (!onStrip) return; const ms = b.data ? b.data.missed : null; const good = !!(ms && ms.ok === true && Array.isArray(ms.signals));
       onStrip({ data: good ? ms : null, loading: b.loading, err: b.err, reload: b.reload }); }, [b.data, b.loading, b.err]);   // eslint-disable-line
-    const [offer, setOffer] = useState(null); const [showAside, setShowAside] = useState(false); const root = useRef(null); const [view, setViewRaw] = useState(() => (ls.get('ax_den_view', 'table') === 'cards' ? 'cards' : 'table')); const setView = v => { setViewRaw(v); ls.set('ax_den_view', v); };
+    const [offer, setOffer] = useState(null); const [showAside, setShowAside] = useState(false); const root = useRef(null); const unconfirmed = useRef(false);
+    // Guided lays its last decisions over the answer and reads again a moment later; left for Table or Cards before that, the read is made here
+    useEffect(() => { if (view !== 'guided' && unconfirmed.current) { unconfirmed.current = false; b.reload(); } }, [view]);   // eslint-disable-line
+    const same = !!(b.data && (!b.data.desk || b.data.desk.id === desk.id));   // for one frame after a change of desk the last desk's answer is still held: it is not drawn as this desk's
+    // the kept rows, each with its copies, go up for the rail: it says how many of them today's brief does not cite, on any tab
+    useEffect(() => { if (onKept && same) onKept({ desk: desk.id, rows: listed(b.data).filter(x => x.r.pinned).map(idsOf) }); }, [b.data]);   // eslint-disable-line
+    // arriving from the header's "Next: triage": the focus goes to the card (or the done state's button) in Guided, and in
+    // Table and Cards to the first row not yet kept in the three sections that are decided
+    useEffect(() => { if (!focusAsk || !same || !root.current) return; const el = view === 'guided' ? root.current.querySelector('#den-focus') || root.current.querySelector('.den-done .den-mini.primary')
+      : root.current.querySelector(['Traditional media', 'Social', 'Influencer and political'].map(n => 'section.den-panel[aria-label="' + n + '"] .den-row:not(.pinned)').join(', '));
+      if (el) el.focus(); if (onFocused) onFocused(); }, [focusAsk, same]);   // eslint-disable-line
     const done = d => { if (d && d.offer) setOffer(d.offer); b.reload(); };
     const mute = async on => { if (on) { try { await call('/den/mute', { desk: desk.id, kind: offer.kind, value: offer.value }); toastMsg('Muted on this desk'); b.reload(); bump('desk'); } catch (e) { toastMsg(say(e), true); } } setOffer(null); };
     // keyboard: j and k move between rows, p pins, x sets aside, o opens, 1 to 5 jump to a section
-    const onKey = e => { if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; if (e.metaKey || e.ctrlKey || e.altKey) return; const rows = root.current ? Array.from(root.current.querySelectorAll('.den-row')) : []; const i = rows.indexOf(document.activeElement.closest ? document.activeElement.closest('.den-row') : null);
+    const onKey = e => { if (view === 'guided') return; if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; if (e.metaKey || e.ctrlKey || e.altKey) return; const rows = root.current ? Array.from(root.current.querySelectorAll('.den-row')) : []; const i = rows.indexOf(document.activeElement.closest ? document.activeElement.closest('.den-row') : null);
       const go = n => { if (rows[n]) { rows[n].focus(); e.preventDefault(); } };
       if (e.key === 'j') return go(i < 0 ? 0 : Math.min(rows.length - 1, i + 1)); if (e.key === 'k') return go(i < 0 ? 0 : Math.max(0, i - 1));
       if (/^[1-5]$/.test(e.key)) { const p = root.current.querySelectorAll('section.den-panel')[+e.key - 1]; if (p) { const r = p.querySelector('.den-row') || p; if (r.focus) r.focus(); p.scrollIntoView({ block: 'start' }); e.preventDefault(); } return; }
       if (i < 0) return; const btn = t => Array.from(rows[i].querySelectorAll('button')).find(x => t.test(x.textContent));
       if (e.key === 'p') { const x = btn(/^Pin/); if (x) { x.click(); e.preventDefault(); } } if (e.key === 'x') { const x = btn(/^Set aside$/); if (x) { x.click(); e.preventDefault(); } } if (e.key === 'o' || e.key === 'Enter') { const a = rows[i].querySelector('a[href]'); if (a && e.target === rows[i]) { a.click(); e.preventDefault(); } } };
-    if (b.loading && !b.data) return html`<${Loading} what="today's evidence" />`;
+    if ((b.loading && !b.data) || (b.data && !same)) return html`<${Loading} what="today's evidence" />`;
     if (b.err && !b.data) return html`<${Failed} what="Today's evidence" err=${b.err} onRetry=${b.reload} />`;
-    const d = b.data, c = d.counts; const none = why => html`<${Empty}>${why} <button class="den-link" onClick=${() => setTab('collection')}>See what was collected, and why not</button><//>`;
+    const d = b.data, c = d.counts; const guided = view === 'guided'; const prog = progOf(d); const none = why => html`<${Empty}>${why} <button class="den-link" onClick=${() => setTab('collection')}>See what was collected, and why not</button><//>`;
     const act = (r, kind) => html`<td class="act"><${RowActions} r=${r} kind=${kind} desk=${desk} canWrite=${canWrite} onDone=${done} /></td>`;
     const row = (r, cells, kind) => html`<tr key=${r.id} class=${'den-row' + (r.pinned ? ' pinned' : '')} tabIndex="0" aria-label=${(r.pinned ? 'Pinned. ' : '') + kind + ': ' + String(r.title || r.text || r.label || '').slice(0, 120)}>${cells}${act(r, kind)}</tr>`;
     /* The same rows as cards: nothing a table row does not show, and the same actions. */
@@ -217,10 +436,11 @@
     return html`<div ref=${root} onKeyDown=${onKey}>
       ${b.err ? html`<div class="den-notice bad" role="alert">The board could not be refreshed: ${b.err} What is shown is the last read. <button class="den-mini" onClick=${b.reload}>Try again</button></div>` : null}
       ${d.capped ? html`<div class="den-notice">This window holds more rows than one board reads (${fmtN(4000)}). The newest are shown; shorten the window in Options to see all of a busy day.</div>` : null}
-      ${offer ? html`<div class="den-notice" role="alert">${offer.text} A mute hides its rows on this desk only, and can be removed in Options. <div><button class="den-mini primary" onClick=${() => mute(true)}>Mute it on this desk</button><button class="den-mini" onClick=${() => mute(false)}>Not now</button></div></div>` : null}
-      <${Overview} d=${d} desk=${desk} setTab=${setTab} jump=${name => { const p = root.current && root.current.querySelector('section.den-panel[aria-label="' + name + '"]'); if (p) { p.scrollIntoView({ block: 'start', behavior: 'auto' }); const r = p.querySelector('.den-row'); if (r) r.focus({ preventScroll: true }); } }} />
-      <div class="den-toolbar"><h3>The evidence, in the report's sections</h3><span class="den-note">${fmtN(c.rows)} rows in the window</span><span class="den-spacer"></span>
-        <div class="den-seg" role="group" aria-label="Show stories and posts as">${[['table', 'Table'], ['cards', 'Cards']].map(v => html`<button key=${v[0]} type="button" class="den-tab" aria-pressed=${view === v[0] ? 'true' : 'false'} onClick=${() => setView(v[0])}>${v[1]}</button>`)}</div></div>
+      ${offer && !guided ? html`<div class="den-notice" role="alert">${offer.text} A mute hides its rows on this desk only, and can be removed in Options. <div><button class="den-mini primary" onClick=${() => mute(true)}>Mute it on this desk</button><button class="den-mini" onClick=${() => mute(false)}>Not now</button></div></div>` : null}
+      ${guided ? null : html`<${Overview} d=${d} desk=${desk} setTab=${setTab} jump=${name => { const p = root.current && root.current.querySelector('section.den-panel[aria-label="' + name + '"]'); if (p) { p.scrollIntoView({ block: 'start', behavior: 'auto' }); const r = p.querySelector('.den-row'); if (r) r.focus({ preventScroll: true }); } }} />`}
+      <div class="den-toolbar"><h3>${guided ? 'Triage, one row at a time' : 'The evidence, in the report\'s sections'}</h3><span class="den-note">${guided ? fmtN(prog.left) + ' left of ' + fmtN(prog.total) : fmtN(c.rows) + ' rows in the window'}</span><span class="den-spacer"></span>
+        <div class="den-seg" role="group" aria-label="Show stories and posts as">${[['guided', 'Guided'], ['table', 'Table'], ['cards', 'Cards']].map(v => html`<button key=${v[0]} type="button" class="den-tab" aria-pressed=${view === v[0] ? 'true' : 'false'} onClick=${() => setView(v[0])}>${v[1]}</button>`)}</div></div>
+      ${guided ? html`<${Guided} key=${desk.id} d=${d} desk=${desk} canWrite=${canWrite} setTab=${setTab} b=${b} later=${later || NONE} setLater=${setLater} bump=${bump} brief=${brief || null} unconfirmed=${unconfirmed} />` : html`<${React.Fragment}>
       <${Panel} title="Key narratives" note=${c.narratives ? c.narratives + ' moving on this desk\'s issues' : ''} flush=${true}>
         ${d.narratives.length ? html`<table class="den-table"><thead><tr><th>Narrative</th><th>Toward the client</th><th class="num">Rows</th><th class="num">Last day</th><th>Taken up by</th><th></th></tr></thead><tbody>
           ${d.narratives.map(n => html`<tr key=${n.id} class="den-row" tabIndex="0" aria-label=${'Narrative: ' + n.label}><td><span class="den-t">${n.label}</span>${n.claim ? html`<span class="den-sub">${n.claim}</span>` : null}</td><td><span class=${'den-chip ' + (n.side === 'hostile' ? 'neg' : n.side === 'supportive' ? 'pos' : '')}>${n.side || 'not read yet'}</span> ${n.status ? html`<span class="den-chip">${n.status}</span>` : null}</td>
@@ -250,7 +470,7 @@
         ${d.upcoming.length ? html`<table class="den-table"><thead><tr><th>Date</th><th>What</th><th>As written</th><th></th></tr></thead><tbody>
           ${d.upcoming.map((u, i) => html`<tr key=${i} class="den-row" tabIndex="0" aria-label=${'Upcoming: ' + u.event + ' on ' + u.date}><td class="den-mono">${u.weekday.slice(0, 3)} ${u.date}${u.yearWritten ? '' : html` <span title="The source wrote no year: this is the next time that day comes">*</span>`}</td><td>${u.event}${u.recorded ? html` <span class="den-chip" title="Read from the parliament's own page for this bill or inquiry, not worked out from a sentence">recorded</span>` : null}</td><td>${u.what}</td><td class="act">${web(u.url) ? html`<a class="den-link" href=${web(u.url)} target="_blank" rel="noopener" aria-label="Open the source of this date">Open</a>` : null}</td></tr>`)}</tbody></table>`
           : html`<${Empty}>No row in this window names a day and a month beside an action that has not yet passed, and no watched bill or inquiry has a date ahead.<//>`}
-      <//>
+      <//><//>`}
       ${c.aside || c.muted || c.otherRegions ? html`<p class="den-mono">${[c.aside ? c.aside + ' set aside' : '', c.muted ? c.muted + ' muted' : '', c.otherRegions ? c.otherRegions + ' in other regions' : ''].filter(Boolean).join(', ')} and not shown. ${c.aside ? html`<button class="den-link" aria-expanded=${showAside ? 'true' : 'false'} onClick=${() => setShowAside(!showAside)}>${showAside ? 'Hide' : 'Show'} what was set aside</button>` : null}</p>` : null}
       ${showAside && d.aside.length ? html`<${Panel} title="Set aside" flush=${true}><table class="den-table"><thead><tr><th>Row</th><th>Reason</th><th>By</th><th></th></tr></thead><tbody>${d.aside.map(a => html`<tr key=${a.id}><td>${a.title || CH[a.channel] || a.channel}</td><td>${a.reason}</td><td class="den-mono">${a.by} ${since(a.at)}</td><td class="act">${canWrite ? html`<button class="den-mini" onClick=${async () => { try { await call('/den/aside', { desk: desk.id, item: a.id, clear: true }); b.reload(); } catch (e) { toastMsg(say(e), true); } }}>Put it back</button>` : null}</td></tr>`)}</tbody></table><//>` : null}
     </div>`;
@@ -286,7 +506,7 @@
         : html`<div style=${{ marginTop: '8px' }}><button class="den-mini" disabled=${busy || dirty} title=${dirty ? 'Save your edit first' : 'One model call, counted against today\'s Den budget'} onClick=${() => setAsk(true)}>Regenerate this section</button></div>`) : null}
     </div>`;
   }
-  function BriefPanel({ desk, tick, bump, budget, canWrite, setTab }) {
+  function BriefPanel({ desk, tick, bump, budget, canWrite, setTab, onBrief }) {
     const [evSel, setEvSel] = useState(null); useEffect(() => { if (evSel) { const e = document.getElementById('den-ev-' + evSel); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' }); } }, [evSel]);
     const wk = b => 'ax_den_work_' + b.id;
     const L = useLoad(() => get('/den/brief?' + q({ desk: desk.id }), 'brief'), [desk.id, tick], desk.id);
@@ -294,6 +514,12 @@
     const [save, setSave] = useState({ s: 'idle', msg: '' }); const [busy, setBusy] = useState(''); const [conflict, setConflict] = useState(null); const [ask, setAsk] = useState(null); const [restored, setRestored] = useState(false);
     const [hist, setHist] = useState(null); const [cmp, setCmp] = useState(null); const [dropped, setDropped] = useState(false); const saving = useRef(false); const mine = useRef(0); const workRef = useRef(null);
     const brief = L.data ? L.data.brief : null; const left = budget ? budget.left : 1;
+    // where this brief stands goes up to the rail and the header, in the shape the worker sends as run.brief (written and
+    // cited are counted the same way there), so they follow a draft, a save and a filing without another read
+    useEffect(() => { if (!onBrief || !L.data) return; if (!brief) { onBrief({ desk: desk.id, none: true }); return; } const secs = brief.sections || {}; const keys = Object.keys(secs); const cited = [];
+      keys.forEach(k => ((secs[k] || {}).cites || []).forEach(c => { const m = /^[MSP]:(\d+)$/.exec(String(c)); if (m && cited.indexOf(+m[1]) < 0) cited.push(+m[1]); }));
+      onBrief({ desk: desk.id, id: brief.id, day: brief.day, status: brief.status, revision: +brief.revision || 1, edited: keys.some(k => !!(secs[k] || {}).edited), written: keys.map(k => (secs[k] || {}).text || '').join('\n').replace(/\s/g, '').length, cited, filed_by: brief.filed_by || '', filed_at: +brief.filed_at || 0 });
+    }, [!!L.data, brief && brief.id, brief && brief.revision, brief && brief.status]);   // eslint-disable-line
     const texts = b => { const o = {}; desk.sections.forEach(s => { if (s.kind !== 'sources') o[s.id] = (b.sections[s.id] && b.sections[s.id].text) || ''; }); return o; };
     // open the brief: this person's unsaved words, if any were kept on this computer, come back over it
     useEffect(() => { workRef.current = work; }, [work]);
@@ -581,13 +807,21 @@
   }
 
   function Shortcuts({ onClose }) {
-    const K = [['j / k', 'Next and previous row on Today'], ['p', 'Pin the row to the report'], ['x', 'Set the row aside'], ['o or Enter', 'Open the row\'s source'], ['1 to 5', 'Jump to a section of Today'], ['Alt + 1 to 5', 'Today, Brief, Watch, Collection, Options'], ['Ctrl or Cmd + S', 'Save the brief'], ['?', 'This sheet'], ['Esc', 'Close a dialog']];
+    const K = [['p', 'Pin the row to the report. In Guided: keep the row on the card'], ['x', 'Set the row aside. In Guided: at once, as not relevant'], ['o or Enter', 'Open the row\'s source'], ['j / k', 'Next and previous row on Today. In Guided: leave the card for later, and bring back the row last left'], ['u', 'In Guided: undo the last decision'], ['1 to 5', 'Jump to a section of Today, in Table and Cards'], ['Alt + 1 to 5', 'Today, Brief, Watch, Collection, Options'], ['Ctrl or Cmd + S', 'Save the brief'], ['?', 'This sheet'], ['Esc', 'Close a dialog']];
     return html`<${Dialog} title="Keyboard" onClose=${onClose}><table class="den-table"><tbody>${K.map(k => html`<tr key=${k[0]}><td><span class="den-kbd">${k[0]}</span></td><td>${k[1]}</td></tr>`)}</tbody></table><div class="den-form" style=${{ marginTop: '12px' }}><button class="den-mini" onClick=${onClose}>Close</button></div><//>`;
   }
 
   function DenApp() {
     const D = useLoad(() => get('/den/desks', 'desks'), [], 'desks'); const [deskId, setDeskId] = useState(() => ls.get('ax_den_desk', '')); const [tab, setTabRaw] = useState(() => ls.get('ax_den_tab', 'today')); const [tick, setTick] = useState(0); const [keys, setKeys] = useState(false); const [job, setJob] = useState(null); const [dm, setDm] = useState(false);
     const [budget, setBudget] = useState(null); const [, setRole] = useState(window.AX_ROLE); const [theme, setThemeRaw] = useState(() => (ls.get('ax_den_theme', 'light') === 'dark' ? 'dark' : 'light')); const setTheme = v => { setThemeRaw(v); ls.set('ax_den_theme', v); const r = document.getElementById('den-root'); if (r) r.dataset.theme = v; }; const [briefSeen, setBriefSeen] = useState(false); const [boardStrip, setBoardStrip] = useState(null);
+    /* The guided run (D10). Today's row view is the shell's: a fresh profile opens in Guided, and Table or Cards is kept once
+       chosen. run is the day as the worker counts it (it rides on the strip's answer, so it is known on every tab), each
+       with the desk it is for; briefNow is the Brief panel's own, newer after a draft, a save or a filing; later is the
+       rows a person left for later, kept on this computer by desk and day and never sent. */
+    const [view, setViewRaw] = useState(() => { const v = ls.get('ax_den_view', 'guided'); return v === 'table' || v === 'cards' ? v : 'guided'; }); const setView = v => { setViewRaw(v); ls.set('ax_den_view', v); };
+    const [run, setRun] = useState(null); const [briefNow, setBriefNow] = useState(null); const [later, setLaterRaw] = useState({ desk: '', day: '', ids: NONE }); const [keptRows, setKeptRows] = useState(null); const [focusAsk, setFocusAsk] = useState(0);
+    // an answer with no run (an older worker) never blanks a run already known for that desk
+    const onRun = useCallback(r => setRun(p => (r.run || !(p && p.desk === r.desk && p.run) ? r : p)), []);
     // the worker says what this key may do a moment after the page opens: the controls follow it
     useEffect(() => { const f = () => setRole(window.AX_ROLE); window.addEventListener('ax:role', f); return () => window.removeEventListener('ax:role', f); }, []);
     const canWrite = canWriteNow();
@@ -596,6 +830,15 @@
     useEffect(() => { if (D.data) setBudget(D.data.budget); }, [D.data]);
     useEffect(() => { if (tab === 'brief') setBriefSeen(true); }, [tab]);
     useEffect(() => { if (desk && desk.id !== deskId) setDeskId(desk.id); }, [desk && desk.id]);   // eslint-disable-line
+    const runNow = desk && run && run.desk === desk.id ? run.run : null; const day = runNow ? String(runNow.day || '') : ''; const laterKey = dy => 'ax_den_later_' + desk.id + '_' + dy;
+    // the rows left for later: held in memory until the day is known, then kept under this desk and day. Another day's
+    // list is of a window that has passed, and is removed.
+    useEffect(() => { if (!desk) return; const mem = later.desk === desk.id ? later.ids : NONE;
+      if (!day) { if (later.desk !== desk.id) setLaterRaw({ desk: desk.id, day: '', ids: NONE }); return; }
+      if (later.desk === desk.id && later.day === day) return;
+      const st = ls.get(laterKey(day), []); const ids = (Array.isArray(st) ? st : []).filter(x => typeof x === 'number'); mem.forEach(x => { if (ids.indexOf(x) < 0) ids.push(x); }); if (mem.length) ls.set(laterKey(day), ids);
+      try { const pre = laterKey(''); Object.keys(localStorage).forEach(k => { const rest = k.indexOf(pre) === 0 ? k.slice(pre.length) : ''; if (/^\d{4}-\d{2}-\d{2}$/.test(rest) && rest !== day) localStorage.removeItem(k); }); } catch (e) {}
+      setLaterRaw({ desk: desk.id, day, ids }); }, [desk && desk.id, day]);   // eslint-disable-line
     useGoto('den', p => { if (p && p.desk) { setDeskId(String(p.desk)); ls.set('ax_den_desk', String(p.desk)); } if (p && p.tab) setTab(String(p.tab)); });
     const bump = what => { if (what === 'budget' || what === 'desk') call('/den/desks').then(d => { setBudget(d.budget); if (what === 'desk') D.set(d); }, () => {}); if (what === 'collected' || what === 'marks' || what === 'filed') setTick(t => t + 1); };
     useEffect(() => { const key = e => { const root = document.getElementById('v-den'); if (!root || !root.classList.contains('on') && getComputedStyle(root).display === 'none') return; if (e.altKey && /^Digit[1-5]$/.test(e.code)) { e.preventDefault(); setTab(TABS[+e.code.slice(5) - 1][0]); } if (e.key === '?' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName || '')) setKeys(true); };
@@ -605,6 +848,25 @@
     if (D.err && !D.data) return html`<${Failed} what="The desks" err=${D.err} onRetry=${D.reload} />`;
     if (!desk) return html`<${Empty}><b>No desk is set up.</b> A desk is a client, a region and a report format. Ask an admin to add one.<//>`;
     const pickDesk = id => { setDeskId(id); ls.set('ax_den_desk', id); setTick(t => t + 1); };
+    const laterIds = later.desk === desk.id ? later.ids : NONE; const setLater = ids => { setLaterRaw({ desk: desk.id, day, ids }); if (day) { if (ids.length) ls.set(laterKey(day), ids); else ls.del(laterKey(day)); } };
+    // today's brief: the Brief panel's own word when it is for this desk and day and no older than the worker's, else the worker's
+    const answered = !!(run && run.desk === desk.id); const prog = runNow ? runNow.progress : null; const rb = runNow ? runNow.brief : null; const bn = runNow && briefNow && !briefNow.none && briefNow.desk === desk.id && briefNow.day === day ? briefNow : null;
+    const todayBrief = bn && rb && bn.id === rb.id ? (bn.revision >= rb.revision ? Object.assign({}, bn, { open: rb.open }) : rb) : bn || rb || null;
+    const filed = !!(todayBrief && todayBrief.status === 'filed'); const ready = !!(todayBrief && todayBrief.written >= 200);
+    const waiting = prog ? Math.min(laterIds.length, +prog.left || 0) : 0; const toDo = prog ? Math.max(0, (+prog.left || 0) - laterIds.length) : 0;
+    const missing = todayBrief && keptRows && keptRows.desk === desk.id ? keptRows.rows.filter(ids => !ids.some(i => (todayBrief.cited || []).indexOf(i) >= 0)).length : 0;
+    /* The rail: the day's three steps, each with where it stands. A step opens its area; it never spends. */
+    const STEPS = [
+      ['triage', 'Triage', 'today', tab === 'today', !!(prog && prog.total > 0 && !prog.left), !answered ? 'reading' : !prog ? '' : !prog.total ? 'nothing to decide' : !prog.left ? 'done: ' + prog.kept + ' kept, ' + prog.aside + ' set aside' : (prog.kept + prog.aside) + ' of ' + prog.total + ' decided' + (waiting ? ', ' + waiting + ' for later' : '')],
+      ['write', 'Write', 'brief', tab === 'brief', filed, !runNow ? '' : !todayBrief ? 'not started' : (todayBrief.edited ? 'edited' : 'draft') + (missing ? ', ' + missing + ' kept row' + (missing === 1 ? '' : 's') + ' not in it' : '')],
+      ['file', 'File', 'brief', false, filed, !runNow ? '' : filed ? 'filed by ' + todayBrief.filed_by + ', ' + aest(todayBrief.filed_at) : ready ? 'not filed' : 'nothing to file yet']];
+    /* The header's one action: one step on from where the person is. It only opens an area. [label, primary, tab, then focus] */
+    const nextStep = !runNow ? null : filed ? ['Filed today', false, 'brief']
+      : tab === 'brief' ? (ready && canWrite ? ['Next: file the brief', true, 'brief'] : toDo ? ['Back to triage, ' + toDo + ' left', false, 'today'] : null)
+      : todayBrief ? ['Next: read the draft', true, 'brief']
+      : tab === 'today' ? [canWrite ? 'Next: write the brief' + (toDo ? ', ' + toDo + ' not decided' : '') : 'Open the brief', true, 'brief']
+      : toDo ? ['Next: triage, ' + toDo + ' left', true, 'today', canWrite] : [canWrite ? 'Next: write the brief' : 'Open the brief', true, 'brief'];
+    const good = !!(boardStrip && boardStrip.data); const compact = tab === 'today' && view === 'guided' && good && !boardStrip.data.signals.some(x => x.sig === 'gap');
     return html`<div data-density=${desk.options.density || 'regular'} id="den-app">
       <aside class="den-side" aria-label="Desk and sections">
         <div class="den-deskwrap" onKeyDown=${e => { if (e.key === 'Escape' && dm) { e.stopPropagation(); setDm(false); } }}>
@@ -621,13 +883,17 @@
         <span class="den-spacer"></span>
         ${budget ? html`<span class="den-chip" title="A brief draft or one section written again is one model call, started by a person. Nothing else on this page spends.">model calls today: ${budget.used} of ${budget.cap}</span>` : null}
         ${canWrite ? null : html`<span class="den-chip warn">read-only key</span>`}
+        ${nextStep ? html`<button type="button" id="den-next" class=${'den-mini' + (nextStep[1] ? ' primary' : '')} onClick=${() => { setTab(nextStep[2]); if (nextStep[3]) setFocusAsk(n => n + 1); }}>${nextStep[0]}</button>` : null}
         <button class="den-mini" onClick=${() => setTick(t => t + 1)} title="Read the archive again">Refresh</button><button class="den-mini" aria-label="Keyboard shortcuts" onClick=${() => setKeys(true)}>?</button>
       </div>
-      <${Boundary} name="The strip" resetKey=${desk.id + tick}><${Strip} deskId=${desk.id} setTab=${setTab} tick=${tick} handed=${tab === 'today' ? (boardStrip || STRIP_PENDING) : undefined} /><//>
+      <nav class="den-rail" aria-label="Today's run"><ol>${STEPS.map((s, i) => html`<li key=${s[0]} class=${'den-step' + (s[4] ? ' is-done' : '') + (s[3] ? ' is-now' : '')}>
+        <button type="button" class="den-stepb" id=${'den-step-' + s[0]} aria-current=${s[3] ? 'step' : null} aria-label=${'Step ' + (i + 1) + ', ' + s[1] + (s[5] ? ': ' + s[5] : '')} onClick=${() => setTab(s[2])}>
+          <span class="n" aria-hidden="true">${i + 1}</span><span class="l">${s[1]}</span>${s[5] ? html`<span class="s">${s[5]}</span>` : null}</button></li>`)}</ol></nav>
+      <${Boundary} name="The strip" resetKey=${desk.id + tick}><${Strip} deskId=${desk.id} setTab=${setTab} tick=${tick} handed=${tab === 'today' ? (boardStrip || STRIP_PENDING) : undefined} onRun=${onRun} compact=${compact} /><//>
       <div role="tabpanel" id="den-tabpanel" aria-labelledby=${'den-tab-' + tab}>
         <${Boundary} name=${TABS.find(t => t[0] === tab)[1]} resetKey=${desk.id + tab}>
-          ${tab === 'today' ? html`<${Board} desk=${desk} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} onStrip=${setBoardStrip} />` : null}
-          ${briefSeen || tab === 'brief' ? html`<div hidden=${tab !== 'brief'}><${BriefPanel} key=${desk.id} desk=${desk} tick=${tick} bump=${bump} budget=${budget} canWrite=${canWrite} setTab=${setTab} /></div>` : null}
+          ${tab === 'today' ? html`<${Board} desk=${desk} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} onStrip=${setBoardStrip} view=${view} setView=${setView} later=${laterIds} setLater=${setLater} brief=${todayBrief} onKept=${setKeptRows} focusAsk=${focusAsk} onFocused=${() => setFocusAsk(0)} />` : null}
+          ${briefSeen || tab === 'brief' ? html`<div hidden=${tab !== 'brief'}><${BriefPanel} key=${desk.id} desk=${desk} tick=${tick} bump=${bump} budget=${budget} canWrite=${canWrite} setTab=${setTab} onBrief=${setBriefNow} /></div>` : null}
           ${tab === 'watch' ? html`<${WatchPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} />` : null}
           ${tab === 'collection' ? html`<${CollectionPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} setJob=${setJob} />` : null}
           ${tab === 'options' ? html`<${OptionsPanel} desk=${desk} canWrite=${canWrite} onSaved=${d => D.set(Object.assign({}, D.data, { desks: desks.map(x => (x.id === d.id ? d : x)) }))} onCreated=${d => { D.set(Object.assign({}, D.data, { desks: desks.concat([d]) })); pickDesk(d.id); toastMsg(d.name + ' is ready') ; }} />` : null}
