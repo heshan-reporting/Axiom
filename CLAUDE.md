@@ -287,9 +287,11 @@ verifies each, and what was asked for and not built.
     `503 db_busy` in words on every Den route (`denBusy`, `DEN_BUSY`), never swallowed into an empty strip, and the
     page's `get()` asks again by itself twice (2.5 s, 6 s) and says so once. **Not measured on the live database**:
     the sandbox cannot reach it, so the reduction is reasoned from the queries, not timed.
-  - Harnesses: `tests/den-worker.mjs` (20), `tests/den-browser.mjs` (27, with axe at 1366, 1440 and 1920 for a
-    full and a read-only key), `tests/den-inject-browser.mjs` (60: every read failing, answering a gateway page,
-    answering the wrong shape, hanging and dropping, and every write failing and dropping, one at a time), the
+  - Harnesses: `tests/den-worker.mjs` (24), `tests/den-browser.mjs` (50, with axe at 1366, 1440 and 1920 for a
+    full and a read-only key; the last fifteen are the guided run, each opened with `{ guided: true }`),
+    `tests/den-inject-browser.mjs` (76: every read failing, answering a gateway page,
+    answering the wrong shape, hanging and dropping, and every write failing and dropping, one at a time, the
+    board, the strip and a decision in Guided among them), the
     recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.

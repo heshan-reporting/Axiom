@@ -5,6 +5,8 @@
  *   regenerate a section, see the uncited warning, a conflict with another person, mark as filed, copy and download;
  *   then the keyboard, the Watch tab, Options, a read-only key, the empty and error states, a paused platform, a dropped
  *   connection mid-draft, and a reload with unsaved edits.
+ *   The journey above is the table's: the fixture chooses Table for it. The guided run (decision D10), which a fresh
+ *   profile opens in, has the fifteen cases at the end, each in its own world.
  * Run: node --experimental-sqlite tests/den-browser.mjs   (SHOT=1 saves screenshots to tests/shots/den/) */
 import fs from 'node:fs';
 import { world, open, browser, t, ok, eq, txt, all, tab, desk, toast, shot, panel, finish, H, D, NOW } from './den-fixture.mjs';
@@ -341,6 +343,302 @@ await t('by default the strip runs five checks and says nothing about a channel 
   const strip = await txt(p, '.den-strip'); ok(/None of the five checks found anything in this window: no spike, no emerging narrative, no first-seen actor, no issue above its baseline, and no post far above its account's usual\./.test(strip), strip);
   ok(!/every channel/.test(strip) && !/six checks/.test(strip) && !/delivered/.test(strip) && !(await p.$('.den-strip li')), 'and it does not say every channel delivered: ' + strip);
   eq(p.errors, []); ok(!(await p.$('#den-tabpanel .den-state.err'))); await p.context().close();
+});
+
+/* ---- the guided run (decision D10, 12 November 2026): Today one row at a time. Every case is its own world, opened as a
+ * fresh profile ({ guided: true }: no row view was ever chosen). Lookups are scoped to the card, the done state or the
+ * tray and the names are exact, because the footer's "Show what was set aside" and the header's "Next: write the brief"
+ * hold the same words. ---- */
+const gCard = p => p.locator('#den-focus'); const gHead = p => p.locator('#den-focus .den-focus-t').textContent(); const gBtn = (p, name) => gCard(p).getByRole('button', { name, exact: true });
+const gSent = p => { const sent = []; p.on('request', r => { if (r.method() === 'POST' && /\/den\//.test(r.url())) sent.push([new URL(r.url()).pathname, JSON.parse(r.postData() || '{}')]); }); return sent; };
+const gPosts = p => p.served.filter(s => /^POST \/den\//.test(s));
+// the decision is over: another row is on the card and it is not busy, or the done state has taken its place
+const gMoved = (p, was) => p.waitForFunction(h => { if (document.querySelector('.den-guide .den-done')) return true; const e = document.querySelector('#den-focus'); return !!e && e.getAttribute('aria-busy') !== 'true' && e.querySelector('.den-focus-t').textContent !== h; }, was);
+const gShows = (p, h) => p.waitForFunction(x => { const e = document.querySelector('#den-focus'); return !!e && e.getAttribute('aria-busy') !== 'true' && e.querySelector('.den-focus-t').textContent === x; }, h);
+const gBring = async (p, h) => { if ((await gHead(p)) !== h) await p.locator('.den-nextb', { has: p.locator('.t', { hasText: new RegExp('^' + h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$') }) }).click(); await gShows(p, h); };
+const gRail = (p, step, label) => p.waitForFunction(([id, want]) => { const e = document.querySelector('#den-step-' + id); return !!e && e.getAttribute('aria-label') === want; }, [step, label]);
+const gOnCard = p => p.waitForFunction(() => document.activeElement && document.activeElement.id === 'den-focus', null, { timeout: 5000 }).catch(() => { throw new Error('the focus is not on the card'); });
+const gOnDone = (p, name) => p.waitForFunction(n => { const a = document.activeElement; return !!(a && a.closest('.den-done') && a.classList.contains('primary') && a.textContent === n); }, name, { timeout: 5000 }).catch(() => { throw new Error('the focus is not on the done state\'s "' + name + '"'); });
+const gReads = p => p.served.filter(s => /^GET \/den\/board/.test(s)).length;
+const gReread = async (p, since) => { for (let i = 0; i < 150 && gReads(p) <= since; i++) await p.waitForTimeout(100); ok(gReads(p) > since, 'the board was not read again'); await p.waitForTimeout(500); };
+const gRefresh = async p => { const n = gReads(p); await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click(); await gReread(p, n); };
+const gQueue = p => p.evaluate(() => ['#den-focus', '.den-next', '.den-traybox'].map(s => Array.from(document.querySelectorAll(s)).map(e => e.textContent).join(' ')).join(' '));   // the card, what is next and the tray: not the line that says what was just decided
+const gClean = async p => { eq(p.errors, [], 'an uncaught error reached the page'); ok(!(await p.$('#den-tabpanel .den-state.err')), 'an error state is on the page'); };
+const gBoard = async (wd, id) => (await wd.F('GET', '/den/board?desk=' + (id || 'aep_au') + '&missed=1')).body; const gRows = b => b.media.concat(b.social, b.actors); const gRow = (b, h) => gRows(b).find(r => (r.title || r.text) === h);
+const gAgain = async (p, sel) => { await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForFunction(() => typeof go === 'function' && typeof denInit === 'function'); await p.evaluate(() => go('den')); await p.waitForSelector(sel, { timeout: 20000 }); };
+const LEVY = 'Harbour levy divides the Senate', NOISY = 'Noisy outlet on the gas export tax ';
+
+await t('a fresh profile opens Today in Guided: one card, the rail, a one-line strip and the next step in the header', async () => {
+  const wg = await world(); const p = await open(wg, 'full-key', { guided: true }); const b = await gBoard(wg); const N = gRows(b).length; eq([N > 0, b.progress], [true, { total: N, kept: 0, aside: 0, left: N }]);
+  eq(await p.evaluate(() => localStorage.getItem('ax_den_view')), null, 'no row view was chosen for this profile');
+  eq([await p.locator('.den-kpis').count(), await gCard(p).count(), await p.locator('#den-tabpanel section.den-panel').count()], [0, 1, 0], 'no figures and no tables: one card');
+  eq(await p.getByRole('button', { name: 'Guided', exact: true }).getAttribute('aria-pressed'), 'true'); ok(new RegExp('^Next to decide, 1 of ' + N + ': ').test(await gCard(p).getAttribute('aria-label')), await gCard(p).getAttribute('aria-label'));
+  ok(/Triage, one row at a time/.test(await txt(p, '.den-toolbar')) && new RegExp(N + ' left of ' + N).test(await txt(p, '.den-toolbar')), await txt(p, '.den-toolbar'));
+  // the queue: the row a signal is about, then by reach
+  eq([await gHead(p), await gCard(p).locator('.den-chip.acc', { hasText: 'Signal' }).count()], [b.actors[0].text, 1], 'the first-seen account\'s own post leads'); eq((await p.$$eval('.den-nextb .t', e => e.map(x => x.textContent))).slice(0, 2), [LEVY, b.social[0].text], 'then the story with the most reach, then the post');
+  // the strip is its header line; the signals are listed beside the card
+  ok(await p.$('.den-strip.den-compact'), 'the strip is not compact'); eq([await p.locator('.den-strip li').count(), await p.locator('.den-strip button').count()], [0, 0]); ok(new RegExp(b.missed.signals.length + ' to read, listed beside the card').test(await txt(p, '.den-strip header')), await txt(p, '.den-strip header'));
+  eq(await p.$$eval('#den-tray-signals > li .den-t', e => e.map(x => x.textContent)), b.missed.signals.map(s => s.title));
+  // the rail and the header
+  await gRail(p, 'triage', 'Step 1, Triage: 0 of ' + N + ' decided'); eq(await p.$$eval('.den-rail .den-stepb', e => e.map(x => [x.id, x.getAttribute('aria-label'), x.getAttribute('aria-current')])), [['den-step-triage', 'Step 1, Triage: 0 of ' + N + ' decided', 'step'], ['den-step-write', 'Step 2, Write: not started', null], ['den-step-file', 'Step 3, File: nothing to file yet', null]]);
+  eq([await p.getAttribute('.den-rail', 'aria-label'), await p.evaluate(() => !!document.querySelector('.den-rail').closest('#den-tabpanel, [role="tablist"]'))], ['Today\'s run', false], 'the rail is its own landmark, outside the tabs and the panel');
+  eq([await txt(p, '#den-next'), await p.$eval('#den-next', e => e.classList.contains('primary'))], ['Next: write the brief, ' + N + ' not decided', true]);
+  ok(!(await p.evaluate(() => !!document.activeElement.closest('.den-guide'))), 'the focus was moved when the page opened');
+  const reads = p.served.filter(x => /^GET \/den\/(board|missed)/.test(x)); ok(reads.length === 1 && /missed=1/.test(reads[0]), 'one read of the window: ' + reads.join(' | ')); eq([wg.calls.length, gPosts(p)], [0, []]);
+  await gClean(p); await p.context().close();
+});
+await t('Guided: keep, set aside, another reason, Undo and Take out are each one request to the table\'s own routes; a folded story is one decision', async () => {
+  const wg = await world(); const p = await open(wg, 'full-key', { guided: true }); const sent = gSent(p); const b = await gBoard(wg); const N = b.progress.total; const last = () => sent[sent.length - 1];
+  const dk = (await wg.F('GET', '/den/desks')).body.desks.find(x => x.id === 'aep_au'); const levy = gRow(b, LEVY); eq(levy.copies.length, 2); const n1 = gRow(b, NOISY + 1), n2 = gRow(b, NOISY + 2);
+  // keep: the card as it opens
+  const h1 = await gHead(p); const r1 = gRow(b, h1); const sec = dk.sections.find(s => s.kind === (b.media.indexOf(r1) >= 0 ? 'media' : b.social.indexOf(r1) >= 0 ? 'social' : 'actors')).title;
+  await gBtn(p, 'Keep for the report').click(); await gMoved(p, h1); eq(sent, [['/den/pin', { desk: 'aep_au', item: r1.id }]], 'a keep is one pin');
+  await gRail(p, 'triage', 'Step 1, Triage: 1 of ' + N + ' decided'); eq(await txt(p, '#den-next'), 'Next: write the brief, ' + (N - 1) + ' not decided'); ok((await txt(p, '.den-last')).indexOf('Kept for the report: ' + h1.replace(/[.\s]+$/, '') + '.') === 0, await txt(p, '.den-last'));
+  eq(await p.locator('.den-tray .den-trayg').evaluateAll(g => g.map(x => [x.querySelector('h4').textContent, Array.from(x.querySelectorAll('li .t')).map(y => y.textContent)])), [[sec, [h1]]], 'the kept row is under its section of the report');
+  // a folded story kept, then taken out: the clear names every copy
+  await gBring(p, LEVY); await gBtn(p, 'Keep for the report').click(); await gMoved(p, LEVY); eq([sent.length, last()], [2, ['/den/pin', { desk: 'aep_au', item: levy.id }]]);
+  await p.locator('.den-tray').getByRole('button', { name: 'Take out of the report: ' + LEVY, exact: true }).click(); await p.waitForFunction(() => !/Harbour levy/.test(document.querySelector('.den-traybox').textContent));
+  eq([sent.length, last()], [3, ['/den/pin', { desk: 'aep_au', item: levy.id, clear: true, copies: levy.copies }]], 'Take out clears the story, every copy named'); ok(/Taken out of the report, and back in the queue: Harbour levy divides the Senate\./.test(await txt(p, '.den-last')), await txt(p, '.den-last'));
+  eq([gRow(await gBoard(wg), LEVY).pinned, await p.getAttribute('#den-step-triage', 'aria-label')], [false, 'Step 1, Triage: 1 of ' + N + ' decided']);
+  // ... and set aside: one request with its copies, and it does not come back as its next copy
+  await gBring(p, LEVY); let n = gReads(p); await gBtn(p, 'Set aside').click(); await gMoved(p, LEVY);
+  eq([sent.length, last()], [4, ['/den/aside', { desk: 'aep_au', item: levy.id, reason: 'not relevant', copies: levy.copies }]], 'a folded story is one set-aside that names its copies'); ok(/^Set aside \(not relevant\): Harbour levy divides the Senate\./.test(await txt(p, '.den-last')));
+  await gReread(p, n); ok(!/Harbour levy/.test(await gQueue(p)), 'the story came back when the board was read again'); const b2 = await gBoard(wg); eq([b2.media.some(m => /Harbour levy/.test(m.title)), b2.progress], [false, { total: N, kept: 1, aside: 1, left: N - 2 }]);
+  await gRail(p, 'triage', 'Step 1, Triage: 2 of ' + N + ' decided');
+  // a plain set-aside is "not relevant", in one press
+  await gBring(p, n1.title); await gBtn(p, 'Set aside').click(); await gMoved(p, n1.title); eq([sent.length, last()], [5, ['/den/aside', { desk: 'aep_au', item: n1.id, reason: 'not relevant', copies: [n1.id] }]]);
+  // another reason: going through the list files nothing; Use this reason files the one chosen
+  await gBring(p, n2.title); const sel = gCard(p).locator('select[aria-label="Another reason"]'); eq(await gBtn(p, 'Use this reason').count(), 0); await sel.focus(); await p.keyboard.press('ArrowDown'); await p.keyboard.press('ArrowDown'); await p.waitForTimeout(400);
+  ok((await sel.inputValue()) !== '' && sent.length === 5 && (await gHead(p)) === n2.title, 'arrowing through the reasons filed one: ' + (await sel.inputValue()) + ', ' + sent.length + ' requests');
+  await sel.selectOption('other'); ok(await gCard(p).locator('input[aria-label="Your reason"]').isVisible() && await gBtn(p, 'Use this reason').isDisabled(), 'a reason of your own needs three characters');
+  await sel.selectOption('duplicate'); await p.waitForTimeout(300); eq([sent.length, await gHead(p), await gCard(p).locator('input[aria-label="Your reason"]').count()], [5, n2.title, 0]);
+  await gBtn(p, 'Use this reason').click(); await gMoved(p, n2.title); eq([sent.length, last()], [6, ['/den/aside', { desk: 'aep_au', item: n2.id, reason: 'duplicate', copies: [n2.id] }]]); ok(/^Set aside \(duplicate\): Noisy outlet on the gas export tax 2\./.test(await txt(p, '.den-last')), await txt(p, '.den-last'));
+  eq(await gCard(p).locator('select[aria-label="Another reason"]').inputValue(), '', 'the reason is reset for the next card'); await gRail(p, 'triage', 'Step 1, Triage: 4 of ' + N + ' decided');
+  // Undo: the last decision only, cleared on the route that made it
+  n = gReads(p); await p.locator('.den-last').getByRole('button', { name: 'Undo', exact: true }).click(); await gShows(p, n2.title);
+  eq([sent.length, last()], [7, ['/den/aside', { desk: 'aep_au', item: n2.id, clear: true, copies: [n2.id] }]]); ok(/Undone\. Back on the card: Noisy outlet on the gas export tax 2\./.test(await txt(p, '.den-last')) && !(await p.locator('.den-last button').count()), await txt(p, '.den-last'));
+  await gRail(p, 'triage', 'Step 1, Triage: 3 of ' + N + ' decided'); await gReread(p, n); eq(await gHead(p), n2.title, 'the row left the card when the board was read again');
+  const b3 = await gBoard(wg); eq([b3.progress, b3.media.some(m => m.id === n2.id), b3.media.some(m => m.id === n1.id)], [{ total: N, kept: 1, aside: 2, left: N - 3 }, true, false]);
+  ok(new RegExp((N - 3) + ' left of ' + N).test(await txt(p, '.den-toolbar')), await txt(p, '.den-toolbar')); eq(await p.getAttribute('#den-step-triage', 'aria-label'), 'Step 1, Triage: 3 of ' + N + ' decided'); eq(wg.calls.length, 0);
+  await gClean(p); await p.context().close();
+});
+/* Three stories of three copies each and a fourth story, all found by one search term: the term is what a mute is offered on. */
+const gFerry = async wd => { const row = (o, title, n, ts) => ({ src: o, title, body: 'The Senate will debate a gas export tax this week, campaigners said.', url: 'https://' + o + '.example.com.au/' + n, ts, meta: { issues: ['gastax'], source: o, q: 'ferry toll' } });
+  const story = (name, n) => ['pointpost', 'tribune', 'coastwire'].map((o, i) => row(o, name + (i === 1 ? ' - Tribune' : ''), n, NOW - (6 - i) * H));
+  await wd.push('news', story('Ferry toll splits the crossbench', 'f1').concat(story('Ferry toll vote is delayed a week', 'f2'), story('Ferry toll talks resume on Monday', 'f3'), [row('pointpost', 'Ferry toll inquiry reports in March', 'f4', NOW - H)])); };
+const FERRY = ['Ferry toll splits the crossbench', 'Ferry toll vote is delayed a week', 'Ferry toll talks resume on Monday', 'Ferry toll inquiry reports in March'];
+const gAside = async (p, h) => { await gBring(p, h); const res = p.waitForResponse(r => r.request().method() === 'POST' && /\/den\/aside$/.test(r.url())); await gBtn(p, 'Set aside').click(); const body = await (await res).json(); await gMoved(p, h); return body; };
+await t('Guided: the mute is offered on the third decision, not the third copy, as a status line; Not now is remembered; Mute it mutes', async () => {
+  const wg = await world(); await gFerry(wg); const p = await open(wg, 'full-key', { guided: true }); const sent = gSent(p); const b = await gBoard(wg); eq(FERRY.map(h => gRow(b, h).copies.length), [3, 3, 3, 1]);
+  const a1 = await gAside(p, FERRY[0]); eq([sent.length, sent[0][1].copies, a1.copies.length, 'offer' in a1], [1, gRow(b, FERRY[0]).copies, 2, false], 'three copies set aside are one request and one decision: nothing is offered'); eq(await p.locator('.den-offer').count(), 0);
+  const a2 = await gAside(p, FERRY[1]); eq(['offer' in a2, await p.locator('.den-offer').count()], [false, 0], 'nor on the second story');
+  const a3 = await gAside(p, FERRY[2]); eq([a3.offer.kind, a3.offer.value, a3.offer.n], ['term', 'ferry toll', 3]); await p.waitForSelector('.den-offer');
+  eq([await p.getAttribute('.den-offer', 'role'), await p.locator('#den-root [role="alert"]').count(), await p.locator('.den-offer .primary').count()], ['status', 0, 0], 'the offer is a status line: never an alert, never the main button');
+  ok(/You have set aside 3 rows from ferry toll on this desk\. Mute it here\? A mute hides its rows on this desk only, and can be removed in Options\./.test(await txt(p, '.den-offer')), await txt(p, '.den-offer')); ok(/Ferry toll inquiry/.test(await gQueue(p)), 'the offer itself changed nothing: the fourth story is still in the queue');
+  await p.locator('.den-offer').getByRole('button', { name: 'Not now', exact: true }).click(); await p.waitForSelector('.den-offer', { state: 'detached' }); eq(await p.evaluate(() => JSON.parse(localStorage.getItem('ax_den_offer_no_aep_au'))), ['term:ferry toll']); await gOnCard(p);
+  const a4 = await gAside(p, FERRY[3]); eq(a4.offer.n, 4, 'the worker offers it again'); await p.waitForTimeout(400); eq(await p.locator('.den-offer').count(), 0, 'and the page, told Not now, does not ask again');
+  eq([sent.length, sent.filter(s => s[0] === '/den/mute').length], [4, 0]); await gClean(p); await p.context().close();
+  // another world: the mute itself
+  const wm = await world(); await gFerry(wm); const q = await open(wm, 'full-key', { guided: true }); const sq = gSent(q); for (const h of FERRY.slice(0, 3)) await gAside(q, h); await q.waitForSelector('.den-offer'); ok(/Ferry toll inquiry/.test(await gQueue(q)));
+  await q.locator('.den-offer').getByRole('button', { name: 'Mute it on this desk', exact: true }).click(); await q.waitForFunction(() => /Muted on this desk/.test((document.querySelector('.toast, #toast') || {}).textContent || '')); await q.waitForSelector('.den-offer', { state: 'detached' });
+  eq(sq[sq.length - 1], ['/den/mute', { desk: 'aep_au', kind: 'term', value: 'ferry toll' }]); await q.waitForFunction(() => !/Ferry toll/.test(['#den-focus', '.den-next'].map(s => (document.querySelector(s) || {}).textContent || '').join(' ')));
+  ok((await wm.F('GET', '/den/desks')).body.desks.find(x => x.id === 'aep_au').options.mutes.some(m => m.kind === 'term' && m.value === 'ferry toll'), 'the mute is in the desk\'s options'); ok(!gRows(await gBoard(wm)).some(r => /Ferry toll/.test(r.title || '')));
+  await q.waitForFunction(() => /\d+ muted/.test(document.querySelector('#den-tabpanel').textContent)); await gOnCard(q); await gClean(q); await q.context().close();
+});
+await t('Guided by keyboard: P, X, J, K, U and O act from the card only, the focus stays on the card, and the last decision lands on Write the brief', async () => {
+  const wg = await world(); const p = await open(wg, 'full-key', { guided: true }); const sent = gSent(p); const b = await gBoard(wg); const N = b.progress.total; const later = () => p.evaluate(k => JSON.parse(localStorage.getItem(k) || '[]'), 'ax_den_later_aep_au_' + b.missed.run.day);
+  // from the body nothing happens
+  const h0 = await gHead(p); for (const k of ['p', 'x', 'j', 'k', 'u', 'o', '3']) await p.keyboard.press(k); await p.waitForTimeout(400);
+  eq([sent.length, await gHead(p), await later(), p.context().pages().length, await p.evaluate(() => document.activeElement === document.body)], [0, h0, [], 1, true], 'a key typed outside the card did something');
+  // on an Up next button P and X do nothing; Enter is the button's own, and the focus follows the row to the card
+  const nb = p.locator('.den-nextb').nth(1); const hA = await nb.locator('.t').textContent(); const A = gRow(b, hA); await nb.focus(); await p.keyboard.press('p'); await p.keyboard.press('x'); await p.waitForTimeout(400); eq([sent.length, await gHead(p)], [0, h0], 'P or X on an Up next button decided a row');
+  await p.keyboard.press('Enter'); await gShows(p, hA); await gOnCard(p);
+  // P keeps
+  await p.keyboard.press('p'); await gMoved(p, hA); await gOnCard(p); eq(sent, [['/den/pin', { desk: 'aep_au', item: A.id }]]);
+  // X sets aside as not relevant, at once
+  const hB = await gHead(p); const B = gRow(b, hB); await p.keyboard.press('x'); await gMoved(p, hB); await gOnCard(p); eq([sent.length, sent[1][0], sent[1][1].item, sent[1][1].reason], [2, '/den/aside', B.id, 'not relevant']);
+  // J leaves the card for later and K brings it back: neither is sent
+  const hC = await gHead(p); const C = gRow(b, hC); await p.keyboard.press('j'); await gMoved(p, hC); await gOnCard(p); eq([sent.length, await later()], [2, [C.id]]); ok(/Left for later: /.test(await txt(p, '.den-last')), await txt(p, '.den-last'));
+  await p.keyboard.press('k'); await gShows(p, hC); await gOnCard(p); eq([sent.length, await later()], [2, []]);
+  // U undoes the last decision, which was the set-aside
+  await p.keyboard.press('u'); await gShows(p, hB); await gOnCard(p); eq([sent.length, sent[2][0], sent[2][1].item, sent[2][1].clear], [3, '/den/aside', B.id, true]);
+  // O opens the source in a new tab
+  const [pop] = await Promise.all([p.waitForEvent('popup'), p.keyboard.press('o')]); await pop.waitForLoadState('domcontentloaded').catch(() => {}); eq(pop.url(), B.url, 'O opened something other than the row\'s source'); await pop.close(); await gOnCard(p); eq([sent.length, await gHead(p)], [3, hB]);
+  // the Undo button and Take out leave the focus on the card too
+  await p.keyboard.press('p'); await gMoved(p, hB); await gOnCard(p); await p.locator('.den-last').getByRole('button', { name: 'Undo', exact: true }).click(); await gShows(p, hB); await gOnCard(p); eq([sent.length, sent[4]], [5, ['/den/pin', Object.assign({ desk: 'aep_au', item: B.id, clear: true }, B.copies ? { copies: B.copies } : {})]]);
+  await p.locator('.den-tray').getByRole('button', { name: 'Take out of the report: ' + hA, exact: true }).click(); await p.waitForFunction(() => /Nothing is kept yet/.test(document.querySelector('.den-traybox').textContent)); await gOnCard(p); eq([sent.length, await gHead(p)], [6, hB]);
+  // every row decided from the keyboard: the focus lands on the done state's button, and Enter opens Brief
+  for (let i = 0; i < N + 2 && await gCard(p).count(); i++) { const h = await gHead(p); await gOnCard(p); await p.keyboard.press('p'); await gMoved(p, h); }
+  await p.waitForSelector('.den-guide .den-done.is-done'); await gOnDone(p, 'Write the brief'); eq([await gCard(p).count(), sent.length], [0, 6 + N]); eq(await txt(p, '.den-done p'), 'Triage is done. ' + N + ' kept for the report, 0 set aside.');
+  await p.keyboard.press('Enter'); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); await p.waitForSelector('#den-tabpanel .den-state'); ok(/No brief has been started for this window/.test(await txt(p, '#den-tabpanel'))); eq(wg.calls.length, 0, 'opening Brief asked a model');
+  await gClean(p); await p.context().close();
+});
+await t('Guided: Decide later sends nothing, is kept for this desk and day through a reload, and the rail and the header count it', async () => {
+  const wg = await world(); await wg.push('news', [1, 2].map(i => ({ src: 'minewire', title: 'Critical minerals strategy lands, part ' + i, body: 'A critical minerals processing plan was released this week.', url: 'https://minewire.example.com.au/' + i, ts: NOW - (2 + i) * H, meta: { issues: ['cm'], source: 'minewire' } })));
+  const p = await open(wg, 'full-key', { guided: true }); const sent = gSent(p); const b = await gBoard(wg); const N = b.progress.total; const day = b.missed.run.day; const aepKey = 'ax_den_later_aep_au_' + day, mcaKey = 'ax_den_later_mca_au_' + day;
+  const stored = () => p.evaluate(() => Object.keys(localStorage).filter(k => /^ax_den_later_/.test(k)).sort().map(k => [k, JSON.parse(localStorage.getItem(k))]));
+  const h1 = await gHead(p); const r1 = gRow(b, h1); await gBtn(p, 'Decide later').click(); await gMoved(p, h1); await gOnCard(p); eq([sent.length, await stored()], [0, [[aepKey, [r1.id]]]]); ok(/^Left for later: /.test(await txt(p, '.den-last')), await txt(p, '.den-last'));
+  const railLater = 'Step 1, Triage: 0 of ' + N + ' decided, 1 for later'; await gRail(p, 'triage', railLater); eq(await txt(p, '#den-next'), 'Next: write the brief, ' + (N - 1) + ' not decided');
+  eq((await p.$$eval('.den-nextb', e => e.map(x => [x.querySelector('.t').textContent, /left for later/.test((x.querySelector('.den-chip') || {}).textContent || '')]))).pop(), [h1, true], 'the row left for later goes last, and is marked');
+  // a reload
+  await gAgain(p, '.den-guide #den-focus'); await gRail(p, 'triage', railLater); ok((await gHead(p)) !== h1, 'the row left for later is the card again'); eq([await stored(), await txt(p, '#den-next')], [[[aepKey, [r1.id]]], 'Next: write the brief, ' + (N - 1) + ' not decided']);
+  // another desk keeps its own
+  const bm = await gBoard(wg, 'mca_au'); eq(bm.progress.total, 2); await desk(p, 'mca_au'); await p.waitForFunction(() => /MCA national/.test(document.querySelector('.den-win').textContent)); await gRail(p, 'triage', 'Step 1, Triage: 0 of 2 decided');
+  const hm = await gHead(p); ok(/Critical minerals/.test(hm), hm); await gBtn(p, 'Decide later').click(); await gMoved(p, hm); await gRail(p, 'triage', 'Step 1, Triage: 0 of 2 decided, 1 for later'); eq(await stored(), [[aepKey, [r1.id]], [mcaKey, [gRow(bm, hm).id]]]);
+  await desk(p, 'aep_au'); await p.waitForFunction(() => /AEP national/.test(document.querySelector('.den-win').textContent)); await gRail(p, 'triage', railLater); await p.waitForSelector('#den-focus');
+  // leave the others: the done state, and still nothing sent
+  await p.locator('.den-under').getByRole('button', { name: 'Leave the other ' + (N - 1) + ' for later', exact: true }).click(); await p.waitForSelector('.den-guide .den-done'); await gOnDone(p, 'Write the brief');
+  eq([await txt(p, '.den-done p'), await p.locator('.den-done.is-done').count()], [N + ' left for later. 0 kept, 0 set aside.', 0]); await gRail(p, 'triage', 'Step 1, Triage: 0 of ' + N + ' decided, ' + N + ' for later'); eq(await txt(p, '#den-next'), 'Next: write the brief');
+  eq([sent.length, gPosts(p), (await stored())[0][1].length], [0, [], N]);
+  await p.locator('.den-done').getByRole('button', { name: 'Go through the ' + N + ' left for later', exact: true }).click(); await p.waitForSelector('#den-focus'); await gOnCard(p); eq((await stored()).map(x => x[0]), [mcaKey]); await gRail(p, 'triage', 'Step 1, Triage: 0 of ' + N + ' decided');
+  eq([sent.length, gPosts(p)], [0, []]); await gClean(p); await p.context().close();
+});
+await t('Guided: the three done states, and their button opens Brief without a model call', async () => {
+  // every row decided
+  const wa = await world(); const b = await gBoard(wa); const N = b.progress.total; for (const r of gRows(b)) await wa.F('POST', '/den/aside', Object.assign({ desk: 'aep_au', item: r.id, reason: 'not relevant' }, r.copies ? { copies: r.copies } : {}));
+  const p = await open(wa, 'full-key', { guided: true }); const main = pg => pg.locator('.den-done').getByRole('button', { name: 'Write the brief', exact: true }); await p.waitForSelector('.den-guide .den-done.is-done'); eq(await gCard(p).count(), 0);
+  eq(await txt(p, '.den-done p'), 'Triage is done. 0 kept for the report, ' + N + ' set aside. Nothing is kept: a draft will choose from the whole window.');
+  await gRail(p, 'triage', 'Step 1, Triage: done: 0 kept, ' + N + ' set aside'); ok(await p.$('.den-rail .den-step.is-done #den-step-triage'), 'the step is not marked done'); eq(await txt(p, '#den-next'), 'Next: write the brief');
+  await wa.F('POST', '/den/aside', { desk: 'aep_au', item: b.social[0].id, clear: true }); await wa.F('POST', '/den/pin', { desk: 'aep_au', item: b.social[0].id }); await gRefresh(p); await p.waitForFunction(() => /1 kept for the report/.test((document.querySelector('.den-done p') || {}).textContent || ''));
+  eq([await txt(p, '.den-done p'), await p.locator('.den-done .den-mini.primary').count(), await p.locator('.den-done button').count()], ['Triage is done. 1 kept for the report, ' + (N - 1) + ' set aside.', 1, 1]);
+  await main(p).click(); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); await p.waitForSelector('#den-tabpanel .den-state'); ok(/No brief has been started for this window/.test(await txt(p, '#den-tabpanel'))); eq([wa.calls.length, gPosts(p)], [0, []], 'the button spent or wrote something');
+  // a desk with nothing in the window: it says so without naming a channel
+  await tab(p, 'today'); await desk(p, 'mca_vic'); await p.waitForFunction(() => /MCA Victoria/.test(document.querySelector('.den-win').textContent)); await p.waitForFunction(() => /Nothing to decide yet/.test((document.querySelector('.den-guide .den-done') || {}).textContent || ''));
+  eq([await txt(p, '.den-done p'), await p.locator('.den-done.is-done').count()], ['Nothing to decide yet. No story or post on this desk\'s issues is in this window. A brief can still be written by hand.', 0]);
+  ok(!/Facebook|Instagram|YouTube|Reddit|Bluesky|not collected|delivered|not read/i.test(await txt(p, '.den-guide')), 'the empty desk names a channel: ' + await txt(p, '.den-guide')); await gRail(p, 'triage', 'Step 1, Triage: nothing to decide');
+  await p.locator('.den-done').getByRole('button', { name: 'Open Collection', exact: true }).click(); await p.waitForSelector('#den-tab-collection[aria-selected="true"]'); await tab(p, 'today'); await p.waitForSelector('.den-guide .den-done');
+  await main(p).click(); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); eq([wa.calls.length, gPosts(p)], [0, []]); await gClean(p); await p.context().close();
+  // only rows left for later
+  const wl = await world(); const q = await open(wl, 'full-key', { guided: true }); await q.locator('.den-under button').click(); await q.waitForSelector('.den-guide .den-done'); eq([await txt(q, '.den-done p'), await q.locator('.den-done.is-done').count()], [N + ' left for later. 0 kept, 0 set aside.', 0]);
+  ok(await q.locator('.den-done').getByRole('button', { name: 'Go through the ' + N + ' left for later', exact: true }).isVisible()); await main(q).click(); await q.waitForSelector('#den-tab-brief[aria-selected="true"]'); await q.waitForSelector('#den-tabpanel .den-state');
+  ok(/No brief has been started for this window/.test(await txt(q, '#den-tabpanel'))); eq([wl.calls.length, gPosts(q)], [0, []]); await gClean(q); await q.context().close();
+});
+await t('Guided: the tray follows the brief - in the brief, kept after the draft, each signal as the filing check reads it, and filed', async () => {
+  const wg = await world(); const b = await gBoard(wg); const levy = gRow(b, LEVY); await wg.F('POST', '/den/pin', { desk: 'aep_au', item: levy.id }); eq((await wg.F('POST', '/den/brief', { desk: 'aep_au' })).status, 200); eq(wg.calls.length, 1);
+  const rb = (await gBoard(wg)).missed.run.brief; ok(rb && rb.status === 'draft' && rb.cited.indexOf(levy.id) >= 0 && rb.written >= 200 && rb.open.length > 0, 'the draft cites the kept story and leaves a signal open: ' + JSON.stringify(rb));
+  const p = await open(wg, 'full-key', { guided: true }); const box = () => txt(p, '.den-traybox');
+  eq([await txt(p, '#den-next'), await p.$$eval('.den-rail .den-stepb', e => e.slice(1).map(x => x.getAttribute('aria-label')))], ['Next: read the draft', ['Step 2, Write: draft', 'Step 3, File: not filed']]);
+  ok(/Harbour levy divides the Senate ?in the brief/.test(await box()) && /1 kept, 0 set aside\. Every kept row is in the brief\./.test(await box()), await box());
+  // each signal reads as the worker's own filing check does
+  const sig = await p.$$eval('#den-tray-signals > li', li => li.map(x => [x.querySelector('.den-t').textContent, /Not in the brief yet/.test(x.textContent) ? 'open' : /In the brief/.test(x.textContent) ? 'in' : '?']));
+  eq(sig, b.missed.signals.map(s => [s.title, rb.open.indexOf(s.key) >= 0 ? 'open' : 'in'])); ok(sig.some(s => /Sentinel spike/.test(s[0]) && s[1] === 'open'), JSON.stringify(sig)); eq(await p.locator('#den-tray-signals button', { hasText: 'Bring forward' }).count(), 0);
+  // a row kept after the draft
+  await gBring(p, NOISY + 1); await gBtn(p, 'Keep for the report').click(); await gMoved(p, NOISY + 1);
+  ok(/Noisy outlet on the gas export tax 1 ?kept after the draft/.test(await box()) && /Harbour levy divides the Senate ?in the brief/.test(await box()), await box());
+  ok(/1 kept row is not in the brief\. Draft again or regenerate a section there \(each is one model call, stated there\), or write them in\./.test(await box()), await box());
+  await gRail(p, 'write', 'Step 2, Write: draft, 1 kept row not in it'); eq(await txt(p, '#den-next'), 'Next: read the draft');
+  await p.locator('.den-tray').getByRole('button', { name: 'Open the brief', exact: true }).click(); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); await p.waitForSelector('.den-sec[data-section="summary"] textarea'); eq(wg.calls.length, 1, 'opening the brief asked a model');
+  // filed, on the page: the header and the rail know at once, from the Brief panel's own word
+  await p.getByRole('button', { name: 'Mark as filed', exact: true }).click(); await p.getByRole('button', { name: 'File anyway', exact: true }).click(); await p.waitForFunction(() => /Filed by Anne/.test((document.querySelector('#den-tabpanel section.den-panel:not([hidden]) header') || {}).textContent || ''));
+  await p.waitForFunction(() => /Filed today/.test((document.querySelector('#den-next') || {}).textContent || '')); eq(await p.$eval('#den-next', e => e.classList.contains('primary')), false);
+  ok(await p.$('.den-rail .den-step.is-done #den-step-write') && await p.$('.den-rail .den-step.is-done #den-step-file') && /^Step 3, File: filed by Anne, /.test(await p.getAttribute('#den-step-file', 'aria-label')), await p.getAttribute('#den-step-file', 'aria-label'));
+  await tab(p, 'today'); await p.waitForSelector('#den-focus'); eq(await txt(p, '#den-next'), 'Filed today'); ok(/Today's brief is filed\. Reopen it there to change it\./.test(await box()), await box());
+  await p.locator('.den-under button').click(); await p.waitForSelector('.den-guide .den-done'); eq(await p.locator('.den-done .den-mini.primary').textContent(), 'Open the filed brief');
+  await p.locator('.den-done').getByRole('button', { name: 'Open the filed brief', exact: true }).click(); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); ok(await p.getByRole('button', { name: 'Reopen', exact: true }).isVisible(), 'the filed brief is not what opened');
+  eq([wg.calls.length, gPosts(p).filter(x => !/brief\/file/.test(x))], [1, ['POST /den/pin']], 'one draft through the API, one keep on the page, and the filing'); await gClean(p); await p.context().close();
+});
+await t('Guided: a refresh never swaps the card under a person; a row decided elsewhere leaves it, and that is said', async () => {
+  const wg = await world(); const p = await open(wg, 'full-key', { guided: true }); const b = await gBoard(wg); const N = b.progress.total; const row = gRow(b, NOISY + 3);
+  await gBring(p, row.title); await gRefresh(p); eq(await gHead(p), row.title, 'a refresh put another row on the card');
+  eq((await wg.F('POST', '/den/pin', { desk: 'aep_au', item: row.id }, 'other-key')).status, 200); eq(await gHead(p), row.title);   // kept by someone else: the page has not been told yet
+  await gRefresh(p); await gMoved(p, row.title); ok(new RegExp('That row is already decided\\. ' + (N - 1) + ' left\\.').test(await txt(p, '.den-last')), await txt(p, '.den-last'));
+  eq(await p.$$eval('.den-trayg li .t', e => e.map(x => x.textContent)), [row.title], 'the tray holds the row kept elsewhere'); ok((await p.$$eval('.den-nextb .t', e => e.map(x => x.textContent))).indexOf(row.title) < 0, 'and it is not in the queue');
+  await gRail(p, 'triage', 'Step 1, Triage: 1 of ' + N + ' decided'); eq(gPosts(p), []); await gClean(p); await p.context().close();
+});
+await t('Guided: two decisions made while a slow read of the board is in flight are not undone when it lands', async () => {
+  // the board is read when it is asked, and that answer is held back until the case lets it go: it lands after both decisions and holds neither
+  const wg = await world(); let hold = false, held = 0, release; const gate = new Promise(r => { release = r; });
+  wg.hooks = [async (route, r, path) => { if (!hold || r.method() !== 'GET' || !/^\/den\/board/.test(path)) return false; hold = false; const res = await wg.call('GET', path, null, r.headers()['x-axiom-key'] || null); held = 1; await gate; await route.fulfill({ status: res.status, contentType: 'application/json', body: res.text }); held = 2; return true; }];
+  const p = await open(wg, 'full-key', { guided: true }); const sent = gSent(p); const N = (await gBoard(wg)).progress.total; await gRail(p, 'triage', 'Step 1, Triage: 0 of ' + N + ' decided'); const r0 = gReads(p);
+  const state = () => p.evaluate(() => ({ card: (document.querySelector('#den-focus .den-focus-t') || {}).textContent || '', next: Array.from(document.querySelectorAll('.den-nextb .t')).map(e => e.textContent), tray: Array.from(document.querySelectorAll('.den-trayg li .t')).map(e => e.textContent), rail: document.querySelector('#den-step-triage').getAttribute('aria-label'), note: document.querySelector('.den-toolbar .den-note').textContent }));
+  hold = true; await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click(); for (let i = 0; i < 100 && held < 1; i++) await p.waitForTimeout(50); eq(held, 1, 'a read made before either decision is in flight');
+  const hA = await gHead(p); await gBtn(p, 'Keep for the report').click(); await gMoved(p, hA); const hB = await gHead(p); await gBtn(p, 'Set aside').click(); await gMoved(p, hB); eq([held, sent.length], [1, 2], 'both decisions were made inside the slow read');
+  const check = s => { ok(s.card !== hA && s.card !== hB && s.next.indexOf(hA) < 0 && s.next.indexOf(hB) < 0, 'a decided row came back to the queue: ' + JSON.stringify(s)); eq([s.tray, s.rail, s.note], [[hA], 'Step 1, Triage: 2 of ' + N + ' decided', (N - 2) + ' left of ' + N], 'the tray or the count went back'); };
+  check(await state()); release(); for (let i = 0; i < 100 && held < 2; i++) await p.waitForTimeout(20); eq(held, 2, 'the slow answer was not let go');
+  const t0 = Date.now(); while (Date.now() - t0 < 4000) { check(await state()); await p.waitForTimeout(120); }   // the slow answer has landed or been dropped, and the page has read the board again
+  ok(gReads(p) >= r0 + 2, 'the board was not read again after the decisions'); eq((await gBoard(wg)).progress, { total: N, kept: 1, aside: 1, left: N - 2 }); check(await state());
+  wg.hooks = []; await gClean(p); await p.context().close();
+});
+await t('Guided: a keep that fails changes nothing on the page and is said; the next press works', async () => {
+  const wg = await world(); let fail = true; wg.hooks = [async (route, r, path) => { if (fail && r.method() === 'POST' && /^\/den\/pin/.test(path)) { await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done.' }) }); return true; } return false; }];
+  const p = await open(wg, 'full-key', { guided: true }); const N = (await gBoard(wg)).progress.total; await gRail(p, 'triage', 'Step 1, Triage: 0 of ' + N + ' decided');
+  const state = async () => [await gHead(p), await txt(p, '.den-toolbar .den-note'), await p.getAttribute('#den-step-triage', 'aria-label'), await txt(p, '#den-next'), await txt(p, '.den-traybox'), await txt(p, '.den-last'), (await p.$$eval('.den-nextb .t', e => e.map(x => x.textContent))).join(' | ')]; const before = await state(); eq(before[5], '');
+  await gBtn(p, 'Keep for the report').click(); await p.waitForFunction(() => /Something failed on the worker/.test((document.querySelector('.toast, #toast') || {}).textContent || '')); await p.waitForFunction(() => document.querySelector('#den-focus').getAttribute('aria-busy') === 'false');
+  eq(await state(), before, 'the page moved though the keep was not saved'); ok(await gBtn(p, 'Keep for the report').isEnabled(), 'the card stayed locked'); await gOnCard(p); eq((await gBoard(wg)).progress.kept, 0);
+  await p.waitForTimeout(1800); eq(await state(), before, 'nothing changed a moment later either');
+  fail = false; await gBtn(p, 'Keep for the report').click(); await gMoved(p, before[0]); await gRail(p, 'triage', 'Step 1, Triage: 1 of ' + N + ' decided'); eq((await gBoard(wg)).progress.kept, 1);
+  wg.hooks = []; await gClean(p); await p.context().close();
+});
+await t('Guided with a read-only key: the card and its source, Next row through the queue, and no control or request that writes', async () => {
+  const wg = await world(); const b = await gBoard(wg); const N = b.progress.total; const kept = gRow(b, 'Producers answer the windfall tax push'); await wg.F('POST', '/den/pin', { desk: 'aep_au', item: kept.id });
+  const p = await open(wg, 'read-key', { guided: true }); await p.waitForFunction(() => window.AX_ROLE === 'read'); await p.waitForSelector('.den-head .den-chip.warn'); await p.waitForFunction(() => /Your key is read-only/.test((document.querySelector('#den-focus') || {}).textContent || ''));
+  ok(/Your key is read-only: keeping and setting aside need a full key\./.test(await txt(p, '#den-focus')), await txt(p, '#den-focus'));
+  eq([await p.locator('#den-root button', { hasText: /^(Keep for the report|Set aside|Take out|Decide later|Undo|Use this reason)$/ }).count(), await p.locator('#den-root button', { hasText: /Leave the other/ }).count(), await p.locator('#den-focus select, #den-focus input').count()], [0, 0, 0], 'a control that writes is shown');
+  eq(await p.$$eval('.den-trayg li .t', e => e.map(x => x.textContent)), [kept.title], 'the kept row is listed, with no way to take it out'); ok(/^https:\/\//.test(await gCard(p).locator('a.den-focus-src').getAttribute('href')), 'the source still opens');
+  // Next row goes through the queue in order and wraps, and leaves nothing for later
+  const order = [await gHead(p)].concat(await p.$$eval('.den-nextb .t', e => e.map(x => x.textContent))); eq(order.length, N - 1); const seen = [order[0]];
+  for (let i = 0; i < N - 1; i++) { await gBtn(p, 'Next row').click(); await p.waitForFunction(h => document.querySelector('#den-focus .den-focus-t').textContent !== h, seen[seen.length - 1]); seen.push(await gHead(p)); }
+  eq(seen, order.concat([order[0]]), 'Next row left the order of the queue, or did not wrap'); await gCard(p).focus(); await p.keyboard.press('p'); await p.keyboard.press('x'); await p.waitForTimeout(400); eq(await gHead(p), order[0], 'P or X did something for a read-only key');
+  eq(await p.evaluate(() => Object.keys(localStorage).filter(k => /^ax_den_later_/.test(k))), [], 'a row was left for later'); eq([await p.getAttribute('#den-step-triage', 'aria-label'), await txt(p, '#den-next')], ['Step 1, Triage: 1 of ' + N + ' decided', 'Open the brief']);
+  // every row decided by someone with a full key: the done state's button and the header both open the brief
+  for (const r of gRows(b)) if (r.id !== kept.id) await wg.F('POST', '/den/aside', Object.assign({ desk: 'aep_au', item: r.id, reason: 'not relevant' }, r.copies ? { copies: r.copies } : {}));
+  await gRefresh(p); await p.waitForSelector('.den-guide .den-done.is-done'); eq([await p.locator('.den-done .den-mini.primary').textContent(), await txt(p, '#den-next'), await p.locator('.den-done button').count()], ['Open the brief', 'Open the brief', 1]);
+  await p.locator('.den-done').getByRole('button', { name: 'Open the brief', exact: true }).click(); await p.waitForSelector('#den-tab-brief[aria-selected="true"]'); eq([gPosts(p), wg.calls.length], [[], 0], 'it sent a write, or asked a model'); await gClean(p); await p.context().close();
+});
+await t('the row view is this person\'s choice and is kept through a reload; in Table the header\'s Next: triage lands on a row still to decide', async () => {
+  const wg = await world(); await wg.F('GET', '/narratives/status'); wg.env.MIND_DB.db.prepare("INSERT INTO narratives(id,label,issues,n,n24,first_ts,last_ts,status,muted,side,spread) VALUES('n1','Gas giants dodge the levy',?,8,7,?,?,'growing',0,'hostile','[]')").run(JSON.stringify(['gastax']), NOW - 20 * H, NOW - H);
+  const b0 = await gBoard(wg); await wg.F('POST', '/den/pin', { desk: 'aep_au', item: b0.media[0].id }); const b = await gBoard(wg); const N = b.progress.total; eq([b.narratives.length, b.media[0].pinned, b.media[1].pinned], [1, true, false]);
+  const p = await open(wg, 'full-key', { guided: true }); const view = () => p.evaluate(() => localStorage.getItem('ax_den_view')); const media = 'section.den-panel[aria-label="Traditional media"] tr.den-row';
+  await p.getByRole('button', { name: 'Table', exact: true }).click(); await p.waitForSelector(media); eq([await p.locator('.den-guide').count(), await p.locator('.den-kpis').count(), await view()], [0, 1, '"table"']);
+  await gAgain(p, media); eq([await p.locator('.den-guide').count(), await p.getByRole('button', { name: 'Table', exact: true }).getAttribute('aria-pressed')], [0, 'true'], 'Table was not kept through a reload');
+  eq([await panel(p, 'Key narratives').locator('tr.den-row').count(), await panel(p, 'Traditional media').locator('tr.den-row.pinned').count()], [1, 1]);
+  // from Watch, the header's next step is triage: it opens Today and puts the focus on the first row not yet decided
+  await tab(p, 'watch'); await p.waitForSelector('#den-tabpanel section.den-panel:visible'); await p.waitForSelector('#den-next'); eq(await txt(p, '#den-next'), 'Next: triage, ' + (N - 1) + ' left');
+  await p.click('#den-next'); await p.waitForSelector('#den-tab-today[aria-selected="true"]'); await p.waitForFunction(() => !!(document.activeElement && document.activeElement.closest('#den-tabpanel .den-row')), null, { timeout: 15000 });
+  eq(await p.evaluate(() => { const a = document.activeElement; return [a.tagName, a.classList.contains('pinned'), a.closest('section.den-panel').getAttribute('aria-label'), a.querySelector('.den-t').textContent]; }), ['TR', false, 'Traditional media', b.media[1].title], 'the focus is not on the first story still to decide');
+  // Guided again, and that is kept too
+  await p.getByRole('button', { name: 'Guided', exact: true }).click(); await p.waitForSelector('.den-guide #den-focus'); eq([await view(), await p.locator('.den-kpis').count()], ['"guided"', 0]);
+  await gAgain(p, '.den-guide #den-focus'); eq([await p.locator('.den-kpis').count(), await p.locator('#den-tabpanel section.den-panel').count(), await p.getByRole('button', { name: 'Guided', exact: true }).getAttribute('aria-pressed')], [0, 0, 'true'], 'Guided was not kept through a reload');
+  await gClean(p); await p.context().close();
+});
+await t('the rail off Today has the day\'s figures without reading the board, and a change of tab or desk never blanks it or shows another desk\'s', async () => {
+  const wg = await world(); const b = await gBoard(wg); const N = b.progress.total; await wg.F('POST', '/den/pin', { desk: 'aep_au', item: b.social[0].id }); const label = 'Step 1, Triage: 1 of ' + N + ' decided';
+  const p = await open(wg, 'full-key', { guided: true }); await p.evaluate(() => localStorage.setItem('ax_den_tab', '"brief"')); p.served.length = 0; await gAgain(p, '#den-tab-brief[aria-selected="true"]'); await gRail(p, 'triage', label);
+  eq(await p.$$eval('.den-rail .den-stepb', e => e.map(x => [x.getAttribute('aria-label'), x.getAttribute('aria-current')])), [[label, null], ['Step 2, Write: not started', 'step'], ['Step 3, File: nothing to file yet', null]]);
+  ok(p.served.some(s => /^GET \/den\/missed/.test(s)) && !p.served.some(s => /^GET \/den\/board/.test(s)), 'the board was read though Today was never opened: ' + p.served.filter(s => /den\/(board|missed)/.test(s)).join(' | '));
+  eq([await txt(p, '#den-next'), await p.$eval('#den-next', e => e.classList.contains('primary'))], ['Back to triage, ' + (N - 1) + ' left', false]);
+  // every state the rail passes through from here on, with the desk it was drawn for
+  await p.evaluate(() => { window.__rail = []; window.__fig = []; const add = (l, s) => { if (l[l.length - 1] !== s) l.push(s); };
+    const rec = () => { const a = Array.from(document.querySelectorAll('.den-rail .den-stepb')); const who = ((document.querySelector('.den-win') || {}).textContent || '').split(' - ')[0]; const step = a[0] ? a[0].getAttribute('aria-label') : ''; add(window.__rail, who + ' | ' + a.length + ' | ' + step); add(window.__fig, who + ' | ' + step + ' | ' + ((document.querySelector('#den-next') || {}).textContent || '-')); };
+    rec(); new MutationObserver(rec).observe(document.getElementById('den-root'), { subtree: true, childList: true, attributes: true, characterData: true }); });
+  for (const name of ['watch', 'collection', 'options', 'today']) { await tab(p, name); await p.waitForTimeout(400); } await p.waitForSelector('.den-guide #den-focus'); await tab(p, 'brief'); await p.waitForTimeout(400);
+  eq(await p.evaluate(() => window.__rail), ['AEP national | 3 | ' + label], 'the rail changed while only the tab did');
+  await desk(p, 'mca_vic'); await gRail(p, 'triage', 'Step 1, Triage: nothing to decide'); await p.waitForTimeout(300); await desk(p, 'aep_au'); await gRail(p, 'triage', label); await p.waitForTimeout(300);
+  const seen = await p.evaluate(() => window.__rail); ok(seen.length >= 3 && seen.every(s => /^(AEP national \| 3 \| Step 1, Triage: (reading|1 of \d+ decided)|MCA Victoria \| 3 \| Step 1, Triage: (reading|nothing to decide))$/.test(s)), 'the rail went blank, or showed one desk\'s figures under another: ' + seen.join(' // '));
+  const fig = await p.evaluate(() => window.__fig); ok(fig.every(s => /^(AEP national \| Step 1, Triage: (reading \| -|1 of \d+ decided \| (Back to triage|Next: triage|Next: write the brief), \d+ (left|not decided))|MCA Victoria \| Step 1, Triage: (reading|nothing to decide) \| -)$/.test(s)), 'the header\'s next step was drawn from another desk\'s figures: ' + fig.join(' // '));
+  await gClean(p); await p.context().close();
+});
+await t('Guided with showGaps on: the strip stays whole above the card, gaps first, and a gap opens Collection', async () => {
+  const wg = await world(); await gapsOn(wg, ['aep_au']);   // this case asserts gaps (D10)
+  const p = await open(wg, 'full-key', { guided: true }); await p.waitForSelector('.den-strip li'); eq([await p.locator('.den-strip.den-compact').count(), await gCard(p).count()], [0, 1], 'the strip is compact though a channel delivered nothing');
+  const lines = await all(p, '.den-strip li'); ok(/Facebook delivered nothing/.test(lines[0]) && /not granted/.test(lines[0]), lines[0]); ok(await p.locator('.den-strip').getByRole('button', { name: 'Fold', exact: true }).isVisible());
+  ok(await p.evaluate(() => !!(document.querySelector('.den-strip').compareDocumentPosition(document.querySelector('#den-focus')) & Node.DOCUMENT_POSITION_FOLLOWING)), 'the strip is not above the card');
+  await p.locator('.den-strip li').first().locator('button.den-link').click(); await p.waitForSelector('#den-tab-collection[aria-selected="true"]'); await p.waitForSelector('section.den-panel[aria-label="Channels"] tr.den-row'); await gClean(p); await p.context().close();
+});
+await t('Guided passes axe, names every control and overflows nowhere at 1366, 1440 and 1920, light and dark, with the card and with a done state', async () => {
+  const wg = await world(); const p = await open(wg, 'full-key', { guided: true }); await p.evaluate(s => { const e = document.createElement('script'); e.textContent = s; document.head.appendChild(e); }, AXE_SRC); const bad = [];
+  const look = async where => { for (const theme of ['Light', 'Dark']) { await p.getByRole('button', { name: theme, exact: true }).click(); await p.waitForFunction(v => document.getElementById('den-root').dataset.theme === v, theme.toLowerCase());
+    for (const wdt of [1366, 1440, 1920]) { await p.setViewportSize({ width: wdt, height: 900 }); const at = where + ', ' + theme.toLowerCase() + ' at ' + wdt;
+      const over = await p.evaluate(() => Array.from(document.querySelectorAll('#den-root .den-rail, #den-root .den-guide, #den-root .den-guide-main, #den-root .den-focus, #den-root .den-done, #den-root .den-next, #den-root .den-tray, #den-root .den-traybox, #den-root .den-strip, #den-root .den-head, #den-root .den-tabs')).filter(e => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1).map(e => e.className).concat(document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 ? ['the page'] : []));
+      if (over.length) bad.push(at + ' overflows: ' + over.join(', '));
+      const unnamed = await p.evaluate(() => Array.from(document.querySelectorAll('#den-root button, #den-root input, #den-root select, #den-root textarea, #den-root a[href]')).filter(e => { const lab = e.getAttribute('aria-label') || (e.labels && e.labels[0] && e.labels[0].textContent) || e.textContent || e.getAttribute('title') || ''; return !lab.trim(); }).map(e => e.outerHTML.slice(0, 120)));
+      if (unnamed.length) bad.push(at + ' has unnamed controls: ' + unnamed.join(' '));
+      (await axeBad(p)).forEach(x => bad.push(at + ': ' + x)); } } };
+  // the card, with a row kept and a reason chosen: the tray, the last line with its Undo and the whole action row are drawn
+  const h = await gHead(p); await gBtn(p, 'Keep for the report').click(); await gMoved(p, h); await gCard(p).locator('select[aria-label="Another reason"]').selectOption('other'); await gBtn(p, 'Use this reason').waitFor();
+  eq([await p.locator('.den-rail .den-stepb').count(), await p.locator('.den-trayg li').count(), await p.locator('.den-last button').count(), await p.locator('.den-nextb').count() > 0], [3, 1, 1, true]); await look('the card');
+  await p.locator('.den-under button').click(); await p.waitForSelector('.den-guide .den-done'); eq(await gCard(p).count(), 0); await look('a done state');
+  eq(bad, [], 'Guided'); await p.setViewportSize({ width: 1440, height: 900 }); await gClean(p); await p.context().close();
 });
 
 await finish();
