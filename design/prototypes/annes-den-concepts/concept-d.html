@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en-AU" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anne's Den - concept D, The Clock</title>
+<link rel="stylesheet" href="./fonts/fonts.css">
+<link rel="stylesheet" href="./concept-d.css">
+</head>
+<body data-route="today">
+<a class="skip" href="#stream">Skip to the evidence</a>
+<header id="top" class="top" aria-label="Anne's Den"></header>
+<div id="banner"></div>
+<section id="tl" class="tl" aria-label="The window on a clock"></section>
+<main id="main" class="main">
+  <section id="stream" class="stream-pane" aria-label="Evidence, newest first" tabindex="-1"></section>
+  <aside id="dock" class="dock" aria-label="The brief"></aside>
+  <section id="page" class="page" aria-label="View"></section>
+</main>
+<div id="overlay"></div>
+<div id="toast" class="toast-wrap" role="status" aria-live="polite"></div>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<div id="live" class="sr" aria-live="polite"></div>
+<noscript><p style="padding:24px;color:#fff">This prototype needs JavaScript. It loads nothing from the network.</p></noscript>
+<script src="./shared.js"></script>
+<script src="./concept-d.js"></script>
+</body>
+</html>

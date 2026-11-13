@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anne's Den - Concept B, The Front Page (prototype, synthetic data)</title>
+<script>
+/* The theme is set before the first paint: the person's stored choice, else the system's. */
+(function () {
+  var t = 'auto';
+  try { t = localStorage.getItem('den_b_theme') || 'auto'; } catch (e) {}
+  if (t !== 'light' && t !== 'dark') {
+    t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
+<link rel="stylesheet" href="./fonts/fonts.css">
+<link rel="stylesheet" href="./concept-b.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the edition</a>
+<div id="app" data-route="today">
+  <noscript><p class="boot">This prototype needs JavaScript. It loads nothing from a network.</p></noscript>
+  <p class="boot" role="status">Setting the edition...</p>
+</div>
+<script src="./shared.js"></script>
+<script src="./concept-b.js"></script>
+</body>
+</html>

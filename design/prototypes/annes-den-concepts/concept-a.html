@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en-AU" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anne's Den · Concept A, The Storyboard</title>
+<!-- Prototype only. Invented data (shared.js); loads nothing from the app, talks to no worker, model or key. Works from file://. -->
+<link rel="stylesheet" href="./fonts/fonts.css">
+<link rel="stylesheet" href="./concept-a.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the evidence</a>
+<div class="app" id="app" data-density="regular" data-route="today">
+  <header class="top" id="top" aria-label="Anne's Den"></header>
+  <div class="rail" id="rail"></div>
+  <main class="main" id="main" tabindex="-1" aria-label="Anne's Den workspace"></main>
+</div>
+<div id="drawer"></div>
+<div id="dialog"></div>
+<div id="toasts" class="toasts"></div>
+<noscript><p style="padding:24px;font-family:sans-serif">This prototype needs JavaScript.</p></noscript>
+<script src="./shared.js"></script>
+<script src="./concept-a.js"></script>
+</body>
+</html>

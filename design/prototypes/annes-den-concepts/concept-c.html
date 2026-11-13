@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en-AU" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anne's Den - Concept C, The Reading Room</title>
+<meta name="description" content="Prototype only. Invented data: Harbourline Ferries is not a client.">
+<link rel="stylesheet" href="./fonts/fonts.css">
+<link rel="stylesheet" href="./concept-c.css">
+</head>
+<body>
+<a class="skip" href="#reader-scroll">Skip to the reading pane</a>
+
+<header class="top" id="top" aria-label="Anne's Den"></header>
+<div class="banner" id="banner"></div>
+
+<main class="app" id="app" data-route="today" data-brief="0" data-rail="0">
+  <aside class="pane list" id="list" aria-label="List">
+    <div class="list-head" id="list-head"></div>
+    <div class="list-body" id="list-body" tabindex="-1"></div>
+  </aside>
+
+  <section class="pane reader" id="reader" aria-label="Reading pane">
+    <div class="reader-bar" id="reader-bar"></div>
+    <div class="reader-scroll" id="reader-scroll" tabindex="-1"></div>
+  </section>
+
+  <aside class="pane brief" id="brief" aria-label="The brief" hidden>
+    <div class="brief-head" id="brief-head"></div>
+    <div class="brief-scroll" id="brief-scroll" tabindex="-1"></div>
+  </aside>
+</main>
+
+<div id="pop"></div>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<div id="dialog-root"></div>
+<div id="toast" class="toast-wrap" role="status" aria-live="polite"></div>
+
+<!-- token probes for the design-system page: the contrast ratios are computed from these, not typed in -->
+<div id="probe-dark" data-theme="dark" hidden></div>
+<div id="probe-light" data-theme="light" hidden></div>
+
+<noscript><p style="padding:24px;font-family:sans-serif">This prototype needs JavaScript.</p></noscript>
+<script src="./shared.js"></script>
+<script src="./concept-c.js"></script>
+</body>
+</html>
