@@ -3,7 +3,7 @@
  * connection; and every write is made to fail and to drop. For each: the page is never blank, the failure is said in
  * words, nothing a person typed is lost, and one press recovers once the route answers again. Providers are stubbed and
  * nothing is spent. Run: node --experimental-sqlite tests/den-inject-browser.mjs */
-import { world, open, t, ok, eq, txt, tab, toast, finish } from './den-fixture.mjs';
+import { world, open, t, ok, eq, txt, tab, toast, finish, CARD, cards, sec } from './den-fixture.mjs';
 
 console.log('den-inject-browser harness (every Den route failing, slow and malformed, one at a time)');
 const w = await world(); await w.F('POST', '/den/brief', { desk: 'aep_au' }); await w.F('POST', '/den/discover', { ns: 'aep' });
@@ -18,7 +18,8 @@ const MODES = {
 };
 const alive = page => page.evaluate(() => { const r = document.getElementById('den-root'); return !!r && r.textContent.replace(/\s+/g, ' ').trim().length > 40; });
 const said = page => page.evaluate(() => Array.from(document.querySelectorAll('#den-root .den-state.err, #den-root .den-notice.bad, #den-root [role="alert"]')).map(e => e.textContent.replace(/\s+/g, ' ').trim()).join(' || '));
-const healthy = { today: 'section.den-panel[aria-label="Traditional media"] tr.den-row', brief: '.den-sec[data-section="summary"] textarea', watch: 'section.den-panel[aria-label="Waiting for a person"]', collection: 'section.den-panel[aria-label="Channels"] tr.den-row' };
+const healthy = { today: CARD('media'),   // the Storyboard: an evidence row is a card in the Unsorted column, not a table row
+  brief: '.den-sec[data-section="summary"] textarea', watch: 'section.den-panel[aria-label="Waiting for a person"]', collection: 'section.den-panel[aria-label="Channels"] tr.den-row' };
 
 for (const [name, rx, where] of READS) for (const mode of Object.keys(MODES)) {
   await t(name + ', ' + mode + ': the page stays up, says so, and recovers', async () => {
@@ -40,10 +41,10 @@ for (const [name, rx, where] of READS) for (const mode of Object.keys(MODES)) {
 }
 
 const WRITES = [
-  ['a pin', /^\/den\/pin/, 'today', async p => { await p.locator('section.den-panel[aria-label="Traditional media"] tr.den-row').first().getByRole('button', { name: 'Pin' }).click(); }, async p => eq(await p.locator('tr.den-row.pinned').count(), 0, 'the row shows a pin that was not saved')],
-  ['a set-aside', /^\/den\/aside/, 'today', async p => { const r = p.locator('section.den-panel[aria-label="Traditional media"] tr.den-row').first(); await r.getByRole('button', { name: 'Set aside' }).click(); await r.getByRole('button', { name: 'Set aside' }).click(); }, async p => ok(await p.locator('section.den-panel[aria-label="Traditional media"] tr.den-row').count() >= 7, 'the row left the board though the set-aside failed')],
-  ['a save', /^\/den\/brief\/save/, 'brief', async p => { await p.locator('.den-sec[data-section="bottom"] textarea').fill('Words that must not be lost.'); await p.locator('.den-sec[data-section="summary"] textarea').focus(); }, async p => { eq(await p.inputValue('.den-sec[data-section="bottom"] textarea'), 'Words that must not be lost.'); ok(/Not saved: .* Your words are kept on this computer/.test(await txt(p, '.den-bar[role="status"]')), await txt(p, '.den-bar[role="status"]')); ok(await p.evaluate(() => Object.keys(localStorage).some(k => /^ax_den_work_/.test(k))), 'the words are not kept on this computer'); }],
-  ['a section written again', /^\/den\/brief\/section/, 'brief', async p => { const s = p.locator('.den-sec[data-section="media"]'); await s.getByRole('button', { name: 'Regenerate this section' }).click(); await s.getByRole('button', { name: 'Write it again (1 model call)' }).click(); }, async p => ok(/^The story ran in three outlets/.test(await p.inputValue('.den-sec[data-section="media"] textarea')), 'the section changed though the call failed')],
+  ['a pin', /^\/den\/pin/, 'today', async p => { await cards(p, 'media').first().getByRole('button', { name: 'Pin' }).click(); }, async p => eq(await p.locator('.den-row.pinned').count(), 0, 'the row shows a pin that was not saved')],
+  ['a set-aside', /^\/den\/aside/, 'today', async p => { const r = cards(p, 'media').first(); await r.getByRole('button', { name: 'Set aside' }).click(); await r.getByRole('button', { name: 'Set aside' }).click(); }, async p => ok(await cards(p, 'media').count() >= 7, 'the row left the board though the set-aside failed')],
+  ['a save', /^\/den\/brief\/save/, 'brief', async p => { await (await sec(p, 'bottom')).locator('textarea').fill('Words that must not be lost.'); await sec(p, 'summary'); /* one section shows at a time: leaving it for another saves it */ }, async p => { eq(await p.inputValue('.den-sec[data-section="bottom"] textarea'), 'Words that must not be lost.'); ok(/Not saved: .* Your words are kept on this computer/.test(await txt(p, '.den-bar[role="status"]')), await txt(p, '.den-bar[role="status"]')); ok(await p.evaluate(() => Object.keys(localStorage).some(k => /^ax_den_work_/.test(k))), 'the words are not kept on this computer'); }],
+  ['a section written again', /^\/den\/brief\/section/, 'brief', async p => { const s = await sec(p, 'media'); await s.getByRole('button', { name: 'Regenerate this section' }).click(); await s.getByRole('button', { name: 'Write it again (1 model call)' }).click(); }, async p => ok(/^The story ran in three outlets/.test(await p.inputValue('.den-sec[data-section="media"] textarea')), 'the section changed though the call failed')],
   ['filing', /^\/den\/brief\/file/, 'brief', async p => { await p.getByRole('button', { name: 'Mark as filed' }).click(); }, async p => ok(/Draft/.test(await txt(p, '#den-tabpanel section.den-panel:visible header .den-chip')), 'it shows as filed')],
   ['an approval', /^\/den\/watch\/decide/, 'watch', async p => { const r = p.locator('section.den-panel[aria-label="Waiting for a person"] tr.den-row').first(); await r.getByRole('button', { name: 'Approve' }).click(); await r.getByRole('button', { name: 'Approve' }).click(); }, async p => ok(await p.locator('section.den-panel[aria-label="Waiting for a person"] tr.den-row').count() >= 1, 'the proposal left the queue')],
   ['finding keywords', /^\/den\/discover/, 'watch', async p => { await p.getByRole('button', { name: 'Find new keywords now (free)' }).click(); }, async p => ok(await p.getByRole('button', { name: 'Find new keywords now (free)' }).isEnabled(), 'the button stayed locked')],

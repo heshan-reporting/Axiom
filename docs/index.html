@@ -31,7 +31,7 @@
 <link rel="stylesheet" href="studio-editor.css?v=r45">
 <link rel="stylesheet" href="studio-shell.css?v=r45">
 <link rel="stylesheet" href="studio-polish.css?v=r45">
-<link rel="stylesheet" href="den.css?v=r45">
+<link rel="stylesheet" href="den.css?v=r46">
 <script src="studio-render.js?v=r45" defer></script>
 <script src="studio-progress.js?v=r45" defer></script>
 <script src="studio-merge.js?v=r45" defer></script>
@@ -42,7 +42,7 @@
 <script src="studio-style.js?v=r45" defer></script>
 <script src="studio-brandmem.js?v=r45" defer></script>
 <script src="sources.js?v=r2" defer></script>
-<script src="den.js?v=r48" defer></script>
+<script src="den.js?v=r49" defer></script>
 <script src="sentiment.js?v=r1" defer></script>
 <script src="narratives.js?v=r1" defer></script>
 <script src="overview.js?v=r1" defer></script>
@@ -3149,6 +3149,8 @@ function go(v,fromHistory){
   // inside the Creative Studio the news navigation, the scope bar and the masthead step aside: the Studio carries its own
   // header with the way back to AXIOM, and owns the whole window below it
   document.body.classList.toggle('in-studio',v==='studio');
+  // Anne's Den is a focused window too (docs/den.css): its own top bar carries the way back
+  document.body.classList.toggle('in-den',v==='den');
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});

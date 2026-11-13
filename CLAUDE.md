@@ -293,6 +293,47 @@ verifies each, and what was asked for and not built.
     recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
+  - **The Storyboard (13 November 2026; page `den.css?v=r46`, `den.js?v=r49`; the worker is unchanged; branch
+    `worktree-annes-den-storyboard`, not deployed).** The owner chose concept A of four
+    (`design/prototypes/annes-den-concepts/`, `prompts/annes-den-ui-variations.md`). **A focused window:** `go('den')`
+    sets `body.in-den` and AXIOM's masthead, navigation, scope bar and the view's note step aside (`#vtitle` and the
+    navigation button still say where this is); the Den draws a 48px top bar (Back to AXIOM, the desk, the day and
+    window, model calls today, Refresh, `?`) and a 44px rail: the tabs (Today is named **Board**; the id is still
+    `den-tab-today`) and the six checks as pills (`.den-strip`, gaps first, one pill a check with its count; a pill
+    opens its findings, each with whether the brief covers it and its one action). The frame rules are in `den.css`
+    only, on `--dn-*` tokens scoped to `#den-root` (the app tokens the older rules and the job console read are
+    re-pointed there); Manrope and DM Sans from `docs/vendor/fonts/`; dark only. **The Board** replaces the five
+    tables: every row is a card (`article.den-row[data-kind][data-key]`: media, social, actors, narratives,
+    upcoming) in **Unsorted** (search, a kind filter with counts, Undo, the gap line "Not a quiet day", cards by
+    weight with pinned first, folded Low weight and Set aside, a line for each kind with no row and why) or under a
+    column for each section of the desk (`section.den-col[data-sec]`, from the desk's `sections`; its number key, a
+    state chip, the checks it has not covered, Write, an excerpt of its words; the Source List column is built, not a
+    place to file). A card is filed by dragging, by focusing it and pressing the section's number (1-9, 0), or by
+    its select. **Filing pins:** a row the worker can pin goes through `POST /den/pin` exactly as the Pin button
+    does; a narrative or a date is not sent (the worker pins archive rows only). **Which section a card sits under
+    is kept per browser**, localStorage `ax_den_file_<desk>_<Sydney day>` (`{cardKey: sectionId}`), and the page
+    says so; the open section is `ax_den_sec_<desk>`. `weigh(card, signals, now)` is the one pure function behind a
+    card's weight (a base for the kind, reach on a log scale, outlets, growth since yesterday, a check that names
+    it, recency), shown with its reasons; `covered(signal, brief, texts)` applies the worker's filing rule to the
+    words in the editor. **The Brief** shows one section at a time between its outline and the evidence filed under
+    it (the other sections stay mounted, hidden): the textarea, **As it reads** (each citation a chip with the row's
+    outlet or channel from the brief's `evidence` map, each flag at the sentence it concerns, cut the way
+    `denCleanText` cuts sentences), the rating selects in the section they rate (`ratings.items` matched by id; the
+    rest stay in a bar), and a card on the right inserts `[M:n]` where the cursor last was - only an id the brief's
+    evidence holds is offered, since the worker removes any other. "Pull from the rest of the window" files a card
+    under the open section from the Board's own read (lifted into `DenApp`; the Brief tab reads no board and falls
+    back to the brief's evidence map). A foot bar holds the save state, words, flags, checks uncovered, History and
+    Compare (a drawer), Export (the four exports in one menu), Draft again, Save changes, Mark as filed / Reopen. A
+    draft shows the time so far and no percentage. Watch's Delete asks in the Den's own dialog; Collection's
+    console opens under the row that started the job. **Reads:** the Board still makes one
+    `GET /den/board?desk=&missed=1` and no `/den/missed`; the brief is now read when the Den opens
+    (`GET /den/brief`, one row) so the columns can show it, where it was read on the first visit to Brief.
+    Harnesses: `tests/den-browser.mjs` (32: the 27 kept, with the table assertions moved to cards, columns and
+    pills, and five new - the focused window and the way back, the first card on the first screen at 1366 x 768,
+    filing by key with the pin, Undo, a reload, the select and a drag, the Write surface and the pull, citing at the
+    cursor), `tests/den-inject-browser.mjs` (60), `tests/studio-tokens-test.mjs` (5: TK5 holds the Den's inks to
+    AA); fixture helpers `CARD`, `cards`, `checks`, `sec`, `exportItem`. **Not verified:** nothing was seen against
+    the live worker or real rows (weights and column widths on a busy day), and the drag was tried in Chromium only.
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -

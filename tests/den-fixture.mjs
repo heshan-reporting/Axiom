@@ -60,5 +60,15 @@ export const tab = async (page, name) => { await page.click('#den-tab-' + name);
 export const toast = page => page.evaluate(() => (document.querySelector('.toast, #toast') || {}).textContent || '');
 export const shot = async (page, n) => { if (SHOT) await page.screenshot({ path: SHOTS + n + '.png', fullPage: true, scale: 'css' }); };
 export const panel = (page, title) => page.locator('section.den-panel[aria-label="' + title + '"]');
+/* The Storyboard (13 November 2026): an evidence row is a card (.den-row[data-kind]) in the Unsorted column or under a
+ * section's column; the six checks are pills on the rail and a pill opens its findings; the brief shows one section at
+ * a time, chosen in its outline; the four exports sit in one Export menu. */
+export const CARD = kind => '.den-unsorted .den-row' + (kind ? '[data-kind="' + kind + '"]' : '');
+export const cards = (page, kind) => page.locator(CARD(kind));
+export const checks = async page => { const out = []; const pills = page.locator('.den-strip li button.den-check'); const n = await pills.count();
+  for (let i = 0; i < n; i++) { const b = pills.nth(i); if ((await b.getAttribute('data-n')) === '0') continue; await b.click(); await page.waitForSelector('.den-pop li'); const lab = await txt(page, '.den-pop header .den-chip'); (await all(page, '.den-pop li')).forEach(l => out.push(lab + ' ' + l)); await page.keyboard.press('Escape'); await page.waitForSelector('.den-pop', { state: 'detached' }); }
+  return out; };
+export const sec = async (page, id) => { const s = '.den-sec[data-section="' + id + '"]'; if (!(await page.locator(s).isVisible())) await page.locator('.den-outline [data-goto="' + id + '"]').click(); await page.waitForSelector(s, { state: 'visible' }); return page.locator(s); };
+export const exportItem = async (page, name) => { if (!(await page.locator('.den-menu-list').count())) await page.getByRole('button', { name: 'Export', exact: true }).click(); return page.getByRole('button', { name }); };
 
 export async function finish() { await browser.close(); server.kill(); console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0); }

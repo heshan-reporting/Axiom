@@ -1,4 +1,5 @@
-/* The Studio's design system holds (P52, Phase 6 of prompts/studio-engines-and-canvas.md). Node only, no browser.
+/* (TK5, 13 November 2026: the same contrast rule for Anne's Den's own --dn- tokens in den.css.)
+ * The Studio's design system holds (P52, Phase 6 of prompts/studio-engines-and-canvas.md). Node only, no browser.
  *   TK1 no Studio stylesheet carries a colour of its own: a hex colour appears only in the token files (studio-skin.css,
  *       studio-shell.css) or as the value of a token declaration (--name: ...), such as the light theme in studio-polish.css
  *   TK2 every corner is a radius token: no pixel border-radius outside the token files
@@ -46,5 +47,12 @@ t('TK3: every text token reads on every surface token at AA, dark and light', ()
 t('TK4: every Studio stylesheet that animates stops under prefers-reduced-motion', () => {
   const bad = files.filter(f => { const s = strip(read(f)); return /(animation\s*:|@keyframes)/.test(s) && !/prefers-reduced-motion/.test(s); });
   ok(!bad.length, 'animates with no reduced-motion rule: ' + bad.join(', '));
+});
+t('TK5: Anne\'s Den: every ink reads on every surface at AA, and each status ink on its own tint', () => {
+  const T = {}; (strip(read('den.css')).match(/--dn-[a-z0-9-]+:#[0-9a-fA-F]{3,8}/g) || []).forEach(d => { const [k, v] = d.split(':'); T[k] = v; }); ok(T['--dn-ink-0'] && T['--dn-s1'] && T['--dn-bg-0'], 'the Den\'s tokens were not found in den.css');
+  const bad = []; const need = (fg, bg, min) => { ok(T[fg] && T[bg], 'no token ' + fg + ' or ' + bg); const r = ratio(T[fg], T[bg]); if (r < min) bad.push(fg + ' on ' + bg + ' ' + r.toFixed(2) + ':1 < ' + min); };
+  for (const bg of ['--dn-bg-0', '--dn-bg-1', '--dn-s1', '--dn-s2', '--dn-s3']) for (const fg of ['--dn-ink-0', '--dn-ink-1', '--dn-ink-2', '--dn-ink-3', '--dn-accent-text']) need(fg, bg, 4.5);
+  [['--dn-pos-ink', '--dn-pos-dim'], ['--dn-warn-ink', '--dn-warn-dim'], ['--dn-neg-ink', '--dn-neg-dim'], ['--dn-info-ink', '--dn-info-dim'], ['--dn-accent-text', '--dn-accent-dim'], ['--dn-ink-1', '--dn-neutral-dim'], ['--dn-accent-ink', '--dn-accent'], ['--dn-accent-ink', '--dn-accent-hi'], ['--dn-bg-0', '--dn-ink-0']].forEach(p => need(p[0], p[1], 4.5));
+  ok(!bad.length, bad.join('\n       '));
 });
 console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);

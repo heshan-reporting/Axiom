@@ -752,6 +752,38 @@ small table of tags by item (`item, issue, ts, kind`) written when a row is file
 baseline count read an index and never touch article text. It is the lasting fix and it is a change to how every
 collector files a row, so it was not made in a hurry on the day of the fault.
 
+### 6.10 The Storyboard (13 November 2026; page `den.css?v=r46`, `den.js?v=r49`; no worker change)
+
+The page was redesigned from the audit in `prompts/annes-den-ui-variations.md`; the owner chose concept A of the four
+prototypes in `design/prototypes/annes-den-concepts/`. What a person now meets:
+
+| Where | Before | Now |
+|---|---|---|
+| The window | The app's masthead, navigation and scope bar above the Den; the first row 600px down at 1366 x 768 | A focused window (`body.in-den`): a 48px top bar with Back to AXIOM and a 44px rail; the first card is on the first screen |
+| What must not be missed | A list repeated above every tab | Six pills on the rail, gaps first; a pill opens its findings, whether the brief covers each, and its one action. A gap is also said on the Board ("Not a quiet day") |
+| The evidence | Five stacked tables on Today | The **Board**: cards by weight in Unsorted, and a column for each section of the desk's report. A card is filed by drag, by the section's number, or by its select |
+| The brief | Nine to eleven textareas in one column, citations as bare ids | One section open between an outline and the evidence filed under it; "As it reads" with citations as outlet chips and each flag at its sentence; a card inserts its citation at the cursor; a sticky foot bar |
+
+Decisions that bind:
+- **Filing pins.** Filing a row under a section sends `POST /den/pin` as the Pin button does, so a draft must cover
+  it. Narratives and dates are not rows the worker pins: they are filed on the computer only.
+- **Where a card sits is this browser's note**: localStorage `ax_den_file_<desk>_<Sydney day>`. The worker was not
+  changed, so a second person, or the same person on another computer, sees the pins and not the columns. Moving
+  this to the worker (a `section` on `den_marks`) is the obvious next step and was not built.
+- **A weight is the page's arithmetic**, from the figures `GET /den/board` already returns (`weigh()` in
+  `docs/den.js`), shown with its reasons. It orders cards; it hides nothing but old, low-reach posts (Low weight, one
+  press away).
+- **Covered / not covered** uses the rule `denBriefFile` applies (a cited row the check names, its words, or a plain
+  statement that a channel was not read), on the words in the editor.
+- **Only an id the brief's evidence holds can be cited from a card**, because `denCleanText` removes any other on
+  save. A row collected after the draft says so and offers nothing.
+- The Board still reads the window once (`/den/board?missed=1`). The brief (`GET /den/brief`, one row) is read when the
+  Den opens, not on the first visit to Brief.
+
+Not verified: the live worker and real rows. Weights, column widths and the rail at a desk with many findings were
+seen only on the fixture's invented day (`tests/den-shots.mjs` saves both sizes into `tests/shots/den/`; the earlier
+layout is in `tests/shots/den-before/`).
+
 ## 7. Hand-over (11 November 2026)
 
 ### 7.1 What exists
@@ -765,6 +797,7 @@ collector files a row, so it was not made in a hurry on the day of the fault.
 | 5 | p57 | Keyword discovery: proposed with evidence, approved by a person |
 | 6 | p58, r44 | Anne's Den: the page |
 | 6.9 | p61, den.js r48 | The page's first live open overloaded the database: one read on Today, slow counts cached, a busy database said and retried |
+| 6.10 | page only, den.js r49 | The Storyboard: a focused window, the Board of cards and section columns, the three-pane Brief (s.6.10) |
 
 ### 7.2 The three layers, in one table
 
