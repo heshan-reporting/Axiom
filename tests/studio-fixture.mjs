@@ -156,7 +156,7 @@ export async function makeStudio(opts) {
   // RC: a static server left running on this port (an interrupted run) would serve another tree's pages and the run would pass or
   // fail on the wrong page; the port must be free, or the harness stops and says so
   await new Promise((resolve, reject) => { const probe = net.createServer(); probe.once('error', e => reject(new Error('port ' + PORT + ' is already in use (' + e.code + '): a static server from an earlier run may still be serving another tree; stop it, or pick another port'))); probe.once('listening', () => probe.close(resolve)); probe.listen(PORT, '0.0.0.0'); });
-  const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+  const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
   await new Promise(r => setTimeout(r, 900));
   // S23: another engine when asked (firefox, webkit); Chromium by default
   const engine = (opts && opts.browser === 'firefox') ? firefox : (opts && opts.browser === 'webkit') ? webkit : chromium;

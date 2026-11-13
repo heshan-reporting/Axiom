@@ -9,7 +9,7 @@
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';
 const PORT = 8773, W = 'https://newsaus.heshan-998.workers.dev';
-const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
 for (let i = 0; i < 40; i++) { try { const r = await fetch('http://127.0.0.1:' + PORT + '/index.html'); if (r.ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 150)); }
 const NOW = Date.now(), H = 3600e3, iso = t => new Date(t).toISOString();
 const general = [

@@ -46,7 +46,7 @@ const ev = (await api('GET', '/studio/get?id=' + p.id)).thread.filter(e => e.kin
 const boards = [{ name: 'House default (before)', layout: house }].concat(ev.options.map(o => ({ name: o.name + (o.needsImage ? ' (new photograph)' : ' (same photograph)'), layout: o.layout, summary: o.summary })));
 boards.forEach(b => console.log('  ' + b.name + (b.summary ? ': ' + b.summary : '')));
 
-const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
 await new Promise(r => setTimeout(r, 900));
 const browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 await page.setContent('<!doctype html><html><body style="margin:0;background:#0f141a"></body></html>');

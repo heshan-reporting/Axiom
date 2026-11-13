@@ -11,7 +11,7 @@ export const W = 'https://newsaus.heshan-998.workers.dev'; export const H = 3600
 const KEYS = { 'full-key': { n: 'Anne', r: 'full' }, 'read-key': { n: 'Reader', r: 'read' }, 'other-key': { n: 'Kai', r: 'full' } };
 const freePort = () => new Promise(r => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const up = port => new Promise(r => { const tryIt = n => { const c = net.connect(port, '127.0.0.1'); c.on('connect', () => { c.destroy(); r(true); }); c.on('error', () => (n > 60 ? r(false) : setTimeout(() => tryIt(n + 1), 120))); }; tryIt(0); });
-const PORT = await freePort(); const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1', '--directory', DOCS], { stdio: 'ignore' }); await up(PORT);
+const PORT = await freePort(); const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1', '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port await up(PORT);
 export const SHOT = process.env.SHOT === '1'; export const SHOTS = new URL('./shots/den/', import.meta.url).pathname; if (SHOT) fs.mkdirSync(SHOTS, { recursive: true });
 
 let seq = 0;

@@ -5,7 +5,7 @@
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';   // Playwright found portably (PLAYWRIGHT_MJS, the project, the global install)
 const PORT = 8774, W = 'https://newsaus.heshan-998.workers.dev';
-const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
 for (let i = 0; i < 40; i++) { try { const r = await fetch('http://127.0.0.1:' + PORT + '/index.html'); if (r.ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 150)); }
 const NOW = Date.now(), H = 3600e3;
 const narr = (id, label, ns, issues, ents) => ({ id, label, client: ns === 'mca' ? 'Minerals Council of Australia' : 'Curious Minds', issues, issueLabels: issues, ns, side: 'hostile', n: 6, n24: 4, nprev: 1, velocity: 4, status: 'growing', first_ts: NOW - 20 * H, first_platform: 'news', first_channel: 'smh', last_ts: NOW - H, platforms: { news: 2, reddit: 4 }, sentiment: { judged: 0 }, alerted: false, counter: '', proponents: '', entities: ents, muted: false, pinned: false, edited: false, spread: [], channels: [], amplifiers: [], termsTop: [], items: [], origin: null, series: [] });
