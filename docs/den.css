@@ -46,7 +46,7 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
   /* motion */
   --dn-dur-1:120ms; --dn-dur-2:200ms; --dn-ease:cubic-bezier(.2,.7,.2,1);
   /* sizes */
-  --dn-hit:32px; --dn-top-h:48px; --dn-rail-h:44px; --dn-col-w:272px; --dn-uns-w:344px; --dn-outline-w:244px; --dn-ev-w:344px; --dn-measure:760px;
+  --dn-hit:32px; --dn-top-h:48px; --dn-rail-h:44px; --dn-col-w:272px; --dn-col-w-c:160px; --dn-uns-w:344px; --dn-outline-w:244px; --dn-ev-w:344px; --dn-measure:760px;
   --den-pad:9px; --den-gap:14px; --den-r:var(--dn-r-md); --den-r-pill:var(--dn-r-pill);
   /* the app tokens the Den's older rules and the shared job console read, on the same palette */
   --t0:var(--dn-ink-0); --t1:var(--dn-ink-1); --t2:var(--dn-ink-2); --t3:var(--dn-ink-3);
@@ -77,8 +77,15 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-where{display:flex;align-items:baseline;gap:8px;min-width:0;overflow:hidden;white-space:nowrap}
 .den-day{font:600 var(--dn-fs-sm)/1 var(--dn-text);color:var(--dn-ink-0)}
 .den-win{font-size:var(--dn-fs-sm);color:var(--dn-ink-2);overflow:hidden;text-overflow:ellipsis}
-.den-budget{font-size:var(--dn-fs-sm);color:var(--dn-ink-2);white-space:nowrap}
+.den-budget{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:var(--dn-fs-sm);line-height:1.1;color:var(--dn-ink-2);white-space:nowrap}
 .den-budget b{color:var(--dn-ink-0);font-weight:600;font-variant-numeric:tabular-nums}
+/* the meter under the count: used of the cap, accent until three quarters, then warn, then neg when the cap is reached */
+.den-meter{display:block;width:124px;height:4px;border-radius:var(--dn-r-pill);background:var(--dn-neutral-dim);overflow:hidden}
+.den-meter i{display:block;height:100%;border-radius:inherit;background:var(--dn-accent);transition:width var(--dn-dur-2) var(--dn-ease)}
+.den-meter i.near{background:var(--dn-warn)} .den-meter i.full{background:var(--dn-neg)}
+/* the day picker: today unless another day is picked; the chip beside it says so while it is */
+.den-daypick input{height:var(--dn-hit);padding:0 8px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-sm);background-color:var(--dn-s2);color:var(--dn-ink-0);font:500 var(--dn-fs-sm)/1 var(--dn-text);color-scheme:dark}
+.den-otherday{flex-shrink:0}
 .den-keys{min-width:var(--dn-hit);font-weight:700}
 .den-spacer{flex:1}
 .den-rail{display:flex;align-items:stretch;gap:var(--dn-sp-4);padding:0 var(--dn-sp-4);min-width:0;background:var(--dn-bg-1);border-bottom:1px solid var(--dn-line)}
@@ -221,6 +228,15 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-col{--spine:var(--dn-line-2);flex:0 0 var(--dn-col-w);display:flex;flex-direction:column;min-height:0;background:var(--dn-s1);border:1px solid var(--dn-line);border-top:2px solid var(--spine);border-radius:var(--dn-r-lg);box-shadow:var(--dn-e1)}
 .den-col.den-unsorted{flex-basis:var(--dn-uns-w);--spine:var(--dn-ink-3)}
 .den-col.over{border-color:var(--dn-accent);background:var(--dn-s2)}
+/* a column with no card is compact: the same column (its key, its state, Write, the drop zone), narrower, its title on two
+   lines. The width changes at once, not over a transition: Chromium starts no drag while the columns under the pointer
+   are still moving (seen 15 November 2026, a drag begun within 300 ms of a filing) */
+.den-col.empty{flex-basis:var(--dn-col-w-c)}
+.den-col.empty .den-col-h h3{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:var(--dn-fs-md);line-height:1.25}
+.den-col.empty .den-col-meta{flex-wrap:wrap;gap:4px 6px;min-height:0;padding-top:6px}
+.den-col.empty .den-col-meta .den-mini{padding:0 8px;min-height:28px}
+.den-col.empty .den-drop{padding:14px 8px;line-height:1.5}
+.den-col.empty .den-excerpt p{-webkit-line-clamp:4}
 .den-col-h{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-2);padding:10px 12px 0}
 .den-col-h h3{flex:1;min-width:0;margin:0;font:650 var(--dn-fs-base)/1.25 var(--dn-display);color:var(--dn-ink-0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .den-unsorted .den-col-h h3{flex:0 1 auto;font-size:var(--dn-fs-xl);font-weight:700}
@@ -239,6 +255,13 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-seg[aria-pressed="true"]{background:var(--dn-s3);color:var(--dn-ink-0);font-weight:600}
 .den-undo{align-self:flex-start;max-width:100%;min-height:28px}
 .den-undo-t{font-weight:400;overflow:hidden;text-overflow:ellipsis;max-width:230px}
+/* several cards selected: the bar that sets them aside with one reason */
+.den-bulk{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--dn-accent);border-radius:var(--dn-r-sm);background:var(--dn-accent-dim);color:var(--dn-ink-0);font-size:var(--dn-fs-sm)}
+.den-bulk b{font-weight:600;margin-right:2px}
+.den-bulk .den-in{min-height:28px;padding:2px 6px;font-size:var(--dn-fs-sm)}
+.den-bulk .den-mini{min-height:28px}
+.den-pick{flex-shrink:0;margin:0;cursor:pointer}
+.den-card.picked{border-color:var(--dn-accent-hi);background:var(--dn-s3)}
 .den-col-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:10px 8px 10px}
 .den-col-body>.den-state{padding:12px 8px}
 .den-drop{margin:0;padding:18px 12px;border:1px dashed var(--dn-line-2);border-radius:var(--dn-r-md);text-align:center;color:var(--dn-ink-2);font-size:var(--dn-fs-sm)}
@@ -321,7 +344,8 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-cites p{margin:0 0 10px}
 .den-cites p:last-child{margin-bottom:0}
 .den-cite{display:inline-flex;align-items:center;margin:0 2px;padding:1px 8px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-pill);background:var(--dn-s3);color:var(--dn-ink-0);font:600 var(--dn-fs-sm)/1.5 var(--dn-text);text-decoration:none;white-space:nowrap;vertical-align:1px}
-a.den-cite:hover{border-color:var(--dn-accent);color:var(--dn-accent-text)}
+a.den-cite:hover,button.den-cite:hover{border-color:var(--dn-accent);color:var(--dn-accent-text)}
+button.den-cite{cursor:pointer}
 .den-cite.bad{background:var(--dn-neg-dim);border-color:var(--dn-neg);color:var(--dn-neg-ink)}
 .den-flag mark{background:var(--dn-mark);color:inherit;border-bottom:2px solid var(--dn-warn);padding:1px 0}
 .den-flag .w,.den-flags .w{display:inline-flex;align-items:center;padding:1px 8px;border-radius:var(--dn-r-xs);background:var(--dn-warn-dim);color:var(--dn-warn-ink);font:700 var(--dn-fs-xs)/1.6 var(--dn-text);vertical-align:1px}
@@ -339,7 +363,9 @@ a.den-cite:hover{border-color:var(--dn-accent);color:var(--dn-accent-text)}
 .den-evsub{margin:var(--dn-sp-4) 4px var(--dn-sp-2);font:600 var(--dn-fs-xs)/1 var(--dn-text);letter-spacing:.08em;text-transform:uppercase;color:var(--dn-ink-2)}
 .den-evsub.warn{color:var(--dn-warn-ink)}
 .den-evlist,.den-pulllist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--dn-sp-2)}
-.den-evitem{display:flex;flex-direction:column;gap:4px}
+.den-evitem{display:flex;flex-direction:column;gap:4px;border-radius:var(--dn-r-md)}
+/* the card a citation chip led to, for a moment */
+.den-evitem.lit .den-evcard{border-color:var(--dn-accent);box-shadow:0 0 0 3px var(--dn-accent-dim)}
 .den-evcard{display:flex;flex-direction:column;gap:4px;width:100%;padding:10px 12px;border:1px solid var(--dn-line);border-left:2px solid var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-s2);color:var(--dn-ink-1);font:inherit;text-align:left;cursor:pointer;box-shadow:var(--dn-e1)}
 .den-evcard:hover:not(:disabled){border-color:var(--dn-accent)}
 .den-evcard:disabled{cursor:default;opacity:.85}

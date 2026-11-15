@@ -16,6 +16,9 @@ await t('the Den opens from the navigation on a desk, in Australian Eastern time
   ok(await page.$('.rbtn[data-v="den"][aria-current="page"]'), 'the navigation button is current'); eq(await page.title() !== '', true); ok(/Anne's Den/.test(await txt(page, '#vtitle')));
   eq(await all(page, '.den-head select[aria-label="Desk"] option'), ['AEP national', 'AEP Victoria', 'Firearms', 'MCA national', 'MCA Victoria']);
   ok(/daily, the last 24 hours - Australian Eastern time/.test(await txt(page, '.den-win'))); ok(/model calls today: 0 of 20/.test(await txt(page, '.den-head')) && !(await page.$('.den-head .den-chip.warn')));
+  // under the count, a meter of the cap, carrying the same words; and the day picker stands on today
+  const meter = page.locator('.den-budget [role="meter"]'); eq([await meter.getAttribute('aria-valuenow'), await meter.getAttribute('aria-valuemax')], ['0', '20'], 'the meter is used of cap'); eq(await meter.getAttribute('title'), await page.getAttribute('.den-budget', 'title'), 'with the same title text');
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); eq(await page.inputValue('.den-head input[aria-label="Day"]'), today, 'today is the day shown'); eq(await page.getAttribute('.den-head input[aria-label="Day"]', 'max'), today, 'and no later day can be picked'); ok(!/not today/.test(await txt(page, '.den-head')));
   eq(await all(page, '.den-tabs[aria-label="Anne\'s Den"] .den-tab'), ['Board', 'Brief', 'Watch', 'Collection', 'Options']); eq(w.calls.length, 0);
 });
 await t('the strip says what should not be missed, gaps first, and opens the evidence', async () => {
@@ -78,11 +81,16 @@ await t('a draft states its cost first, is one call, and comes back checked agai
   await page.getByRole('button', { name: 'Draft the brief (1 model call)' }).click(); await page.waitForSelector('.den-sec[data-section="summary"] textarea'); eq(w.calls.length, 1);
   ok(/^Coverage of the gas taxation debate/.test(await page.inputValue('.den-sec[data-section="summary"] textarea'))); ok(/drafted/.test(await txt(page, '.den-sec[data-section="summary"] h4')));
   eq(await txt(page, '.den-sec[data-section="summary"] .den-flag'), 'No evidence behind: A campaigner named Sam Private is behind it.', 'the sentence that rested on an invented row is marked, at the sentence'); ok(/1 without evidence/.test(await txt(page, '.den-bar[role="status"]')));
-  eq(await all(page, '.den-sec[data-section="summary"] .den-cites a'), ['pointpost', 'X post'], 'a citation reads as the outlet or the channel, not a bare id');
-  ok((await page.inputValue('.den-sec[data-section="summary"] textarea')).indexOf('M:999999') < 0, 'and the invented citation is gone'); eq(await page.$$eval('.den-sec[data-section="summary"] .den-cites a', a => a.map(x => /^https:/.test(x.href))), [true, true]);
+  eq(await all(page, '.den-sec[data-section="summary"] .den-cites button.den-cite'), ['pointpost', 'X post'], 'a citation reads as the outlet or the channel, not a bare id');
+  ok((await page.inputValue('.den-sec[data-section="summary"] textarea')).indexOf('M:999999') < 0, 'and the invented citation is gone');
+  // a chip jumps to its card in the evidence pane: the card is brought into view and focused, and its source is one press away
+  const chip = page.locator('.den-sec[data-section="summary"] .den-cites button.den-cite', { hasText: 'pointpost' }); const cid = (/^\[?([A-Z]:\d+)/.exec(await chip.getAttribute('title')) || [])[1]; ok(cid, 'the chip says which row it cites: ' + await chip.getAttribute('title'));
+  await chip.click(); await page.waitForFunction(id => { const li = document.activeElement && document.activeElement.closest('.den-evpane li[data-cite]'); return !!li && li.dataset.cite === id; }, cid);
+  const lit = page.locator('.den-evpane li[data-cite="' + cid + '"]'); ok(await lit.evaluate(e => { const r = e.getBoundingClientRect(); const p = e.closest('.den-evpane').getBoundingClientRect(); return r.top >= p.top - 1 && r.bottom <= p.bottom + 1; }), 'the card is in view');
+  ok(/^https:/.test(await lit.locator('a.den-link', { hasText: 'Open' }).getAttribute('href')), 'the source link is on the card the chip led to'); ok(/Harbour levy/.test(await lit.textContent()));
   const mo = await sec(page, 'momentum'); eq(await mo.locator('.den-bar select').first().inputValue(), 'Moderate', 'the rating sits in the section it rates'); eq(await page.inputValue('#den-tabpanel .den-bar select[aria-label="Momentum trend"]'), 'Stable'); await sec(page, 'summary'); ok(/Draft/.test(await txt(page, 'section.den-panel header .den-chip.warn')) && /revision 1/.test(await txt(page, 'section.den-panel header')));
   ok(/Traditional media.*pointpost - Harbour levy divides the Senate/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')) && /built from the citations/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')));
-  await page.waitForFunction(() => /model calls today: 1 of 20/.test(document.querySelector('.den-head').textContent)); await shot(page, '03-brief-draft');
+  await page.waitForFunction(() => /model calls today: 1 of 20/.test(document.querySelector('.den-head').textContent)); eq(await page.getAttribute('.den-budget [role="meter"]', 'aria-valuenow'), '1', 'the meter moved with the call'); await shot(page, '03-brief-draft');
 });
 await t('an edit is kept on this computer at once, saved on leaving the field, and marked as a person\'s', async () => {
   const ta = (await sec(page, 'bottom')).locator('textarea'); await ta.fill('Anne\'s own bottom line.');   // the brief shows one section at a time: the outline opens it
@@ -350,6 +358,51 @@ await t('citing a card puts its mark where the cursor was, marks the card as cit
   await p.getByRole('button', { name: 'Save changes' }).click(); await p.waitForFunction(() => /Saved, revision/.test(document.querySelector('.den-bar[role="status"]').textContent));
   const b = (await w5.F('GET', '/den/brief?desk=aep_au')).body.brief; ok(b.sections.media.cites.indexOf(cid) >= 0 && b.sections.media.text === now, 'the worker kept the citation: ' + JSON.stringify(b.sections.media.cites));
   ok(b.sourceList.some(g => g.items.some(i => i.id === cid)), 'and the Source List, built from the citations, now carries it'); eq(p.errors, []); await p.context().close();
+});
+
+/* ---- 15 November 2026: the four items s.6.10 named and did not build, and the quiet desk ---- */
+const w6 = await world(); const syd = ms => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+await t('several unsorted cards are set aside at once: a tick or a shift-click selects, one reason for all, each row through POST /den/aside, one Undo, and the mute offer', async () => {
+  const p = await open(w6); await p.waitForSelector(CARD('media')); const noisy = i => cards(p, 'media').filter({ hasText: 'Noisy outlet on the gas export tax ' + i });
+  eq(await p.locator('.den-bulk').count(), 0, 'nothing selected: no bulk bar'); eq(await p.locator(CARD() + ' input.den-pick').count(), await p.locator(CARD('media') + ', ' + CARD('social') + ', ' + CARD('actors')).count(), 'a tick on every card the worker can set aside, and on no other');
+  await noisy(1).locator('input.den-pick').check(); await p.waitForSelector('.den-bulk'); ok(/1 selected/.test(await txt(p, '.den-bulk'))); await noisy(2).locator('input.den-pick').check();
+  await noisy(3).locator('.den-card-title').click({ modifiers: ['Shift'] }); await p.waitForFunction(() => /3 selected/.test(document.querySelector('.den-bulk').textContent)); eq(await noisy(3).locator('input.den-pick').isChecked(), true, 'a shift-click selects too');
+  await noisy(3).getByRole('button', { name: 'Pin' }).click(); await p.waitForSelector(CARD('media') + '.pinned'); ok(/3 selected/.test(await txt(p, '.den-bulk')), 'a button on a selected card is still its own');
+  await p.locator('.den-bulk select[aria-label="Why they are set aside"]').selectOption('duplicate'); const before = p.served.filter(x => x === 'POST /den/aside').length;
+  await p.locator('.den-bulk').getByRole('button', { name: 'Set aside 3 cards' }).click();
+  await p.waitForFunction(() => !Array.from(document.querySelectorAll('.den-unsorted .den-row[data-kind="media"]')).some(x => /Noisy outlet on the gas export tax [123](?!\d)/.test(x.textContent)));   // the title runs straight into "Pin", so no word boundary follows the digit
+  eq(p.served.filter(x => x === 'POST /den/aside').length - before, 3, 'each row went through POST /den/aside, as a single set-aside does');
+  const wb = (await w6.F('GET', '/den/board?desk=aep_au')).body; eq(wb.aside.length, 3); ok(wb.aside.every(a => a.reason === 'duplicate'), 'with the one reason: ' + JSON.stringify(wb.aside.map(a => a.reason)));
+  await p.waitForSelector('.den-notice[role="alert"]'); ok(/set aside 3 rows from noisy\.example\.com on this desk\. Mute it here\?/.test(await txt(p, '.den-notice[role="alert"]')), 'the mute offer still comes');
+  ok(/3 set aside and not shown/.test(await txt(p, '#den-tabpanel'))); eq(await p.locator('.den-bulk').count(), 0, 'the selection is cleared'); ok((await all(p, CARD('media'))).some(r => /Noisy outlet on the gas export tax 4/.test(r)), 'the fourth, not selected, is still on the board');
+  await p.getByRole('button', { name: 'Not now' }).click(); const undo = p.getByRole('button', { name: /^Undo/ }); ok(/Set aside 3 cards/.test(await undo.textContent()), 'one Undo for the three: ' + await undo.textContent());
+  await undo.click(); await p.waitForFunction(() => Array.from(document.querySelectorAll('.den-unsorted .den-row[data-kind="media"]')).filter(x => /Noisy outlet on the gas export tax [123](?!\d)/.test(x.textContent)).length === 3, null, { timeout: 15000 });
+  eq((await w6.F('GET', '/den/board?desk=aep_au')).body.aside.length, 0, 'Undo put all three back'); eq(w6.calls.length, 0, 'nothing was spent'); eq(p.errors, []); await p.context().close();
+});
+await t('a day picker in the top bar moves the Board and the Brief to another day, says so, and spends nothing', async () => {
+  const p = await open(w6); await p.waitForSelector(CARD('media')); const today = syd(Date.now()), day = syd(Date.now() - 3 * D);
+  p.served.length = 0; const calls = w6.calls.length; await p.fill('.den-head input[aria-label="Day"]', day);
+  await p.waitForFunction(() => /not today/.test(document.querySelector('.den-head').textContent)); await p.waitForFunction(() => document.querySelectorAll('.den-board .den-col').length > 1 && !/Loading/.test(document.querySelector('#den-tabpanel').textContent), null, { timeout: 15000 });
+  const board = p.served.find(x => /^GET \/den\/board/.test(x)); ok(board, 'the board was read for the day'); const to = +new URL('https://w' + board.slice(4)).searchParams.get('to');
+  eq([syd(to), syd(to + 1) > day], [day, true], 'the window ends with the last moment of that Sydney day: ' + board); ok(/missed=1/.test(board), 'with the checks');
+  eq(await p.locator('.den-board .den-row').count(), 0, 'three days back, the fixture holds no row'); ok(/No story on this desk/.test(await txt(p, '.den-none [data-none="media"]')));
+  await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state'); ok(p.served.some(x => x === 'GET /den/brief?desk=aep_au&day=' + day), 'the brief for that day was asked for: ' + p.served.filter(x => /brief/.test(x)).join(' | '));
+  const e = await txt(p, '#den-tabpanel'); ok(/No brief was written for /.test(e) && /drafted for today's window only/.test(e), e.slice(0, 200)); eq(await p.locator('#den-tabpanel button', { hasText: /Draft the brief|Write it by hand/ }).count(), 0, 'nothing drafts for another day');
+  eq(p.served.filter(x => /^POST /.test(x)), [], 'nothing was written'); eq(w6.calls.length, calls, 'nothing was spent');
+  await p.getByRole('button', { name: 'Today' }).click(); await p.waitForFunction(() => !/not today/.test(document.querySelector('.den-head').textContent)); eq(await p.inputValue('.den-head input[aria-label="Day"]'), today);
+  await tab(p, 'today'); await p.waitForSelector(CARD('media')); ok(p.served.some(x => x === 'GET /den/board?desk=aep_au&missed=1'), 'back on today the board asks for the window as before'); eq(p.errors, []); await p.context().close();
+});
+await t('on a quiet desk the empty columns are compact: they keep their place and their key, more of the board fits at 1920, and one still takes a drop', async () => {
+  const p = await open(w6, 'full-key', { width: 1920, height: 1080 }); await p.waitForSelector(CARD('media'));
+  const story = cards(p, 'media').filter({ hasText: 'Harbour levy' }); await story.focus(); await p.keyboard.press('3'); await p.waitForSelector('.den-col[data-sec="media"] .den-row');
+  const cols = () => p.$$eval('.den-board .den-col[data-sec]', c => c.map(x => ({ sec: x.dataset.sec, empty: x.classList.contains('empty'), w: Math.round(x.getBoundingClientRect().width), right: x.getBoundingClientRect().right, n: x.querySelectorAll('.den-row').length, key: (x.querySelector('.den-kbd') || {}).textContent || '' })));
+  let c = await cols(); ok(c.every(x => x.empty === (x.n === 0)), 'a column is compact exactly when no card is filed under it: ' + JSON.stringify(c)); eq(c.filter(x => x.empty).length, 9);
+  const full = c.find(x => !x.empty), small = c.find(x => x.empty); ok(small.w <= full.w * 0.6, 'a compact column is well under a full one: ' + small.w + ' against ' + full.w); ok(c.every(x => x.key), 'every column keeps its number');
+  eq(await p.$$eval('.den-board .den-col', c => c.map(x => x.getAttribute('aria-label'))).then(a => a.length), 12, 'and the column structure is whole'); ok((await p.evaluate(() => document.documentElement.clientWidth)) === 1920);
+  ok(c.filter(x => x.right <= 1920).length >= 7, 'at 1920 at least seven section columns are fully on the first screen: ' + c.filter(x => x.right <= 1920).length);
+  ok(/Drop here/.test(await txt(p, '.den-col.empty[data-sec="social"] .den-drop')), 'the drop zone says what it is, briefly');
+  const post = cards(p, 'social').first(); const skey = await post.getAttribute('data-key'); await post.dragTo(p.locator('.den-col[data-sec="social"] .den-col-body')); await p.waitForSelector('.den-col[data-sec="social"] .den-row[data-key="' + skey + '"]');
+  c = await cols(); const soc = c.find(x => x.sec === 'social'); ok(!soc.empty && soc.w === full.w, 'with a card under it the column opens to its full width'); eq(p.errors, []); await p.context().close();
 });
 
 await finish();

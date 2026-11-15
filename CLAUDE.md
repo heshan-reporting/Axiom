@@ -349,6 +349,19 @@ verifies each, and what was asked for and not built.
     Brief tab on another computer and its Unfile reaches the worker). Merged to `main` (c057ef9) and live on GitHub Pages on
     15 November 2026; the owner deployed the worker the same day (11:49 UTC, deploy token `6709076c463c0290`), so
     filing is shared.
+  - **The four items s.6.10 left, and the quiet desk (15 November 2026; page `den.css?v=r47`, `den.js?v=r51`; no
+    worker change; branch `claude/den-storyboard-next`; `DEN.md` s.6.12).** Page only. **Bulk set-aside:** a tick
+    (`input.den-pick`) or a shift-click selects Unsorted cards the worker can set aside; the `.den-bulk` bar takes one
+    reason and sends each row through `POST /den/aside` in turn (the mute offer and one Undo as by hand). **A citation
+    chip** (`button.den-cite` under As it reads) scrolls its card in the evidence pane into view and focuses it
+    (`li.den-evitem[data-cite]`, lit for a moment); the card's Open link is the next press. **A meter** (`[role="meter"]`
+    in `.den-budget`, used of cap from `budget`, the same title as the count). **A day picker** (`input[type=date]
+    [aria-label="Day"]` in the top bar, today by default, never later): another day sends `to=` (the last millisecond of
+    that Sydney day, `dayEnd`) on `/den/board` and `/den/missed` and `day=` on `/den/brief`, the top bar says "not
+    today" with a Today button, nothing drafts for another day, the filing note is kept under that day, and the day is
+    never kept across opens. **Compact empty columns** (`.den-col.empty`, `--dn-col-w-c`): a section column with no
+    card is 160px wide with its key, state, Write and drop zone, and opens to full width when a card is filed under
+    it. `tests/den-browser.mjs` (36), `tests/den-inject-browser.mjs` (60), `tests/den-worker.mjs` (21).
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -

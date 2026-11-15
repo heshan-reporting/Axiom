@@ -827,6 +827,54 @@ served `den.js?v=r50`: the live worker answers build `2026-11-15.studio-p66`, re
 `den_marks` (it runs on the first `/den/` request with a key, which is the owner's), and the write and read a move now
 costs under a busy database.
 
+### 6.12 The four items s.6.10 left, and the quiet desk (15 November 2026; page `den.css?v=r47`, `den.js?v=r51`; no worker change)
+
+Page only: every route it uses already existed. Branch `claude/den-storyboard-next`, cut from `main` after s.6.11 was
+merged and the owner deployed p66.
+
+- **Bulk set-aside on the Board.** Every Unsorted card the worker can set aside (a story, a post, an actor's post)
+  carries a tick (`input.den-pick`, "Select: ..."); a shift-click on the card selects it too, and a button inside the
+  card is still its own. With one or more selected, a bar in the Unsorted tools (`.den-bulk`, "N selected") takes one
+  reason (the same list as a single set-aside, with "other") and one button, "Set aside N cards". Each row goes through
+  `POST /den/aside {desk, item, reason}` one after the other, exactly as a single set-aside does, so the worker's count
+  and its mute offer are what they would be by hand; the offer, when the worker makes one, is shown as before. One
+  Undo ("Set aside N cards") clears them all (`POST /den/aside {clear: true}` for each). A failure part way says how many
+  went before it; the rest stay on the board. The selection is this render's: it empties on a desk or day change, and a
+  card that leaves Unsorted leaves it. Narratives and dates, which the worker does not set aside, carry no tick.
+- **A citation chip leads to its card.** Under "As it reads" a chip is now a button (`button.den-cite`) that scrolls
+  its card in the evidence pane into view, focuses it and lights it for a moment (`li.den-evitem[data-cite].lit`);
+  the card's Open link is the next press, so the source is one press away. Every id the open section cites and the
+  brief's evidence holds is listed in the pane (filed here, or "Cited here, filed elsewhere"), so there is always a
+  card to land on; a chip whose evidence has no row stays a plain, red chip as before.
+- **A meter under "model calls today".** `.den-budget` holds the count and, under it, `[role="meter"]` (used of the
+  cap, from the `budget` the desks route already returns, the same title text as the count): accent to three
+  quarters, warn past it, neg at the cap.
+- **A day picker in the top bar.** `input[type=date][aria-label="Day"]`, today by default and never later than
+  today. Another day sets `to` to the last millisecond of that Sydney day (`dayEnd`, the offset read at noon so a
+  clock change cannot move it): the Board reads `GET /den/board?desk=&missed=1&to=`, the checks on the other tabs
+  `GET /den/missed?to=`, and the Brief `GET /den/brief?desk=&day=`. The top bar then says "not today" (a warn chip),
+  the window line reads "the N hours to the end of that day", and a Today button comes back. On another day nothing
+  drafts (no Draft, Draft again or Regenerate: a brief is drafted for today's window only, and the empty state says
+  so); saving, filing and reopening an old brief are still a person's. Where a card is filed is kept under that day
+  (`ax_den_file_<desk>_<day>`). The day is never kept: a new open is today's. Nothing here spends.
+- **The quiet desk.** At 1920 a desk with little filed was a row of ten wide, empty drop zones. A column with no card
+  under it is now compact (`.den-col.empty`, `--dn-col-w-c: 160px` against 272 to 316): the same column, with its
+  key, its state chip, Write and the drop zone ("Drop here, or press N on a card"), its title on up to two lines; it
+  opens to full width as soon as a card is filed under it, and it still takes a drop. At 1920 eight section columns
+  now fit on the first screen where four did. The smallest fix that keeps the column structure; the alternatives
+  (folding empty columns into one strip, or hiding them) would have cost the one-key filing and the state at a glance.
+  The width changes at once, not over a transition: a drag begun while the columns under the pointer were still
+  moving started no drag in Chromium (found by the harness, a drop within 300 ms of a filing by key).
+
+Harnesses: `tests/den-browser.mjs` (36: the first case checks the meter and the picker's default; the draft case
+presses a chip and finds its card focused, in view, with its source link; three new cases - the bulk set-aside with
+the worker's count, the offer and one Undo; the day picker with the `to` it sends, the brief it asks for and that
+nothing was written or spent; the compact columns at 1920 with a drop into one), `tests/den-inject-browser.mjs` (60),
+`tests/den-worker.mjs` (21) and `node tests/run.mjs check` pass.
+
+Not verified: the live worker and real rows (a busy day's columns at 1366 with compact neighbours; the picker on a
+desk with weeks of briefs).
+
 ## 7. Hand-over (11 November 2026)
 
 ### 7.1 What exists
