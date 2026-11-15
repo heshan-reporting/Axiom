@@ -291,15 +291,18 @@ await t('at 1366 x 768 the first evidence card is on the first screen, and the b
   const m = await p.evaluate(() => { const e = document.querySelector('.den-board'); return { doc: document.documentElement.scrollWidth - document.documentElement.clientWidth, board: e.scrollWidth - e.clientWidth }; }); ok(m.doc <= 1 && m.board > 100, 'the document does not scroll sideways and the board does: ' + JSON.stringify(m)); await p.context().close();
 });
 const w5 = await world(); const p5 = await open(w5); let filedKey = '';
-await t('a card is filed under a section by its number: pinned through the worker, the section kept on this computer, undone, and still there after a reload', async () => {
+await t('a card is filed under a section by its number: pinned through the worker with its section, seen from another computer, undone, and still there after a reload', async () => {
   const p = p5; await p.waitForSelector(CARD('media')); await p.waitForSelector('.den-strip li');
   eq(p.served.filter(x => /^GET \/den\/(board|missed)/.test(x)).length, 1, 'the Board still opens on one read of the window');
   const story = cards(p, 'media').filter({ hasText: 'Harbour levy' }); const key = filedKey = await story.getAttribute('data-key'); const item = +key.slice(2);
   await story.focus(); await p.keyboard.press('3');   // the third section of this desk: Traditional Media Coverage
   await p.waitForSelector('.den-col[data-sec="media"] .den-row[data-key="' + key + '"].pinned');
-  ok(p.served.some(x => x === 'POST /den/pin'), 'filing pins the row through POST /den/pin, as the Pin button does'); eq((await w5.F('GET', '/den/board?desk=aep_au')).body.pinned, [item], 'so the worker holds the pin and a draft must cover it');
+  ok(p.served.some(x => x === 'POST /den/pin'), 'filing pins the row through POST /den/pin, as the Pin button does'); const wb = (await w5.F('GET', '/den/board?desk=aep_au')).body; eq(wb.pinned, [item], 'so the worker holds the pin and a draft must cover it');
+  eq(wb.media.find(m => m.id === item).section, 'media', 'and the pin carries the section: where the card sits is the desk\'s record');
   const kept = () => p.evaluate(() => { const k = Object.keys(localStorage).find(x => /^ax_den_file_aep_au_\d{4}-\d\d-\d\d$/.test(x)); return k ? JSON.parse(localStorage.getItem(k)) : null; });
-  eq(await kept(), { [key]: 'media' }, 'which section it sits under is this browser\'s note'); ok(/kept on this computer/.test(await txt(p, '.den-unsorted .den-colsub')), 'and the page says where that is kept');
+  eq(await kept(), { [key]: 'media' }, 'this browser\'s note mirrors it'); ok(/kept with the desk/.test(await txt(p, '.den-unsorted .den-colsub')), 'and the page says where that is kept');
+  const p2 = await open(w5, 'other-key'); await p2.waitForSelector('.den-col[data-sec="media"] .den-row[data-key="' + key + '"].pinned', { timeout: 20000 });   // a fresh browser, another person: no note of ours
+  eq(await cards(p2, 'media').filter({ hasText: 'Harbour levy' }).count(), 0, 'on another computer the card is under its section, not in Unsorted'); eq(p2.errors, []); await p2.context().close();
   ok(await p.evaluate(() => !!(document.activeElement.closest && document.activeElement.closest('.den-unsorted .den-row'))), 'the focus moves on to the next unsorted card');
   eq(await txt(p, '.den-col[data-sec="media"] .den-col-h .den-count'), '1'); ok(/Has evidence/.test(await txt(p, '.den-col[data-sec="media"] .den-col-meta')));
   await cards(p, 'media').filter({ hasText: 'Producers answer' }).getByRole('button', { name: 'Pin' }).click(); await p.waitForSelector(CARD('media') + '.pinned'); ok(/Producers answer/.test(await txt(p, CARD('media') + '.pinned')), 'a row pinned and not filed stays in Unsorted, as pinned');
@@ -308,6 +311,7 @@ await t('a card is filed under a section by its number: pinned through the worke
   await p.getByRole('button', { name: /^Undo/ }).click(); await p.waitForSelector(CARD('upcoming')); eq(await kept(), { [key]: 'media' }, 'Undo puts the last card back');
   await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForFunction(() => typeof go === 'function'); await p.evaluate(() => go('den')); await p.waitForSelector('.den-col[data-sec="media"] .den-row[data-key="' + key + '"]'); eq(await cards(p, 'media').filter({ hasText: 'Harbour levy' }).count(), 0, 'after a reload the card is still under its section');
   await p.locator('.den-col[data-sec="media"] .den-row select.den-file').selectOption(''); await p.waitForSelector(CARD('media') + '[data-key="' + key + '"].pinned'); eq(await kept(), null, 'taken back to Unsorted, it is still pinned');
+  const wb2 =(await w5.F('GET', '/den/board?desk=aep_au')).body; eq([wb2.pinned.indexOf(item) >= 0, wb2.media.find(m => m.id === item).section], [true, ''], 'and the worker says so too: pinned, under no section');
   await cards(p, 'media').filter({ hasText: 'Harbour levy' }).locator('select.den-file').selectOption('media'); await p.waitForSelector('.den-col[data-sec="media"] .den-row[data-key="' + key + '"]'); eq(await kept(), { [key]: 'media' }, 'the select files a card too, for a hand that does not drag');
   const post = cards(p, 'social').first(); const skey = await post.getAttribute('data-key'); await post.dragTo(p.locator('.den-col[data-sec="social"] .den-col-body')); await p.waitForSelector('.den-col[data-sec="social"] .den-row[data-key="' + skey + '"]'); eq((await kept())[skey], 'social', 'and a card dragged to a column is filed there');
   await p.locator('.den-col[data-sec="social"] .den-row select.den-file').selectOption(''); await p.waitForSelector(CARD('social'));
@@ -317,11 +321,23 @@ await t('the Write surface: a column opens its section with the filed card besid
   ok(/The story ran in three outlets/.test(await txt(p, '.den-col[data-sec="media"] .den-excerpt')), 'the column shows what the section says'); ok(/Cited/.test(await txt(p, '.den-col[data-sec="media"] .den-row')), 'and the card says the brief cites it');
   await p.getByRole('button', { name: 'Write Traditional Media Coverage' }).click(); ok(await p.$('#den-tab-brief[aria-selected="true"]')); await p.waitForSelector('.den-sec[data-section="media"]', { state: 'visible' });
   eq(await p.locator('.den-outline [data-goto="media"]').getAttribute('aria-current'), 'true'); ok(new RegExp('^Cite ' + filedKey + ': Harbour levy').test(await p.locator('.den-evlist .den-evcard').first().getAttribute('aria-label')), 'the card filed on the Board is the evidence for this section');
-  ok(/kept on this computer/.test(await txt(p, '.den-evhead')));
+  ok(/kept with the desk/.test(await txt(p, '.den-evhead')));
   const reads = p.served.filter(x => /^GET \/den\/board/.test(x)).length; await p.locator('.den-pull .den-fold').click(); await p.waitForSelector('.den-pulllist li'); eq(p.served.filter(x => /^GET \/den\/board/.test(x)).length, reads, 'the rest of the window is what the Board already read');
   const pins = p.served.filter(x => x === 'POST /den/pin').length; await p.locator('.den-pulllist li', { hasText: 'Our position on the gas export tax' }).getByRole('button', { name: /^File here/ }).click();
   await p.waitForFunction(() => document.querySelectorAll('.den-evlist .den-evcard').length === 2); eq(p.served.filter(x => x === 'POST /den/pin').length, pins + 1, 'pulled in, it is pinned like any filed row');
   ok(Object.values(await p.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find(x => /^ax_den_file_aep_au_/.test(x)))))).every(v => v === 'media'));
+});
+await t('opened on the Brief tab on another computer, the desk\'s filing is read with the window: the filed card is the section\'s evidence, and Unfile reaches the worker', async () => {
+  const p = await open(w5, 'other-key'); await p.evaluate(() => { localStorage.setItem('ax_den_tab', '"brief"'); localStorage.setItem('ax_den_sec_aep_au', '"media"'); }); p.served.length = 0;
+  await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForFunction(() => typeof go === 'function'); await p.evaluate(() => go('den')); await p.waitForSelector('#den-tab-brief[aria-selected="true"]');
+  const here = () => p.evaluate(() => (document.querySelector('.den-evhead .den-count') || {}).textContent || ''); await p.waitForFunction(() => (document.querySelector('.den-evhead .den-count') || {}).textContent === '2', null, { timeout: 20000 });
+  ok(/Harbour levy/.test(await txt(p, '.den-evlist')), 'the card filed on the Board elsewhere is this section\'s evidence here, with the one pulled in');
+  eq(p.served.filter(x => /^GET \/den\/board/.test(x)).length, 1, 'one read of the window, made for the Brief');
+  const item = +filedKey.slice(2); await p.getByRole('button', { name: /^Take it out of this section: Harbour levy/ }).click(); await p.waitForFunction(() => (document.querySelector('.den-evhead .den-count') || {}).textContent === '1');
+  ok(/Cited here, filed elsewhere/.test(await txt(p, '.den-evpane')) && /not filed/.test(await txt(p, '.den-evpane')), 'the brief still cites it, so it is listed as cited and not filed'); eq(await here(), '1');
+  const wb = (await w5.F('GET', '/den/board?desk=aep_au')).body; eq([wb.pinned.indexOf(item) >= 0, wb.media.find(m => m.id === item).section], [true, ''], 'Unfile reached the worker: still pinned, under no section');
+  ok(p.served.some(x => x === 'POST /den/pin')); eq(p.errors, []); await p.context().close();
+  await w5.F('POST', '/den/pin', { desk: 'aep_au', item, section: 'media' });   // filed again, as the cases that follow expect
 });
 await t('citing a card puts its mark where the cursor was, marks the card as cited, and the save keeps it', async () => {
   const p = p5; const ta = p.locator('.den-sec[data-section="media"] textarea'); const before = await ta.inputValue(); ok(/^The story ran in three outlets/.test(before), before);

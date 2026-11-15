@@ -784,6 +784,46 @@ Not verified: the live worker and real rows. Weights, column widths and the rail
 seen only on the fixture's invented day (`tests/den-shots.mjs` saves both sizes into `tests/shots/den/`; the earlier
 layout is in `tests/shots/den-before/`).
 
+### 6.11 Where a card is filed is the desk's (15 November 2026; build `2026-11-15.studio-p66`, page `den.js?v=r50`)
+
+The step s.6.10 named and did not take. Until now which column a card sat in was one browser's note, so a second
+person, or the same person on another computer, saw the pins and an Unsorted queue. Now:
+
+- **`den_marks` has a `section`** (added by `ensureDesks` with `ALTER TABLE`, once, on the first open after the
+  deploy). `POST /den/pin {desk, item, section}` files the row under that section as it pins it; `section: ''` takes it
+  back to Unsorted and leaves it pinned; a pin that says nothing about the section (the Pin button) keeps the one it
+  has, so pinning never unfiles. A section id the desk's report does not have, or the Source List, is refused
+  (`400 unknown_section`) and nothing is written. A set-aside unfiles the row; clearing a mark removes both.
+- **`GET /den/board` carries `section` on every media, social and actor row** (`''` when unfiled). A folded story
+  shows the section of whichever copy was filed.
+- **The page adopts the board's answer.** When the board arrives, what it says replaces this computer's note for
+  every row it names (`adopt()` in `DenApp`; a section hidden on Options counts as Unsorted), so a filing made by
+  someone else, or on another computer, shows here. The Den opened on another tab than the Board (the last tab used
+  is kept) now reads the window once too (`GET /den/board?desk=`, no checks), so the Brief's evidence is the desk's
+  record from the first screen and an Unfile there reaches the worker; the Board's own read, when it opens, carries
+  the checks as before. This computer's note (`ax_den_file_<desk>_<day>`) mirrors the worker and stands on its own
+  only for narratives and dates, which the worker does not pin, or under a worker older than this page, which says
+  nothing about sections. Filing from the Board (drag, number, select) and from the Brief ("File here", "Unfile")
+  sends the section with the pin, and the Board reads the window again after each write, so a read in flight when the
+  pin went out cannot bring the old column back.
+- **Notes made before p66.** The first board with sections a desk has seen on this computer (`ax_den_sec_sent_<desk>`)
+  sends each note it holds for a pinned row the worker reports under no section, once, instead of dropping it; after
+  that a pinned row under no section is someone's "back to Unsorted" and the note follows it.
+- **Cost:** a filing is one `POST /den/pin` and one read of the window; moving a row that is already pinned is now a
+  write and a read where it was none. The Board still opens on one read of the window.
+- Harnesses: `tests/den-worker.mjs` DK21 (the pin carries the section, the board returns it, a folded copy, a refused
+  section, a pin that says nothing keeps it, a set-aside unfiles it, clearing removes it, a read key, the sister desk
+  sees the same story unpinned and unfiled); `tests/den-browser.mjs` (the filing case checks the worker's answer and
+  opens a second browser with no note, as another person; a new case opens on the Brief tab on another computer and
+  finds the filed card as the section's evidence, and its Unfile reaches the worker); 33, 60, 21 and the five token
+  checks pass. The change was reviewed by three readers and each finding verified against the code before the commit:
+  the `ALTER` swallowed every error (now only "duplicate column"), an Unfile from the Brief without the Board read
+  stayed local, a stale board read could undo a fresh move, two quick clicks on the Brief lost one, a hidden section
+  was adopted, and two of DK21's assertions could not fail.
+
+Not verified: the live worker (the `ALTER TABLE` on the live `den_marks`, and the write and read a move now costs under
+a busy database).
+
 ## 7. Hand-over (11 November 2026)
 
 ### 7.1 What exists

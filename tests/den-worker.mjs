@@ -22,6 +22,8 @@
  *   DK18 a busy database is said in words, with a status a page can retry on (found live, 11 November 2026)
  *   DK19 the strip's slow figures are read once in fifteen minutes, not on every open; what is urgent stays live
  *   DK20 the board asks the database only for this desk's rows, and the strip can be handed the board it needs
+ *   DK21 where a card is filed is the desk's (a section on the pin), not one browser's note; a section the desk
+ *        does not have is refused; a pin that says nothing keeps the section; a set-aside clears it
  * Run: node --experimental-sqlite tests/den-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 
@@ -335,6 +337,29 @@ await S.t('DK20 the board asks only for this desk\'s rows', async () => {
   sp.clear(); const both = (await F(w, 'GET', '/den/board?desk=aep_au&missed=1', null, 'read-key')).body; eq(sp.n(/FROM arc_items WHERE ts>\? AND ts<=\?/), 1, 'the board and the strip in one answer read the window once, not twice');
   ok(both.counts && both.missed && both.missed.ok === true && Array.isArray(both.missed.signals) && !('_rows' in both), 'board and strip together: ' + Object.keys(both).join(','));
   const alone = (await F(w, 'GET', '/den/missed?desk=aep_au', null, 'read-key')).body; eq(both.missed.signals.map(s => s.key), alone.signals.map(s => s.key), 'the same strip either way');
+});
+
+await S.t('DK21 where a card is filed is the desk\'s, not one browser\'s', async () => {
+  const w = await mk(); await seedDay(w); const b = await board(w, 'aep_au'); const lead = b.media[0], posts = b.social;
+  ok(lead.section === '' && posts.every(s => s.section === ''), 'a row nobody has filed carries an empty section: ' + JSON.stringify([lead.section, posts.map(s => s.section)]));
+  const f = (await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: lead.id, section: 'media' })).body; eq([f.ok, f.mark, f.section], [true, 'pin', 'media'], 'a pin says which section the row is filed under');
+  const b2 = await board(w, 'aep_au'); eq([b2.media[0].id, b2.media[0].pinned, b2.media[0].section], [lead.id, true, 'media'], 'and the board says so to every browser');
+  const copy = lead.copies.find(id => id !== lead.id); await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: lead.id, clear: true }); await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: copy, section: 'narratives' });
+  eq((await board(w, 'aep_au')).media[0].section, 'narratives', 'a section on a folded copy shows on the fold');
+  eq((await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: posts[0].id, section: 'nonsense' })).body.error, 'unknown_section', 'a section this desk does not have is refused');
+  eq((await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: posts[0].id, section: 'sources' })).body.error, 'unknown_section', 'the Source List is built from the citations: nothing is filed under it');
+  eq((await board(w, 'aep_au')).social.find(s => s.id === posts[0].id).section, '', 'a refused pin filed nothing');
+  await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: posts[0].id, section: 'social' }); await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: posts[0].id });
+  eq((await board(w, 'aep_au')).social.find(s => s.id === posts[0].id).section, 'social', 'a pin that says nothing about the section keeps it (the Pin button)');
+  await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: posts[0].id, section: '' }); const s3 = (await board(w, 'aep_au')).social.find(s => s.id === posts[0].id); eq([s3.pinned, s3.section], [true, ''], 'back to Unsorted: still pinned, under no section');
+  await F(w, 'POST', '/den/aside', { desk: 'aep_au', item: copy, reason: 'duplicate' }); await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: copy });
+  eq((await board(w, 'aep_au')).media[0].section, '', 'filed, set aside and pinned again with no section said: the set-aside unfiled it');
+  await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: copy, section: 'narratives' }); await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: copy, clear: true }); await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: copy });
+  eq((await board(w, 'aep_au')).media[0].section, '', 'clearing the mark removes the section with it');
+  eq((await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: posts[1].id, section: 'social' }, 'read-key')).status, 403, 'a read key files nothing');
+  await push(w, 'news', [news({ title: 'Melbourne councils back a windfall tax on gas', url: 'https://a.example.com.au/2' })]); const shared = (await board(w, 'aep_au')).media.find(m => /Melbourne/.test(m.title));
+  await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: shared.id, section: 'narratives' }); const vicRow = (await board(w, 'aep_vic')).media.find(m => m.id === shared.id);
+  eq([!!vicRow, vicRow && vicRow.pinned, vicRow && vicRow.section], [true, false, ''], 'the sister desk shows the same story unpinned and unfiled: marks are one desk\'s');
 });
 
 const r = S.done(); process.exit(r.fail ? 1 : 0);

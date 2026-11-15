@@ -8240,6 +8240,9 @@ async function ensureDesks(env) {
     env.MIND_DB.prepare("CREATE TABLE IF NOT EXISTS den_brief_revisions(id INTEGER PRIMARY KEY AUTOINCREMENT, brief TEXT NOT NULL, revision INTEGER, sections TEXT, ratings TEXT, by TEXT DEFAULT '', note TEXT DEFAULT '', at INTEGER)"),
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS den_brief_rev ON den_brief_revisions(brief, revision)'),
   ]);
+  // which section of the report a pinned row is filed under (p66): the desk's, so every browser sees the same columns
+  // only "already there" is swallowed: a busy database here must not leave this isolate believing the column exists
+  try { await env.MIND_DB.prepare("ALTER TABLE den_marks ADD COLUMN section TEXT DEFAULT ''").run(); } catch (e) { if (!/duplicate column/i.test(String((e && e.message) || e))) throw e; }
   const now = Date.now();
   await env.MIND_DB.batch(DEN_DESK_SEED.map(d => env.MIND_DB.prepare('INSERT OR IGNORE INTO den_desks(id,ns,name,region,cadence,window_h,sections,ratings,options,auto_draft,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,0,1,?,?)')
     .bind(d.id, d.ns, d.name, d.region, 'daily', 24, JSON.stringify(d.sections), JSON.stringify(d.ratings), JSON.stringify(DEN_OPTIONS), now, now)));
@@ -8368,17 +8371,18 @@ async function denBoard(env, deskId, opts) {
     rows.push({ id: r0.id, kind: r0.kind, src: r0.src, url: r0.url, title: String(r0.title || ''), body: String(r0.body || ''), tone: r0.tone, ts: r0.ts, seen: r0.seen, meta: m, issues, w, ch, eng, total, host });
   }
   const marks = new Map(); const ids = rows.map(r => r.id);
-  for (let i = 0; i < ids.length; i += 90) (((await env.MIND_DB.prepare('SELECT item, mark, reason, by, at FROM den_marks WHERE desk=? AND item IN (' + ids.slice(i, i + 90).map(() => '?').join(',') + ')').bind(desk.id, ...ids.slice(i, i + 90)).all()).results) || []).forEach(k => marks.set(k.item, k));
+  for (let i = 0; i < ids.length; i += 90) (((await env.MIND_DB.prepare('SELECT item, mark, reason, section, by, at FROM den_marks WHERE desk=? AND item IN (' + ids.slice(i, i + 90).map(() => '?').join(',') + ')').bind(desk.id, ...ids.slice(i, i + 90)).all()).results) || []).forEach(k => marks.set(k.item, k));
   const live = []; const aside = [];
-  rows.forEach(r => { const k = marks.get(r.id); r.pinned = !!(k && k.mark === 'pin'); if (k && k.mark === 'aside') aside.push({ id: r.id, title: r.title.slice(0, 160), channel: r.ch, reason: k.reason, by: k.by, at: k.at }); else live.push(r); });
+  // section: which column of the report a pinned row is filed under, the desk's own record (p66); '' is Unsorted
+  rows.forEach(r => { const k = marks.get(r.id); r.pinned = !!(k && k.mark === 'pin'); r.section = r.pinned ? String(k.section || '') : ''; if (k && k.mark === 'aside') aside.push({ id: r.id, title: r.title.slice(0, 160), channel: r.ch, reason: k.reason, by: k.by, at: k.at }); else live.push(r); });
   const link = r => (/^https?:/.test(String(r.url || '')) ? r.url : '');
   // traditional media: syndicated copies fold into the copy seen first, with the outlets that carried it
   const news = live.filter(r => r.kind === 'news'); const folds = new Map();
   news.slice().sort((a, b) => a.ts - b.ts).forEach(r => { const k = o.fold === false ? 'r' + r.id : (denFoldKey(r.title) || 'r' + r.id); const f = folds.get(k); const outlet = String(r.meta.outlet || r.meta.source || r.src || r.host || '').slice(0, 60);
-    if (!f) folds.set(k, { head: r, outlets: [outlet], ids: [r.id], pinned: r.pinned, gated: !!r.meta.gated, fb: r.meta.fb || null }); else { if (f.outlets.indexOf(outlet) < 0) f.outlets.push(outlet); f.ids.push(r.id); f.pinned = f.pinned || r.pinned; f.gated = f.gated || !!r.meta.gated; if (!f.fb && r.meta.fb) f.fb = r.meta.fb; } });
+    if (!f) folds.set(k, { head: r, outlets: [outlet], ids: [r.id], pinned: r.pinned, section: r.section, gated: !!r.meta.gated, fb: r.meta.fb || null }); else { if (f.outlets.indexOf(outlet) < 0) f.outlets.push(outlet); f.ids.push(r.id); f.pinned = f.pinned || r.pinned; f.section = f.section || r.section; f.gated = f.gated || !!r.meta.gated; if (!f.fb && r.meta.fb) f.fb = r.meta.fb; } });
   const fbTotal = fb => (fb ? (Number(fb.reactions) || 0) + (Number(fb.comments) || 0) + (Number(fb.shares) || 0) : 0);
   const media = Array.from(folds.values()).map(f => ({ id: f.head.id, title: f.head.title.slice(0, 300), url: link(f.head), outlet: f.outlets[0], outlets: f.outlets.slice(0, 12), n: f.outlets.length, copies: f.ids.slice(0, 40), ts: f.head.ts, tier: f.head.meta.tier || '', juris: f.head.meta.juris || '',
-    gated: f.gated, access: f.head.meta.access || '', full: !!(f.head.meta.full || (f.head.meta.ft && f.head.meta.ft !== 'none' && f.head.meta.ft !== 'retry')), fb: f.fb, issues: f.head.issues, tone: f.head.tone, pinned: f.pinned, summary: f.head.body.slice(0, 260), claim: f.head.meta.claim || null }))
+    gated: f.gated, access: f.head.meta.access || '', full: !!(f.head.meta.full || (f.head.meta.ft && f.head.meta.ft !== 'none' && f.head.meta.ft !== 'retry')), fb: f.fb, issues: f.head.issues, tone: f.head.tone, pinned: f.pinned, section: f.section || '', summary: f.head.body.slice(0, 260), claim: f.head.meta.claim || null }))
     .sort((a, b) => (b.pinned - a.pinned) || (b.n - a.n) || (fbTotal(b.fb) - fbTotal(a.fb)) || (b.ts - a.ts)).slice(0, 150);
   // social: what the register's accounts posted and what the terms found; public actors and MPs go to their own table
   const soc = live.filter(r => r.kind === 'sig_thread' || r.kind === 'reddit_thread' || r.kind === 'transcript'); const isActor = r => !!(r.meta.actor || r.meta.mp);
@@ -8389,7 +8393,7 @@ async function denBoard(env, deskId, opts) {
   const held = new Map(); const tids = pick.map(r => String(r.meta.id || '')).filter(Boolean);
   for (let i = 0; i < tids.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, AVG(tone) a FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND ts>? AND json_extract(meta,'$.thread') IN (" + tids.slice(i, i + 90).map(() => '?').join(',') + ") GROUP BY t").bind(win.from - 86400000, ...tids.slice(i, i + 90)).all()).results) || []).forEach(h => held.set(String(h.t), { n: h.n, tone: h.a == null ? null : Math.round(h.a * 100) / 100 }));
   const socRow = r => ({ id: r.id, platform: r.ch, text: (r.title && r.title !== r.ch + ' post' ? r.title : r.body).slice(0, 280), url: link(r), ts: r.ts, eng: r.eng, total: r.total, eng_at: Number(r.meta.eng_at) || 0, growth: prev.has(r.id) ? r.total - prev.get(r.id) : null,
-    held: held.get(String(r.meta.id || '')) || null, layers: Array.isArray(r.meta.layers) ? r.meta.layers : (r.meta.via === 'reach' ? [2] : []), issues: r.issues, term: r.meta.term || r.meta.q || '', hashtag: r.meta.hashtag || '', registered: !!r.w, pinned: r.pinned, sub: r.meta.sub || '' });
+    held: held.get(String(r.meta.id || '')) || null, layers: Array.isArray(r.meta.layers) ? r.meta.layers : (r.meta.via === 'reach' ? [2] : []), issues: r.issues, term: r.meta.term || r.meta.q || '', hashtag: r.meta.hashtag || '', registered: !!r.w, pinned: r.pinned, section: r.section || '', sub: r.meta.sub || '' });
   const social = pick.filter(r => !isActor(r)).slice(0, 90).map(socRow);
   const actors = pick.filter(isActor).slice(0, 60).map(r => Object.assign(socRow(r), r.meta.actor ? { who: String(r.meta.actor.name || '').slice(0, 80), role: String(r.meta.actor.kind || ''), party: '' } : { who: String((r.meta.mp || {}).name || '').slice(0, 80), role: 'mp', party: String((r.meta.mp || {}).party || '').slice(0, 40) }));
   // key narratives on this desk's issues that gained rows in the window
@@ -8406,22 +8410,30 @@ async function denBoard(env, deskId, opts) {
     counts: { rows: live.length, news: news.length, media: media.length, social: social.length, actors: actors.length, narratives: narratives.length, upcoming: upcoming.length, aside: aside.length, muted: nMuted, underMinimum: nLow, otherRegions: nRegion }, capped: raw.length >= DEN_BOARD_ROWS,
     byChannel: live.reduce((a, r) => { a[r.ch] = (a[r.ch] || 0) + 1; return a; }, {}), _rows: opts.keepRows ? live : undefined };
 }
-/** Pin a row to the report, set it aside with a reason, or clear the mark. Marks are one desk's. */
+/** Pin a row to the report, set it aside with a reason, or clear the mark. Marks are one desk's. A pin may say which
+ *  section of the report the row is filed under (section: a section id of this desk, or '' for Unsorted); a pin that
+ *  says nothing keeps the section it has, so the Pin button never unfiles a card. A set-aside unfiles it. */
 async function denMark(env, b, who, mark) {
   b = b || {}; const desk = await deskGet(env, b.desk); if (!desk) return DESK_UNKNOWN;
   const item = parseInt(b.item, 10); if (!(item > 0)) return { ok: false, status: 400, error: 'item_required', detail: 'Say which row (item).' };
   if (b.clear) { await env.MIND_DB.prepare('DELETE FROM den_marks WHERE desk=? AND item=?').bind(desk.id, item).run(); return { ok: true, desk: desk.id, item, mark: '' }; }
   const row = await env.MIND_DB.prepare('SELECT id, url, title, substr(body,1,400) body, meta FROM arc_items WHERE id=?').bind(item).first();
   if (!row) return { ok: false, status: 404, error: 'unknown_item', detail: 'That row is no longer held.' };
+  let section = null;   // null: not said, keep what is there
+  if (mark === 'pin' && b.section !== undefined && b.section !== null) {
+    section = String(b.section).slice(0, 40);
+    if (section && !desk.sections.some(s => s.id === section && s.kind !== 'sources')) return { ok: false, status: 400, error: 'unknown_section', detail: 'This desk\'s report has no section "' + section + '" to file under (the Source List is built from the citations and takes no card).' };
+  } else if (mark === 'aside') section = '';
   let reason = '', mkey = '';
   if (mark === 'aside') {
     reason = String(b.reason || '').replace(/\s+/g, ' ').trim().slice(0, 200);
     if (reason.length < 3) return { ok: false, status: 400, error: 'reason_required', detail: 'Say why it is set aside (not relevant, duplicate, foreign, or your own words): the reason is what a mute is later offered on.' };
     const m = denJ(row.meta, {}); const host = denHost(row.url); mkey = m.watch ? 'account:' + m.watch : (m.term || m.q) ? 'term:' + String(m.term || m.q).toLowerCase() : host && !DISC_SOCIAL_HOSTS.test(host) ? 'domain:' + host : '';
   }
-  await env.MIND_DB.prepare('INSERT INTO den_marks(desk,item,mark,reason,mkey,by,at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(desk,item) DO UPDATE SET mark=excluded.mark, reason=excluded.reason, mkey=excluded.mkey, by=excluded.by, at=excluded.at')
-    .bind(desk.id, item, mark, reason, mkey, String(who || '').slice(0, 60), Date.now()).run();
-  const out = { ok: true, desk: desk.id, item, mark };
+  await env.MIND_DB.prepare('INSERT INTO den_marks(desk,item,mark,reason,mkey,by,at,section) VALUES(?,?,?,?,?,?,?,COALESCE(?,\'\')) ON CONFLICT(desk,item) DO UPDATE SET mark=excluded.mark, reason=excluded.reason, mkey=excluded.mkey, by=excluded.by, at=excluded.at, section=COALESCE(?, den_marks.section)')
+    .bind(desk.id, item, mark, reason, mkey, String(who || '').slice(0, 60), Date.now(), section, section).run();
+  const kept = section === null ? await env.MIND_DB.prepare('SELECT section FROM den_marks WHERE desk=? AND item=?').bind(desk.id, item).first() : null;
+  const out = { ok: true, desk: desk.id, item, mark, section: mark === 'pin' ? String((section === null ? (kept || {}).section : section) || '') : '' };
   if (mark === 'aside' && mkey) {   // three set-asides of the same account, site or term: offer the mute, which a person confirms
     const n = Number(((await env.MIND_DB.prepare("SELECT COUNT(*) n FROM den_marks WHERE desk=? AND mark='aside' AND mkey=?").bind(desk.id, mkey).first()) || {}).n || 0);
     const kind = mkey.split(':')[0], value = mkey.slice(kind.length + 1);
@@ -10469,7 +10481,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-12.studio-p65';
+const AXIOM_BUILD = '2026-11-15.studio-p66';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -20908,7 +20920,7 @@ const AXIOM_WORKER = {
     //    POST /den/import {ns, kind newsletter|monitor, source, items}   newsletters and monitoring-service exports (full)
     //    GET  /den/desks | /den/board?desk=&hours= | /den/missed?desk= | /den/collection?desk= | /den/held?u=   the Den's reads
     //    GET  /den/brief?desk=&day=&format=md|html|slack&prev=1 | /den/briefs?desk= | /den/brief/history?id=&rev=
-    //    POST /den/desk/update | /den/pin | /den/aside | /den/mute | /den/collect | /den/backtest   (full)
+    //    POST /den/desk/update | /den/pin {desk, item, section?, clear?} | /den/aside | /den/mute | /den/collect | /den/backtest   (full)
     //    POST /den/brief {desk, hours, pins} | /den/brief/section | /den/brief/save | /den/brief/file   (full; a draft is one model call)
     //    GET  /den/lexicon?ns=&review=1                  the desk's own and approved terms, the cap, the review line (read)
     //    GET  /den/preview?ns=&term=&days=               what a term would have caught in what is already held (read)

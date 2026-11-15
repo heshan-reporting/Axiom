@@ -4,8 +4,9 @@
  * section of the report; Brief is the report, drafted from that evidence by one stated model call or written by hand,
  * one section open at a time between its outline and the evidence filed under it, checked against the rows it cites;
  * Watch is the register and the proposals that wait for a person; Collection says which channels read and why not;
- * Options are the desk's own. Which section a card is filed under is this browser's own note (localStorage); the pin
- * behind it is the worker's. A React island (React, ReactDOM and htm vendored under docs/vendor; shared pieces from
+ * Options are the desk's own. Which section a story or post is filed under rides on its pin in the worker (build p66), so
+ * every browser on the desk shows the same columns; a narrative or a date, which the worker does not pin, is filed on
+ * this computer only (localStorage). A React island (React, ReactDOM and htm vendored under docs/vendor; shared pieces from
  * docs/ax-ui.js) mounted into #den-root on first open. Nothing here spends without a button that states the cost. */
 (function () {
   'use strict';
@@ -95,9 +96,9 @@
      narrative or a date cannot). */
   function toCards(d) {
     const out = []; if (!d) return out;
-    (d.media || []).forEach(m => out.push({ key: 'M:' + m.id, cite: 'M:' + m.id, id: m.id, kind: 'media', pin: true, title: m.title, url: m.url, ts: m.ts, pinned: !!m.pinned, reach: fbTotal(m.fb), outlets: m.n || 1, growth: 0, r: m }));
-    (d.social || []).forEach(s => out.push({ key: 'S:' + s.id, cite: 'S:' + s.id, id: s.id, kind: 'social', pin: true, title: s.text, url: s.url, ts: s.ts, pinned: !!s.pinned, reach: +s.total || 0, outlets: 1, growth: +s.growth || 0, r: s }));
-    (d.actors || []).forEach(a => out.push({ key: 'P:' + a.id, cite: 'P:' + a.id, id: a.id, kind: 'actors', pin: true, title: a.text, url: a.url, ts: a.ts, pinned: !!a.pinned, reach: +a.total || 0, outlets: 1, growth: +a.growth || 0, r: a }));
+    (d.media || []).forEach(m => out.push({ key: 'M:' + m.id, cite: 'M:' + m.id, id: m.id, kind: 'media', pin: true, title: m.title, url: m.url, ts: m.ts, pinned: !!m.pinned, wsec: m.section || '', reach: fbTotal(m.fb), outlets: m.n || 1, growth: 0, r: m }));
+    (d.social || []).forEach(s => out.push({ key: 'S:' + s.id, cite: 'S:' + s.id, id: s.id, kind: 'social', pin: true, title: s.text, url: s.url, ts: s.ts, pinned: !!s.pinned, wsec: s.section || '', reach: +s.total || 0, outlets: 1, growth: +s.growth || 0, r: s }));
+    (d.actors || []).forEach(a => out.push({ key: 'P:' + a.id, cite: 'P:' + a.id, id: a.id, kind: 'actors', pin: true, title: a.text, url: a.url, ts: a.ts, pinned: !!a.pinned, wsec: a.section || '', reach: +a.total || 0, outlets: 1, growth: +a.growth || 0, r: a }));
     (d.narratives || []).forEach(n => out.push({ key: 'N:' + n.id, cite: 'N:' + n.id, id: n.id, kind: 'narratives', pin: false, title: n.label, url: '', ts: n.last, pinned: false, reach: 0, outlets: 1, growth: 0, r: n }));
     (d.upcoming || []).forEach((u, i) => out.push({ key: 'U:' + u.date + '|' + String(u.event || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40), cite: 'U:' + (i + 1), label: u.date + ' ' + u.event, id: 0, kind: 'upcoming', pin: false, title: u.event, url: u.url, ts: 0, pinned: false, reach: 0, outlets: 1, growth: 0, r: u }));
     return out;
@@ -235,7 +236,7 @@
         ${c.pin ? html`<${RowActions} r=${Object.assign({}, r, { pinned: c.pinned })} kind=${kindWord} desk=${desk} canWrite=${canWrite} onDone=${onDone} />`
           : k === 'narratives' ? html`<button class="den-link" onClick=${() => window.AXUI.goto('narratives', { id: r.id })} aria-label=${'Open the narrative: ' + r.label}>Open</button>`
           : web(r.url) ? html`<a class="den-link" href=${web(r.url)} target="_blank" rel="noopener" aria-label="Open the source of this date">Open</a>` : null}
-        ${canWrite && onFile ? html`<select class="den-in den-file" aria-label="File under a section" title="Where this card is filed is kept on this computer" value=${c.sec || ''} onChange=${e => onFile(c, e.target.value)}><option value="">${c.sec ? 'Back to Unsorted' : 'File under...'}</option>${secs.map((s, i) => html`<option key=${s.id} value=${s.id}>${secKey(i) ? secKey(i) + '  ' : ''}${s.title}</option>`)}</select>` : null}
+        ${canWrite && onFile ? html`<select class="den-in den-file" aria-label="File under a section" title=${c.pin ? 'Where this card is filed is kept with the desk, for everyone on it' : 'Where this card is filed is kept on this computer'} value=${c.sec || ''} onChange=${e => onFile(c, e.target.value)}><option value="">${c.sec ? 'Back to Unsorted' : 'File under...'}</option>${secs.map((s, i) => html`<option key=${s.id} value=${s.id}>${secKey(i) ? secKey(i) + '  ' : ''}${s.title}</option>`)}</select>` : null}
       </div>
     </article>`;
   }
@@ -259,14 +260,18 @@
       if (d) setUndo(d.mark === 'pin' ? { text: 'Pinned: ' + title, run: () => back('/den/pin', { clear: true }) } : d.mark === 'aside' ? { text: 'Set aside: ' + title, run: () => back('/den/aside', { clear: true }) } : { text: 'Unpinned: ' + title, run: () => back('/den/pin', {}) });
       b.reload(); };
     const mute = async on => { if (on) { try { await call('/den/mute', { desk: desk.id, kind: offer.kind, value: offer.value }); toastMsg('Muted on this desk'); b.reload(); bump('desk'); } catch (e) { toastMsg(say(e), true); } } setOffer(null); };
-    /* File a card under a section. A row the worker can pin is pinned first, exactly as the Pin button does, so a draft
-       must cover it; which section it sits under is this browser's own note. */
-    const fileCard = async (c, sec) => { if (!canWrite || !c || (c.sec || '') === (sec || '')) return; const was = c.sec || ''; let pinnedNow = false;
-      if (sec && c.pin && !c.pinned) { try { await call('/den/pin', { desk: desk.id, item: c.id }); pinnedNow = true; } catch (e) { toastMsg(say(e), true); return; } }
+    /* File a card under a section. A row the worker can pin is pinned, exactly as the Pin button does, so a draft must
+       cover it, and the pin carries the section (build p66): where the card sits is the desk's record, seen by everyone
+       on it. Taking it back to Unsorted leaves it pinned. A narrative or a date is filed on this computer only. The note
+       kept here mirrors the worker's answer, and stands on its own when the worker is older than this page. */
+    const fileCard = async (c, sec) => { if (!canWrite || !c || (c.sec || '') === (sec || '')) return; const was = c.sec || ''; let pinnedNow = false, posted = false;
+      if (c.pin && (sec || c.pinned)) { try { await call('/den/pin', { desk: desk.id, item: c.id, section: sec || '' }); pinnedNow = !c.pinned; posted = true; } catch (e) { toastMsg(say(e), true); return; } }
       const m = Object.assign({}, fref.current); if (sec) m[c.key] = sec; else delete m[c.key]; setFiling(m);
       const t = (secs.find(s => s.id === sec) || {}).title;
-      setUndo({ text: (sec ? 'Filed under ' + t : 'Back to Unsorted') + ': ' + String(c.title || '').slice(0, 50), run: async () => { const n = Object.assign({}, fref.current); if (was) n[c.key] = was; else delete n[c.key]; setFiling(n); if (pinnedNow) { try { await call('/den/pin', { desk: desk.id, item: c.id, clear: true }); } catch (e) { toastMsg(say(e), true); } b.reload(); } } });
-      if (pinnedNow) b.reload(); };
+      setUndo({ text: (sec ? 'Filed under ' + t : 'Back to Unsorted') + ': ' + String(c.title || '').slice(0, 50), run: async () => { const n = Object.assign({}, fref.current); if (was) n[c.key] = was; else delete n[c.key]; setFiling(n);
+        if (posted) { try { await call('/den/pin', pinnedNow ? { desk: desk.id, item: c.id, clear: true } : { desk: desk.id, item: c.id, section: was }); } catch (e) { toastMsg(say(e), true); } b.reload(); } } });
+      // the board is read again after every write, so a read that was in flight when the pin went out cannot bring the old section back over it
+      if (posted) b.reload(); };
     const drop = sec => e => { e.preventDefault(); let k = drag; try { k = e.dataTransfer.getData('text/plain') || drag; } catch (x) {} setOver(''); setDrag(''); const c = cards.find(x => x.key === k); if (c) fileCard(c, sec); };
     const dragOver = sec => e => { if (!drag) return; e.preventDefault(); if (over !== (sec || 'unsorted')) setOver(sec || 'unsorted'); };
     // keyboard: j and k move between cards, p pins, x sets aside, o opens, a section's number files the focused card, / searches
@@ -301,7 +306,7 @@
       <div class="den-board">
         <section class=${'den-col den-unsorted' + (over === 'unsorted' ? ' over' : '')} aria-label="Unsorted" onDragOver=${dragOver('')} onDrop=${drop('')} onDragLeave=${() => setOver('')}>
           <header class="den-col-h"><h3>Unsorted</h3><span class="den-count" title="Cards not yet filed under a section">${uns.length}</span>
-            <p class="den-colsub">${canWrite ? 'The window\'s triage queue. Drag a card to a section, or focus it and press the section\'s number. Where a card is filed is kept on this computer.' : 'The window\'s rows, by weight. Your key is read-only: filing, pinning and setting aside need a full key.'}</p></header>
+            <p class="den-colsub">${canWrite ? 'The window\'s triage queue. Drag a card to a section, or focus it and press the section\'s number. Where a story or post is filed is kept with the desk, for everyone on it; a narrative or a date is filed on this computer only.' :'The window\'s rows, by weight. Your key is read-only: filing, pinning and setting aside need a full key.'}</p></header>
           <div class="den-col-tools">
             ${gaps.map(g => html`<button key=${g.key} class="den-gapline" onClick=${() => setTab('collection')} title=${g.detail}><b>${g.title}.</b> <span>Not a quiet day: see why</span></button>`)}
             <label class="den-search"><span class="den-sr">Search the unsorted cards</span><input class="den-in" type="search" value=${find} placeholder="Search rows ( / )" onInput=${e => setFind(e.target.value)} /></label>
@@ -329,7 +334,7 @@
             <header class="den-col-h">${key ? html`<span class="den-kbd" title=${'Press ' + key + ' to file the focused card here'}>${key}</span>` : null}<h3>${s.title}</h3><span class="den-count" title="Cards filed here">${mine.length}</span></header>
             <div class="den-col-meta"><span class=${'den-chip ' + st[1]}>${st[0]}</span>${un.length ? html`<span class="den-chip neg" title=${un.map(x => x.title).join('; ')}>${plural(un.length, 'check')} uncovered</span>` : null}<span class="den-spacer"></span>
               <button class="den-mini" aria-label=${'Write ' + s.title} onClick=${() => onWrite(s.id)}>${canWrite ? 'Write' : 'Read'}</button></div>
-            <div class="den-col-body">${mine.length ? mine.map(card) : html`<p class="den-drop">${canWrite ? html`<span>Drop evidence here${key ? html`<span>, or focus a card and press <span class="den-kbd">${key}</span></span>` : null}.</span>` : 'No card is filed here on this computer.'}</p>`}</div>
+            <div class="den-col-body">${mine.length ? mine.map(card) : html`<p class="den-drop">${canWrite ? html`<span>Drop evidence here${key ? html`<span>, or focus a card and press <span class="den-kbd">${key}</span></span>` : null}.</span>` : 'No card is filed here.'}</p>`}</div>
             ${String(text || '').trim() ? html`<div class="den-excerpt"><span class="den-mono">${wc(text)} words</span><p>${String(text).replace(/\s*\[[A-Z]:[^\]]+\]/g, '').slice(0, 170)}${String(text).length > 170 ? '...' : ''}</p></div>` : null}
           </section>`; })}
       </div>
@@ -443,6 +448,7 @@
     const compare = async () => { if (cmp) return setCmp(null); try { const d = await call('/den/brief?' + q({ desk: desk.id, prev: 1, day: brief.day })); setCmp(d.brief ? d.brief : { none: true }); } catch (e) { toastMsg(say(e), true); } };
 
     const carets = useRef({}); const wrap = useRef(null); const [menu, setMenu] = useState(false); const [pull, setPull] = useState(false);
+    const fref = useRef(filing); fref.current = filing;   // the filing as it is when a write has answered, not as the render that started the click saw it
     // the Board's columns and the rail read the brief as it stands in the editor
     useEffect(() => { if (onState) onState({ brief: brief || null, texts: work && brief && work.id === brief.id ? work.sections : null }); }, [brief, work]);   // eslint-disable-line
     useEffect(() => { if (!menu) return; const out = e => { if (!e.target.closest || !e.target.closest('.den-menu')) setMenu(false); }; const key = e => { if (e.key === 'Escape') setMenu(false); };
@@ -471,8 +477,12 @@
        unsaved edit like any other. Only an id this brief's evidence holds is offered: the worker removes any other. */
     const cite = cid => { if (ro || !cid || onSrc) return; const sid = openS.id; const t = T(sid); let pos = carets.current[sid]; if (pos == null || pos > t.length) pos = t.length; const pre = t.slice(0, pos); const lead = pre && !/[\s(]$/.test(pre) ? ' ' : ''; const at = (pre + lead + '[' + cid + ']').length;
       carets.current[sid] = at; change(sid, pre + lead + '[' + cid + ']' + t.slice(pos)); setTimeout(() => { const ta = wrap.current && Array.from(wrap.current.querySelectorAll('.den-sec textarea')).find(x => x.closest('.den-sec').dataset.section === sid); if (ta) { ta.focus(); try { ta.setSelectionRange(at, at); } catch (e) {} } }, 0); };
-    const fileHere = async c => { if (!canWrite || onSrc) return; if (c.pin && !c.pinned) { try { await call('/den/pin', { desk: desk.id, item: c.id }); c.pinned = true; } catch (e) { toastMsg(say(e), true); return; } } setFiling(Object.assign({}, filing, { [c.key]: openS.id })); };
-    const unfileKey = k => { const m = Object.assign({}, filing); delete m[k]; setFiling(m); };
+    // filing from here is the Board's rule: a row the worker pins is pinned with its section (the desk's record), the rest is this computer's note;
+    // the note is built from fref, what it is when the worker has answered, so two quick clicks keep both
+    const fileHere = async c => { if (!canWrite || onSrc) return; if (c.pin) { try { await call('/den/pin', { desk: desk.id, item: c.id, section: openS.id }); c.pinned = true; } catch (e) { toastMsg(say(e), true); return; } } setFiling(Object.assign({}, fref.current, { [c.key]: openS.id })); };
+    const unfileKey = async k => { const c = cardBy[k]; const idm = /^[MSP]:(\d+)$/.exec(k); const item = c ? c.id : (idm && ev[k] ? +idm[1] : 0);   // a row of the brief's evidence is the worker's even when the window has not been read here
+      if (item && (!c || c.pinned)) { try { await call('/den/pin', { desk: desk.id, item, section: '' }); } catch (e) { toastMsg(say(e), true); return; } } const m = Object.assign({}, fref.current); delete m[k]; setFiling(m); };
+    const visFiled = k => !!filing[k] && others.some(s => s.id === filing[k]);   // a section hidden on Options is not a place a card is filed: the Board shows such a card in Unsorted, and so does the pull list
     const cardSub = c => (c.kind === 'media' ? c.r.outlet + (c.r.n > 1 ? ', ' + c.r.n + ' outlets' : '') + (c.reach ? ', ' + fmtN(c.reach) + ' on Facebook' : '') : c.kind === 'social' ? (CH[c.r.platform] || c.r.platform) + (c.reach ? ', ' + fmtN(c.reach) + ' interactions' : '') : c.kind === 'actors' ? c.r.who + ' on ' + (CH[c.r.platform] || c.r.platform) : c.kind === 'narratives' ? 'Narrative, ' + fmtN(c.r.n) + ' rows' : 'Upcoming, ' + c.r.date);
     const evItem = (key, extra) => { const c = cardBy[key]; const cid = c ? citeOf(c, ev) : (ev[key] ? key : ''); const e = cid ? ev[cid] : null; const title = c ? String(c.title || '') : e ? String(e.label || key) : key; const url = c ? c.url : e ? e.url : ''; const n = cid ? citedIn(cid) : 0;
       return html`<li key=${key} class="den-evitem"><button class=${'den-evcard' + (n ? ' cited' : '')} disabled=${ro || !cid} aria-label=${(cid ? 'Cite ' + cid + ': ' : 'Cannot be cited in this brief: ') + title.slice(0, 100)} title=${cid ? 'Insert [' + cid + '] where the cursor was' : 'This brief\'s evidence does not hold this row: it was collected after the draft, or the brief was started by hand. Draft again to cite it.'} onClick=${() => cite(cid)}>
@@ -482,7 +492,7 @@
     const here = onSrc ? [] : filedHere(openS.id); const hereIds = new Set(here.map(k => { const c = cardBy[k]; return c ? citeOf(c, ev) : k; }));
     const elsewhere = onSrc ? [] : Array.from(new Set((T(openS.id).match(/\[[A-Z]:[A-Za-z0-9_.-]{1,40}\]/g) || []).map(x => x.slice(1, -1)))).filter(id => ev[id] && !hereIds.has(id));
     const keyOfCite = id => { const c = (cards || []).find(x => citeOf(x, ev) === id); return c ? c.key : id; };
-    const pullList = cards ? cards.filter(c => !filing[c.key]).sort(byWeight) : null; const unHere = uncAll && !onSrc ? uncAll.filter(s => secOfSig(s) === openS.id) : [];
+    const pullList = cards ? cards.filter(c => !visFiled(c.key)).sort(byWeight) : null; const unHere = uncAll && !onSrc ? uncAll.filter(s => secOfSig(s) === openS.id) : [];
     const matched = s => desk.ratings.items.filter(i => i.id === s.id || i.id === s.kind); const loose = desk.ratings.items.filter(i => !others.some(s => i.id === s.id || i.id === s.kind));
     const rateBar = items => (items.length ? html`<div class="den-bar den-rate">${items.map(i => { const r = (work && work.ratings && work.ratings[i.id]) || {}; const set = (k, v) => { setWork(w => Object.assign({}, w, { ratings: Object.assign({}, w.ratings, { [i.id]: Object.assign({}, r, { [k]: v }) }) })); setSave({ s: 'dirty', msg: '' }); };
       return html`<span key=${i.id} class="den-form"><label class="den-lab">${i.label}<select value=${r.level || ''} disabled=${ro} onChange=${e => set('level', e.target.value)}><option value="">Not rated</option>${desk.ratings.levels.map(l => html`<option key=${l} value=${l}>${l}</option>`)}</select></label>
@@ -512,15 +522,15 @@
           </div></div>
           <aside class="den-evpane" aria-label="Evidence for this section">
             ${onSrc ? html`<div class="den-evhead"><b>Source List</b><p>Built from every row the brief cites, in the report's own groups. Cite a row in a section and it appears here; nothing is typed into it.</p></div>` : html`<div class="den-evin">
-            <div class="den-evhead"><b>Evidence for this section</b><span class="den-count">${here.length}</span><p>${ro ? (filed ? 'The brief is filed: reopen it to change it.' : 'Your key is read-only.') : 'Click a card to insert its citation where the cursor was. Which cards are filed here is kept on this computer.'}</p></div>
+            <div class="den-evhead"><b>Evidence for this section</b><span class="den-count">${here.length}</span><p>${ro ? (filed ? 'The brief is filed: reopen it to change it.' : 'Your key is read-only.') : 'Click a card to insert its citation where the cursor was. Stories and posts filed here are kept with the desk, for everyone on it; narratives and dates on this computer only.'}</p></div>
             ${here.length ? html`<ul class="den-evlist">${here.map(k => evItem(k, canWrite ? html`<button class="den-link" aria-label=${'Take it out of this section: ' + String((cardBy[k] || {}).title || k).slice(0, 80)} onClick=${() => unfileKey(k)}>Unfile</button>` : null))}</ul>`
-              : html`<p class="den-quiet">No card is filed under this section on this computer. File one on the Board, or pull one from the window below.</p>`}
-            ${elsewhere.length ? html`<div class="den-evsub">Cited here, filed elsewhere</div><ul class="den-evlist">${elsewhere.map(id => { const k = keyOfCite(id); const f = filing[k]; return evItem(k, html`<span class="den-mono">${f ? 'filed under ' + ((others.find(s => s.id === f) || {}).title || f) : 'not filed'}</span>`); })}</ul>` : null}
+              : html`<p class="den-quiet">No card is filed under this section. File one on the Board, or pull one from the window below.</p>`}
+            ${elsewhere.length ? html`<div class="den-evsub">Cited here, filed elsewhere</div><ul class="den-evlist">${elsewhere.map(id => { const k = keyOfCite(id); const f = visFiled(k) ? filing[k] : ''; return evItem(k, html`<span class="den-mono">${f ? 'filed under ' + (others.find(s => s.id === f) || {}).title : 'not filed'}</span>`); })}</ul>` : null}
             ${unHere.length ? html`<div class="den-evsub warn">Checks this section does not cover</div><ul class="den-evlist">${unHere.map(s => html`<li key=${s.key} class="den-uncheck"><span class=${'den-chip ' + (SIG[s.sig] || ['', ''])[1]}>${(SIG[s.sig] || [s.sig])[0]}</span><span class="den-t">${s.title}</span><span class="den-sub">${s.detail}</span></li>`)}</ul>` : null}
             <div class="den-pull"><button class="den-fold" aria-expanded=${pull ? 'true' : 'false'} onClick=${() => setPull(!pull)}>Pull from the rest of the window${pullList ? html` <span class="den-count">${pullList.length}</span>` : null}</button>
               ${!pull ? null : !pullList ? html`<p class="den-quiet">The window's rows are read with the Board. <button class="den-link" onClick=${() => setTab('today')}>Open the Board</button></p>`
                 : pullList.length ? html`<ul class="den-pulllist">${pullList.slice(0, 80).map(c => html`<li key=${c.key}><span class="den-w">${c.w.score}</span><span class="den-pull-t"><span class="den-t">${c.title}</span><span class="den-sub">${cardSub(c)}</span></span>
-                  <button class="den-mini row" disabled=${!canWrite} aria-label=${'File here: ' + String(c.title || '').slice(0, 80)} title=${c.pin ? 'Pins it to the report and files it under this section' : 'Files it under this section on this computer'} onClick=${() => fileHere(c)}>File here</button></li>`)}</ul>`
+                  <button class="den-mini row" disabled=${!canWrite} aria-label=${'File here: ' + String(c.title || '').slice(0, 80)} title=${c.pin ? 'Pins it to the report and files it under this section, for everyone on the desk' : 'Files it under this section on this computer'} onClick=${() => fileHere(c)}>File here</button></li>`)}</ul>`
                 : html`<p class="den-quiet">Every card of the window is filed under a section.</p>`}</div></div>`}
           </aside>
           ${hist || cmp ? html`<aside class="den-drawer" aria-label="History and comparison">
@@ -781,14 +791,33 @@
       window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, []);   // eslint-disable-line
     const did = desk ? desk.id : ''; const mine = board && board.id === did ? board.d : null; const mySigs = mine && mine.missed && Array.isArray(mine.missed.signals) ? mine.missed.signals : (sigs && sigs.id === did ? sigs.s : null);
     const cards = useMemo(() => (mine ? deck(mine, mySigs || []) : null), [mine, mySigs]);
+    // opened on another tab than the Board (the last tab used is kept): the window is read once here too, so the Brief's
+    // evidence and where the desk's cards are filed are the desk's record, not this computer's note; the Board's own
+    // read, when it opens, carries the checks
+    const adoptRef = useRef(null);
+    useEffect(() => { if (!desk || tab === 'today' || mine) return; let on = true; get('/den/board?' + q({ desk: desk.id }), 'counts').then(d => { if (on) { setBoard({ id: desk.id, d }); if (adoptRef.current) adoptRef.current(d); } }, () => {}); return () => { on = false; }; }, [did, tab, !!mine]);   // eslint-disable-line
     if (D.loading && !D.data) return html`<div id="den-shell"><${TopBar} /><${Loading} what="the desks" /></div>`;
     if (D.err && !D.data) return html`<div id="den-shell"><${TopBar} /><${Failed} what="The desks" err=${D.err} onRetry=${D.reload} /></div>`;
     if (!desk) return html`<div id="den-shell"><${TopBar} /><${Empty}><b>No desk is set up.</b> A desk is a client, a region and a report format. Ask an admin to add one.<//></div>`;
     const pickDesk = id => { setDeskId(id); ls.set('ax_den_desk', id); setTick(t => t + 1); };
-    /* Which section a card is filed under: this browser's own note for this desk and this Sydney day. The worker holds
-       the pin (so a draft covers the row); it is not asked to hold where the card sits. */
+    /* Which section a card is filed under, for this desk and this Sydney day. A story or post carries its section on its
+       pin, the desk's record (build p66): when the board arrives, what it says replaces this computer's note for every
+       row it names, so a filing made by someone else, or on another computer, shows here. A narrative or a date is not a
+       row the worker pins, so where it sits stays this computer's note. A worker older than this page says nothing about
+       sections, and the note then stands as it did before. */
     const fkey = 'ax_den_file_' + desk.id + '_' + sydDay(); const filing = fst.k === fkey ? fst.m : (ls.get(fkey, {}) || {});
     const setFiling = m => { setFst({ k: fkey, m }); if (Object.keys(m).length) ls.set(fkey, m); else ls.del(fkey); };
+    const adopt = d => { if (!d) return; const rows = [['M:', d.media], ['S:', d.social], ['P:', d.actors]]; if (!rows.some(x => (x[1] || []).some(r => 'section' in r))) return;
+      const m = Object.assign({}, filing); let ch = false; const known = s => !!s && desk.sections.some(x => x.id === s && x.kind !== 'sources' && desk.options.hidden.indexOf(x.id) < 0);
+      // the first board with sections this desk has seen on this computer: a note made here before the worker kept sections
+      // (a pinned row it reports under no section) is sent to it once, instead of being dropped; after that, a pinned row
+      // under no section is someone's "back to Unsorted" and the note follows it
+      const sentKey = 'ax_den_sec_sent_' + desk.id; const first = !ls.get(sentKey, false); const send = [];
+      rows.forEach(x => (x[1] || []).forEach(r => { const k = x[0] + r.id, s = r.pinned && known(r.section) ? r.section : '';
+        if (first && canWrite && r.pinned && !s && known(m[k])) { send.push(call('/den/pin', { desk: desk.id, item: r.id, section: m[k] }).catch(() => {})); return; }
+        if ((m[k] || '') !== s) { ch = true; if (s) m[k] = s; else delete m[k]; } }));
+      if (ch) setFiling(m); ls.set(sentKey, true); if (send.length) Promise.all(send).then(() => setTick(t => t + 1)); };
+    adoptRef.current = adopt;
     const openSec = secs[desk.id] !== undefined ? secs[desk.id] : ls.get('ax_den_sec_' + desk.id, ''); const setOpenSec = id => { setSecs(o => Object.assign({}, o, { [desk.id]: id })); ls.set('ax_den_sec_' + desk.id, id); };
     const cov = bst.id === desk.id ? bst : { brief: null, texts: null };
     return html`<div data-density=${desk.options.density || 'regular'} id="den-app">
@@ -806,7 +835,7 @@
       </div>
       <div role="tabpanel" id="den-tabpanel" class=${'tab-' + tab} aria-labelledby=${'den-tab-' + tab} tabIndex=${tab === 'today' || tab === 'brief' ? null : '0'}>
         <${Boundary} name=${TABS.find(t => t[0] === tab)[1]} resetKey=${desk.id + tab}>
-          ${tab === 'today' ? html`<${Board} desk=${desk} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} onStrip=${setBoardStrip} onBoard=${d => setBoard(d ? { id: desk.id, d } : null)} bst=${cov} filing=${filing} setFiling=${setFiling} onWrite=${id => { setOpenSec(id); setTab('brief'); }} />` : null}
+          ${tab === 'today' ? html`<${Board} desk=${desk} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} onStrip=${setBoardStrip} onBoard=${d => { setBoard(d ? { id: desk.id, d } : null); adopt(d); }} bst=${cov} filing=${filing} setFiling=${setFiling} onWrite=${id => { setOpenSec(id); setTab('brief'); }} />` : null}
           <div class="den-briefhost" hidden=${tab !== 'brief'}><${Boundary} name="Brief" resetKey=${desk.id}><${BriefPanel} key=${desk.id} desk=${desk} tick=${tick} bump=${bump} budget=${budget} canWrite=${canWrite} setTab=${setTab} cards=${cards} signals=${mySigs} filing=${filing} setFiling=${setFiling} openSec=${openSec} setOpenSec=${setOpenSec} onState=${s => setBst(Object.assign({ id: desk.id }, s))} /><//></div>
           ${tab === 'watch' ? html`<div class="den-page"><${WatchPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} /></div>` : null}
           ${tab === 'collection' ? html`<div class="den-page"><${CollectionPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} /></div>` : null}

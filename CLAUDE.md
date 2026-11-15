@@ -71,7 +71,7 @@ notified -> acked -> drafted. Routes: `/sentinel/alerts|scan|ack|metrics`.
 In-app: the Sentinel view (nav badge counts what is unactioned) with
 Acknowledge (stops the clock) and Draft in Ad Lab (seeds the brief).
 
-## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; release 1 of 7 built)
+## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 7 built, the Storyboard live)
 
 The agency's monitoring analyst files daily and weekly activist-activity briefs per client. `DEN.md` holds what her
 reports are made of (counts and public names only: the reports themselves are client material and never enter the
@@ -310,9 +310,17 @@ verifies each, and what was asked for and not built.
     state chip, the checks it has not covered, Write, an excerpt of its words; the Source List column is built, not a
     place to file). A card is filed by dragging, by focusing it and pressing the section's number (1-9, 0), or by
     its select. **Filing pins:** a row the worker can pin goes through `POST /den/pin` exactly as the Pin button
-    does; a narrative or a date is not sent (the worker pins archive rows only). **Which section a card sits under
-    is kept per browser**, localStorage `ax_den_file_<desk>_<Sydney day>` (`{cardKey: sectionId}`), and the page
-    says so; the open section is `ax_den_sec_<desk>`. `weigh(card, signals, now)` is the one pure function behind a
+    does; a narrative or a date is not sent (the worker pins archive rows only). **Which section a story or post
+    sits under is the desk's record since build p66** (`DEN.md` s.6.11): `den_marks.section`, written by
+    `POST /den/pin {section}` (`''` is Unsorted and keeps the pin; a pin that says nothing keeps the section; an id the
+    desk has not, or the Source List, is `400 unknown_section`), returned as `section` on every media, social and
+    actor row (`''` when unfiled; narratives and dates carry none), and adopted by the page over this browser's note
+    (`adopt()` in `DenApp`, a hidden section read as Unsorted; localStorage `ax_den_file_<desk>_<Sydney day>`
+    `{cardKey: sectionId}` mirrors the worker, and stands alone only for narratives and dates, which the worker does
+    not pin, or under a worker older than the page; the first board with sections seen on a computer sends its earlier
+    notes to the worker once, `ax_den_sec_sent_<desk>`). The Den opened on a tab other than the Board reads the window
+    once too (`GET /den/board?desk=`, no checks) so the Brief's evidence is the desk's record; the Board reads the
+    window again after each filing. The open section is `ax_den_sec_<desk>`. `weigh(card, signals, now)` is the one pure function behind a
     card's weight (a base for the kind, reach on a log scale, outlets, growth since yesterday, a check that names
     it, recency), shown with its reasons; `covered(signal, brief, texts)` applies the worker's filing rule to the
     words in the editor. **The Brief** shows one section at a time between its outline and the evidence filed under
@@ -334,6 +342,12 @@ verifies each, and what was asked for and not built.
     cursor), `tests/den-inject-browser.mjs` (60), `tests/studio-tokens-test.mjs` (5: TK5 holds the Den's inks to
     AA); fixture helpers `CARD`, `cards`, `checks`, `sec`, `exportItem`. **Not verified:** nothing was seen against
     the live worker or real rows (weights and column widths on a busy day), and the drag was tried in Chromium only.
+    Merged to `main` and live on GitHub Pages on 14 November 2026.
+  - **Filing follows the desk (15 November 2026; build `2026-11-15.studio-p66`, page `den.js?v=r50`; branch
+    `claude/den-section-marks`).** The section rides on the pin (above); `tests/den-worker.mjs` DK21 (21), and
+    `tests/den-browser.mjs` (33: the filing case opens a second browser as another person; a new case opens on the
+    Brief tab on another computer and its Unfile reaches the worker). Needs the worker deployed: a page at r50 on a
+    worker before p66 files as before, per browser.
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
