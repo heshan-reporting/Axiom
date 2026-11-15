@@ -821,8 +821,11 @@ person, or the same person on another computer, saw the pins and an Unsorted que
   stayed local, a stale board read could undo a fresh move, two quick clicks on the Brief lost one, a hidden section
   was adopted, and two of DK21's assertions could not fail.
 
-Not verified: the live worker (the `ALTER TABLE` on the live `den_marks`, and the write and read a move now costs under
-a busy database).
+Deployed by the owner on 15 November 2026 at 11:49 UTC, after the branch was merged to `main` (c057ef9) and GitHub Pages
+served `den.js?v=r50`: the live worker answers build `2026-11-15.studio-p66`, revision c057ef9, deploy token
+`6709076c463c0290`, and `/engine/status` answered 200 after the upload. Not verified: the `ALTER TABLE` on the live
+`den_marks` (it runs on the first `/den/` request with a key, which is the owner's), and the write and read a move now
+costs under a busy database.
 
 ## 7. Hand-over (11 November 2026)
 

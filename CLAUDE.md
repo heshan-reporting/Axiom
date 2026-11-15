@@ -346,8 +346,9 @@ verifies each, and what was asked for and not built.
   - **Filing follows the desk (15 November 2026; build `2026-11-15.studio-p66`, page `den.js?v=r50`; branch
     `claude/den-section-marks`).** The section rides on the pin (above); `tests/den-worker.mjs` DK21 (21), and
     `tests/den-browser.mjs` (33: the filing case opens a second browser as another person; a new case opens on the
-    Brief tab on another computer and its Unfile reaches the worker). Needs the worker deployed: a page at r50 on a
-    worker before p66 files as before, per browser.
+    Brief tab on another computer and its Unfile reaches the worker). Merged to `main` (c057ef9) and live on GitHub Pages on
+    15 November 2026; the owner deployed the worker the same day (11:49 UTC, deploy token `6709076c463c0290`), so
+    filing is shared.
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
@@ -909,7 +910,7 @@ because it exists. **Every address and every answer shape below is unverified un
   Still whole-kind by design, and small today: reads with no window (`/signals/status`, held comments by thread).
   Harness: `tests/archive-index-worker.mjs` (4).
 
-## Collection hardening (build `2026-11-12.studio-p65`, page `sources.js?v=r2`; branch `worktree-collection-hardening`, not deployed)
+## Collection hardening (build `2026-11-12.studio-p65`, page `sources.js?v=r2`; on `main`, live in the worker since the owner's deploy of 15 November 2026)
 
 At the owner's request (12 November 2026): every collector audited for rate limits, a refused token, retry, timeouts
 and pagination; Meta and LinkedIn engagement through their own APIs; two official datasets. No signed-in source was
