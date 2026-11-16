@@ -8399,9 +8399,12 @@ async function denBoard(env, deskId, opts) {
   // key narratives on this desk's issues that gained rows in the window
   let narratives = [];
   try { await ensureNarratives(env);
-    narratives = (((await env.MIND_DB.prepare("SELECT id, label, claim, counter_claim, issues, n, n24, nprev, velocity, side, spread, status, first_ts, last_ts, first_platform, scope FROM narratives WHERE last_ts>? AND n>=2 AND COALESCE(muted,0)=0 AND COALESCE(status,'')!='broad' AND COALESCE(scope,'')!='off' ORDER BY n24 DESC, n DESC LIMIT 200").bind(win.from).all()).results) || [])
+    // p67: never the placeholder. A model's or a person's name (label), else the working title the recount wrote, else one
+    // built here from the shared words and the desk's issue (no query, no model call); named says which (additive)
+    const issueLabel = id => (desk.issues.find(i => i.id === id) || {}).label || (CLIENT_ISSUES.find(c => c.id === id) || {}).label || id;
+    narratives = (((await env.MIND_DB.prepare("SELECT id, label, claim, counter_claim, issues, n, n24, nprev, velocity, side, spread, status, first_ts, last_ts, first_platform, scope, edited, COALESCE(auto_label,'') auto_label, terms FROM narratives WHERE last_ts>? AND n>=2 AND COALESCE(muted,0)=0 AND COALESCE(status,'')!='broad' AND COALESCE(scope,'')!='off' ORDER BY n24 DESC, n DESC LIMIT 200").bind(win.from).all()).results) || [])
       .map(n => Object.assign(n, { issues: denJ(n.issues, []), spread: denJ(n.spread, []) })).filter(n => n.issues.some(i => mine.indexOf(i) >= 0)).slice(0, 25)
-      .map(n => ({ id: n.id, label: n.label || 'A narrative not yet named', claim: n.claim || '', counter: n.counter_claim || '', issues: n.issues.filter(i => mine.indexOf(i) >= 0), n: n.n, n24: n.n24, pace: n.velocity, side: n.side || '', status: n.status || '', spread: (Array.isArray(n.spread) ? n.spread : []).slice(0, 6).map(s => (s && s.platform) || s).filter(Boolean), first: n.first_ts, last: n.last_ts }));
+      .map(n => { const on = n.issues.filter(i => mine.indexOf(i) >= 0); return { id: n.id, label: n.label || n.auto_label || narrTemplate(denJ(n.terms, {}), [], issueLabel(on[0]), n.n), named: n.label ? (n.edited ? 'person' : 'model') : 'auto', claim: n.claim || '', counter: n.counter_claim || '', issues: on, n: n.n, n24: n.n24, pace: n.velocity, side: n.side || '', status: n.status || '', spread: (Array.isArray(n.spread) ? n.spread : []).slice(0, 6).map(s => (s && s.platform) || s).filter(Boolean), first: n.first_ts, last: n.last_ts }; });
   } catch (e) { narratives = []; }
   // recorded dates (read from a parliament's own page) lead; a stage row's own sentence is not read again as a guess
   let recorded = []; try { recorded = await processUpcoming(env, mine, now); } catch (e) { recorded = []; }
@@ -8528,7 +8531,7 @@ async function denEvidence(env, desk, board, missed, pins, eo) {
   const chUnread = missed && Array.isArray(missed.signals) ? Array.from(new Set(missed.signals.filter(s => s.sig === 'gap').map(s => DEN_CH_NAME[s.channel] || s.channel).filter(Boolean))) : [];
   L.push('CHANNELS READ IN THIS WINDOW: ' + (chRead.join(', ') || 'none') + (chUnread.length ? '; not read: ' + chUnread.join(', ') : '') + '.');
   if (sigs.length) { L.push('', 'SIGNALS NOT TO MISS (computed from the archive)'); sigs.forEach(s => { if (/^A:/.test(s.key)) put(s.key, { k: 'alert', label: s.title, text: one(s.title).slice(0, 160), sub: one(s.detail).slice(0, 120) }, s.title + '. ' + s.detail); else L.push('- ' + s.title + '. ' + s.detail); }); }
-  L.push('', 'KEY NARRATIVES (' + board.narratives.length + ')'); board.narratives.slice(0, 10).forEach(n => put('N:' + n.id, { k: 'narrative', label: n.label, text: (one(n.claim) || one(n.label)).slice(0, 160), sub: n.n + ' rows, ' + n.n24 + ' in the last day, ' + (n.status || 'steady') },'"' + one(n.label) + '" | claim: ' + one(n.claim).slice(0, 200) + ' | ' + n.n + ' rows, ' + n.n24 + ' in the last day, ' + (n.status || 'steady') + ' | toward the client: ' + (n.side || 'unknown') + ' | taken up by: ' + (n.spread.join(' > ') || 'unknown')));
+  L.push('', 'KEY NARRATIVES (' + board.narratives.length + ')'); board.narratives.slice(0, 10).forEach(n => put('N:' + n.id, { k: 'narrative', label: n.label, text: (one(n.claim) || one(n.label)).slice(0, 160), sub: (n.n + ' rows, ' + n.n24 + ' in the last day, ' + (n.status || 'steady') + (n.named === 'auto' ? ', working title' : '')).slice(0, 120) },'"' + one(n.label) + '"' + (n.named === 'auto' ? ' | working title, not yet reviewed' : '') + ' | claim: ' + one(n.claim).slice(0, 200) + ' | ' + n.n + ' rows, ' + n.n24 + ' in the last day, ' + (n.status || 'steady') + ' | toward the client: ' + (n.side || 'unknown') + ' | taken up by: ' + (n.spread.join(' > ') || 'unknown')));
   let gt = {}; const gIds = board.media.filter(m => m.gated).map(m => m.id); if (gIds.length) { try { gt = await gatedTexts(env, gIds.slice(0, 40)); } catch (e) { gt = {}; } }
   const med = board.media.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
   L.push('', 'TRADITIONAL MEDIA (' + board.counts.news + ' stories, ' + board.media.length + ' after folding syndicated copies; ' + med.length + ' shown)');
@@ -9884,6 +9887,12 @@ async function ensureNarratives(env) {
   try { await env.MIND_DB.prepare("ALTER TABLE narratives ADD COLUMN scope TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
   try { await env.MIND_DB.prepare("ALTER TABLE narratives ADD COLUMN relevance INTEGER DEFAULT -1").run(); } catch (e) { /* already there */ }
   try { await env.MIND_DB.prepare("ALTER TABLE narratives ADD COLUMN scope_why TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
+  // p67: the working title (computed from the rows, no model call) and the size it was computed at; label stays the
+  // model's or a person's. label_tries / label_try_ts: the namer's strikes and its claim (B0, narrLabelQueue).
+  try { await env.MIND_DB.prepare("ALTER TABLE narratives ADD COLUMN auto_label TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
+  try { await env.MIND_DB.prepare('ALTER TABLE narratives ADD COLUMN auto_n INTEGER DEFAULT 0').run(); } catch (e) { /* already there */ }
+  try { await env.MIND_DB.prepare('ALTER TABLE narratives ADD COLUMN label_tries INTEGER DEFAULT 0').run(); } catch (e) { /* already there */ }
+  try { await env.MIND_DB.prepare('ALTER TABLE narratives ADD COLUMN label_try_ts INTEGER DEFAULT 0').run(); } catch (e) { /* already there */ }
   NARR_READY = true;
   return true;
 }
@@ -9919,12 +9928,93 @@ function narrChannel(kind, meta, src) {
 }
 function narrId() { return 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function narrTopTerms(tok, k) { return Object.keys(tok).sort((a, b) => tok[b] - tok[a]).slice(0, k || 40); }
+/* p67 working titles (Layer A). A narrative is never stored or shown without a title: the member headline that carries
+ * the most of the cluster's shared words, cleaned; failing that a post's own first sentence; failing that a template from
+ * register names, the leading issue and the shared words. No model call. Never a comment's words, and never text that
+ * names somebody who is not on the register (a two-word capitalised name in a post, thread or forum title that is not a
+ * register entity or an issue). Recomputed only when the narrative has doubled since (auto_n), so a title an analyst is
+ * citing does not flicker; a model's name (label) and a person's (edited=1) always win. */
+const NARR_AUTO_KINDS = { news: 3, transcript: 2, reddit_thread: 2, forum: 1 };   // rows whose own title may be the title
+const NARR_AUTO_WORDS = 14;
+function narrClip(t) {
+  t = String(t || '').replace(/\s+/g, ' ').trim();
+  const w = t.split(' ').filter(Boolean);
+  if (w.length > NARR_AUTO_WORDS) t = w.slice(0, NARR_AUTO_WORDS).join(' ').replace(/[,;:\-]+$/, '') + '...';
+  if (t.length > 120) t = t.slice(0, 117).replace(/\s+\S*$/, '').replace(/[,;:\-]+$/, '') + '...';
+  return t;
+}
+const NARR_RX_SQ = new RegExp('[' + String.fromCharCode(0x2018, 0x2019) + ']', 'g');   // curly single quotes (ASCII source)
+const NARR_RX_DQ = new RegExp('["' + String.fromCharCode(0x201c, 0x201d) + ']', 'g');  // straight and curly double quotes
+const NARR_RX_DASH = new RegExp('[' + String.fromCharCode(0x2013, 0x2014) + ']', 'g'); // en and em dashes
+function narrCleanTitle(s) {
+  const t = String(s || '').replace(NARR_RX_SQ, "'").replace(NARR_RX_DQ, '').replace(NARR_RX_DASH, '-')
+    .replace(/^Comment on:\s*/i, '').replace(/https?:\/\/\S+/g, ' ')
+    .replace(/\s+[-|]\s+[^-|]{2,40}$/, '')   // " - The Outlet" / " | Outlet", as the Board folds copies
+    .replace(/^(live|watch|listen|opinion|analysis|exclusive|breaking|video|explainer|updated?)\s*[:|-]\s*/i, '')
+    .replace(/(^|\s)[#@][\w.]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^[-|:,;\s]+|[-|:,;\s]+$/g, '');
+  return narrClip(t);
+}
+/** Text that may name a private person: a capitalised pair (or longer) that is not a register name, an issue, or a
+ *  sentence-opening word followed by a common one. Only a story's published headline is exempt. */
+function narrPersonish(t, known) {
+  let s = String(t || '');
+  const cut = k => { k = String(k || '').trim(); if (k.length > 2) s = s.split(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')).join(' ; '); };
+  (known || []).forEach(cut); CLIENT_ISSUES.forEach(ci => cut(ci.label));
+  s = s.replace(/\s+/g, ' ').trim().replace(/(^|[.!?;]\s+)(The|A|An|This|That|These|Those|It|We|Our|Their|They|In|On|At|For|And|But|So|If|When|Why|How|What|New|Big|More|Sign|Stop|Say|Tell|No|Yes)\s+/g, '$1');
+  return /\b[A-Z][a-z'\-]+\s+(?:(?:de|van|von|di|da|le|la|bin|al)\s+)?[A-Z][a-z'\-]+/.test(s);
+}
+function narrTemplate(terms, names, issue, n) {
+  const top = narrTopTerms(terms || {}, 4).filter(t => !/^\$?\d/.test(t));
+  const who = (names || []).filter(Boolean).slice(0, 2).join(' and ');
+  const core = who && issue ? who + ' on ' + issue : (who || issue || '');
+  let t = core ? (top.length ? core + ': ' + top.join(', ') : 'A narrative on ' + core) : top.length ? top.join(', ') : 'A narrative of ' + (Number(n) || 0) + ' rows';
+  t = t.charAt(0).toUpperCase() + t.slice(1);
+  return narrClip(t);
+}
+/** rows: the narrative's rows {kind,title,body}, oldest first (a tie keeps the origin); terms: its term weights;
+ *  o: { names: register names of its entities, issue: its leading issue's label, known: every register name, n }. */
+function narrAutoLabel(rows, terms, o) {
+  o = o || {}; const tv = terms || {}; const known = (o.known || []).concat(o.names || []);
+  const score = t => tokenCos(tokenVec(narrTokens(t)), tv);
+  let best = '', bestScore = -1, post = '', postScore = -1;
+  (rows || []).forEach(r => {
+    const kind = String(r.kind || '');
+    if (/comment/.test(kind)) return;   // never a comment
+    const title = String(r.title || '').trim();
+    if (NARR_AUTO_KINDS[kind] && title && !/^[\w.-]+ post$/i.test(title)) {   // "x post" is a placeholder, "... - Example Post" an outlet
+      const t = narrCleanTitle(title); if (t.split(' ').length < 4) return;
+      if (kind !== 'news' && kind !== 'transcript' && narrPersonish(t, known)) return;
+      const s = score(t) + NARR_AUTO_KINDS[kind] * 0.02;
+      if (s > bestScore) { best = t; bestScore = s; }
+      return;
+    }
+    if (kind === 'sig_thread' || kind === 'transcript' || kind === 'forum' || kind === 'reddit_thread') {
+      // a post's own words are the last fallback: its first sentence, handles and links out, nobody unregistered in it
+      const first = String(r.body || '').replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/)[0] || '';
+      const t = narrCleanTitle(first); if (t.split(' ').length < 4 || narrPersonish(t, known)) return;
+      const s = score(t);
+      if (s > postScore) { post = t; postScore = s; }
+    }
+  });
+  return best || post || narrTemplate(tv, o.names, o.issue, o.n);
+}
+/** Who named it: a person (an edit), the model, or nobody yet (the working title). */
+function narrNamed(r) { return r && r.label ? (r.edited ? 'person' : 'model') : r && r.auto_label ? 'auto' : ''; }
+/** The working title of one narrative, with register names resolved (cached matcher; no model call). */
+async function narrAutoTitle(env, rows, terms, issues, entityIds, n) {
+  let m = null; try { m = await entityMatcher(env); } catch (e) { m = null; }
+  const names = m ? (entityIds || []).map(id => (m.byId[id] || {}).name).filter(Boolean) : [];
+  const known = m ? m.entities.map(e => e.name).filter(Boolean) : [];
+  const ci = CLIENT_ISSUES.find(c => c.id === (issues || [])[0]);
+  return narrAutoLabel(rows, terms, { names, known, issue: ci ? ci.label : ((issues || [])[0] || ''), n });
+}
 function narrRow(r) {
   return { id: r.id, label: r.label || '', summary: r.summary || '', claim: r.claim || '', counter_claim: r.counter_claim || '', proponents: r.proponents || '', issues: pjs(r.issues, []), entities: pjs(r.entities, []), ns: r.ns || '', side: r.side || 'unknown',
     n: r.n || 0, n24: r.n24 || 0, nprev: r.nprev || 0, velocity: Number(r.velocity) || 0, first_ts: r.first_ts || 0, first_item: r.first_item || 0, first_platform: r.first_platform || '', first_channel: r.first_channel || '', last_ts: r.last_ts || 0,
     platforms: pjs(r.platforms, {}), channels: pjs(r.channels, []), spread: pjs(r.spread, []), amplifiers: pjs(r.amplifiers, []), sentiment: pjs(r.sentiment, {}), counter: r.counter || '', status: r.status || 'new',
     alerted: !!r.alerted, alert_ts: r.alert_ts || 0, muted: !!r.muted, pinned: !!r.pinned, edited: !!r.edited, terms: pjs(r.terms, {}), labelled_n: r.labelled_n || 0, model: r.model || '', created: r.created || 0, updated: r.updated || 0,
-    scope: r.scope || '', relevance: r.relevance == null ? -1 : Number(r.relevance), scopeWhy: r.scope_why || '' };
+    scope: r.scope || '', relevance: r.relevance == null ? -1 : Number(r.relevance), scopeWhy: r.scope_why || '',
+    autoLabel: r.auto_label || '', named: narrNamed(r) };   // p67, additive: the working title and who named it
 }
 function narrDay() { return new Date().toISOString().slice(0, 10).replace(/-/g, ''); }
 async function narrBudget(env) {
@@ -9936,7 +10026,7 @@ async function narrBudget(env) {
  *  stands toward the client. */
 async function narrRefresh(env, id, now) {
   const db = env.MIND_DB;
-  const [tot, plats, chans, amps, sent, side, ents] = await db.batch([
+  const [tot, plats, chans, amps, sent, side, ents, stories, self] = await db.batch([
     db.prepare('SELECT COUNT(*) n, SUM(ts>?) n24, SUM(ts>? AND ts<=?) nprev, MIN(ts) first_ts, MAX(ts) last_ts FROM narrative_items WHERE narrative=?').bind(now - 86400000, now - 2 * 86400000, now - 86400000, id),
     db.prepare('SELECT platform, COUNT(*) n, MIN(ts) first FROM narrative_items WHERE narrative=? GROUP BY platform ORDER BY first').bind(id),
     db.prepare('SELECT channel, platform, COUNT(*) n FROM narrative_items WHERE narrative=? GROUP BY channel ORDER BY n DESC LIMIT 8').bind(id),
@@ -9944,9 +10034,17 @@ async function narrRefresh(env, id, now) {
     db.prepare("SELECT SUM(s.tone<-0.2) neg, SUM(s.tone>0.2) pos, COUNT(*) judged, AVG(s.tone) tone FROM narrative_items ni JOIN sent_items s ON s.item=ni.item WHERE ni.narrative=? AND s.model<>'none'").bind(id),
     db.prepare("SELECT AVG(e.stance) st, COUNT(*) k FROM narrative_items ni JOIN sent_entities e ON e.item=ni.item JOIN entities en ON en.id=e.entity WHERE ni.narrative=? AND en.side='client'").bind(id),
     db.prepare('SELECT e.entity, COUNT(*) k FROM narrative_items ni JOIN sent_entities e ON e.item=ni.item WHERE ni.narrative=? GROUP BY e.entity ORDER BY k DESC LIMIT 6').bind(id),
+    // p67: the rows a working title may come from (stories and posts, never comments), oldest first, and what it has now
+    db.prepare("SELECT a.kind, a.title, substr(a.body,1,300) body FROM narrative_items ni JOIN arc_items a ON a.id=ni.item WHERE ni.narrative=? AND a.kind IN ('news','transcript','reddit_thread','forum','sig_thread') ORDER BY ni.ts LIMIT 40").bind(id),
+    db.prepare("SELECT muted, terms, issues, entities, COALESCE(auto_label,'') auto_label, COALESCE(auto_n,0) auto_n FROM narratives WHERE id=?").bind(id),
   ]);
   const t = (tot.results || [])[0] || {};
   if (!t.n) return null;
+  const me = (self.results || [])[0] || {};
+  let autoLabel = me.auto_label || '', autoN = Number(me.auto_n) || 0;
+  if (!me.muted && t.n < narrMax(env) && (!autoLabel || t.n >= 2 * autoN)) {
+    try { autoLabel = await narrAutoTitle(env, stories.results || [], pjs(me.terms, {}), pjs(me.issues, []), pjs(me.entities, []), t.n) || autoLabel; autoN = t.n; } catch (e) { /* the title waits for the next recount */ }
+  }
   const platforms = {}; const spread = []; (plats.results || []).forEach(p => { platforms[p.platform || 'unknown'] = p.n; spread.push({ platform: p.platform || 'unknown', first: p.first, n: p.n }); });
   const channels = (chans.results || []).map(c => ({ channel: c.channel || '', platform: c.platform || '', n: c.n }));
   const amplifiers = (amps.results || []).map(a => ({ channel: a.channel || '', platform: a.platform || '', title: String(a.title || a.body || '').replace(/^Comment on:\s*/i, '').slice(0, 160), url: a.url, ts: a.ts, score: Number(a.score) || 0, comments: Number(a.comments) || 0, item: a.id }));
@@ -9960,9 +10058,9 @@ async function narrRefresh(env, id, now) {
   const velocity = nprev ? Math.round((n24 / nprev) * 100) / 100 : (n24 ? n24 : 0);
   const fresh = (t.first_ts || 0) > now - 48 * 3600000;
   const status = t.n >= narrMax(env) ? 'broad' : t.n < NARR_LABEL_MIN ? 'new' : (fresh && t.n >= NARR_ALERT_MIN) ? 'emerging' : (t.last_ts < now - 36 * 3600000 || (nprev && n24 < nprev / 2)) ? 'fading' : (n24 > nprev && n24 >= 3) ? 'growing' : 'steady';
-  await db.prepare('UPDATE narratives SET n=?, n24=?, nprev=?, velocity=?, first_ts=?, last_ts=?, platforms=?, spread=?, channels=?, amplifiers=?, sentiment=?, side=?, entities=?, status=?, updated=? WHERE id=?')
-    .bind(t.n, n24, nprev, velocity, t.first_ts, t.last_ts, JSON.stringify(platforms), JSON.stringify(spread), JSON.stringify(channels), JSON.stringify(amplifiers), JSON.stringify(sentiment), stand, JSON.stringify(entities), status, now, id).run();
-  return { n: t.n, n24, nprev, velocity, status, side: stand, platforms, spread, sentiment, first_ts: t.first_ts, last_ts: t.last_ts };
+  await db.prepare('UPDATE narratives SET n=?, n24=?, nprev=?, velocity=?, first_ts=?, last_ts=?, platforms=?, spread=?, channels=?, amplifiers=?, sentiment=?, side=?, entities=?, status=?, auto_label=?, auto_n=?, updated=? WHERE id=?')
+    .bind(t.n, n24, nprev, velocity, t.first_ts, t.last_ts, JSON.stringify(platforms), JSON.stringify(spread), JSON.stringify(channels), JSON.stringify(amplifiers), JSON.stringify(sentiment), stand, JSON.stringify(entities), status, autoLabel, autoN, now, id).run();
+  return { n: t.n, n24, nprev, velocity, status, side: stand, platforms, spread, sentiment, first_ts: t.first_ts, last_ts: t.last_ts, autoLabel };
 }
 const NARR_SYS = 'You name political narratives for an Australian intelligence platform. A narrative is a claim or story that people keep repeating in different words. For each numbered cluster of texts write: label - at most twelve words, the claim as its proponents would put it, no hashtags, no quotation marks; summary - two plain sentences: what is being said, and in general terms by whom (parties, groups, outlets, ordinary posters - never a private individual\'s name); claim - one sentence, the core assertion; counter - one sentence, the strongest opposing claim as its own proponents would put it, or an empty string when there is none; proponents - a short phrase for who tends to push it (e.g. "Greens and climate groups", "mining industry and Coalition MPs", "Reddit posters"); issues - the ids from the ISSUES list that the cluster is really about, at most three; scope - "client" when it is really about an issue in the ISSUES list, "politics" when it is Australian politics, government, public policy, the economy or finance but not a listed issue, "off" when it is celebrity, sport, entertainment, lifestyle, ordinary crime, weather or foreign news with no Australian political actor, policy or economic stake (a kidnapping, a footballer, a TV host - off, unless a politician or a policy is the point); relevance - 0 to 3, how much an Australian public-affairs agency and its clients should care; why - six words on the scope call. Reply with strict JSON only: {"clusters":[{"n":1,"label":"...","summary":"...","claim":"...","counter":"...","proponents":"...","issues":["ftc"],"scope":"client","relevance":3,"why":"..."}]}.';
 async function narrLabelBatch(env, clusters, log) {
@@ -9998,7 +10096,7 @@ async function narrLabel(env, ids, log, left) {
     const part = ids.slice(i, i + 90); const marks = part.map(() => '?').join(',');
     rows.push(...((await db.prepare('SELECT * FROM narratives WHERE id IN (' + marks + ') AND muted=0 AND edited=0 AND status<>\'broad\' AND n>=? AND (label=\'\' OR labelled_n*2<=n OR COALESCE(scope,\'\')=\'\')').bind(...part, NARR_LABEL_MIN).all()).results || []));
   }
-  const out = { named: 0, calls: 0, errors: [], deferred: 0 };
+  const out = { named: 0, calls: 0, errors: [], deferred: 0, stopped: '' };
   if (!rows.length) return out;
   const budget = await narrBudget(env);
   const clusters = [];
@@ -10014,18 +10112,60 @@ async function narrLabel(env, ids, log, left) {
     clusters.push({ id: r.id, n: r.n, terms: narrTopTerms(pjs(r.terms, {}), 8), chan, samples: pick });
   }
   for (let i = 0; i < clusters.length; i += 5) {
-    if (out.calls >= budget.left) { out.errors.push('naming budget of ' + budget.cap + ' calls reached; ' + (clusters.length - i) + ' narratives stay unnamed until tomorrow'); await log('err', out.errors[out.errors.length - 1]); break; }
-    if (left() < 15000) { out.deferred = clusters.length - i; await log('info', out.deferred + ' narratives wait for the next cron tick to be named (this run is out of time)'); break; }
+    if (out.calls >= budget.left) { out.stopped = 'budget'; out.errors.push('naming budget of ' + budget.cap + ' calls reached; ' + (clusters.length - i) + ' narratives stay unnamed until tomorrow'); await log('err', out.errors[out.errors.length - 1]); break; }
+    if (left() < 15000) { out.stopped = 'time'; out.deferred = clusters.length - i; await log('info', out.deferred + ' narratives wait for the next cron tick to be named (this run is out of time)'); break; }
     const batch = clusters.slice(i, i + 5);
     await log('cmd', 'claude ' + budget.model + ' name ' + batch.length + ' narrative' + (batch.length === 1 ? '' : 's') + ' (' + batch.map(c => c.n + ' rows').join(', ') + ')');
     let named;
     try { named = await narrLabelBatch(env, batch, log); out.calls++; }   // reserved and settled per provider call inside claudeMsg
-    catch (e) { const m = String((e && e.message) || e).slice(0, 160); if (/budget_exhausted/.test(m)) { out.errors.push(m); await log('err', m); break; } out.calls++; out.errors.push(m); await log('err', m); continue; }
-    const stmts = named.map(x => { const ns = (CLIENT_ISSUES.find(ci => ci.id === x.issues[0]) || {}).ns || ''; return db.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, proponents=?, issues=CASE WHEN ?<>\'[]\' THEN ? ELSE issues END, ns=CASE WHEN ?<>\'\' THEN ? ELSE ns END, scope=?, relevance=?, scope_why=?, labelled_n=n, model=?, updated=? WHERE id=?').bind(x.label, x.summary, x.claim, x.counter, x.proponents, JSON.stringify(x.issues), JSON.stringify(x.issues), ns, ns, x.scope, x.relevance, x.why, x.model, now, x.id); });
+    catch (e) { const m = String((e && e.message) || e).slice(0, 160); if (/budget_exhausted/.test(m)) { out.stopped = 'budget'; out.errors.push(m); await log('err', m); break; } out.calls++; out.errors.push(m); await log('err', m); continue; }
+    // a name clears the namer's strikes and its claim (p67); label_tries / label_try_ts exist once ensureNarratives ran
+    const stmts = named.map(x => { const ns = (CLIENT_ISSUES.find(ci => ci.id === x.issues[0]) || {}).ns || ''; return db.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, proponents=?, issues=CASE WHEN ?<>\'[]\' THEN ? ELSE issues END, ns=CASE WHEN ?<>\'\' THEN ? ELSE ns END, scope=?, relevance=?, scope_why=?, labelled_n=n, model=?, label_tries=0, label_try_ts=0, updated=? WHERE id=?').bind(x.label, x.summary, x.claim, x.counter, x.proponents, JSON.stringify(x.issues), JSON.stringify(x.issues), ns, ns, x.scope, x.relevance, x.why, x.model, now, x.id); });
     if (stmts.length) await db.batch(stmts);
     out.named += named.length;
     named.forEach(x => log('out', '"' + x.label + '"' + (x.issues.length ? ' [' + x.issues.join(', ') + ']' : '') + ' - ' + x.scope + (x.scope === 'off' ? ', hidden' : '') + (x.why ? ' (' + x.why + ')' : '')));
   }
+  return out;
+}
+/* p67 (B0): the day's window names the whole waiting queue, not only the narratives that moved in that tick. Same gate,
+ * same ledger scope ('narratives'), same daily cap (NARRATIVE_DAILY_CALLS) and the cron's own eight minutes. A narrative is
+ * claimed before its call (one compare-and-set per row: two drains, or the cron and a person's "Finish all waiting", never
+ * send the same one twice); a call that fails is a strike, and three strikes in a day set it aside until the next day, so
+ * one cluster the model cannot name cannot spend a call every pass. A claim lapses after two minutes. */
+const NARR_ELIGIBLE = "muted=0 AND edited=0 AND status<>'broad' AND n>=? AND (label='' OR labelled_n*2<=n OR COALESCE(scope,'')='')";
+const NARR_CLAIM_MS = 120000;
+const NARR_STRIKES = 3;
+async function narrClaim(env, ids, now) {
+  if (!ids || !ids.length) return [];
+  now = now || Date.now();
+  const res = await env.MIND_DB.batch(ids.map(id => env.MIND_DB.prepare('UPDATE narratives SET label_try_ts=?, label_tries=COALESCE(label_tries,0)+1 WHERE id=? AND COALESCE(label_try_ts,0)<?').bind(now, id, now - NARR_CLAIM_MS)));
+  return ids.filter((id, i) => ((res[i] && res[i].meta && res[i].meta.changes) || 0) > 0);
+}
+/** Nothing was asked of the model for these (the cap, or the clock): the claim and the strike are taken back. */
+async function narrUnclaim(env, ids) {
+  for (let i = 0; i < (ids || []).length; i += 90) { const part = ids.slice(i, i + 90); await env.MIND_DB.prepare('UPDATE narratives SET label_try_ts=0, label_tries=MAX(COALESCE(label_tries,0)-1,0) WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).run(); }
+}
+async function narrLabelQueue(env, o) {
+  o = o || {}; const db = env.MIND_DB; const log = o.log || (async () => {}); const left = typeof o.left === 'function' ? o.left : (() => 1e9);
+  const maxCalls = o.maxCalls > 0 ? o.maxCalls : 1e9;
+  const out = { named: 0, calls: 0, errors: [], deferred: 0, stopped: '', waiting: 0 };
+  const open = "AND NOT (COALESCE(label_tries,0)>=? AND COALESCE(label_try_ts,0)>?) AND COALESCE(label_try_ts,0)<?" + (o.where ? ' AND ' + o.where : '');
+  const tried = new Set();
+  for (let pass = 0; pass < 400; pass++) {
+    if (out.calls >= maxCalls) { out.stopped = 'calls'; break; }
+    if (left() < 15000) { out.stopped = 'time'; break; }
+    const now = Date.now();
+    const cand = ((await db.prepare('SELECT id FROM narratives WHERE ' + NARR_ELIGIBLE + ' ' + open + " ORDER BY (COALESCE(ns,'')<>'') DESC, n24 DESC, n DESC LIMIT 20").bind(NARR_LABEL_MIN, NARR_STRIKES, now - 86400000, now - NARR_CLAIM_MS).all()).results || []).map(r => r.id).filter(id => !tried.has(id)).slice(0, 5);
+    if (!cand.length) { out.stopped = 'done'; break; }
+    cand.forEach(id => tried.add(id));
+    const mine = await narrClaim(env, cand, now);
+    if (!mine.length) continue;
+    const nm = await narrLabel(env, mine, log, left);
+    out.named += nm.named; out.calls += nm.calls; out.errors.push(...nm.errors); out.deferred += nm.deferred || 0;
+    if (nm.stopped) { await narrUnclaim(env, mine); out.stopped = nm.stopped; break; }
+  }
+  try { const now = Date.now(); out.waiting = Number(((await db.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE + ' ' + open).bind(NARR_LABEL_MIN, NARR_STRIKES, now - 86400000, now + 1).first()) || {}).n) || 0; } catch (e) {}
+  if (out.waiting && out.stopped !== 'done') await log('info', out.waiting + ' narrative' + (out.waiting === 1 ? '' : 's') + ' still wait for a model name (' + (out.stopped === 'budget' ? 'the day\'s naming cap is reached' : out.stopped === 'time' ? 'this run is out of time' : 'this pass\'s calls are spent') + '); each keeps its working title');
   return out;
 }
 /** Two narratives on the same issue facing opposite ways toward the client are each other's counter. */
@@ -10134,12 +10274,13 @@ async function narrativesRun(env, opts) {
       for (const t in tv) best.tok[t] = (best.tok[t] || 0) + tv[t];
       issues.forEach(x => { best.ic[x] = (best.ic[x] || 0) + 1; }); best.top = new Set(narrTopIssues(best.ic, 3)); ents.forEach(x => best.ents.add(x));
       best.n++; best.last_ts = Math.max(best.last_ts, r.ts || now); best.first_ts = Math.min(best.first_ts || r.ts, r.ts || now); best.touched = true;
+      if (best.fresh && best.rows && best.rows.length < 40) best.rows.push({ kind: r.kind, title: r.title, body: String(r.body || '').slice(0, 300) });
       itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,?)').bind(r.id, best.id, r.ts || now, platform, channel, Math.round(bestSim * 1000) / 1000));
       touched.add(best.id); out.joined++; touchedBy[best.id] = touchedBy[best.id] || { id: best.id, added: 0, started: false }; touchedBy[best.id].added++;
     } else {
       bests.push(bestAny);
       const ic = {}; issues.forEach(x => { ic[x] = 1; });
-      const c = { id: narrId(), ic, top: new Set(narrTopIssues(ic, 3)), ents, n: 1, vec: v, tok: tv, first_ts: r.ts || now, last_ts: r.ts || now, fresh: true, touched: true, first_item: r.id, first_platform: platform, first_channel: channel };
+      const c = { id: narrId(), ic, top: new Set(narrTopIssues(ic, 3)), ents, n: 1, vec: v, tok: tv, first_ts: r.ts || now, last_ts: r.ts || now, fresh: true, touched: true, first_item: r.id, first_platform: platform, first_channel: channel, rows: [{ kind: r.kind, title: r.title, body: String(r.body || '').slice(0, 300) }] };
       live.push(c);
       itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,1)').bind(r.id, c.id, r.ts || now, platform, channel));
       touched.add(c.id); out.started++; touchedBy[c.id] = { id: c.id, added: 1, started: true };
@@ -10157,8 +10298,10 @@ async function narrativesRun(env, opts) {
   live.filter(c => c.touched).forEach(c => {
     const terms = {}; narrTopTerms(c.tok, 40).forEach(t => { terms[t] = Math.round(c.tok[t] * 1000) / 1000; });
     const top = narrTopIssues(c.ic, 3); const nsOf = (CLIENT_ISSUES.find(ci => ci.id === top[0]) || {}).ns || '';
-    if (c.fresh) nStmts.push(db.prepare("INSERT INTO narratives(id,label,summary,claim,counter_claim,proponents,issues,issue_counts,entities,ns,side,n,n24,nprev,velocity,first_ts,first_item,first_platform,first_channel,last_ts,platforms,channels,spread,amplifiers,sentiment,counter,status,alerted,alert_ts,muted,pinned,edited,terms,centroid,dim,labelled_n,model,created,updated) VALUES(?,'','','','','',?,?,?,?,'unknown',?,0,0,0,?,?,?,?,?,'{}','[]','[]','[]','{}','','new',0,0,0,0,0,?,?,?,0,'',?,?) ON CONFLICT(id) DO NOTHING")
-      .bind(c.id, JSON.stringify(top), JSON.stringify(c.ic), JSON.stringify([...c.ents].slice(0, 12)), nsOf, c.n, c.first_ts, c.first_item, c.first_platform, c.first_channel, c.last_ts, JSON.stringify(terms), c.vec ? f32b64(c.vec) : '', c.vec ? c.vec.length : 0, now, now));
+    // p67: born with a working title from the rows in hand (no model call), so no narrative exists without one
+    if (c.fresh) { const ci0 = CLIENT_ISSUES.find(ci => ci.id === top[0]); const autoLabel = narrAutoLabel(c.rows, terms, { names: [...c.ents].map(id => (matcher.byId[id] || {}).name).filter(Boolean), known: matcher.entities.map(e => e.name).filter(Boolean), issue: ci0 ? ci0.label : (top[0] || ''), n: c.n });
+      nStmts.push(db.prepare("INSERT INTO narratives(id,label,summary,claim,counter_claim,proponents,issues,issue_counts,entities,ns,side,n,n24,nprev,velocity,first_ts,first_item,first_platform,first_channel,last_ts,platforms,channels,spread,amplifiers,sentiment,counter,status,alerted,alert_ts,muted,pinned,edited,terms,centroid,dim,labelled_n,model,created,updated,auto_label,auto_n) VALUES(?,'','','','','',?,?,?,?,'unknown',?,0,0,0,?,?,?,?,?,'{}','[]','[]','[]','{}','','new',0,0,0,0,0,?,?,?,0,'',?,?,?,?) ON CONFLICT(id) DO NOTHING")
+      .bind(c.id, JSON.stringify(top), JSON.stringify(c.ic), JSON.stringify([...c.ents].slice(0, 12)), nsOf, c.n, c.first_ts, c.first_item, c.first_platform, c.first_channel, c.last_ts, JSON.stringify(terms), c.vec ? f32b64(c.vec) : '', c.vec ? c.vec.length : 0, now, now, autoLabel, c.n)); }
     else nStmts.push(db.prepare("UPDATE narratives SET issues=CASE WHEN edited=1 THEN issues ELSE ? END, issue_counts=?, entities=?, ns=CASE WHEN ns='' THEN ? ELSE ns END, n=?, last_ts=?, first_ts=?, terms=?, centroid=?, dim=?, updated=? WHERE id=?")
       .bind(JSON.stringify(top), JSON.stringify(c.ic), JSON.stringify([...c.ents].slice(0, 12)), nsOf, c.n, c.last_ts, c.first_ts, JSON.stringify(terms), c.vec ? f32b64(c.vec) : '', c.vec ? c.vec.length : 0, now, c.id));
   });
@@ -10177,11 +10320,20 @@ async function narrativesRun(env, opts) {
     try { if (await narrRefresh(env, id, now)) recounted++; } catch (e) { out.errors.push('recount ' + id + ': ' + String((e && e.message) || e).slice(0, 80)); }
   }
   await log('info', recounted + ' narratives recounted (size, pace, spread, sentiment split, stance toward the client)' + (out.deferred ? '; ' + out.deferred + ' left for the next cron tick, this run is out of time' : ''));
-  // names, counters, alerts - each only while the budget allows; the cron tick finishes what is left
-  if (!env.ANTHROPIC_API_KEY) await log('info', 'ANTHROPIC_API_KEY is not set: narratives stay unnamed (their terms and rows are still here)');
+  // p67: working titles for the narratives written before p67 (or by a hand that skipped the columns), sixty a run; the
+  // recount computes the title (no model call). Clears the stock in a tick or two after the deploy.
+  out.titled = 0;
+  try {
+    const need = ((await db.prepare("SELECT id FROM narratives WHERE COALESCE(auto_label,'')='' AND n>=2 AND muted=0 AND COALESCE(status,'')<>'broad' AND last_ts>? ORDER BY n24 DESC, n DESC LIMIT 60").bind(now - 14 * 86400000).all()).results || []).map(r => r.id);
+    for (const id of need) { if (left() < 6000) break; try { const rf = await narrRefresh(env, id, now); if (rf && rf.autoLabel) out.titled++; } catch (e) { out.errors.push('title ' + id + ': ' + String((e && e.message) || e).slice(0, 80)); } }
+    if (out.titled) await log('info', out.titled + ' narrative' + (out.titled === 1 ? '' : 's') + ' given a working title from their rows (no model call)');
+  } catch (e) { out.errors.push('titles: ' + String((e && e.message) || e).slice(0, 80)); }
+  // names, counters, alerts - each only while the budget allows; the cron tick finishes what is left. From the day's window
+  // (opts.queue, p67) the namer takes the whole waiting queue, client-issue narratives first, not only what moved this tick.
+  if (!env.ANTHROPIC_API_KEY) await log('info', 'ANTHROPIC_API_KEY is not set: narratives stay unnamed by the model (their working titles, terms and rows are still here)');
   else if (opts.skipNaming) { out.namingDeferred = true; await log('info', 'naming left to the name steps'); }
   else if (left() < 15000) { out.namingDeferred = true; await log('info', 'naming deferred to the next cron tick (' + Math.round(left() / 1000) + 's left in this run; a naming call takes up to 45s)'); }
-  else { try { const nm = await narrLabel(env, ids, log, left); out.named = nm.named; out.calls = nm.calls; out.errors.push(...nm.errors); if (nm.deferred) out.namingDeferred = true; } catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 120)); } }
+  else { try { const nm = opts.queue ? await narrLabelQueue(env, { left, log }) : await narrLabel(env, ids, log, left); out.named = nm.named; out.calls = nm.calls; out.errors.push(...nm.errors); if (nm.deferred) out.namingDeferred = true; if (opts.queue) { out.namesWaiting = nm.waiting; out.namingStopped = nm.stopped; } } catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 120)); } }
   if (left() > 2500) { try { await narrCounters(env); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 80)); } }
   if (left() > 2500) { try { const al = await narrAlerts(env, log); out.alerts = al.length; } catch (e) { out.errors.push('alerts: ' + String((e && e.message) || e).slice(0, 80)); } }
   // singletons that never grew are noise: gone after two days (their rows are freed to be placed again)
@@ -10200,9 +10352,11 @@ async function narrativesCron(env) {
   for (let i = 0; i < 6; i++) {
     const budget = total - (Date.now() - t0);
     if (budget < 75000) break;
-    const out = await narrativesRun(env, { budgetMs: budget });
-    if (!acc) acc = out; else { ['scanned', 'placed', 'joined', 'started', 'skipped', 'unanchored', 'named', 'calls', 'alerts', 'pruned'].forEach(k => { acc[k] = (acc[k] || 0) + (out[k] || 0); }); acc.errors = (acc.errors || []).concat(out.errors || []); acc.passes = i + 1; }
-    if (!out.ok || out.scanned < NARR_SCAN) break;
+    // p67 (B0): the window's namer takes the whole waiting queue (narrLabelQueue), within the same cap and minutes
+    const out = await narrativesRun(env, { budgetMs: budget, queue: true });
+    if (!acc) acc = out; else { ['scanned', 'placed', 'joined', 'started', 'skipped', 'unanchored', 'named', 'calls', 'alerts', 'pruned', 'titled'].forEach(k => { acc[k] = (acc[k] || 0) + (out[k] || 0); }); acc.errors = (acc.errors || []).concat(out.errors || []); acc.passes = i + 1; acc.namesWaiting = out.namesWaiting; acc.namingStopped = out.namingStopped; }
+    // another pass while rows wait to be placed, or while names wait and only the clock (not the cap) stopped the namer
+    if (!out.ok || (out.scanned < NARR_SCAN && !(out.namesWaiting > 0 && out.namingStopped === 'time'))) break;
   }
   return acc || { ok: false };
 }
@@ -10258,13 +10412,15 @@ async function narrativeOne(env, id) {
 }
 async function narrativesStatus(env) {
   const now = Date.now();
-  const c = (await env.MIND_DB.prepare("SELECT SUM(last_ts>? AND n>=2 AND muted=0 AND status<>'broad') live, SUM(status='emerging' AND muted=0) emerging, SUM(status='growing' AND muted=0) growing, SUM(label<>'') named, SUM(alerted=1) alerted, SUM(status='broad' OR n>=?) broad, SUM(n<2) singletons, SUM(scope='off') off, COUNT(*) total FROM narratives").bind(now - NARR_LIVE_H * 3600000, narrMax(env)).first()) || {};
+  const c = (await env.MIND_DB.prepare("SELECT SUM(last_ts>? AND n>=2 AND muted=0 AND status<>'broad') live, SUM(status='emerging' AND muted=0) emerging, SUM(status='growing' AND muted=0) growing, SUM(label<>'') named, SUM(label<>'' OR COALESCE(auto_label,'')<>'') titled, SUM(alerted=1) alerted, SUM(status='broad' OR n>=?) broad, SUM(n<2) singletons, SUM(scope='off') off, COUNT(*) total FROM narratives").bind(now - NARR_LIVE_H * 3600000, narrMax(env)).first()) || {};
   const placed = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(ts>?) n24 FROM narrative_items WHERE narrative<>\'\'').bind(now - 86400000).first()) || {};
   const kinds = SENT_KINDS.map(() => '?').join(',');
   const backlog = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ')').bind(now - NARR_WINDOW_H * 3600000, ...SENT_KINDS).first()) || {};
   let last = null; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'narr_last')) || 'null'); } catch (e) { last = null; }
   const sims = narrSims(env);
-  return { ok: true, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, off: c.off || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: narrMax(env) };
+  // p67, additive: titled counts working titles too; awaitingModel is the namer's true queue (what the window drains)
+  let awaitingModel = 0; try { awaitingModel = Number(((await env.MIND_DB.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE).bind(NARR_LABEL_MIN).first()) || {}).n) || 0; } catch (e) {}
+  return { ok: true, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, titled: c.titled || 0, awaitingModel, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, off: c.off || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: narrMax(env) };
 }
 
 // ============================================================================
@@ -18534,7 +18690,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve, narrCleanTitle, narrAutoLabel, narrTemplate, narrPersonish, narrNamed, narrRow, narrLabelQueue, narrClaim, narrativesCron, narrativesRun };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -20861,7 +21017,10 @@ const AXIOM_WORKER = {
           if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'not_configured', detail: 'Set ANTHROPIC_API_KEY on the worker: the namer is Claude.' }, 501);
           const eligible = "muted=0 AND edited=0 AND status<>'broad' AND n>=? AND (label='' OR labelled_n*2<=n OR COALESCE(scope,'')='')";
           const cands = ((await db.prepare('SELECT id FROM narratives WHERE ' + eligible + ' ORDER BY n DESC LIMIT 5').bind(NARR_LABEL_MIN).all()).results || []).map(r => r.id);
-          const nm = cands.length ? await narrLabel(env, cands, log) : { named: 0, calls: 0, errors: [] };
+          // p67: claimed first, so a press and the window's drain never send the same narrative twice
+          const mine = await narrClaim(env, cands, now);
+          const nm = mine.length ? await narrLabel(env, mine, log) : { named: 0, calls: 0, errors: [] };
+          if (nm.stopped) await narrUnclaim(env, mine);
           if (nm.named) { try { await narrCounters(env); } catch (e) {} try { const al = await narrAlerts(env, log); nm.alerts = al.length; } catch (e) {} }
           const rem = ((await db.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + eligible).bind(NARR_LABEL_MIN).first()) || {}).n || 0;
           if (!cands.length) await log('info', 'nothing waits for a name');
@@ -20877,7 +21036,8 @@ const AXIOM_WORKER = {
           const merged = va && vb && va.length === vb.length ? va.map((x, i) => (x * (a.n || 1) + vb[i] * (b.n || 1)) / ((a.n || 1) + (b.n || 1))) : va || vb;
           await env.MIND_DB.batch([
             env.MIND_DB.prepare('UPDATE narrative_items SET narrative=? WHERE narrative=?').bind(into, from),
-            env.MIND_DB.prepare('UPDATE narratives SET terms=?, centroid=?, dim=?, updated=? WHERE id=?').bind(JSON.stringify(Object.fromEntries(narrTopTerms(ta, 40).map(k => [k, Math.round(ta[k] * 1000) / 1000]))), merged ? f32b64(merged) : '', merged ? merged.length : 0, Date.now(), into),
+            // p67: the working title is derived again from the merged rows by the recount below
+            env.MIND_DB.prepare("UPDATE narratives SET terms=?, centroid=?, dim=?, auto_label='', auto_n=0, updated=? WHERE id=?").bind(JSON.stringify(Object.fromEntries(narrTopTerms(ta, 40).map(k => [k, Math.round(ta[k] * 1000) / 1000]))), merged ? f32b64(merged) : '', merged ? merged.length : 0, Date.now(), into),
             env.MIND_DB.prepare('DELETE FROM narratives WHERE id=?').bind(from),
             env.MIND_DB.prepare("UPDATE narratives SET counter='' WHERE counter=?").bind(from),
           ]);
