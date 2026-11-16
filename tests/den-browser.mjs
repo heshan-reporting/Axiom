@@ -21,16 +21,22 @@ await t('the Den opens from the navigation on a desk, in Australian Eastern time
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); eq(await page.inputValue('.den-head input[aria-label="Day"]'), today, 'today is the day shown'); eq(await page.getAttribute('.den-head input[aria-label="Day"]', 'max'), today, 'and no later day can be picked'); ok(!/not today/.test(await txt(page, '.den-head')));
   eq(await all(page, '.den-tabs[aria-label="Anne\'s Den"] .den-tab'), ['Board', 'Brief', 'Watch', 'Collection', 'Options']); eq(w.calls.length, 0);
 });
-await t('the strip says what should not be missed, gaps first, and opens the evidence', async () => {
-  // the strip is the rail of six checks: a pill for each, the gaps first, and a pill opens its findings with the one action
-  eq(await page.$$eval('.den-strip li', e => e.map(x => x.dataset.sig)), ['gap', 'spike', 'emerging', 'outlier', 'first_seen', 'burst'], 'six checks, gaps first');
-  const lines = await checks(page); ok(/Not collected.*Facebook delivered nothing in this window/.test(lines[0]) && /not granted/.test(lines[0]) && /No signed-in collector is connected/.test(lines[0]), lines[0]);
+await t('the strip says what should not be missed, never a collection gap, and opens the evidence; the gap is said on Collection only', async () => {
+  // the strip is the rail of five checks: a pill for each, and a pill opens its findings with the one action. A channel that
+  // delivered nothing is a collection fact, said on the Collection tab and nowhere else (owner's item (a), 16 November 2026)
+  // the gap assertions are gathered and said at the end, so a red one never leaves this shared page off the Board or under a popover
+  const bad = []; const soft = (v, m) => { if (!v) bad.push(m); };
+  const pills = await page.$$eval('.den-strip li', e => e.map(x => x.dataset.sig)); soft(JSON.stringify(pills) === JSON.stringify(['spike', 'emerging', 'outlier', 'first_seen', 'burst']), 'five checks, no gap: ' + JSON.stringify(pills));
+  const lines = await checks(page); soft(!lines.some(l => /delivered nothing|Not collected/.test(l)), 'no check speaks of collection: ' + lines.join(' | ').slice(0, 300));
   ok(lines.some(l => /Spike.*Sentinel spike: Gas taxation.*3\.1 times/.test(l)), lines.join(' | '));
   await page.click('.den-strip li:first-child button.den-check'); await page.waitForSelector('.den-pop'); ok(/computed, no model/.test(await txt(page, '.den-pop header'))); eq(await page.getAttribute('.den-strip li:first-child button.den-check', 'aria-expanded'), 'true');
-  await page.click('.den-pop li:first-child button.den-link'); ok(await page.$('#den-tab-collection[aria-selected="true"]'), 'a gap opens Collection'); ok(!(await page.$('.den-pop')), 'and the popover closes'); await tab(page, 'today');
-  ok(/4 to read/.test(await txt(page, '.den-strip-h')) && (await page.getAttribute('.den-strip li[data-sig="gap"] button', 'data-n')) === '1', 'closed, the rail still says how many and that a channel was not read');
-  await page.waitForSelector('.den-gapline'); ok(/Facebook delivered nothing in this window\. ?Not a quiet day/.test(await txt(page, '.den-gapline')), 'and the gap is said on the Board itself, not behind a click');
+  await page.keyboard.press('Escape'); await page.waitForSelector('.den-pop', { state: 'detached' });
+  soft(/3 to read/.test(await txt(page, '.den-strip-h')) && !(await page.$('.den-strip li[data-sig="gap"]')), 'closed, the rail says "3 to read", and no pill is a gap');
+  soft((await page.locator('.den-gapline').count()) === 0, 'the Board carries no gap line'); soft(!!(await page.$('#den-tab-collection[data-attn]')), 'the Collection tab carries its quiet mark');
+  await tab(page, 'collection'); const gEl = await page.waitForSelector('#den-tabpanel [data-tour="gaps"]', { timeout: 8000 }).catch(() => null); const gp = gEl ? await txt(page, '#den-tabpanel [data-tour="gaps"]') : '(no [data-tour="gaps"] panel on Collection)';
+  soft(/Facebook delivered nothing in this window/.test(gp) && /not granted/.test(gp) && /No signed-in collector is connected/.test(gp), 'Collection says which channel delivered nothing, and why: ' + gp.slice(0, 300)); await tab(page, 'today');
   await page.locator('.den-strip li[data-sig="spike"] button').focus(); await page.keyboard.press('Enter'); await page.waitForSelector('.den-pop'); await page.keyboard.press('Escape'); await page.waitForSelector('.den-pop', { state: 'detached' }); eq(await page.evaluate(() => document.activeElement.closest('li').dataset.sig), 'spike', 'Escape closes a check and the focus goes back to its pill');
+  ok(!bad.length, bad.join('; '));
 });
 await t('the Board holds the window as cards: folded copies, the subscriber mark, reach, actors apart, a dated action, a column for each section', async () => {
   // the five tables are cards now (one .den-row[data-kind] each); what each row says is asserted as before
@@ -43,7 +49,7 @@ await t('the Board holds the window as cards: folded copies, the subscriber mark
   ok(/Narratives: none\. No narrative on this desk's issues gained rows/.test(await txt(page, '.den-none [data-none="narratives"]')), 'a kind with no row says why');
   eq(await page.$$eval('.den-board .den-col', c => c.map(x => x.getAttribute('aria-label'))), ['Unsorted', 'Executive Summary', 'Key Narratives', 'Traditional Media Coverage', 'Social Media Activity', 'Influencer and Political Activity', 'Sentiment and Tone', 'Momentum Assessment', 'Risks and Implications', 'Bottom Line', 'Recommended Posture', 'Source List'], 'a column for each section of this desk, from its own sections');
   ok(/Weight \d+ of 99: .*362 on Facebook, 2 outlets/.test(await page.locator(CARD('media'), { hasText: 'Harbour levy' }).locator('.den-w').getAttribute('title')), 'a card says why it weighs what it does');
-  ok(/Empty/.test(await txt(page, '.den-col[data-sec="summary"] .den-col-meta')) && /check uncovered/.test(await txt(page, '.den-board')), 'a column says its state and the checks it has not covered'); await shot(page, '01-today');
+  ok(/Empty/.test(await txt(page, '.den-col[data-sec="summary"] .den-col-meta')) && !/check uncovered/.test(await txt(page, '.den-board')), 'a column says its state, and no check is called uncovered before a brief exists'); await shot(page, '01-today');
 });
 await t('pin a row, set rows aside with a reason, and confirm the mute that is offered after three', async () => {
   const row = cards(page, 'media').filter({ hasText: 'Producers answer' });
@@ -139,7 +145,7 @@ await t('copy and download: the document, Markdown, HTML and the Slack summary',
   const rich = await until(() => page.evaluate(async () => { try { const it = await navigator.clipboard.read(); const h = it.find(i => i.types.indexOf('text/html') >= 0); return h ? (await (await h.getType('text/html')).text()) : ''; } catch (e) { return ''; } }), 'formatted text on the clipboard'); ok(/<h2>Executive Summary<\/h2>/.test(rich) && /<a href="https:\/\/pointpost\.example\.com\.au\/a">/.test(rich), 'headings and links travel with it');
 });
 await t('filing: what the strip holds and the brief does not is listed once; filed is read-only until reopened', async () => {
-  await page.getByRole('button', { name: 'Mark as filed' }).click(); await page.waitForSelector('[role="dialog"][aria-label="Before it is filed"]'); const d = await txt(page, '[role="dialog"]'); ok(/not in this brief/.test(d) && /Sentinel spike: Gas taxation/.test(d) && /Facebook delivered nothing/.test(d), d.slice(0, 300));
+  await page.getByRole('button', { name: 'Mark as filed' }).click(); await page.waitForSelector('[role="dialog"][aria-label="Before it is filed"]'); const d = await txt(page, '[role="dialog"]'); ok(/not in this brief/.test(d) && /Sentinel spike: Gas taxation/.test(d), d.slice(0, 300)); const gapInDialog = /Facebook delivered nothing/.test(d);   // said at the end of the case, so a red one never leaves the dialog over the shared page
   await page.getByRole('button', { name: 'Go back and cover them' }).click(); eq((await w.F('GET', '/den/brief?desk=aep_au')).body.brief.status, 'draft');
   await page.getByRole('button', { name: 'Mark as filed' }).click(); await page.getByRole('button', { name: 'File anyway' }).click(); await page.waitForFunction(() => /Filed by Anne/.test(document.querySelector('#den-tabpanel section.den-panel header').textContent));
   ok(await page.$eval('.den-sec[data-section="summary"] textarea', e => e.readOnly) && !(await page.$('button:has-text("Regenerate this section")')) && !(await page.$('button:has-text("Save changes")')), 'a filed brief is not edited');
@@ -147,6 +153,7 @@ await t('filing: what the strip holds and the brief does not is listed once; fil
   await page.getByRole('button', { name: 'History' }).click(); await page.waitForSelector('section.den-panel[aria-label="History"] tbody tr'); const hist = await all(page, 'section.den-panel[aria-label="History"] tbody tr'); ok(/\| filed with \d signals? acknowledged as not covered \| Anne \|/.test(hist[0]) && hist.some(h => /\| edited: posture \| Kai \|/.test(h)) && /\| drafted from \d+ evidence rows \|/.test(hist[hist.length - 1]), hist.join(' // '));
   await page.getByRole('button', { name: 'Compare with the last filed brief' }).click(); await page.waitForSelector('section.den-panel[aria-label="Against the last filed brief"]'); ok(/No brief was filed on this desk before this one/.test(await txt(page, 'section.den-panel[aria-label="Against the last filed brief"]')));
   await shot(page, '04-brief-filed'); await page.getByRole('button', { name: 'Reopen' }).click(); await page.waitForFunction(() => /Draft/.test(document.querySelector('#den-tabpanel section.den-panel header .den-chip').textContent));
+  ok(!gapInDialog, 'the dialog lists no collection gap: ' + d.slice(0, 300));
 });
 await t('Watch: find keywords for nothing, preview one, approve it under an issue, dismiss another with a reason', async () => {
   await w.push('news', Array.from({ length: 60 }, (_, i) => ({ src: 'o' + (i % 5), title: ['Ferntree', 'Kingsbay', 'Marlow', 'Dunmore'][i % 4] + ' residents weigh in on ' + ['library hours', 'the netball final', 'a bridge repair', 'school enrolments', 'the flower show'][i % 5], body: 'Locals gathered at a meeting chaired by a volunteer.', url: 'https://bg.example.com.au/' + i, ts: NOW - (i % 90) * H, meta: { issues: [] } })));
@@ -210,9 +217,10 @@ await t('a read-only key sees everything and no control that writes', async () =
 });
 await t('a desk with nothing collected says so in every panel, with the one place to look', async () => {
   const p = await open(w); await p.selectOption('.den-head select[aria-label="Desk"]', 'guns_au'); await p.waitForFunction(() => /Firearms/.test(document.querySelector('.den-win').textContent)); await p.waitForFunction(() => document.querySelectorAll('#den-tabpanel .den-col').length >= 5 && !/Loading/.test(document.querySelector('#den-tabpanel').textContent));
-  const strip = (await checks(p)).join(' '); ok(/News delivered nothing in this window/.test(strip) && /before reading it as a quiet day/.test(strip), 'the checks do not read an empty desk as a quiet day'); ok(/News delivered nothing in this window\. ?Not a quiet day/.test(await txt(p, '.den-gapline')), 'and the Board says so where the cards would be');
+  const strip = (await checks(p)).join(' '); ok(!/delivered nothing|Not collected/.test(strip), 'the checks carry no collection gap: ' + strip); ok(!/delivered nothing|Not collected/.test(await txt(p, '.den-board')) && !(await p.$('.den-gapline')), 'nor does the Board');
   for (const [kind, why] of [['media', /No story on this desk's issues was filed in this window\. See what was collected, and why not/], ['social', /No post on this desk's terms or from its registered accounts was collected/], ['actors', /No registered organisation, official or MP posted/], ['upcoming', /No row in this window names a day and a month/]]) ok(why.test(await txt(p, '.den-none [data-none="' + kind + '"]')), kind);
-  eq(await p.locator('.den-board .den-row').count(), 0); await p.locator('.den-none [data-none="social"] button.den-link').click(); ok(await p.$('#den-tab-collection[aria-selected="true"]')); await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state');
+  eq(await p.locator('.den-board .den-row').count(), 0); await p.locator('.den-none [data-none="social"] button.den-link').click(); ok(await p.$('#den-tab-collection[aria-selected="true"]'));
+  await p.waitForSelector('#den-tabpanel [data-tour="gaps"]'); const gq = await txt(p, '#den-tabpanel [data-tour="gaps"]'); ok(/News delivered nothing in this window/.test(gq) && /before reading it as a quiet day/.test(gq), 'Collection does not read an empty desk as a quiet day: ' + gq.slice(0, 300)); await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state');
   await p.getByRole('button', { name: 'Draft the brief (1 model call)' }).click(); await p.waitForFunction(() => /Nothing on this desk was collected in the window/.test((document.querySelector('.toast, #toast') || {}).textContent || '')); ok(await p.getByRole('button', { name: 'Write it by hand' }).isEnabled());
   await p.getByRole('button', { name: 'Write it by hand' }).click(); await p.waitForSelector('.den-sec[data-section="judgement"] textarea', { state: 'attached' }); eq(await p.$$eval('.den-outline .den-out-t b', a => a.map(x => x.textContent.trim())), ['Executive Summary', 'Today\'s Key Judgement', 'Key Developments', 'News environment', 'Organisational and influencer activity', 'Assessment of Activist Momentum', 'Implications for the client', 'Bottom Line', 'Source List'], 'the outline is the desk\'s own sections'); eq(await p.$$eval('.den-sec h4', a => a.map(x => x.childNodes[0].textContent.trim())), ['Executive Summary', 'Today\'s Key Judgement', 'Key Developments', 'News environment', 'Organisational and influencer activity', 'Assessment of Activist Momentum', 'Implications for the client', 'Bottom Line', 'Source List']);
   // a rating sits in the section it rates when the desk has one of that name (Media risk, under News environment); the others stay in the bar
@@ -264,11 +272,14 @@ await t('Collection lists the watched parliament pages and the campaign counters
   eq(w.calls.length >= 0, true); await p.close();
 });
 
-await t('a paused platform is said in the strip and in Collection, and nothing retries it', async () => {
+await t('a paused platform is said in Collection only, and nothing retries it', async () => {
   await w.kv.set('reach_challenges', JSON.stringify({ facebook: { at: NOW - 2 * H, agent: 'mac-1', error: 'facebook_challenge' } }));
-  const p = await open(w); await p.waitForSelector('.den-strip li'); const said = await checks(p); ok(/Facebook delivered nothing.*stopped at a verification on \d{4}-\d\d-\d\d and is paused/.test(said.join(' ')), said[0]);
-  await tab(p, 'collection'); await p.waitForSelector('section.den-panel[aria-label="Channels"] tr.den-row'); ok(/paused: verification/.test(await panel(p, 'Channels').locator('tr.den-row', { hasText: 'Facebook' }).textContent()) && /verification \d+ h ago/.test(await txt(p, 'section.den-panel[aria-label="Signed-in collection"]')));
+  // the gap assertions are said after the challenge is cleared, so a red one never leaves it set for the cases after this one
+  const bad = []; const soft = (v, m) => { if (!v) bad.push(m); };
+  const p = await open(w); await p.waitForSelector('.den-strip li'); const said = await checks(p); soft(!/Facebook delivered nothing|stopped at a verification/.test(said.join(' ')), 'the strip is silent on it: ' + said.join(' | ').slice(0, 300));
+  await tab(p, 'collection'); const gEl = await p.waitForSelector('#den-tabpanel [data-tour="gaps"]', { timeout: 8000 }).catch(() => null); soft(gEl && /stopped at a verification on \d{4}-\d\d-\d\d and is paused/.test(await txt(p, '#den-tabpanel [data-tour="gaps"]')), 'Collection says the platform is paused'); await p.waitForSelector('section.den-panel[aria-label="Channels"] tr.den-row'); ok(/paused: verification/.test(await panel(p, 'Channels').locator('tr.den-row', { hasText: 'Facebook' }).textContent()) && /verification \d+ h ago/.test(await txt(p, 'section.den-panel[aria-label="Signed-in collection"]')));
   await w.kv.delete('reach_challenges'); await p.context().close();
+  ok(!bad.length, bad.join('; '));
 });
 await t('the connection drops mid-draft: the page says so, and the draft the worker finished is one press away', async () => {
   const w2 = await world(); let cut = true; w2.hooks = [async (route, r, path) => { if (r.method() === 'POST' && path === '/den/brief' && cut) { cut = false; await w2.call('POST', path, r.postData(), 'full-key'); await route.abort('connectionreset'); return true; } return false; }];
