@@ -62,7 +62,8 @@
     return Object.assign({ reload: load, set: d => setSt({ data: d, err: '', loading: false }) }, st);
   }
   /* Loading is a skeleton with its words, so a slow read looks like the thing it will become, not like nothing. */
-  const Loading = ({ what, board }) => html`<div class=${'den-state den-loading' + (board ? ' board' : '')} role="status"><span class="den-loadtxt">Loading ${what || ''}...</span><span class="den-skel" aria-hidden="true"></span><span class="den-skel s2" aria-hidden="true"></span><span class="den-skel s3" aria-hidden="true"></span></div>`;
+  /* On the Board the skeleton is shaped like the columns that will arrive (Unsorted, then sections), so nothing jumps. */
+  const Loading = ({ what, board }) => html`<div class=${'den-state den-loading' + (board ? ' board' : '')} role="status"><span class="den-loadtxt">Loading ${what || ''}...</span><span class="den-skel" aria-hidden="true"></span><span class="den-skel s2" aria-hidden="true"></span><span class="den-skel s3" aria-hidden="true"></span>${board ? html`<span class="den-skelcols" aria-hidden="true">${[0, 1, 2, 3, 4].map(i => html`<span key=${i} class=${'den-skelcol' + (i ? '' : ' wide')}><i></i><i></i><i></i></span>`)}</span>` : null}</div>`;
   const Failed = ({ what, err, onRetry }) => html`<div class="den-state err" role="alert"><span class="den-errtext"><b>${what} could not be loaded.</b> ${err}</span> ${onRetry ? html`<button class="den-mini" onClick=${onRetry}>Try again</button>` : null}</div>`;
   const Empty = ({ children, tour }) => html`<div class="den-state" data-tour=${tour || null}>${children}</div>`;
   /* A failure in one panel never blanks the page. */
@@ -253,6 +254,8 @@
   /* A narrative the worker named by itself (build p67 sends named: 'auto') carries its computed name as a working title
      until a person or the model names it. Under an older worker the field is absent and nothing is shown. */
   const WORKTITLE_T = 'A working title computed from the narrative\'s own rows, not yet reviewed by a person. It changes when a person or the model names it.';
+  // a filed card's menu reads "Move...", not the clipped name of the column it already sits in
+  const MOVE = '__move';
   const layerTitle = l => (l === 1 ? 'Layer 1: an official route' : l === 2 ? 'Layer 2: a signed-in collector on the Mac' : 'Layer 3: a keyless read from the worker');
   /* One evidence card. The same card in Unsorted and under a section; what differs by kind is what the row carries. */
   function Card({ c, desk, canWrite, onDone, onFile, secs, cited, onDrag, picked, onPick }) {
@@ -290,7 +293,7 @@
         ${c.pin ? html`<${RowActions} r=${Object.assign({}, r, { pinned: c.pinned })} kind=${kindWord} desk=${desk} canWrite=${canWrite} onDone=${onDone} />`
           : k === 'narratives' ? html`<button class="den-link" onClick=${() => window.AXUI.goto('narratives', { id: r.id })} aria-label=${'Open the narrative: ' + r.label}>${Ic('open')}Open</button>`
           : web(r.url) ? html`<a class="den-link" href=${web(r.url)} target="_blank" rel="noopener" aria-label="Open the source of this date">${Ic('open')}Open</a>` : null}
-        ${canWrite && onFile ? html`<select class="den-in den-file" data-tour="card-file" aria-label="File under a section" title=${c.pin ? 'Where this card is filed is kept with the desk, for everyone on it' : 'Where this card is filed is kept on this computer'} value=${c.sec || ''} onChange=${e => onFile(c, e.target.value)}><option value="">${c.sec ? 'Back to Unsorted' : 'File under...'}</option>${secs.map((s, i) => html`<option key=${s.id} value=${s.id}>${secKey(i) ? secKey(i) + '  ' : ''}${s.title}</option>`)}</select>` : null}
+        ${canWrite && onFile ? html`<select class="den-in den-file" data-tour="card-file" aria-label="File under a section" title=${c.pin ? 'Where this card is filed is kept with the desk, for everyone on it' : 'Where this card is filed is kept on this computer'} value=${c.sec ? MOVE : ''} onChange=${e => { if (e.target.value !== MOVE) onFile(c, e.target.value); }}>${c.sec ? html`<option value=${MOVE} disabled hidden>Move...</option>` : null}<option value="">${c.sec ? 'Back to Unsorted' : 'File under...'}</option>${secs.map((s, i) => html`<option key=${s.id} value=${s.id} disabled=${s.id === c.sec}>${secKey(i) ? secKey(i) + '  ' : ''}${s.title}${s.id === c.sec ? ' (filed here)' : ''}</option>`)}</select>` : null}
       </div>
     </article>`;
   }
@@ -382,7 +385,8 @@
           <div class="den-col-tools">
             <label class="den-search"><span class="den-sr">Search the unsorted cards</span><input class="den-in" type="search" data-tour="search" value=${find} placeholder="Search rows ( / )" onInput=${e => setFind(e.target.value)} /></label>
             <div class="den-filter" data-tour="filter" role="group" aria-label="Kind of row">${[['all', 'All']].concat(KINDS_ROW).map(k => html`<button key=${k[0]} class="den-seg" data-kind=${k[0]} aria-pressed=${kind === k[0] ? 'true' : 'false'} onClick=${() => setKind(k[0])}>${k[1]} <span class="n">${k[0] === 'all' ? uns.length : counts[k[0]] || 0}</span></button>`)}</div>
-            ${canWrite ? html`<button class="den-mini quiet den-undo" data-tour="undo" data-what=${undo ? undo.text : ''} disabled=${!undo} title=${undo ? undo.text : 'Nothing to undo'} onClick=${() => { const u = undo; setUndo(null); if (u) u.run(); }}>Undo${undo ? html`<span class="den-undo-t">: ${undo.text}</span>` : null}</button>` : null}
+            ${canWrite ? html`<button class="den-mini quiet den-undo" data-tour="undo" data-what=${undo ? undo.text : ''} disabled=${!undo} title=${undo ? undo.text : 'Nothing to undo'} onClick=${() => { const u = undo; setUndo(null); if (u) u.run(); }}>${Ic('undo')}Undo${undo ? html`<span class="den-undo-t">: ${undo.text}</span>` : null}</button>` : null}
+            ${canWrite ? html`<span class="den-sr" role="status" aria-live="polite">${undo ? undo.text + '. Undo is beside it.' : ''}</span>` : null}
             ${canWrite && selected.length ? html`<div class="den-bulk" data-tour="bulk" role="group" aria-label="Selected cards"><b>${selected.length} selected</b>
               <select class="den-in" data-tour="bulk-why" value=${bulkWhy} aria-label="Why they are set aside" onChange=${e => setBulkWhy(e.target.value)}>${ASIDE.map(a => html`<option key=${a} value=${a}>${a}</option>`)}<option value="other">other (say why)</option></select>
               ${bulkWhy === 'other' ? html`<input class="den-in" value=${bulkOwn} maxlength="200" placeholder="Why" aria-label="Your reason for them all" onInput=${e => setBulkOwn(e.target.value)} />` : null}
@@ -474,9 +478,10 @@
     const cards = useMemo(() => (mine ? deck(mine, mySigs || []) : null), [mine, mySigs]);
     // opened on another tab than the Board (the last tab used is kept): the window is read once here too, so the Brief's
     // evidence and where the desk's cards are filed are the desk's record, not this computer's note; the Board's own
-    // read, when it opens, carries the checks
-    const adoptRef = useRef(null);
-    useEffect(() => { if (!desk || tab === 'today' || mine) return; let on = true; get('/den/board?' + q({ desk: desk.id, to }), 'counts').then(d => { if (on) { setBoard({ id: bid, d }); if (adoptRef.current) adoptRef.current(d); } }, () => {}); return () => { on = false; }; }, [did, tab, !!mine, to]);   // eslint-disable-line
+    // read, when it opens, carries the checks. On the Brief tab, where that evidence is shown, Refresh reads it again
+    // (readAt is the Refresh the window was last read at)
+    const adoptRef = useRef(null); const readAt = useRef(-1);
+    useEffect(() => { if (!desk || tab === 'today' || (mine && (tab !== 'brief' || readAt.current === tick))) return; let on = true; const at = tick; get('/den/board?' + q({ desk: desk.id, to }), 'counts').then(d => { if (on) { readAt.current = at; setBoard({ id: bid, d }); if (adoptRef.current) adoptRef.current(d); } }, () => {}); return () => { on = false; }; }, [did, tab, !!mine, to, tick]);   // eslint-disable-line
     if (D.loading && !D.data) return html`<div id="den-shell"><${TopBar} /><${Loading} what="the desks" /></div>`;
     if (D.err && !D.data) return html`<div id="den-shell"><${TopBar} /><${Failed} what="The desks" err=${D.err} onRetry=${D.reload} /></div>`;
     if (!desk) return html`<div id="den-shell"><${TopBar} /><${Empty}><b>No desk is set up.</b> A desk is a client, a region and a report format. Ask an admin to add one.<//></div>`;
@@ -519,7 +524,7 @@
       </div>
       <div role="tabpanel" id="den-tabpanel" class=${'tab-' + tab} aria-labelledby=${'den-tab-' + tab} tabIndex=${tab === 'today' || tab === 'brief' ? null : '0'}>
         <${Boundary} name=${TABS.find(t => t[0] === tab)[1]} resetKey=${desk.id + tab}>
-          ${tab === 'today' ? html`<${Board} desk=${desk} to=${to} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} onStrip=${setBoardStrip} onBoard=${d => { setBoard(d ? { id: bid, d } : null); adopt(d); }} bst=${cov} filing=${filing} setFiling=${setFiling} onWrite=${id => { setOpenSec(id); setTab('brief'); }} />` : null}
+          ${tab === 'today' ? html`<${Board} desk=${desk} to=${to} tick=${tick} bump=${bump} setTab=${setTab} canWrite=${canWrite} onStrip=${setBoardStrip} onBoard=${d => { readAt.current = tick; setBoard(d ? { id: bid, d } : null); adopt(d); }} bst=${cov} filing=${filing} setFiling=${setFiling} onWrite=${id => { setOpenSec(id); setTab('brief'); }} />` : null}
           <div class="den-briefhost" hidden=${tab !== 'brief'}><${Boundary} name="Brief" resetKey=${desk.id + day}><${BriefPanel} key=${desk.id + '|' + day} desk=${desk} day=${day} past=${past} tick=${tick} bump=${bump} budget=${budget} canWrite=${canWrite} setTab=${setTab} cards=${cards} signals=${mySigs} filing=${filing} setFiling=${setFiling} openSec=${openSec} setOpenSec=${setOpenSec} onState=${s => setBst(Object.assign({ id: desk.id }, s))} /><//></div>
           ${tab === 'watch' ? html`<div class="den-page"><${WatchPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} /></div>` : null}
           ${tab === 'collection' ? html`<div class="den-page"><${CollectionPanel} desk=${desk} tick=${tick} bump=${bump} canWrite=${canWrite} gaps=${gaps} to=${to} setTab=${setTab} /></div>` : null}

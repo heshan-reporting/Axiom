@@ -14,7 +14,7 @@ const w = await world();
 const gapsOf = async desk => ((await w.F('GET', '/den/missed?desk=' + desk)).body.signals || []).filter(s => s.sig === 'gap');
 const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const settle = p => p.waitForFunction(() => !/Loading/.test((document.querySelector('#den-tabpanel') || {}).textContent || ''), null, { timeout: 15000 }).catch(() => {});
-const READY = { today: CARD(), brief: '.den-briefhost .den-brief, .den-briefhost .den-state', watch: '#den-tabpanel section.den-panel', collection: 'section.den-panel[aria-label="Channels"]', options: 'section.den-panel[aria-label="The desk"]' };
+const READY = { today: CARD(), brief: '.den-briefhost .den-brief, .den-briefhost .den-state', watch: '#den-tabpanel section.den-panel:visible', collection: 'section.den-panel[aria-label="Channels"]', options: 'section.den-panel[aria-label="The desk"]' };
 /* Every element outside the Collection tab's panel whose own words, title or label name a gap (its title, its reason, or
    the generic words a gap is said in). The Collection tab's own panel is the one place they belong. */
 const leaks = (p, gaps) => p.evaluate(words => {
@@ -129,6 +129,24 @@ await t('a narrative the worker named by itself carries a quiet "working title" 
     eq([await tag(902).count(), await tag(903).count()], [0, 0], 'a model name, or no field at all, carries no tag');
     ok(/Harbour levy and regional jobs/.test(await txt(p, CARD('narratives') + '[data-key="N:901"] .den-card-title')), 'the working title is the card\'s title'); eq(p.errors, []); await p.context().close();
   } finally { w.hooks.length = 0; }
+});
+await t('the Board loads as column ghosts; a write is said in a live line beside its Undo; a filed card\'s menu reads "Move..." and still goes back to Unsorted', async () => {
+  const w4 = await world(); let slow = true; w4.hooks = [async (route, r, path) => { if (slow && /^\/den\/board/.test(path)) await new Promise(res => setTimeout(res, 1500)); return false; }];
+  const p = await open(w4); await p.waitForSelector('.den-loading.board', { timeout: 5000 }); eq(await p.locator('.den-loading.board .den-skelcol').count(), 5, 'the skeleton is shaped like the columns'); slow = false;
+  await p.waitForSelector(CARD('media')); const story = cards(p, 'media').filter({ hasText: 'Harbour levy' });
+  await story.getByRole('button', { name: 'Pin', exact: true }).click(); await p.waitForFunction(() => /^Pinned: Harbour levy/.test((document.querySelector('.den-col-tools [role="status"]') || {}).textContent || ''));
+  const key = await story.getAttribute('data-key'); await story.focus(); await p.keyboard.press('3'); const filed = p.locator('.den-col[data-sec="media"] .den-row[data-key="' + key + '"]'); await filed.waitFor();
+  eq(await filed.locator('select.den-file').evaluate(s => s.options[s.selectedIndex].textContent), 'Move...', 'a filed card offers to move, not the name of where it is');
+  ok(await filed.locator('select.den-file option[value="media"]').evaluate(o => o.disabled && /filed here/.test(o.textContent)), 'the column it sits in is marked, and not offered again');
+  await filed.locator('select.den-file').selectOption(''); await p.waitForSelector(CARD('media') + '[data-key="' + key + '"]'); eq(p.errors, []); await p.context().close();
+});
+await t('Refresh on the Brief tab reads the window again for its evidence; on Watch it reads only the checks', async () => {
+  const p = await open(w); await p.waitForSelector(CARD('media')); await tab(p, 'brief'); await p.waitForSelector('.den-briefhost .den-brief, .den-briefhost .den-state', { state: 'attached' });
+  const wait = async rx => { for (let i = 0; i < 50 && !p.served.some(x => rx.test(x)); i++) await new Promise(r => setTimeout(r, 100)); };
+  p.served.length = 0; await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click(); await wait(/^GET \/den\/board/); await wait(/^GET \/den\/missed/);
+  ok(p.served.some(x => /^GET \/den\/board\?/.test(x)) && p.served.some(x => /^GET \/den\/missed/.test(x)), 'on Brief both are read: ' + p.served.join(' | '));
+  await tab(p, 'watch'); await p.waitForSelector('#den-tabpanel section.den-panel:visible'); p.served.length = 0; await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click(); await wait(/^GET \/den\/missed/); await new Promise(r => setTimeout(r, 400));
+  ok(p.served.some(x => /^GET \/den\/missed/.test(x)) && !p.served.some(x => /^GET \/den\/board/.test(x)), 'on Watch only the checks: ' + p.served.join(' | ')); eq(p.errors, []); await p.context().close();
 });
 
 await finish();
