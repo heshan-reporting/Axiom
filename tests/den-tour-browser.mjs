@@ -27,13 +27,13 @@ const press = async (p, i) => { await p.waitForTimeout(120); const r = (await ri
 const under = async (p, i, sel) => { const r = (await rings(p))[i || 0]; ok(r, 'a ring is drawn'); return p.evaluate(([x, y, sel]) => { const el = document.elementFromPoint(x, y); const h = el && el.closest(sel); return h ? (h.dataset.key || h.dataset.sec || h.dataset.goto || h.id || h.getAttribute('data-tour')) : ''; }, [r.x + r.w / 2, r.y + r.h / 2, sel]); };
 // the ringed control is the hook asked for, it is not covered (what is hit at its middle is it), the ring is around it
 // and the coach card does not overlap it
-const clear = (p, sel) => p.evaluate(sel => {
+const clear = async (p, sel) => { await p.waitForTimeout(450); return p.evaluate(sel => {
   const el = Array.from(document.querySelectorAll('#den-root ' + sel)).find(e => e.getClientRects().length && !e.closest('[hidden]')); if (!el) return 'no ' + sel;
   const b = el.getBoundingClientRect(); const cx = b.x + b.width / 2, cy = b.y + b.height / 2; const hit = document.elementFromPoint(cx, cy);
   if (!hit || !(el === hit || el.contains(hit))) return sel + ' is covered by ' + (hit ? hit.outerHTML.slice(0, 90) : 'nothing');
   const c = document.querySelector('#den-tour .dt-card'); if (c) { const r = c.getBoundingClientRect(); if (r.x < b.right && r.right > b.x && r.y < b.bottom && r.bottom > b.y) return 'the coach card overlaps ' + sel; }
   const g = document.querySelector('#den-tour .dt-ring'); if (!g) return 'no ring'; const q = g.getBoundingClientRect();
-  if (!(q.x <= b.x + 1 && q.y <= b.y + 1 && q.right >= b.right - 1 && q.bottom >= b.bottom - 1)) return 'the ring is not around ' + sel; return ''; }, sel);
+  if (!(q.x <= b.x + 1 && q.y <= b.y + 1 && q.right >= b.right - 1 && q.bottom >= b.bottom - 1)) return 'the ring is not around ' + sel; return ''; }, sel); };   // one tick of the guide (400 ms) to settle after the page moves
 const denPosts = p => p.served.filter(s => /^POST \/den\//.test(s));
 const axe = async (p, where) => { await p.waitForTimeout(400); if (!(await p.evaluate(() => !!window.axe))) await p.addScriptTag({ content: AXE });
   const v = await p.evaluate(async () => { const r = await window.axe.run(document.querySelector('#den-tour'), { resultTypes: ['violations'] }); return r.violations.filter(x => x.impact === 'serious' || x.impact === 'critical').map(x => x.id + ' x' + x.nodes.length + ' ' + x.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')); });

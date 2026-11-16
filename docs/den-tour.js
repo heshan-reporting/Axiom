@@ -312,9 +312,9 @@
   function drawRings(hs, labels, els) { const box = layer.querySelector('.dt-rings'); while (box.children.length > hs.length) box.lastChild.remove();
     while (box.children.length < hs.length) { const d = document.createElement('div'); d.className = 'dt-ring'; d.innerHTML = '<span class="dt-badge"></span>'; box.appendChild(d); }
     hs.forEach((r, i) => { const d = box.children[i]; d.style.left = r.left + 'px'; d.style.top = r.top + 'px'; d.style.width = r.width + 'px'; d.style.height = r.height + 'px';
-      const lab = labels[i] || ''; const b = d.firstChild; if (b.textContent !== lab) b.textContent = lab; d.classList.toggle('below', r.top < 30); d.classList.toggle('badged', i > 0 || /Drag|Press [0-9]|model call/.test(lab)); d.classList.toggle('paid', !!(els && els[i] && els[i].matches(PAID))); }); }
+      const lab = labels[i] || ''; const b = d.firstChild; if (b.textContent !== lab) b.textContent = lab; d.classList.toggle('dt-below', r.top < 30); d.classList.toggle('dt-badged', i > 0 || /Drag|Press [0-9]|model call/.test(lab)); d.classList.toggle('dt-paid', !!(els && els[i] && els[i].matches(PAID))); }); }
   function place(card, hs, avoid) {
-    const W = innerWidth, Hh = innerHeight, mg = 12, gap = 14; card.classList.toggle('dock', W < 1100); if (W < 1100) { card.style.left = ''; card.style.top = ''; return; }
+    const W = innerWidth, Hh = innerHeight, mg = 12, gap = 14; card.classList.toggle('dt-dock', W < 1100); if (W < 1100) { card.style.left = ''; card.style.top = ''; return; }
     const cw = card.offsetWidth, ch = card.offsetHeight; const no = hs.concat(avoid); const fits = p => p.left >= mg && p.top >= mg && p.left + cw <= W - mg && p.top + ch <= Hh - mg;
     const box = p => ({ left: p.left, top: p.top, right: p.left + cw, bottom: p.top + ch }); const ok = p => fits(p) && !no.some(r => meets(box(p), r));
     const cy = y => Math.max(mg, Math.min(Hh - ch - mg, y)), cx = x => Math.max(mg, Math.min(W - cw - mg, x)); let pick = null;
@@ -332,13 +332,13 @@
   }
   function sampleArt(kind) {
     const A = { edit: '<p>Regional outlets led the story through the morning <span class="dt-chip">1</span>. Comment stayed small.<span class="dt-caret" aria-hidden="true"></span></p>',
-      cite: '<div class="dt-mini"><b>Example Herald</b> - Council backs the harbour plan</div><p>... the plan passed on a close vote <span class="dt-chip on">2</span></p>',
-      jump: '<p>The vote was close <span class="dt-chip on">2</span></p><div class="dt-mini lit"><b>2</b> Example Herald - Council backs the harbour plan</div>',
+      cite: '<div class="dt-mini"><b>Example Herald</b> - Council backs the harbour plan</div><p>... the plan passed on a close vote <span class="dt-chip dt-on">2</span></p>',
+      jump: '<p>The vote was close <span class="dt-chip dt-on">2</span></p><div class="dt-mini dt-lit"><b>2</b> Example Herald - Council backs the harbour plan</div>',
       save: '<p class="dt-mono">Saved, revision 3</p>', regen: '<p><span class="dt-fake">Write it again (1 model call)</span> <span class="dt-fake">Cancel</span></p>',
       history: '<table class="dt-tab"><tr><td>3</td><td>Edited Summary</td><td>Sam</td></tr><tr><td>2</td><td>Drafted</td><td>model</td></tr></table>',
       foot: '<p class="dt-mono">Saved - 412 words - 1 needs a source - 1 check not in the brief yet</p>', export: '<p><span class="dt-fake">Copy for the document</span> <span class="dt-fake">Download .md</span> <span class="dt-fake">Copy the Slack summary</span></p>',
       file: '<p class="dt-mono">Filed by Sam, 9:10 am</p>' };
-    return Array.isArray(kind) ? '<ol class="dt-out">' + kind.map((t, i) => '<li' + (i === 1 ? ' class="on"' : '') + '>' + esc(t) + '</li>').join('') + '</ol>' : A[kind] || '';
+    return Array.isArray(kind) ? '<ol class="dt-out">' + kind.map((t, i) => '<li' + (i === 1 ? ' class="dt-on"' : '') + '>' + esc(t) + '</li>').join('') + '</ol>' : A[kind] || '';
   }
   function stepTick() {
     const st = STEPS[cur.idx]; const c = ctx(); const t = now();
@@ -353,18 +353,18 @@
     cur.target = targets[0] || null; const stuck = t - cur.phaseAt;
     acts = []; const done = (S.done || []).indexOf(st.id) >= 0;
     const eyebrow = v.mode === 'route' ? 'Before step ' + st.n : CHAPTERS[st.ch];
-    const segs = CHAPTERS.map((n, i) => '<span class="dt-seg' + (i < st.ch ? ' on' : i === st.ch ? ' cur' : '') + '"></span>').join('');
+    const segs = CHAPTERS.map((n, i) => '<span class="dt-seg' + (i < st.ch ? ' dt-on' : i === st.ch ? ' dt-cur' : '') + '"></span>').join('');
     const glyph = v.mode === 'show' ? 'Look' : v.act || (st.id === 'find' ? 'Type' : 'Click');
     let status = v.flash ? 'Done' : v.suspended ? 'A dialog is open: finish with it first. The guide waits.' : v.missing ? 'This control is not available right now. Skip this step, or come back to it from the Guide button.' : v.wait || (v.mode === 'do' && !targets.length) ? (loading() ? 'Waiting for the page to load.' : 'Waiting for the control to appear.') : v.status || '';
     if (!status && v.mode === 'do' && stuck > 20000) status = 'Can\'t find it? The ring shows where.';
     status = v.flash ? '<span class="dt-ok">Done</span>' : esc(status);
     const primSkip = v.missing || (v.mode === 'do' && stuck > 45000);
     let nav = '';
-    if (v.mode === 'show' && !v.noGot && !v.missing && !v.flash) nav += btn(done ? 'Next' : 'Got it', () => { if (v.got) v.got(); if (done) goIdx(cur.idx + 1, true); else complete('got'); }, 'primary');
-    else if (done && v.mode === 'do' && !v.flash) nav += btn('Next', () => goIdx(cur.idx + 1, true), 'primary');
-    const alts = (v.alts || []).map(a => btn(a.label, a.go, a.primary ? 'primary' : '')).join('');
-    if (v.mode === 'do' && stuck > 20000 && cur.target) nav += btn('Show me where', () => { cur.scrolled = new WeakSet(); layer.classList.remove('dt-pulse'); void layer.offsetWidth; layer.classList.add('dt-pulse'); schedule(); });
-    nav += btn('Back', () => goIdx(cur.idx - 1, true), '', cur.idx === 0 ? ' disabled' : '') + btn('Skip this step', () => complete('skip'), primSkip ? 'primary' : '') + btn('I\'ll do it later', later);
+    if (v.mode === 'show' && !v.noGot && !v.missing && !v.flash) nav += btn(done ? 'Next' : 'Got it', () => { if (v.got) v.got(); if (done) goIdx(cur.idx + 1, true); else complete('got'); }, 'dt-primary');
+    else if (done && v.mode === 'do' && !v.flash) nav += btn('Next', () => goIdx(cur.idx + 1, true), 'dt-primary');
+    const alts = (v.alts || []).map(a => btn(a.label, a.go, a.primary ? 'dt-primary' : '')).join('');
+    if (v.mode === 'do' && stuck > 20000 && cur.target) nav += btn('Show me where', () => { cur.scrolled = new WeakSet(); layer.classList.remove('dt-repulse'); void layer.offsetWidth; layer.classList.add('dt-repulse'); schedule(); });
+    nav += btn('Back', () => goIdx(cur.idx - 1, true), '', cur.idx === 0 ? ' disabled' : '') + btn('Skip this step', () => complete('skip'), primSkip ? 'dt-primary' : '') + btn('I\'ll do it later', later);
     const sampleHtml = v.sample ? '<div class="dt-sample"><div class="dt-sample-h">' + esc(SAMPLE) + '</div>' + sampleArt(st.art || st.id) + '</div>' : '';
     const html = '<section class="dt-card" role="region" aria-label="Guide"' + (v.mode === 'show' ? ' data-mode="show"' : '') + '>' +
       btn('×', later, 'dt-x', ' aria-label="Close the guide (I\'ll do it later)" title="Close the guide (I\'ll do it later)"') +
@@ -376,7 +376,7 @@
       '<p class="dt-status" role="status">' + status + '</p>' +
       (alts ? '<div class="dt-alts">' + alts + '</div>' : '') + '<div class="dt-nav">' + nav + '</div>' +
       (cur.target && !v.flash ? '<div class="dt-foot">' + btn('Go to the highlighted control (Alt+G)', toTarget, 'dt-link') + '</div>' : '') + '</section>';
-    layer.setAttribute('data-ui', 'step'); layer.className = (v.mode === 'show' || v.missing ? 'show' : 'do') + (reduced() ? ' reduced' : '') + (v.suspended ? ' suspended' : '');
+    layer.setAttribute('data-ui', 'step'); layer.className = (v.mode === 'show' || v.missing ? 'dt-show' : 'dt-do') + (reduced() ? ' dt-reduced' : '') + (v.suspended ? ' dt-suspended' : '');
     paint(html, cur.focus ? 'h2' : null); cur.focus = false;
     const hs = holes(targets); shade(hs);
     // a control that starts a model call (data-paid="1") is only ever pointed at: its ring says the cost, and nothing here presses it
@@ -411,25 +411,25 @@
   }
   function welcome() { ui = 'welcome'; restoreTo = document.activeElement; renderStatic(true); }
   function renderStatic(first) {
-    mount(); acts = []; const c = ctx(); let html = '', focus = null; layer.className = (reduced() ? 'reduced ' : '') + (ui === 'welcome' || ui === 'finish' ? 'modal' : 'quiet');
+    mount(); acts = []; const c = ctx(); let html = '', focus = null; layer.className = (reduced() ? 'dt-reduced ' : '') + (ui === 'welcome' || ui === 'finish' ? 'dt-modal-on' : 'dt-quiet');
     if (ui === 'welcome') { html = modal('Welcome to Anne\'s Den', '<p class="dt-body">This guide walks you through one full day on the ' + esc(c.desk) + ' desk: sort the evidence, start the brief, write and cite, file, share. You do each step yourself and I point at the control. About 6 minutes. Nothing is spent unless you press a button that says \'1 model call\'.</p>' + (c.ro ? '<p class="dt-body">Your key is view-only, so I will show the steps that change things instead of asking for them.</p>' : ''),
-      btn('Start the guide', () => { closeModal(); start(); }, 'primary') + btn('I\'ll do it later', () => { put({ status: 'dismissed' }); closeModal(); }) + btn('Don\'t ask again', () => { put({ status: 'dismissed', ask: 'never' }); closeModal(); note(); })); if (first) focus = '.dt-btn.primary'; }
+      btn('Start the guide', () => { closeModal(); start(); }, 'dt-primary') + btn('I\'ll do it later', () => { put({ status: 'dismissed' }); closeModal(); }) + btn('Don\'t ask again', () => { put({ status: 'dismissed', ask: 'never' }); closeModal(); note(); })); if (first) focus = '.dt-btn.dt-primary'; }
     else if (ui === 'finish') { const w = S.w || {}; const bits = []; if (w.pin) bits.push('pinned ' + w.pin + ' card' + (w.pin === 1 ? '' : 's')); if (w.aside) bits.push('set ' + w.aside + ' aside'); if (w.file) bits.push('added ' + w.file + ' to sections');
       const line = bits.length ? '<p class="dt-body">You ' + bits.join(' and ').replace(/ and (?=[^,]* and )/, ', ') + '. Undo is on the Board.</p>' : '';
       acts.push(e => { put({ ask: e.target.checked ? 'never' : 'ask' }); }); const cb = '<label class="dt-check"><input type="checkbox" data-act="' + (acts.length - 1) + '"' + (S.ask === 'never' ? ' checked' : '') + '> Don\'t ask me again when I open the Den</label>';
-      html = modal('That is a full day on ' + c.desk, '<p class="dt-body">Sort, start, write and cite, file, share. Replay this guide any time from the Guide button beside ?.</p>' + line, btn('Back to the Board', () => endTour('today'), 'primary') + btn('Keyboard shortcuts', () => endTour('help')), cb); if (first) focus = '.dt-btn.primary'; }
+      html = modal('That is a full day on ' + c.desk, '<p class="dt-body">Sort, start, write and cite, file, share. Replay this guide any time from the Guide button beside ?.</p>' + line, btn('Back to the Board', () => endTour('today'), 'dt-primary') + btn('Keyboard shortcuts', () => endTour('help')), cb); if (first) focus = '.dt-btn.dt-primary'; }
     else if (ui === 'resume') { const st = STEPS[Math.max(0, idxOf(S.step))]; html = '<section class="dt-card dt-prompt" role="region" aria-label="Guide"><h2>Carry on with the guide?</h2><p class="dt-body">You were on step ' + st.n + ' of ' + N + ': ' + esc(st.title) + '.</p><div class="dt-nav">' +
-      btn('Carry on', () => { ui = 'none'; goId(st.id, true); }, 'primary') + btn('Start over', () => { ui = 'none'; start(); }) + btn('Not now', () => { put({ status: 'paused' }); quiet(); }) + btn('Don\'t ask again', () => { put({ ask: 'never', status: 'paused' }); quiet(); note(); }) + '</div></section>'; }
+      btn('Carry on', () => { ui = 'none'; goId(st.id, true); }, 'dt-primary') + btn('Start over', () => { ui = 'none'; start(); }) + btn('Not now', () => { put({ status: 'paused' }); quiet(); }) + btn('Don\'t ask again', () => { put({ ask: 'never', status: 'paused' }); quiet(); note(); }) + '</div></section>'; }
     else if (ui === 'again') { html = '<section class="dt-card dt-prompt" role="region" aria-label="Guide"><h2>Want the guide again?</h2><p class="dt-body">It takes about 6 minutes and spends nothing by itself.' + (S && (S.v || 0) < V ? ' The guide has new steps.' : '') + '</p><div class="dt-nav">' +
-      btn('Yes, guide me', () => { ui = 'none'; start(); }, 'primary') + btn('Not now', () => quiet()) + btn('Don\'t ask again', () => { put({ ask: 'never' }); quiet(); note(); }) + '</div></section>'; }
+      btn('Yes, guide me', () => { ui = 'none'; start(); }, 'dt-primary') + btn('Not now', () => quiet()) + btn('Don\'t ask again', () => { put({ ask: 'never' }); quiet(); note(); }) + '</div></section>'; }
     else if (ui === 'menu') { const st = S && S.step && idxOf(S.step) >= 0 && (S.status === 'active' || S.status === 'paused') ? STEPS[idxOf(S.step)] : null;
       acts.push(e => { put({ ask: e.target.checked ? 'ask' : 'never' }); });
       const cb = '<label class="dt-check"><input type="checkbox" data-act="' + (acts.length - 1) + '"' + (!S || S.ask !== 'never' ? ' checked' : '') + '> Ask me each time I open the Den</label>';
-      html = '<section class="dt-card dt-menu" role="region" aria-label="Guide">' + btn('×', () => quiet(), 'dt-x', ' aria-label="Close the guide menu"') + '<h2 tabindex="-1">The guide</h2><p class="dt-body">One day on the desk in ' + N + ' steps; you press each control yourself and nothing is spent by the guide.</p><div class="dt-nav col">' +
-        btn('Start from the beginning', () => { ui = 'none'; start(); }, 'primary') + (st ? btn('Resume at step ' + st.n + ': ' + st.title, () => { ui = 'none'; goId(st.id, true); }) : '') + '</div>' +
+      html = '<section class="dt-card dt-menu" role="region" aria-label="Guide">' + btn('×', () => quiet(), 'dt-x', ' aria-label="Close the guide menu"') + '<h2 tabindex="-1">The guide</h2><p class="dt-body">One day on the desk in ' + N + ' steps; you press each control yourself and nothing is spent by the guide.</p><div class="dt-nav dt-col">' +
+        btn('Start from the beginning', () => { ui = 'none'; start(); }, 'dt-primary') + (st ? btn('Resume at step ' + st.n + ': ' + st.title, () => { ui = 'none'; goId(st.id, true); }) : '') + '</div>' +
         '<div class="dt-chapters" role="group" aria-label="Chapters">' + CHAPTERS.map((n, i) => btn(n, () => { ui = 'none'; const j = STEPS.findIndex(s => s.ch === i); put({ runs: (S && S.runs || 0) + 1 }); goIdx(j, true); }, 'dt-chip-btn')).join('') + '</div>' + cb + '</section>';
-      if (first) focus = '.dt-btn.primary'; }
-    else if (ui === 'note') html = '<section class="dt-card dt-note" role="region" aria-label="Guide"><p class="dt-body">' + esc(noteText) + '</p><div class="dt-nav">' + btn('Got it', () => quiet(), 'primary') + '</div></section>';
+      if (first) focus = '.dt-btn.dt-primary'; }
+    else if (ui === 'note') html = '<section class="dt-card dt-note" role="region" aria-label="Guide"><p class="dt-body">' + esc(noteText) + '</p><div class="dt-nav">' + btn('Got it', () => quiet(), 'dt-primary') + '</div></section>';
     layer.setAttribute('data-ui', ui); layer.querySelector('.dt-rings').innerHTML = ''; layer.querySelector('.dt-shade path').setAttribute('d', ui === 'welcome' || ui === 'finish' ? 'M0 0H' + innerWidth + 'V' + innerHeight + 'H0Z' : '');
     if (ui === 'welcome' || ui === 'finish') { const svg = layer.querySelector('.dt-shade'); svg.setAttribute('width', innerWidth); svg.setAttribute('height', innerHeight); }
     paint(html, focus); if (first && (ui === 'resume' || ui === 'again')) announce(ui === 'resume' ? 'Carry on with the guide?' : 'Want the guide again?');
@@ -473,7 +473,7 @@
   // the guide's own keys: Alt+G between the card and the control; Escape only from inside the card; Tab kept inside a modal
   document.addEventListener('keydown', e => { try {
     if (ui === 'none' || !layer) return; const inCard = layer.contains(document.activeElement);
-    if (e.altKey && (e.code === 'KeyG' || /^g$/i.test(e.key))) { if (ui === 'step') { e.preventDefault(); if (inCard) toTarget(); else doFocus('h2', true); } else if (ui !== 'welcome' && ui !== 'finish') { e.preventDefault(); doFocus(inCard ? '.dt-btn' : '.dt-btn.primary'); } return; }
+    if (e.altKey && (e.code === 'KeyG' || /^g$/i.test(e.key))) { if (ui === 'step') { e.preventDefault(); if (inCard) toTarget(); else doFocus('h2', true); } else if (ui !== 'welcome' && ui !== 'finish') { e.preventDefault(); doFocus(inCard ? '.dt-btn' : '.dt-btn.dt-primary'); } return; }
     if (e.key === 'Escape' && inCard) { if (ui === 'welcome') { put({ status: 'dismissed' }); closeModal(); } else if (ui === 'finish') endTour('today'); else if (ui === 'step') later(); else quiet(); return; }
     if (e.key === 'Tab' && (ui === 'welcome' || ui === 'finish')) { const f = Array.from(slot().querySelectorAll('button:not([disabled]), input')); if (!f.length) return; const a = f[0], z = f[f.length - 1];
       if (!inCard) { e.preventDefault(); a.focus(); } else if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); } else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); } }
