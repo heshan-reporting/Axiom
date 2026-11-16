@@ -1,1 +1,53 @@
-/* Anne's Den: den-desk styles (filled by the release lane that owns this file). */
+/* Anne's Den: Watch, Collection and Options (docs/den-desk.js). Loads after den.css and wins by order. Tokens only (C8):
+   no hex, no pixel radius, no new font. */
+
+/* ---- Collection: "Not delivering", the one home of delivery problems ---- */
+.den-gaps{list-style:none;margin:0;padding:0}
+.den-gaps>li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:var(--dn-sp-3);align-items:start;padding:var(--dn-sp-3) var(--dn-sp-4);border-top:1px solid var(--dn-line)}
+.den-gaps>li:first-child{border-top:0}
+.den-gapdot{width:8px;height:8px;margin-top:7px;border-radius:var(--dn-r-pill);background:var(--dn-warn)}
+.den-gapmain{min-width:0}
+.den-gapmain>.den-t{display:block;font:600 var(--dn-fs-md)/1.35 var(--dn-text)}
+.den-why{display:block;margin-top:2px;max-width:var(--dn-measure);font-size:var(--dn-fs-sm);line-height:1.5;color:var(--dn-ink-2)}
+.den-gapside{display:flex;align-items:flex-start;justify-content:flex-end;min-width:0;max-width:280px;text-align:right}
+.den-gapact{font-size:var(--dn-fs-sm);line-height:1.45;color:var(--dn-ink-2)}
+.den-gapjob{grid-column:1/-1;margin-top:var(--dn-sp-3)}
+.den-allgood{display:inline-flex;align-items:center;gap:var(--dn-sp-2);color:var(--dn-ink-1)}
+.den-allgood::before{content:"";width:8px;height:8px;border-radius:var(--dn-r-pill);background:var(--dn-pos)}
+.den-gapnow{margin:0;padding:var(--dn-sp-2) var(--dn-sp-4) var(--dn-sp-3);border-top:1px solid var(--dn-line);font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
+.den-gapacc{padding:var(--dn-sp-3) var(--dn-sp-4);border-top:1px solid var(--dn-line)}
+.den-gapacc h4{margin:0 0 var(--dn-sp-2);font:600 var(--dn-fs-xs)/1.2 var(--dn-text);letter-spacing:.07em;text-transform:uppercase;color:var(--dn-ink-2)}
+.den-gapacc ul{list-style:none;margin:0;padding:0;display:grid;gap:var(--dn-sp-2)}
+
+/* "Setup details": the names only a person setting up a route needs (secrets, permissions, scripts), folded */
+.den-setup{margin-top:var(--dn-sp-2);font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
+.den-setup>summary{display:inline-flex;align-items:center;gap:6px;min-height:var(--dn-hit);cursor:pointer;color:var(--dn-accent-text);list-style:none}
+.den-setup>summary::-webkit-details-marker{display:none}
+.den-setup>summary::before{content:"";width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform var(--dn-dur-1) var(--dn-ease)}
+.den-setup[open]>summary::before{transform:rotate(45deg)}
+.den-setup>summary:focus-visible{outline:2px solid var(--dn-focus);outline-offset:2px;border-radius:var(--dn-r-xs)}
+.den-setup ul{margin:var(--dn-sp-1) 0 0;padding-left:var(--dn-sp-4)}
+.den-setup code{font-family:var(--dn-mono);font-size:var(--dn-fs-xs);color:var(--dn-ink-1);background:var(--dn-bg-1);border-radius:var(--dn-r-xs);padding:1px 5px;overflow-wrap:anywhere}
+.den-state .den-setup{display:block}
+.den-notbuilt{margin:var(--dn-sp-2) 0 var(--dn-sp-5)}
+.den-notbuilt .den-mono{margin:var(--dn-sp-1) 0 0}
+
+/* the Channels table: the route in plain words, its prose behind the row's own fold; a channel that delivered nothing marked */
+.den-how>summary{cursor:pointer;color:var(--dn-ink-1);list-style:none;min-height:var(--dn-hit);display:inline-flex;align-items:center;gap:6px}
+.den-how>summary::-webkit-details-marker{display:none}
+.den-how>summary::after{content:"";width:5px;height:5px;border-right:1.5px solid var(--dn-ink-3);border-bottom:1.5px solid var(--dn-ink-3);transform:rotate(45deg);margin-top:-3px}
+.den-how[open]>summary::after{transform:rotate(-135deg);margin-top:3px}
+.den-how>summary:focus-visible{outline:2px solid var(--dn-focus);outline-offset:2px;border-radius:var(--dn-r-xs)}
+.den-howtext{display:block;max-width:44ch;font-size:var(--dn-fs-sm);line-height:1.5;color:var(--dn-ink-2)}
+.den-chtable tr.den-row[data-gap] td:first-child{box-shadow:inset 3px 0 0 var(--dn-warn)}
+
+/* the analysis behind the Board, when the worker sends it */
+.den-pipe{list-style:none;margin:0;padding:0;display:grid;gap:var(--dn-sp-2);font-size:var(--dn-fs-md);color:var(--dn-ink-1)}
+
+/* Watch: when an account was last read, in neutral ink and never an error */
+.den-lastread{color:var(--dn-ink-2)}
+
+/* a job's console on Collection: a warning is a rule at the left, not a red box */
+#den-root .den-page .sig-con{border-color:var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-bg-1)}
+#den-root .den-page .sig-line.err{color:var(--dn-ink-1);box-shadow:inset 2px 0 0 var(--dn-warn);padding-left:var(--dn-sp-2)}
+#den-root .den-page .sig-line.err .k{color:var(--dn-warn-ink)}
