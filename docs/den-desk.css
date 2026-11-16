@@ -51,3 +51,5 @@
 #den-root .den-page .sig-con{border-color:var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-bg-1)}
 #den-root .den-page .sig-line.err{color:var(--dn-ink-1);box-shadow:inset 2px 0 0 var(--dn-warn);padding-left:var(--dn-sp-2)}
 #den-root .den-page .sig-line.err .k{color:var(--dn-warn-ink)}
+.den-zero{color:var(--dn-ink-2)}
+.den-setup ul{list-style:disc}
