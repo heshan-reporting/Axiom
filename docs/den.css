@@ -102,6 +102,8 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 /* an icon beside a word (contract C3; SHELL's Ic helper). Never instead of the word: buttons are found by name */
 #den-root .den-ic{width:var(--dn-icon);height:var(--dn-icon);flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px}
 #den-root .den-mini .den-ic,#den-root .den-back .den-ic{margin-left:-2px}
+#den-root .den-check .den-ic{width:14px;height:14px;margin-left:-2px}
+#den-root .den-chip .den-ic,#den-root .den-cite .den-ic,#den-root .den-seg .den-ic{width:12px;height:12px;stroke-width:2}
 .den-spacer{flex:1}
 .den-rail{display:flex;align-items:stretch;gap:var(--dn-sp-4);padding:0 var(--dn-sp-4);min-width:0;background:var(--dn-bg-1);border-bottom:1px solid var(--dn-line)}
 .den-tabs{display:flex;gap:2px;flex-shrink:0}
@@ -224,6 +226,9 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-table td.num,.den-table th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .den-table td.act{white-space:nowrap;text-align:right}
 .den-table td.act .den-mini{margin-left:6px}
+/* a row's own buttons recede until the row is pointed at or holds the focus; the panel's primary action stays filled */
+.den-table td.act .den-mini:not(.primary):not(.danger):not(.on){background:none;border-color:var(--dn-line-2)}
+.den-table tr:hover td.act .den-mini:not(.primary):not(.danger):not(.on):not(:disabled),.den-table tr:focus-within td.act .den-mini:not(.primary):not(.danger):not(.on):not(:disabled){background:var(--dn-s3);border-color:var(--dn-line-3)}
 .den-table tbody tr:hover td{background:var(--dn-bg-1)}
 .den-table tr.den-row:hover td{background:var(--dn-s2)}
 .den-jobrow td{background:var(--dn-bg-1);padding:12px 16px}
@@ -235,6 +240,7 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-state.err .den-errtext{color:var(--dn-ink-2)}
 .den-state.err .den-errtext b{display:block;margin-bottom:2px;color:var(--dn-ink-0)}
 #den-tabpanel>.den-state.err{max-width:640px;margin:var(--dn-sp-7) auto;padding:16px 20px;animation:den-in var(--dn-dur-2) var(--dn-ease-out)}
+#den-tabpanel>.den-state.err .den-errtext{display:block}
 #den-tabpanel>.den-state.err .den-mini{margin:12px 0 0}
 .den-state .den-mini{margin-left:8px}
 .den-loading{display:flex;flex-direction:column;gap:12px}
@@ -313,9 +319,13 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-seg .n{font-variant-numeric:tabular-nums;color:var(--dn-ink-3);margin-left:2px}
 .den-seg:hover{color:var(--dn-ink-0)}
 .den-seg[aria-pressed="true"]{background:var(--dn-s3);color:var(--dn-ink-0);font-weight:600}
-.den-undo{align-self:flex-start;max-width:100%;min-height:28px;animation:den-in var(--dn-dur-2) var(--dn-ease-out)}
+/* Undo sits in Unsorted's title row, out of the flow: it appears after a pin, a set-aside or a filing and leaves when there is
+   nothing to undo, and the cards under it never move (a drag may start the moment after a filing) */
+.den-col.den-unsorted{position:relative}
+.den-undo{align-self:flex-start;max-width:100%;min-height:28px;animation:den-fade var(--dn-dur-2) var(--dn-ease)}
+.den-unsorted .den-undo{position:absolute;top:8px;right:8px;max-width:calc(100% - 150px);margin:0;overflow:hidden;color:var(--dn-accent-text)}
 .den-undo:disabled{display:none}
-.den-undo-t{font-weight:400;overflow:hidden;text-overflow:ellipsis;max-width:230px}
+.den-undo-t{min-width:0;font-weight:400;overflow:hidden;text-overflow:ellipsis;max-width:230px;color:var(--dn-ink-1)}
 /* several cards selected: the bar that sets them aside with one reason */
 .den-bulk{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px;border:1px solid var(--dn-accent);border-radius:var(--dn-r-sm);background:var(--dn-accent-dim);color:var(--dn-ink-0);font-size:var(--dn-fs-sm);animation:den-in var(--dn-dur-2) var(--dn-ease-out)}
 .den-bulk b{font-weight:600;margin-right:2px}
@@ -392,6 +402,14 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-briefwrap{position:relative;display:flex;flex-direction:column;height:100%;min-height:0}
 .den-briefwrap>.den-notice{margin:var(--dn-sp-3) var(--dn-sp-4) 0}
 .den-briefwrap.den-page{height:auto}
+/* no brief yet: the one panel sits where the eye is, its primary action across the width and the cost under it */
+.den-briefwrap.den-page>.den-panel,.den-briefwrap.den-page>.den-notice{max-width:640px;margin-left:auto;margin-right:auto}
+.den-briefwrap.den-page>.den-panel{margin-top:12vh;box-shadow:var(--dn-e1)}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state{padding:8px 4px;line-height:var(--dn-lh-body)}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state>.den-mt{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-2);margin-top:var(--dn-sp-4)}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state>.den-mt>.den-mini{margin:0;min-height:40px}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state>.den-mt>.den-mini.primary{flex:1 1 auto}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state>.den-mt>.den-sub{flex:1 1 100%;margin:0;color:var(--dn-ink-3)}
 .den-brief{flex:1;min-height:0;display:flex;flex-direction:column;margin:0;border:0;border-radius:0;background:var(--dn-bg-0);box-shadow:none}
 .den-brief>header{padding:8px var(--dn-sp-4);background:var(--dn-bg-1)}
 .den-brief>header h3{font-size:var(--dn-fs-base)}
