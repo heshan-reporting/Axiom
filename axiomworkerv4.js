@@ -5012,7 +5012,10 @@ async function arcTagFill(env, opts) {
   // the walk down from the newest
   if (st.lo > 0 && pick.length < limit) {
     const n = limit - pick.length;
-    const rs = ((await db.prepare("SELECT id, title, substr(body,1,300) body, meta FROM arc_items WHERE kind='news' AND id<? AND ts>? AND " + need + ' ORDER BY id DESC LIMIT ?').bind(st.lo, since, lexv, n).all()).results) || [];
+    // a floor at the window's first news row: should the planner walk the rowid down (it may once ANALYZE has run), the
+    // scan stops at the week's first row rather than reading the archive to id 1 on every lexicon change
+    const floor = Number(((await db.prepare("SELECT MIN(id) m FROM arc_items WHERE kind='news' AND ts>?").bind(since).first()) || {}).m) || 0;
+    const rs = ((await db.prepare("SELECT id, title, substr(body,1,300) body, meta FROM arc_items WHERE kind='news' AND id<? AND id>=? AND ts>? AND " + need + ' ORDER BY id DESC LIMIT ?').bind(st.lo, floor, since, lexv, n).all()).results) || [];
     pick.push(...rs); st.lo = rs.length >= n ? rs[rs.length - 1].id : 0;
   }
   out.read = pick.length;
@@ -6755,8 +6758,8 @@ async function bskySearchGet(qs, st, ms) {
   if (!r.ok && st.refused) r.error = 'api.bsky.app: ' + st.refused + '; public.api.bsky.app: ' + r.error;
   return r;
 }
-async function bskySearch(q, limit, sinceIso, st) {
-  const r = await bskySearchGet('q=' + encodeURIComponent(q) + '&limit=' + Math.min(Math.max(limit || 40, 1), 100) + '&sort=latest' + (sinceIso ? '&since=' + encodeURIComponent(sinceIso) : ''), st);
+async function bskySearch(q, limit, sinceIso, st, ms) {
+  const r = await bskySearchGet('q=' + encodeURIComponent(q) + '&limit=' + Math.min(Math.max(limit || 40, 1), 100) + '&sort=latest' + (sinceIso ? '&since=' + encodeURIComponent(sinceIso) : ''), st, ms);
   if (!r.ok) return { ok: false, posts: [], detail: r.error, status: r.status, host: r.host, fellBack: !!r.fellBack };
   return { ok: true, posts: ((r.json || {}).posts || []).map(p => bskyNorm(p, q)), more: !!(r.json || {}).cursor, host: r.host, fellBack: !!r.fellBack };
 }
@@ -6779,16 +6782,21 @@ async function bskySweep(env, opts) {
   const out = { ok: true, platform: 'bluesky', queries: queries.length, found: 0, kept: 0, threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [] };
   const seen = new Map(); const st = {}; let refusals = 0;
   await log('info', 'Bluesky: ' + queries.length + ' keywords on the AppView search, last ' + days + ' days');
-  for (const q of queries) {
+  // a wall-clock budget for the searches (opts.budgetMs): with every desk term asked a run, a slow host must not carry
+  // the social run, and the tick after it, past the cron's wall clock. What is not asked waits for the next run.
+  const t0 = Date.now(); const budgetMs = Number(opts.budgetMs) > 0 ? Number(opts.budgetMs) : 0;
+  for (let qi = 0; qi < queries.length; qi++) {
+    const q = queries[qi];
+    if (budgetMs && Date.now() - t0 > budgetMs) { out.stoppedEarly = 'the searches used their ' + Math.round(budgetMs / 1000) + ' seconds; the other ' + (queries.length - qi) + ' terms were not asked this run'; out.errors.push(out.stoppedEarly); await log('err', out.stoppedEarly); break; }
     await log('cmd', 'GET app.bsky.feed.searchPosts q="' + q + '" sort=latest');
-    const r = await bskySearch(q, perQuery, since, st);
+    const r = await bskySearch(q, perQuery, since, st, 5000);
     if (r.host) out.host = r.host;
     if (st.fallback) out.fallback = st.fallback;
     if (!r.ok) {
       out.errors.push(q + ': ' + r.detail); await log('err', q + ': ' + r.detail);
-      // p67: with every desk term asked a run, a search host that refuses outright (both hosts, three terms running) is
-      // not asked the other sixty: the run stops and says why, and the next run tries again
-      if ([401, 403, 404, 410].indexOf(Number(r.status)) >= 0 && ++refusals >= 3 && queries.length > 3) { out.stoppedEarly = 'three terms running were refused (' + r.detail.slice(0, 80) + '); the other ' + (queries.length - queries.indexOf(q) - 1) + ' were not asked this run'; out.errors.push(out.stoppedEarly); await log('err', out.stoppedEarly); break; }
+      // p67: a search host that fails three terms running (a refusal, a 5xx, a 429 or a timeout alike, on both hosts) is
+      // not asked the rest: the run stops and says why, and the next run tries again
+      if (++refusals >= 3 && queries.length > 3) { out.stoppedEarly = 'three terms running failed (' + String(r.detail || r.status || 'no answer').slice(0, 80) + '); the other ' + (queries.length - qi - 1) + ' were not asked this run'; out.errors.push(out.stoppedEarly); await log('err', out.stoppedEarly); break; }
       await rdSleep(SOCIAL_PACE); continue;
     }
     refusals = 0;
@@ -7411,7 +7419,7 @@ async function socialCron(env) {
   let res = {}; try { res = JSON.parse((await kvGet(env.AXIOM_KV, 'social_last')) || '{}'); } catch (e) { res = {}; }
   const run = async (id, fn) => { try { res[id] = Object.assign({ at: now }, socialSummary(await fn())); } catch (e) { res[id] = { at: now, ok: false, detail: String((e && e.message) || e).slice(0, 160) }; } };
   const qs = await bskyCronQueries(env);
-  await run('bluesky', () => bskySweep(env, { queries: qs, threads: 15, days: 3 }));
+  await run('bluesky', () => bskySweep(env, { queries: qs, threads: 15, days: 3, budgetMs: 180000 }));
   await run('bluesky_accounts', () => bskyActorSweep(env, { max: 20 }));
   if (env.OPENAUSTRALIA_KEY) { const hz = await hansardSweep(env, {}); if (!hz.skipped) res.hansard = Object.assign({ at: now }, socialSummary(hz)); }
   await run('mastodon', () => mastodonSweep(env, { threads: 15, days: 3 }));
@@ -8619,7 +8627,7 @@ async function denMissed(env, deskId, opts) {
     (((await env.MIND_DB.prepare('SELECT id, issue, label, ratio, hot, detected_ts, acked_ts FROM arc_alerts WHERE ns=? AND detected_ts>? AND detected_ts<=? ORDER BY detected_ts DESC LIMIT 20').bind(desk.ns, win.from, win.to).all()).results) || [])
       .forEach(a => out.push({ sig: 'spike', key: 'A:' + a.id, title: 'Sentinel spike: ' + (a.label || label(a.issue)), detail: a.hot + ' stories in six hours, ' + (Math.round((Number(a.ratio) || 0) * 10) / 10) + ' times this issue\'s own baseline' + (a.acked_ts ? '. Acknowledged.' : '. Not yet acknowledged.'), cover: ['A:' + a.id], words: [], open: { view: 'sentinel' }, at: a.detected_ts })); });
   // 2 narratives that became emerging in the window
-  board.narratives.filter(n => n.status === 'emerging' && n.first >= win.from - 48 * 3600000).forEach(n => out.push({ sig: 'emerging', key: 'N:' + n.id, title: 'Emerging narrative: ' + n.label, detail: n.n + ' rows, ' + n.n24 + ' in the last day' + (n.side ? ', ' + n.side + ' toward the client' : ''), cover: ['N:' + n.id], words: [], open: { view: 'narratives', params: { id: n.id } }, at: n.first }));
+  board.narratives.filter(n => n.status === 'emerging' && n.first >= win.from - 48 * 3600000).forEach(n => out.push({ sig: 'emerging', key: 'N:' + n.id, title: 'Emerging narrative' + (n.named === 'auto' ? ' (working title)' : '') + ': ' + n.label, detail: n.n + ' rows, ' + n.n24 + ' in the last day' + (n.side ? ', ' + n.side + ' toward the client' : ''), cover: ['N:' + n.id], words: [], open: { view: 'narratives', params: { id: n.id } }, at: n.first }));
   // 3 first-seen actors: a registered account, or a register entity, on this desk's issues for the first time in fourteen days
   const wIds = Array.from(new Set(rows.filter(r => r.w).map(r => r.w.id)));
   // the slow figures (DEN_SLOW_TTL): counted once for this desk and window, read from the cache until then
@@ -8693,9 +8701,10 @@ async function denEvidence(env, desk, board, missed, pins, eo) {
   const engLine = s => (s.eng ? [['likes', 'likes'], ['comments', 'comments'], ['shares', 'shares'], ['reposts', 'reposts'], ['replies', 'replies'], ['views', 'views']].filter(k => Number(s.eng[k[0]]) > 0).map(k => s.eng[k[0]] + ' ' + k[1]).join(', ') : (s.total ? s.total + ' interactions' : '')) || 'no counts held';
   const soc = board.social.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
   L.push('', 'SOCIAL (' + board.social.length + ' posts held; ' + soc.length + ' shown; authors are not recorded and must not be guessed)');
-  // a social row is labelled by its channel and its own words (p67), never by an account: social rows carry no author.
-  // The label still opens with the platform key, which pages up to r52 read for the citation chip ("X post").
-  soc.forEach(s => put('S:' + s.id, { k: 'social', label: s.platform + ' post' + (one(s.text) ? ': ' + one(s.text).slice(0, 80) : ''), url: s.url, item: s.id, platform: s.platform, text: one(s.text).slice(0, 160),
+  // a social row is labelled by its channel only, never by an account or its own words: the label is printed in the
+  // brief's Source List and the downloaded document, and a post's words can name a private person. The card reads the
+  // post's words from text, which the Source List never prints. Pages up to r52 read the label's first word for the chip.
+  soc.forEach(s => put('S:' + s.id, { k: 'social', label: s.platform + ' post', url: s.url, item: s.id, platform: s.platform, text: one(s.text).slice(0, 160),
     sub: ((DEN_CH_NAME[s.platform] || s.platform) + (s.sub ? ' r/' + s.sub : '') + ', ' + when(s.ts) + ', ' + engLine(s)).slice(0, 120) },(pinned.has(s.id) ? 'PINNED | ' : '') + s.platform + (s.sub ? ' r/' + s.sub : '') + ' | ' + when(s.ts) + ' | ' + one(s.text).slice(0, 240) + ' | ' + engLine(s) + (s.growth != null && s.growth > 0 ? ' | +' + s.growth + ' since yesterday\'s read' : '') + (s.held ? ' | ' + s.held.n + ' comments held, tone ' + s.held.tone : '')));
   L.push('', 'INFLUENCER AND POLITICAL (registered public actors and MPs, on their own posts; these may be named)');
   board.actors.slice(0, 20).forEach(a => put('P:' + a.id, { k: 'actor', label: a.who + ' on ' + a.platform, url: a.url, item: a.id, who: a.who, platform: a.platform, text: one(a.text).slice(0, 160),
@@ -8872,7 +8881,14 @@ async function denBriefSave(env, b, who) {
   for (const s of desk.sections.filter(x => x.kind !== 'sources')) { if (sent[s.id] == null) continue; const text = String(sent[s.id]);
     if (text.length > DEN_SECTION_MAX) return { ok: false, status: 413, error: 'section_too_long', detail: '"' + s.title + '" is ' + text.length + ' characters; a section holds at most ' + DEN_SECTION_MAX + '. Nothing was saved.' };
     if (sections[s.id] && sections[s.id].text === text.replace(/\r/g, '').trim()) continue;
-    const c = denCleanText(text, ids); sections[s.id] = { text: c.text, cites: c.cites, uncited: c.uncited, unverified: c.unverified, trimmed: c.trimmed, edited: true, by: String(who || '').slice(0, 60), at: Date.now() }; changed.push(s.id); }
+    const c = denCleanText(text, ids);
+    // a flag the draft raised ("needs a source") survives a save while its sentence is still there, word for word, and
+    // still cites nothing; it clears only when the sentence goes or gains a citation (release review: a one-word edit
+    // elsewhere in the section used to wipe every flag in it)
+    const carried = ((sections[s.id] && sections[s.id].uncited) || []).filter(u => { u = String(u || ''); if (!u || c.uncited.indexOf(u) >= 0 || /\[[A-Z]:[^\]]+\]/.test(u)) return false;
+      const at = c.text.indexOf(u); return at >= 0 && !/^\s*\[[A-Z]:[^\]]+\]/.test(c.text.slice(at + u.length)); });
+    c.uncited = c.uncited.concat(carried);
+    sections[s.id] = { text: c.text, cites: c.cites, uncited: c.uncited, unverified: c.unverified, trimmed: c.trimmed, edited: true, by: String(who || '').slice(0, 60), at: Date.now() }; changed.push(s.id); }
   let ratings = denJ(row.ratings, {});
   if (b.ratings && typeof b.ratings === 'object') { const before = JSON.stringify(ratings); desk.ratings.items.forEach(i => { const r = b.ratings[i.id]; if (!r) return; ratings[i.id] = { level: desk.ratings.levels.indexOf(String(r.level)) >= 0 ? String(r.level) : '', trend: i.trend && desk.ratings.trends.indexOf(String(r.trend)) >= 0 ? String(r.trend) : '' }; }); if (JSON.stringify(ratings) !== before) changed.push('ratings'); }
   if (!changed.length) return { ok: true, brief: denBriefView(row, desk), unchanged: true };
@@ -10109,12 +10125,11 @@ function narrChannel(kind, meta, src) {
 function narrId() { return 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function narrTopTerms(tok, k) { return Object.keys(tok).sort((a, b) => tok[b] - tok[a]).slice(0, k || 40); }
 /* p67 working titles (Layer A). A narrative is never stored or shown without a title: the member headline that carries
- * the most of the cluster's shared words, cleaned; failing that a post's own first sentence; failing that a template from
- * register names, the leading issue and the shared words. No model call. Never a comment's words, and never text that
- * names somebody who is not on the register (a two-word capitalised name in a post, thread or forum title that is not a
- * register entity or an issue). Recomputed only when the narrative has doubled since (auto_n), so a title an analyst is
+ * the most of the cluster's shared words, cleaned; failing that a template from register names, the leading issue and
+ * the shared words the rows write in plain lower case. No model call. Never a comment's or a post's words, and never text
+ * that may name somebody who is not on the register (narrPersonish, applied to every headline). Recomputed only when the narrative has doubled since (auto_n), so a title an analyst is
  * citing does not flicker; a model's name (label) and a person's (edited=1) always win. */
-const NARR_AUTO_KINDS = { news: 3, transcript: 2, reddit_thread: 2, forum: 1 };   // rows whose own title may be the title
+const NARR_AUTO_KINDS = { news: 3 };   // rows whose own title may be the title: a story's published headline only
 const NARR_AUTO_WORDS = 14;
 function narrClip(t) {
   t = String(t || '').replace(/\s+/g, ' ').trim();
@@ -10134,17 +10149,65 @@ function narrCleanTitle(s) {
     .replace(/(^|\s)[#@][\w.]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^[-|:,;\s]+|[-|:,;\s]+$/g, '');
   return narrClip(t);
 }
-/** Text that may name a private person: a capitalised pair (or longer) that is not a register name, an issue, or a
- *  sentence-opening word followed by a common one. Only a story's published headline is exempt. */
+/* Capitalised words a headline may carry that are never a private person: institutions, parties, places, days, months. */
+const NARR_PUBLIC_WORDS = new Set(('senate parliament house assembly treasury treasurer government governments labor coalition liberal liberals '
+  + 'nationals national greens teals teal crossbench crossbencher crossbenchers independents australia australian australians federal state '
+  + 'commonwealth premier premiers minister ministers prime opposition council councils court budget reserve bank inquiry royal commission '
+  + 'monday tuesday wednesday thursday friday saturday sunday january february march april may june july august september october november '
+  + 'december victoria victorian queensland tasmania tasmanian canberra sydney melbourne brisbane perth adelaide hobart darwin western '
+  + 'south southern north northern territory new wales east coast gulf pacific asia china chinese india indian japan us usa america american '
+  + 'europe european uk britain british covid christmas easter anzac').split(' '));
+/* The word after a sentence's first word that makes that first word a person's name: "Doolan says", "Shane from". */
+const NARR_NAME_NEXT = /^(says|said|say|slams|slammed|blasts|blasted|calls|called|claims|claimed|warns|warned|urges|urged|tells|told|accuses|accused|admits|admitted|denies|denied|defends|defended|attacks|attacked|backs|backed|hits|wants|thinks|believes|reckons|is|was|has|had|from|of|and|vs|v|on)$/i;
+/** Text that may name a private person, which a working title must never carry (the owner's rule: nobody unregistered
+ *  is named). Register names and issue labels are cut out first. What is left is name-like when it has: a capitalised
+ *  word after a sentence's first word that is not an institution, party, place, day or month (any script: Zoe, Angstrom
+ *  with marks, O'Brien, a lone surname); an initial (J.); a word of four or more capitals (shouting, or a name in
+ *  capitals); a first word followed by a speech verb or "from" ("Shane says", "Doolan from"); or no capital at all (a
+ *  lower-case line whose names cannot be told apart, so it is never used). Strict on purpose: a refused title falls
+ *  back to the neutral template, a let-through one could put a private person on the Board. */
 function narrPersonish(t, known) {
   let s = String(t || '');
   const cut = k => { k = String(k || '').trim(); if (k.length > 2) s = s.split(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')).join(' ; '); };
   (known || []).forEach(cut); CLIENT_ISSUES.forEach(ci => cut(ci.label));
-  s = s.replace(/\s+/g, ' ').trim().replace(/(^|[.!?;]\s+)(The|A|An|This|That|These|Those|It|We|Our|Their|They|In|On|At|For|And|But|So|If|When|Why|How|What|New|Big|More|Sign|Stop|Say|Tell|No|Yes)\s+/g, '$1');
-  return /\b[A-Z][a-z'\-]+\s+(?:(?:de|van|von|di|da|le|la|bin|al)\s+)?[A-Z][a-z'\-]+/.test(s);
+  if (!/\p{Lu}/u.test(String(t || ''))) return true;
+  if (/(^|[^\p{L}])\p{Lu}{4,}(?![\p{L}])/u.test(s)) return true;
+  const w = s.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  const bare = x => String(x || '').replace(/^[^\p{L}]+/u, '').replace(/[^\p{L}]+$/u, '');
+  for (let i = 0; i < w.length; i++) {
+    const tok = bare(w[i]); if (!tok || !/^\p{Lu}/u.test(tok)) continue;
+    const prev = i > 0 ? w[i - 1] : '';
+    const start = i === 0 || prev === ';' || /[!?;:]$/.test(prev) || (/\.$/.test(prev) && bare(prev).length > 1);
+    if (/^\p{Lu}$/u.test(tok) && /\.$/.test(w[i])) return true;                     // an initial: "J. Doolan"
+    if (start) { if (NARR_NAME_NEXT.test(bare(w[i + 1]))) return true; continue; }   // "Shane says", "Doolan from"
+    if (/^\p{Lu}{1,3}$/u.test(tok)) continue;                                        // NSW, PM, ABC
+    if (NARR_PUBLIC_WORDS.has(tok.toLowerCase().replace(/'s$/, ''))) continue;
+    return true;
+  }
+  return false;
 }
-function narrTemplate(terms, names, issue, n) {
-  const top = narrTopTerms(terms || {}, 4).filter(t => !/^\$?\d/.test(t));
+/** The shared words a template may print: only words the rows themselves write in lower case in ordinary mixed-case
+ *  text, and never capitalised mid-sentence there. A surname that dominates a cluster is written capitalised wherever
+ *  the casing can be trusted, and a line with no ordinary casing (all lower case, all capitals) proves nothing. */
+function narrPlainWords(rows) {
+  const low = new Set(), cap = new Set();
+  (rows || []).forEach(r => {
+    const text = (String(r.title || '') + '. ' + String(r.body || '')).replace(/https?:\/\/\S+/g, ' ');
+    const words = text.split(/\s+/).filter(Boolean); if (words.length < 3) return;
+    const caps = words.filter(x => /^[^\p{L}]*\p{Lu}/u.test(x)).length;
+    if (!/\p{Ll}/u.test(text) || !caps || caps / words.length > 0.45) return;          // no ordinary casing here
+    words.forEach((x, i) => {
+      const tok = x.replace(/^[^\p{L}0-9$]+/u, '').replace(/[^\p{L}0-9%]+$/u, ''); if (!tok) return;
+      const start = i === 0 || /[.!?;:]$/.test(words[i - 1]);
+      if (/^\p{Lu}/u.test(tok)) { if (!start) cap.add(tok.toLowerCase()); } else low.add(tok.toLowerCase());
+    });
+  });
+  return new Set(Array.from(low).filter(x => !cap.has(x)));
+}
+/** allow: the shared words that may be printed (narrPlainWords). Without it no shared word is printed: the template is
+ *  then the register names and the issue only, which can never name a private person. */
+function narrTemplate(terms, names, issue, n, allow) {
+  const top = narrTopTerms(terms || {}, 40).filter(t => !/^\$?\d/.test(t) && allow && allow.has(t)).slice(0, 4);
   const who = (names || []).filter(Boolean).slice(0, 2).join(' and ');
   const core = who && issue ? who + ' on ' + issue : (who || issue || '');
   let t = core ? (top.length ? core + ': ' + top.join(', ') : 'A narrative on ' + core) : top.length ? top.join(', ') : 'A narrative of ' + (Number(n) || 0) + ' rows';
@@ -10156,27 +10219,21 @@ function narrTemplate(terms, names, issue, n) {
 function narrAutoLabel(rows, terms, o) {
   o = o || {}; const tv = terms || {}; const known = (o.known || []).concat(o.names || []);
   const score = t => tokenCos(tokenVec(narrTokens(t)), tv);
-  let best = '', bestScore = -1, post = '', postScore = -1;
+  let best = '', bestScore = -1;
   (rows || []).forEach(r => {
     const kind = String(r.kind || '');
     if (/comment/.test(kind)) return;   // never a comment
     const title = String(r.title || '').trim();
+    // only a story's published headline may be the title, and only when nothing in it may name a private person. A
+    // post's, thread's, forum's or call's own words never are (their casing cannot be trusted to show a name, and a
+    // poster's first sentence is often a judgement): the neutral template stands in for them.
     if (NARR_AUTO_KINDS[kind] && title && !/^[\w.-]+ post$/i.test(title)) {   // "x post" is a placeholder, "... - Example Post" an outlet
-      const t = narrCleanTitle(title); if (t.split(' ').length < 4) return;
-      if (kind !== 'news' && kind !== 'transcript' && narrPersonish(t, known)) return;
+      const t = narrCleanTitle(title); if (t.split(' ').length < 4 || narrPersonish(t, known)) return;
       const s = score(t) + NARR_AUTO_KINDS[kind] * 0.02;
       if (s > bestScore) { best = t; bestScore = s; }
-      return;
-    }
-    if (kind === 'sig_thread' || kind === 'transcript' || kind === 'forum' || kind === 'reddit_thread') {
-      // a post's own words are the last fallback: its first sentence, handles and links out, nobody unregistered in it
-      const first = String(r.body || '').replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/)[0] || '';
-      const t = narrCleanTitle(first); if (t.split(' ').length < 4 || narrPersonish(t, known)) return;
-      const s = score(t);
-      if (s > postScore) { post = t; postScore = s; }
     }
   });
-  return best || post || narrTemplate(tv, o.names, o.issue, o.n);
+  return best || narrTemplate(tv, o.names, o.issue, o.n, narrPlainWords(rows));
 }
 /** Who named it: a person (an edit), the model, or nobody yet (the working title). */
 function narrNamed(r) { return r && r.label ? (r.edited ? 'person' : 'model') : r && r.auto_label ? 'auto' : ''; }
@@ -10315,6 +10372,12 @@ async function narrLabel(env, ids, log, left, scope) {   // scope: the ledger ('
 const NARR_ELIGIBLE = "muted=0 AND edited=0 AND status<>'broad' AND n>=? AND (label='' OR labelled_n*2<=n OR COALESCE(scope,'')='')";
 const NARR_CLAIM_MS = 120000;
 const NARR_STRIKES = 3;
+const NARR_QUEUE_DAYS = 7;
+/* The day's window drain is bounded (release review): the window tick also runs the morning drafts, the daily brief and
+ * topic research after narratives, all inside the cron's fifteen-minute wall clock that was never measured; naming more
+ * than this waits for the next window, or for a person's "Finish all waiting". */
+const NARR_WINDOW_CALLS = 20;
+const NARR_WINDOW_MS = 4 * 60000;
 async function narrClaim(env, ids, now) {
   if (!ids || !ids.length) return [];
   now = now || Date.now();
@@ -10329,13 +10392,16 @@ async function narrLabelQueue(env, o) {
   o = o || {}; const db = env.MIND_DB; const log = o.log || (async () => {}); const left = typeof o.left === 'function' ? o.left : (() => 1e9);
   const maxCalls = o.maxCalls > 0 ? o.maxCalls : 1e9;
   const out = { named: 0, calls: 0, errors: [], deferred: 0, stopped: '', waiting: 0 };
-  const open = "AND NOT (COALESCE(label_tries,0)>=? AND COALESCE(label_try_ts,0)>?) AND COALESCE(label_try_ts,0)<?" + (o.where ? ' AND ' + o.where : '');
+  // only narratives active in the last seven days (the window /narratives, the Board and the Collection tab's
+  // awaiting-model count read): a quiet narrative from months ago never spends the day's cap on history no page shows
+  const open = "AND last_ts>? AND NOT (COALESCE(label_tries,0)>=? AND COALESCE(label_try_ts,0)>?) AND COALESCE(label_try_ts,0)<?" + (o.where ? ' AND ' + o.where : '');
+  const recent = () => Date.now() - NARR_QUEUE_DAYS * 86400000;
   const tried = new Set();
   for (let pass = 0; pass < 400; pass++) {
     if (out.calls >= maxCalls) { out.stopped = 'calls'; break; }
     if (left() < 15000) { out.stopped = 'time'; break; }
     const now = Date.now();
-    const cand = ((await db.prepare('SELECT id FROM narratives WHERE ' + NARR_ELIGIBLE + ' ' + open + " ORDER BY (COALESCE(ns,'')<>'') DESC, n24 DESC, n DESC LIMIT 20").bind(NARR_LABEL_MIN, NARR_STRIKES, now - 86400000, now - NARR_CLAIM_MS).all()).results || []).map(r => r.id).filter(id => !tried.has(id)).slice(0, 5);
+    const cand = ((await db.prepare('SELECT id FROM narratives WHERE ' + NARR_ELIGIBLE + ' ' + open + " ORDER BY (COALESCE(ns,'')<>'') DESC, n24 DESC, last_ts DESC, n DESC LIMIT 20").bind(NARR_LABEL_MIN, recent(), NARR_STRIKES, now - 86400000, now - NARR_CLAIM_MS).all()).results || []).map(r => r.id).filter(id => !tried.has(id)).slice(0, 5);
     if (!cand.length) { out.stopped = 'done'; break; }
     cand.forEach(id => tried.add(id));
     const mine = await narrClaim(env, cand, now);
@@ -10344,12 +10410,13 @@ async function narrLabelQueue(env, o) {
     out.named += nm.named; out.calls += nm.calls; out.errors.push(...nm.errors); out.deferred += nm.deferred || 0;
     if (nm.stopped) { await narrUnclaim(env, mine); out.stopped = nm.stopped; break; }
   }
-  try { const now = Date.now(); out.waiting = Number(((await db.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE + ' ' + open).bind(NARR_LABEL_MIN, NARR_STRIKES, now - 86400000, now + 1).first()) || {}).n) || 0; } catch (e) {}
+  try { const now = Date.now(); out.waiting = Number(((await db.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE + ' ' + open).bind(NARR_LABEL_MIN, recent(), NARR_STRIKES, now - 86400000, now + 1).first()) || {}).n) || 0; } catch (e) {}
   if (out.waiting && out.stopped !== 'done') await log('info', out.waiting + ' narrative' + (out.waiting === 1 ? '' : 's') + ' still wait for a model name (' + (out.stopped === 'budget' ? 'the day\'s naming cap is reached' : out.stopped === 'time' ? 'this run is out of time' : 'this pass\'s calls are spent') + '); each keeps its working title');
   return out;
 }
 /* p67 (B1, OFF unless the owner sets it): NARRATIVE_AUTO=tick lets a tick outside the day's window make at most two naming
- * calls for client-issue narratives that moved in the last day, on their own ledger scope 'narr_auto' capped by
+ * batches (a batch whose answer is not valid JSON is asked once more, so up to four provider calls; the ledger cap
+ * holds either way; /narratives/status reports this ledger as budgetAuto) for client-issue narratives that moved in the last day, on their own ledger scope 'narr_auto' capped by
  * NARRATIVE_AUTO_DAILY_CALLS (default 24 a Sydney day). The default ('window') keeps the 5 October rule: naming is held
  * outside the window. AI_AUTOMATION=off stops it too. Never from a page read. */
 const NARR_AUTO_DAILY_CALLS = 24;
@@ -10525,7 +10592,12 @@ async function narrativesRun(env, opts) {
   if (!env.ANTHROPIC_API_KEY) await log('info', 'ANTHROPIC_API_KEY is not set: narratives stay unnamed by the model (their working titles, terms and rows are still here)');
   else if (opts.skipNaming) { out.namingDeferred = true; await log('info', 'naming left to the name steps'); }
   else if (left() < 15000) { out.namingDeferred = true; await log('info', 'naming deferred to the next cron tick (' + Math.round(left() / 1000) + 's left in this run; a naming call takes up to 45s)'); }
-  else { try { const nm = opts.queue ? await narrLabelQueue(env, { left, log }) : await narrLabel(env, ids, log, left); out.named = nm.named; out.calls = nm.calls; out.errors.push(...nm.errors); if (nm.deferred) out.namingDeferred = true; if (opts.queue) { out.namesWaiting = nm.waiting; out.namingStopped = nm.stopped; } } catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 120)); } }
+  else { try { const qb = opts.queue && typeof opts.queue === 'object' ? opts.queue : null;
+    const qCalls = qb ? NARR_WINDOW_CALLS - qb.calls : 1e9;
+    const nm = !opts.queue ? await narrLabel(env, ids, log, left)
+      : qCalls <= 0 ? { named: 0, calls: 0, errors: [], waiting: null, stopped: 'calls' }
+      : await narrLabelQueue(env, { left: qb ? () => Math.min(left(), qb.until - Date.now() + 15000) : left, maxCalls: qCalls, log });
+    if (qb) qb.calls += nm.calls || 0; out.named = nm.named; out.calls = nm.calls; out.errors.push(...nm.errors); if (nm.deferred) out.namingDeferred = true; if (opts.queue) { out.namesWaiting = nm.waiting; out.namingStopped = nm.stopped; } } catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 120)); } }
   if (left() > 2500) { try { await narrCounters(env); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 80)); } }
   if (left() > 2500) { try { const al = await narrAlerts(env, log); out.alerts = al.length; } catch (e) { out.errors.push('alerts: ' + String((e && e.message) || e).slice(0, 80)); } }
   // singletons that never grew are noise: gone after two days (their rows are freed to be placed again)
@@ -10541,14 +10613,17 @@ async function narrativesCron(env) {
   if (!env.MIND_DB) return { ok: false, skipped: true };
   // several passes while the tick's minutes last, so a backlog clears in hours rather than days
   const t0 = Date.now(); const total = 8 * 60000; let acc = null;
+  // the drain's share of this tick, across every pass: NARR_WINDOW_CALLS calls and NARR_WINDOW_MS minutes at most
+  const queue = { calls: 0, until: t0 + NARR_WINDOW_MS };
   for (let i = 0; i < 6; i++) {
     const budget = total - (Date.now() - t0);
     if (budget < 75000) break;
-    // p67 (B0): the window's namer takes the whole waiting queue (narrLabelQueue), within the same cap and minutes
-    const out = await narrativesRun(env, { budgetMs: budget, queue: true });
+    // p67 (B0): the window's namer takes the waiting queue (narrLabelQueue), within the same cap, and its bounded share
+    const out = await narrativesRun(env, { budgetMs: budget, queue });
     if (!acc) acc = out; else { ['scanned', 'placed', 'joined', 'started', 'skipped', 'unanchored', 'named', 'calls', 'alerts', 'pruned', 'titled'].forEach(k => { acc[k] = (acc[k] || 0) + (out[k] || 0); }); acc.errors = (acc.errors || []).concat(out.errors || []); acc.passes = i + 1; acc.namesWaiting = out.namesWaiting; acc.namingStopped = out.namingStopped; }
     // another pass while rows wait to be placed, or while names wait and only the clock (not the cap) stopped the namer
-    if (!out.ok || (out.scanned < NARR_SCAN && !(out.namesWaiting > 0 && out.namingStopped === 'time'))) break;
+    const drainLeft = queue.calls < NARR_WINDOW_CALLS && Date.now() < queue.until - 15000;
+    if (!out.ok || (out.scanned < NARR_SCAN && !(out.namesWaiting > 0 && out.namingStopped === 'time' && drainLeft))) break;
   }
   return acc || { ok: false };
 }
@@ -10611,8 +10686,10 @@ async function narrativesStatus(env) {
   let last = null; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'narr_last')) || 'null'); } catch (e) { last = null; }
   const sims = narrSims(env);
   // p67, additive: titled counts working titles too; awaitingModel is the namer's true queue (what the window drains)
-  let awaitingModel = 0; try { awaitingModel = Number(((await env.MIND_DB.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE).bind(NARR_LABEL_MIN).first()) || {}).n) || 0; } catch (e) {}
-  return { ok: true, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, titled: c.titled || 0, awaitingModel, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, off: c.off || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: narrMax(env) };
+  let awaitingModel = 0; try { awaitingModel = Number(((await env.MIND_DB.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE + ' AND last_ts>?').bind(NARR_LABEL_MIN, now - NARR_QUEUE_DAYS * 86400000).first()) || {}).n) || 0; } catch (e) {}
+  // B1's own ledger ('narr_auto', off unless NARRATIVE_AUTO=tick) is reported beside the window's, so no spend is unseen
+  let budgetAuto = null; try { budgetAuto = Object.assign({ mode: narrAutoMode(env) }, await narrBudget(env, 'narr_auto')); } catch (e) { budgetAuto = { mode: narrAutoMode(env) }; }
+  return { ok: true, budgetAuto, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, titled: c.titled || 0, awaitingModel, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, off: c.off || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: narrMax(env) };
 }
 
 // ============================================================================

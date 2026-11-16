@@ -75,7 +75,7 @@ window.__DEN_PARTS.desk = function (D) {
       ${canWrite ? html`<${Panel} title="Add to the register" tour="watch-add"><div class="den-form">
         <label class="den-lab">Kind<select value=${add.kind} onChange=${e => setAdd(Object.assign({}, add, { kind: e.target.value }))}><option value="term">a term</option><option value="hashtag">a hashtag</option><option value="account">an account</option><option value="group">a public Facebook group</option><option value="source">an outlet</option></select></label>
         ${add.kind === 'account' || add.kind === 'hashtag' ? html`<label class="den-lab">Channel<select value=${add.platform} onChange=${e => setAdd(Object.assign({}, add, { platform: e.target.value }))}>${(add.kind === 'hashtag' ? ['instagram', 'any'] : ['x', 'facebook', 'instagram', 'youtube', 'tiktok', 'threads', 'linkedin']).map(p => html`<option key=${p} value=${p}>${CH[p] || 'any channel'}</option>`)}</select></label>` : null}
-        <label class="den-lab den-grow">${add.kind === 'term' ? 'Word or phrase' : add.kind === 'source' ? 'Site address' : add.kind === 'hashtag' ? 'Hashtag' : 'Handle or address'}<input value=${add.value} maxlength="200" onInput=${e => setAdd(Object.assign({}, add, { value: e.target.value }))} onKeyDown=${e => { if (e.key === 'Enter' && add.value.trim().length > 1) submit(); }} /></label>
+        <label class="den-lab den-grow">${add.kind === 'term' ? 'Word or phrase' : add.kind === 'source' ? 'Site address' : add.kind === 'hashtag' ? 'Hashtag' : 'Handle or address'}<input value=${add.value} maxlength="200" onInput=${e => setAdd(Object.assign({}, add, { value: e.target.value }))} onKeyDown=${e => { if (e.key === 'Enter' && add.value.trim().length > 1 && busy !== 'add') submit(); }} /></label>
         ${add.kind === 'account' ? html`<label class="den-lab">Its name<input value=${add.name} maxlength="120" onInput=${e => setAdd(Object.assign({}, add, { name: e.target.value }))} /></label><label class="den-lab">A public actor?<select value=${add.actor_kind} onChange=${e => setAdd(Object.assign({}, add, { actor_kind: e.target.value }))}><option value="">no: never named</option><option value="org">an organisation</option><option value="official">an official</option><option value="media">a media outlet</option></select></label>` : null}
         ${add.kind === 'term' ? html`<label class="den-lab">Files under<select value=${add.issue} onChange=${e => setAdd(Object.assign({}, add, { issue: e.target.value }))}><option value="">no issue (searched for only)</option>${desk.issues.map(i => html`<option key=${i.id} value=${i.id}>${i.label}</option>`)}</select></label>` : null}
         <button class="den-mini primary" disabled=${busy === 'add' || add.value.trim().length < 2} onClick=${submit}>Add</button></div>
@@ -104,7 +104,7 @@ window.__DEN_PARTS.desk = function (D) {
   const routeWords = c => { const r = []; if (c.worker) r.push('the worker'); if (c.collector) r.push('the Mac'); return r.length ? 'By ' + r.join(' and ') : 'Not set up'; };
   const NO_ROUTE = 'No collection job exists for this channel: it is read on its own schedule.';
 
-  function Gaps({ gaps, to, chOf, canWrite, busy, job, collect, accounts }) {
+  function Gaps({ gaps, to, chOf, canWrite, busy, job, collect, accounts, retry }) {
     const note = to ? 'For ' + fmtDay.format(new Date(+to)) : 'In this desk\'s window';
     const action = g => { const c = chOf(g.channel); if (!c) return null;
       if (c.collector && c.collector.off) return html`<span class="den-gapact">Switched off under Signed-in collection.</span>`;
@@ -115,7 +115,7 @@ window.__DEN_PARTS.desk = function (D) {
     const acc = Array.isArray(accounts) ? accounts.filter(a => a && a.last_error) : [];
     return html`<${Panel} title="Not delivering" tour="gaps" note=${note} flush=${true}>
       ${gaps === undefined ? html`<${Empty}>Checking what each channel delivered...<//>`
-        : gaps === null ? html`<${Empty}>The checks could not be read, so which channel delivered nothing is not known here. The table below still says what each one delivered.<//>`
+        : gaps === null ? html`<${Empty}>The checks could not be read, so which channel delivered nothing is not known here. The table below still says what each one delivered.${retry ? html` <button class="den-mini" onClick=${retry}>Try again</button>` : null}<//>`
         : !gaps.length ? html`<${Empty}><span class="den-allgood">Every channel this desk relies on delivered.</span><//>`
         : html`<ul class="den-gaps">${gaps.map(g => { const w = whyOf(g.detail); const c = chOf(g.channel);
             return html`<li key=${g.key} data-channel=${g.channel || null}><span class="den-gapdot" aria-hidden="true"></span>
@@ -148,7 +148,7 @@ window.__DEN_PARTS.desk = function (D) {
     const toggle = async src => { const off = (C.data.reach.off || []).slice(); const i = off.indexOf(src); if (i >= 0) off.splice(i, 1); else off.push(src); setBusy('sw'); try { await call('/den/reach', { off }); C.reload(); } catch (e) { toastMsg(say(e), true); } setBusy(''); };
     const chs = C.data && Array.isArray(C.data.channels) ? C.data.channels : []; const chOf = id => chs.find(c => c && c.id === id) || null;
     const gapIds = Array.isArray(gaps) ? gaps.map(g => g.channel) : [];
-    const head = html`<${Gaps} gaps=${gaps} to=${to} chOf=${chOf} canWrite=${canWrite} busy=${busy} job=${job} collect=${collect} accounts=${C.data && C.data.accounts} />`;
+    const head = html`<${Gaps} gaps=${gaps} to=${to} chOf=${chOf} canWrite=${canWrite} busy=${busy} job=${job} collect=${collect} accounts=${C.data && C.data.accounts} retry=${() => bump('collected')} />`;
     if (C.loading && !C.data) return html`<div>${head}<${Loading} what="collection" /></div>`;
     if (C.err && !C.data) return html`<div>${head}<${Failed} what="Collection" err=${C.err} onRetry=${C.reload} /></div>`;
     const d = C.data; const live = (d.reach.agents || []).filter(a => a.live); const bt = d.backtest;

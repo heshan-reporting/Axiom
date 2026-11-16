@@ -55,4 +55,11 @@ t('TK5: Anne\'s Den: every ink reads on every surface at AA, and each status ink
   [['--dn-pos-ink', '--dn-pos-dim'], ['--dn-warn-ink', '--dn-warn-dim'], ['--dn-neg-ink', '--dn-neg-dim'], ['--dn-info-ink', '--dn-info-dim'], ['--dn-accent-text', '--dn-accent-dim'], ['--dn-ink-1', '--dn-neutral-dim'], ['--dn-accent-ink', '--dn-accent'], ['--dn-accent-ink', '--dn-accent-hi'], ['--dn-bg-0', '--dn-ink-0']].forEach(p => need(p[0], p[1], 4.5));
   ok(!bad.length, bad.join('\n       '));
 });
+t('TK6: the Den\'s guide (den-tour.css, its own --dt-* tokens): every ink reads on every surface of the card at AA', () => {
+  const T = {}; (strip(read('den-tour.css')).match(/--dt-[a-z0-9-]+:#[0-9a-fA-F]{3,8}/g) || []).forEach(d => { const [k, v] = d.split(':'); T[k] = v; }); ok(T['--dt-ink'] && T['--dt-bg'], 'the guide\'s tokens were not found in den-tour.css');
+  const bad = []; const need = (fg, bg, min) => { ok(T[fg] && T[bg], 'no token ' + fg + ' or ' + bg); const r = ratio(T[fg], T[bg]); if (r < min) bad.push(fg + ' on ' + bg + ' ' + r.toFixed(2) + ':1 < ' + min); };
+  for (const bg of ['--dt-bg', '--dt-bg-2', '--dt-bg-3']) for (const fg of ['--dt-ink', '--dt-ink-2', '--dt-ink-3']) need(fg, bg, 4.5);
+  [['--dt-accent-ink', '--dt-accent'], ['--dt-accent-ink', '--dt-accent-hi'], ['--dt-warn-ink', '--dt-warn-dim'], ['--dt-pos-ink', '--dt-bg'], ['--dt-accent-hi', '--dt-bg']].forEach(p => need(p[0], p[1], 4.5));
+  ok(!bad.length, bad.join('\n       '));
+});
 console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);

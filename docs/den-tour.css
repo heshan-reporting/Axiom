@@ -35,12 +35,15 @@
 #den-tour .dt-ring.dt-below .dt-badge{bottom:auto; top:calc(100% + 4px)}
 #den-tour .dt-ring.dt-badged .dt-badge{display:block}
 #den-tour .dt-ring.dt-paid .dt-badge{background:var(--dt-warn-dim); color:var(--dt-warn-ink); border:1px solid var(--dt-warn-ink)}
+#den-tour.dt-repulse .dt-ring{animation:dt-pulse .5s ease-out 3}
+#den-tour.dt-reduced.dt-repulse .dt-ring{animation:none; border-width:3px}
 @keyframes dt-pulse{0%{box-shadow:0 0 0 0 var(--dt-halo)}70%{box-shadow:0 0 0 10px var(--dt-halo-0)}100%{box-shadow:0 0 0 0 var(--dt-halo-0)}}
 
 /* the coach card */
 #den-tour .dt-card{position:fixed; pointer-events:auto; width:340px; max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); overflow:auto; padding:14px 16px 12px; background:var(--dt-bg); border:1px solid var(--dt-line); border-radius:var(--dt-r-lg); box-shadow:0 10px 30px var(--dt-shadow); color:var(--dt-ink-2); z-index:80; animation:dt-in .2s cubic-bezier(.2,.7,.2,1)}
 #den-tour .dt-card.dt-dock{left:12px!important; right:12px; bottom:12px; top:auto!important; width:auto}
 #den-tour .dt-card h2{margin:6px 0 4px; font:700 16px/1.3 var(--dt-display); color:var(--dt-ink); outline:none}
+#den-tour .dt-card h2:focus-visible, #den-tour .dt-card h2:focus{outline:2px solid var(--dt-focus); outline-offset:3px; border-radius:var(--dt-r-sm)}
 #den-tour .dt-eyebrow{display:flex; justify-content:space-between; gap:8px; padding-right:28px; font:600 11px/1.4 var(--dt-text); letter-spacing:.04em; text-transform:uppercase; color:var(--dt-ink-3)}
 #den-tour .dt-bar{display:grid; grid-template-columns:repeat(6,1fr); gap:3px; margin-top:6px}
 #den-tour .dt-seg{height:4px; border-radius:var(--dt-r-pill); background:var(--dt-line)}

@@ -82,10 +82,16 @@
       if (empty) return { mode: 'route', route: 'brief', title: 'Start the brief first', body: 'This step needs today\'s brief. Draft it (1 model call, pressed by you), write it by hand for free, or see a sample.', line: 'Press Write it by hand, or Draft the brief', targets: [hook('by-hand'), hook('draft')], alts: [{ label: 'Show me with a sample', go: () => put({ sample: true }) }] };
       return null; };
     return def; };
-  const tabStep = (id, tab, title, body, look, lookBody) => ({ id, ch: 5, title,
+  /* A tab's second half is a press too (the owner: every step waits for the person to do it): something on the tab that
+     only shows more, never a control that collects or saves. Where there is nothing of that kind to press (a read-only
+     key, an empty panel), the step is shown instead. */
+  const tabStep = (id, tab, title, body, look, lookBody, press, pressLine) => ({ id, ch: 5, title,
     view(m, c) { if (c.tab !== tab) return { mode: 'do', phase: 'tab', body, line: 'Press ' + TABN[tab], targets: [document.getElementById('den-tab-' + tab)] };
-      const t = look(); return show({ phase: 'look', body: lookBody, targets: t ? [t] : [] }); },
-    done: () => false });
+      const t = look(); const can = t && press ? all(press, t).filter(x => !x.disabled && x.getAttribute('aria-selected') !== 'true') : [];
+      if (!can.length) return show({ phase: 'look', body: lookBody, targets: t ? [t] : [] });
+      return { mode: 'do', phase: 'look', body: lookBody, line: pressLine, targets: [can[0]] }; },
+    on(m, e) { if (e.type === 'click' && press && e.target.closest) { const t = look(); const hit = e.target.closest(press); if (t && hit && t.contains(hit)) m.pressed = true; } },
+    done: m => !!m.pressed });
 
   const STEPS = [
     { id: 'desk', ch: 0, title: 'Choose your desk',
@@ -97,8 +103,12 @@
     { id: 'day', ch: 0, title: 'Check the day',
       view(m, c) { if (c.past) { m.wasPast = true; return { mode: 'do', phase: 'today', body: 'The Den is showing another day. Nothing drafts for a past day. Press Today to come back.', line: 'Press Today', targets: [hook('today')] }; }
         const d = hook('day'), b = hook('budget'); const meter = c.budget ? ' The meter beside it counts today\'s model calls: ' + (c.budget.cap - c.budget.left) + ' of ' + c.budget.cap + ' used. Only a button that says \'1 model call\' spends, and this guide never presses one.' : '';
-        return show({ body: 'The Den reads one day at a time. It is showing ' + (d && d.value ? dayWords(d.value) : 'today') + ', the desk\'s window up to now. Looking at another day spends nothing.' + meter, targets: [d, b].filter(Boolean) }); },
-      done: (m, c) => !!m.wasPast && !c.past },
+        const body = 'The Den reads one day at a time. It is showing ' + (d && d.value ? dayWords(d.value) : 'today') + ', the desk\'s window up to now. Looking at another day spends nothing.' + meter;
+        if (!d) return show({ body, targets: [b].filter(Boolean) });
+        return { mode: 'do', act: 'Click', body, line: m.touched ? 'Now press Escape, or click away' : 'Click the date, then press Escape or click away', targets: [d, b].filter(Boolean), badges: ['Click here', 'Look here'] }; },
+      on(m, e) { const inDay = e.target && e.target.closest && e.target.closest(H('day')); if ((e.type === 'focusin' || e.type === 'click') && inDay) m.touched = true;
+        if (m.touched && inDay && (e.type === 'change' || (e.type === 'keydown' && (e.key === 'Escape' || e.key === 'Enter')))) m.left = true; },
+      done: (m, c) => (!!m.wasPast && !c.past) || (!!m.touched && (!!m.left || !(document.activeElement && document.activeElement.closest && document.activeElement.closest(H('day'))))) },
     { id: 'checks', ch: 0, title: 'Read the checks',
       view(m) { const pills = all(H('check')); const pop = hook('check-pop');
         if (pop) { m.opened = true; return { mode: 'do', phase: 'close', body: 'Each finding says whether today\'s brief covers it, and opens its evidence.', line: 'Close it: press Close, or Escape', targets: [pop] }; }
@@ -162,7 +172,7 @@
         let k = m.key && cardBy(m.key); if (!k || !inUns(k)) { k = all(H('card'), u).find(x => x.dataset.key !== X.fileKey) || null; m.key = k ? k.dataset.key : ''; }
         if (!k) { const f = (X.fileKey && cardBy(X.fileKey)) || one(H('col') + ' ' + H('card')); if (!f) return show({ body: 'No card is left to add with a key.', targets: [u] });
           return { mode: 'do', act: 'Choose', phase: 'back', body: 'Every card is in a section. Put one back first: in its menu choose Back to Unsorted.', line: 'Choose Back to Unsorted', targets: [hook('card-file', f) || f] }; }
-        let col = (X.fileSec && colBy(X.fileSec)) || colFor(k.dataset.kind); if (!keyOf(col)) col = every(H('col'))[0]; const n = keyOf(col); m.n = n;
+        let col = colFor(k.dataset.kind) || (X.fileSec && colBy(X.fileSec)); if (!keyOf(col)) col = every(H('col'))[0]; const n = keyOf(col); m.n = n;   // the card's own kind picks its section, as step 8 does
         return { mode: 'do', act: 'Press ' + n, phase: 'key', key: n, body: 'Faster: click a card, then press ' + n + ' to add it to ' + colName(col) + '. j and k move between cards.', line: 'Click a card, then press ' + n, targets: [k, col], badges: ['Click here', 'Press ' + n],
           status: m.retry ? 'That did not go through; click the card first, then press ' + n + '.' : '' }; },
       on(m, e) { if (e.type === 'keydown' && /^[0-9]$/.test(e.key) && !e.altKey && !e.metaKey && !e.ctrlKey) { const a = document.activeElement; const k = a && a.closest && a.closest(H('card')); if (k) m.keyed = { key: k.dataset.key, at: now() }; } },
@@ -206,13 +216,19 @@
         const pane = hook('evidence'); if (!pane) return null; if (m.base == null) m.base = citedSum();
         const cards = all(H('ev-card'), pane).filter(b => !b.disabled);
         if (!cards.length) { const any_ = all(H('ev-card'), pane).length; const pull = hook('pull', pane); const rows = all(H('pull-file'), pane).filter(b => !b.disabled); const n = pull ? +((pull.textContent.match(/(\d+)\s*$/) || [0, 0])[1]) : 0;
-          if (!any_ && rows.length) return { mode: 'do', phase: 'add', body: 'Nothing is cited here yet. Add one card to this section; then it can be cited. It is kept with the desk, and Unfile takes it out.', line: 'Press File here on one card', targets: [rows[0]] };
+          if (!any_ && rows.length) return { mode: 'do', phase: 'add', body: 'Nothing is cited here yet. Add one card to this section; then it can be cited. It is kept with the desk, and Remove takes it out.', line: 'Press Add to this section on one card', targets: [rows[0]] };
           if (!any_ && pull && n > 0 && pull.getAttribute('aria-expanded') !== 'true') return { mode: 'do', phase: 'pull', body: 'Nothing is cited here yet. Open the rest of today\'s cards and add one.', line: 'Open it', targets: [pull] };
           return show({ phase: 'none', sample: true, body: 'No card in this pane can be cited in this brief: a brief started by hand cites today\'s cards once the worker is updated, or after a draft. This is what citing looks like.', targets: [pane] }); }
         const pick = cards.slice().sort((a, b) => (+a.getAttribute('data-cited') || 0) - (+b.getAttribute('data-cited') || 0))[0];
         return { mode: 'do', body: 'Put your cursor where the source belongs, then press this card. Its citation goes in at the cursor. The words are then yours to save.', line: 'Press the card', targets: [pick] }; },
       on(m, e) { if (did(e, 'cite')) m.cited = true; },
       done: m => !!m.cited || (m.base != null && citedSum() > m.base) }, 'cite'),
+    briefStep({ id: 'save', ch: 3, title: 'Save', write: true, sampleBody: 'Leaving the text saves it; so do Ctrl or Cmd + S and Save changes. The line at the foot always says where you stand.',
+      view(m, c) { const st = saveState(); if (c.filed || c.ro) return show({ body: c.filed ? 'A filed brief is saved and locked; Reopen is how it changes.' : 'Saving changes the brief. ' + VIEW, targets: [st].filter(Boolean) });
+        if (!dirty()) return show({ phase: 'saved', body: 'Already saved: leaving the text did it. This line always says where you stand.', targets: [st].filter(Boolean) });
+        return { mode: 'do', body: 'Leaving the text saves it; so do Ctrl or Cmd + S and Save changes. This line always says where you stand. History keeps every save.', line: 'Press Save changes, or click outside the text', targets: [hook('save') || hook('done'), st].filter(Boolean) }; },
+      on(m, e) { if (did(e, 'save')) m.saved = true; },
+      done: m => !!m.saved }, 'save'),
     briefStep({ id: 'jump', ch: 3, title: 'Follow a citation', sampleBody: 'Every citation is a chip. Press one to land on its card in the evidence pane; from there Open goes to the original.',
       view() { const s = openSec(); const chips = s ? all(H('cite-chip'), s) : [];
         if (chips.length) return { mode: 'do', body: 'Every citation is a chip. Press one to land on its card; from there Open goes to the original.', line: 'Press a citation chip', targets: [chips[0]] };
@@ -222,12 +238,6 @@
         return show({ phase: 'none', sample: true, body: 'No section cites a card yet. When one does, each citation is a chip that leads to its card.', targets: [] }); },
       on(m, e) { if (did(e, 'jump')) m.jumped = true; },
       done: m => !!m.jumped }, 'jump'),
-    briefStep({ id: 'save', ch: 3, title: 'Save', write: true, sampleBody: 'Leaving the text saves it; so do Ctrl or Cmd + S and Save changes. The line at the foot always says where you stand.',
-      view(m, c) { const st = saveState(); if (c.filed || c.ro) return show({ body: c.filed ? 'A filed brief is saved and locked; Reopen is how it changes.' : 'Saving changes the brief. ' + VIEW, targets: [st].filter(Boolean) });
-        if (!dirty()) return show({ phase: 'saved', body: 'Already saved: leaving the text did it. This line always says where you stand.', targets: [st].filter(Boolean) });
-        return { mode: 'do', body: 'Leaving the text saves it; so do Ctrl or Cmd + S and Save changes. This line always says where you stand. History keeps every save.', line: 'Press Save changes, or click outside the text', targets: [hook('save') || hook('done'), st].filter(Boolean) }; },
-      on(m, e) { if (did(e, 'save')) m.saved = true; },
-      done: m => !!m.saved }, 'save'),
     briefStep({ id: 'regen', ch: 3, title: 'Rewrite one section', paid: true, sampleBody: 'One section can be written again without touching the rest. Opening the options is free; writing it again is 1 model call, pressed by you.',
       view(m, c) { const s = openSec(); if (c.ro || c.filed || c.past) return show({ body: 'Writing a section again is not offered here: ' + (c.ro ? 'the key is view-only.' : c.filed ? 'the brief is filed.' : 'this is another day.'), targets: [s].filter(Boolean) });
         if (hook('progress') && m.opened) { m.paid = true; return { mode: 'do', phase: 'writing', body: 'The section is being written again.', status: 'Writing. You can keep looking around.', targets: [hook('progress')] }; }
@@ -245,8 +255,11 @@
         return { mode: 'do', phase: 'open', body, line: 'Press History', targets: [h] }; },
       done(m) { const h = any('history'); return !!m.opened && !(h && h.getAttribute('aria-expanded') === 'true'); } }, 'history'),
     briefStep({ id: 'foot', ch: 4, title: 'Read the foot before filing', sampleBody: 'The foot says what is left: sentences that need a source, and checks the brief does not mention yet.',
-      view() { const st = saveState(); return show({ body: 'The foot says what is left: sentences that need a source, and checks the brief does not mention yet. Neither stops you; both are worth a look.', targets: st ? [st.closest('[role="status"]') || st] : [] }); },
-      done: () => false }, 'foot'),
+      view() { const st = saveState(); const left = [hook('foot-flags'), hook('foot-checks')].filter(b => b && !b.disabled); const body = 'The foot says what is left: sentences that need a source, and checks the brief does not mention yet. Neither stops you; both are worth a look.';
+        if (!left.length) return show({ phase: 'clear', body: body + ' Nothing is left on this brief.', targets: st ? [st.closest('[role="status"]') || st] : [] });
+        return { mode: 'do', body, line: 'Press the first thing the foot says is left', targets: [left[0]] }; },
+      on(m, e) { if (e.type === 'click' && e.target.closest && e.target.closest(H('foot-flags') + ',' + H('foot-checks'))) m.pressed = true; },
+      done: m => !!m.pressed }, 'foot'),
     briefStep({ id: 'export', ch: 4, title: 'Take it out', sampleBody: 'Copy it formatted for the document, download it, or copy a short Slack summary. Exports use the saved brief.',
       view(m) { const menu = hook('export-menu'); const body = 'Copy it formatted for the document, download it, or copy a short Slack summary. Exports use the saved brief.';
         if (menu) { m.opened = true; return { mode: 'do', phase: 'pick', body, line: 'Pick one', targets: [menu] }; }
@@ -263,11 +276,14 @@
       done: (m, c) => !!m.open && c.filed }, 'file'),
 
     tabStep('watch', 'watch', 'See what is watched', 'Watch is the list this desk collects on: words, hashtags, accounts and outlets.', () => hook('watch-kinds'),
-      'Suggestions wait here until a person approves them; nothing suggested is collected before that. Find new keywords reads the archive for free; Group into themes is 1 model call, and the guide does not ask for it.'),
+      'Suggestions wait here until a person approves them; nothing suggested is collected before that. Find new keywords reads the archive for free; Group into themes is 1 model call, and the guide does not ask for it.',
+      '[role="tab"]', 'Press another kind, such as Accounts'),
     tabStep('collection', 'collection', 'See what was read', 'Collection says which channels delivered, and why not.', () => hook('gaps') || hook('channels') || hook('collectors'),
-      'Collection is the one place the Den tells you a channel delivered nothing, why, and what to do about it. Collect now starts one collection; no model call.'),
+      'Collection is the one place the Den tells you a channel delivered nothing, why, and what to do about it. Collect now starts one collection; no model call.',
+      'summary', 'Open Setup details, or how a channel is read'),
     tabStep('options', 'options', 'Make the desk yours', 'Options holds this desk\'s own settings.', () => hook('opt-sections') || hook('opt-desk'),
-      'Options holds this desk\'s sections and their order, its window and its mutes. Nothing changes until you press Save options.')
+      'Options holds this desk\'s sections and their order, its window and its mutes. Nothing changes until you press Save options.',
+      'button[aria-label^="Move "]', 'Press Down on a section (nothing is saved until Save options)')
   ];
   STEPS.forEach((s, i) => { s.n = i + 1; });
   const N = STEPS.length;
@@ -313,7 +329,7 @@
   function drawRings(hs, labels, els) { const box = layer.querySelector('.dt-rings'); while (box.children.length > hs.length) box.lastChild.remove();
     while (box.children.length < hs.length) { const d = document.createElement('div'); d.className = 'dt-ring'; d.innerHTML = '<span class="dt-badge"></span>'; box.appendChild(d); }
     hs.forEach((r, i) => { const d = box.children[i]; d.style.left = r.left + 'px'; d.style.top = r.top + 'px'; d.style.width = r.width + 'px'; d.style.height = r.height + 'px';
-      const lab = labels[i] || ''; const b = d.firstChild; if (b.textContent !== lab) b.textContent = lab; d.classList.toggle('dt-below', r.top < 30); d.classList.toggle('dt-badged', i > 0 || /Drag|Press [0-9]|model call/.test(lab)); d.classList.toggle('dt-paid', !!(els && els[i] && els[i].matches(PAID))); }); }
+      const lab = labels[i] || ''; const b = d.firstChild; if (b.textContent !== lab) b.textContent = lab; d.classList.toggle('dt-below', r.top < 30 || !!(els && els[i] && els[i].matches && els[i].matches(PAID)));   /* a paid badge sits under its ring, never over the page's own words */ d.classList.toggle('dt-badged', i > 0 || /Drag|Press [0-9]|model call/.test(lab)); d.classList.toggle('dt-paid', !!(els && els[i] && els[i].matches(PAID))); }); }
   function place(card, hs, avoid) {
     const W = innerWidth, Hh = innerHeight, mg = 12, gap = 14; card.classList.toggle('dt-dock', W < 1100); if (W < 1100) { card.style.left = ''; card.style.top = ''; return; }
     const cw = card.offsetWidth, ch = card.offsetHeight; const no = hs.concat(avoid); const fits = p => p.left >= mg && p.top >= mg && p.left + cw <= W - mg && p.top + ch <= Hh - mg;
@@ -345,7 +361,7 @@
     const st = STEPS[cur.idx]; const c = ctx(); const t = now();
     let v; if (cur.flash) v = Object.assign({}, cur.last || {}, { flash: true });
     else { try { v = routeOf(st, c) || st.view(cur.m, c); } catch (e) { v = null; } v = v || { mode: 'do', wait: true, targets: [] };
-      if (v.mode !== 'route' && !v.wait) { let ok = false; try { ok = !!st.done(cur.m, c); } catch (e) {} if (ok) { cur.last = v; return complete('did'); } } }
+      if (v.mode !== 'route' && !v.wait && !cur.back) { let ok = false; try { ok = !!st.done(cur.m, c); } catch (e) {} if (ok) { cur.last = v; return complete('did'); } } }
     const dlg = dialog(); let targets = (v.targets || []).filter(visible);
     if (!v.flash && dlg && !targets.some(x => dlg.contains(x))) { v = Object.assign({}, v, { suspended: true }); targets = []; }
     const phase = (v.mode === 'route' ? 'route:' + v.route : v.phase || '') + (v.suspended ? ':dlg' : ''); if (phase !== cur.phase) { cur.phase = phase; cur.phaseAt = t; cur.miss = 0; }
@@ -364,7 +380,7 @@
     if (v.mode === 'show' && !v.noGot && !v.missing && !v.flash) nav += btn(done ? 'Next' : 'Got it', () => { if (v.got) v.got(); if (done) goIdx(cur.idx + 1, true); else complete('got'); }, 'dt-primary');
     else if (done && v.mode === 'do' && !v.flash) nav += btn('Next', () => goIdx(cur.idx + 1, true), 'dt-primary');
     const alts = (v.alts || []).map(a => btn(a.label, a.go, a.primary ? 'dt-primary' : '')).join('');
-    if (v.mode === 'do' && stuck > 20000 && cur.target) nav += btn('Show me where', () => { cur.scrolled = new WeakSet(); layer.classList.remove('dt-repulse'); void layer.offsetWidth; layer.classList.add('dt-repulse'); schedule(); });
+    if (v.mode === 'do' && stuck > 20000 && cur.target) nav += btn('Show me where', () => { cur.scrolled = new WeakSet(); layer.classList.remove('dt-repulse'); void layer.offsetWidth; layer.classList.add('dt-repulse'); setTimeout(() => layer.classList.remove('dt-repulse'), 1600); schedule(); });
     nav += btn('Back', () => goIdx(cur.idx - 1, true), '', cur.idx === 0 ? ' disabled' : '') + btn('Skip this step', () => complete('skip'), primSkip ? 'dt-primary' : '') + btn('I\'ll do it later', later);
     const sampleHtml = v.sample ? '<div class="dt-sample"><div class="dt-sample-h">' + esc(SAMPLE) + '</div>' + sampleArt(st.art || st.id) + '</div>' : '';
     const html = '<section class="dt-card" role="region" aria-label="Guide"' + (v.mode === 'show' ? ' data-mode="show"' : '') + '>' +
@@ -377,12 +393,12 @@
       '<p class="dt-status"></p>' +
       (alts ? '<div class="dt-alts">' + alts + '</div>' : '') + '<div class="dt-nav">' + nav + '</div>' +
       (cur.target && !v.flash ? '<div class="dt-foot">' + btn('Go to the highlighted control (Alt+G)', toTarget, 'dt-link') + '</div>' : '') + '</section>';
-    layer.setAttribute('data-ui', 'step'); layer.className = (v.mode === 'show' || v.missing ? 'dt-show' : 'dt-do') + (reduced() ? ' dt-reduced' : '') + (v.suspended ? ' dt-suspended' : '');
+    layer.setAttribute('data-ui', 'step'); layer.className = (v.mode === 'show' || v.missing ? 'dt-show' : 'dt-do') + (reduced() ? ' dt-reduced' : '') + (v.suspended ? ' dt-suspended' : '') + (layer.classList.contains('dt-repulse') ? ' dt-repulse' : '');
     paint(html, cur.focus ? 'h2' : null); cur.focus = false;
     const sl = slot().querySelector('.dt-status'); if (sl && sl.innerHTML !== status) sl.innerHTML = status;   // the status line changes in place: the card is not redrawn for a second's tick
     const hs = holes(targets); shade(hs);
     // a control that starts a model call (data-paid="1") is only ever pointed at: its ring says the cost, and nothing here presses it
-    const lab = i => (targets[i] && targets[i].matches(PAID) ? '1 model call: your press' : (v.badges && v.badges[i]) || (v.mode === 'show' ? 'Look here' : i > 0 ? 'And here' : glyph === 'Type' ? 'Type here' : glyph === 'Drag' ? 'Drag from here' : glyph === 'Choose' ? 'Choose here' : /^Press [0-9]$/.test(glyph) ? 'Click here' : 'Press here'));
+    const lab = i => (targets[i] && targets[i].matches(PAID) ? '1 model call, you press it' : (v.badges && v.badges[i]) || (v.mode === 'show' ? 'Look here' : i > 0 ? 'And here' : glyph === 'Type' ? 'Type here' : glyph === 'Drag' ? 'Drag from here' : glyph === 'Choose' ? 'Choose here' : /^Press [0-9]$/.test(glyph) ? 'Click here' : 'Press here'));
     drawRings(hs, hs.map((r, i) => lab(i)), targets);
     const avoid = [hook('export-menu'), hook('check-pop')].filter(Boolean).map(e => pad(e.getBoundingClientRect(), 4));
     place(slot().querySelector('.dt-card'), hs, avoid);
@@ -393,7 +409,8 @@
   function timeOn() { if (!cur) return; const id = STEPS[cur.idx].id; const t = Object.assign({}, S.t || {}); t[id] = (t[id] || 0) + (now() - cur.at); put({ t }); }
   function goIdx(i, fromCard) {
     if (cur) timeOn(); if (i < 0) i = 0; if (i >= N) return finish();
-    cur = { idx: i, m: {}, at: now(), phase: null, phaseAt: now(), scrolled: new WeakSet(), focus: !!fromCard }; ui = 'step'; put({ status: 'active', step: STEPS[i].id });
+    const back = !!cur && i < cur.idx;   // reached through Back: done() waits for the person's own next action, so the step is not completed (and left) by the state it was entered in
+    cur = { idx: i, m: {}, at: now(), phase: null, phaseAt: now(), scrolled: new WeakSet(), focus: !!fromCard, back }; ui = 'step'; put({ status: 'active', step: STEPS[i].id });
     tick(); const v = cur && cur.view; if (v) announce('Step ' + STEPS[i].n + ' of ' + N + '. ' + v.title + '.');
   }
   const goId = (id, fromCard) => goIdx(Math.max(0, idxOf(id)), fromCard);
@@ -422,7 +439,7 @@
       html = modal('That is a full day on ' + c.desk, '<p class="dt-body">Sort, start, write and cite, file, share. Replay this guide any time from the Guide button beside ?.</p>' + line, btn('Back to the Board', () => endTour('today'), 'dt-primary') + btn('Keyboard shortcuts', () => endTour('help')), cb); if (first) focus = '.dt-btn.dt-primary'; }
     else if (ui === 'resume') { const st = STEPS[Math.max(0, idxOf(S.step))]; html = '<section class="dt-card dt-prompt" role="region" aria-label="Guide"><h2>Carry on with the guide?</h2><p class="dt-body">You were on step ' + st.n + ' of ' + N + ': ' + esc(st.title) + '.</p><div class="dt-nav">' +
       btn('Carry on', () => { ui = 'none'; goId(st.id, true); }, 'dt-primary') + btn('Start over', () => { ui = 'none'; start(); }) + btn('Not now', () => { put({ status: 'paused' }); quiet(); }) + btn('Don\'t ask again', () => { put({ ask: 'never', status: 'paused' }); quiet(); note(); }) + '</div></section>'; }
-    else if (ui === 'again') { html = '<section class="dt-card dt-prompt" role="region" aria-label="Guide"><h2>Want the guide again?</h2><p class="dt-body">It takes about 6 minutes and spends nothing by itself.' + (S && (S.v || 0) < V ? ' The guide has new steps.' : '') + '</p><div class="dt-nav">' +
+    else if (ui === 'again') { html = '<section class="dt-card dt-prompt" role="region" aria-label="Guide"><h2>' + (S && S.runs ? 'Want the guide again?' : 'Want a guided tour of the Den?') + '</h2><p class="dt-body">It takes about 6 minutes and spends nothing by itself.' + (S && (S.v || 0) < V ? ' The guide has new steps.' : '') + '</p><div class="dt-nav">' +
       btn('Yes, guide me', () => { ui = 'none'; start(); }, 'dt-primary') + btn('Not now', () => quiet()) + btn('Don\'t ask again', () => { put({ ask: 'never' }); quiet(); note(); }) + '</div></section>'; }
     else if (ui === 'menu') { const st = S && S.step && idxOf(S.step) >= 0 && (S.status === 'active' || S.status === 'paused') ? STEPS[idxOf(S.step)] : null;
       acts.push(e => { put({ ask: e.target.checked ? 'ask' : 'never' }); });
@@ -434,11 +451,14 @@
     else if (ui === 'note') html = '<section class="dt-card dt-note" role="region" aria-label="Guide"><p class="dt-body">' + esc(noteText) + '</p><div class="dt-nav">' + btn('Got it', () => quiet(), 'dt-primary') + '</div></section>';
     layer.setAttribute('data-ui', ui); layer.querySelector('.dt-rings').innerHTML = ''; layer.querySelector('.dt-shade path').setAttribute('d', ui === 'welcome' || ui === 'finish' ? 'M0 0H' + innerWidth + 'V' + innerHeight + 'H0Z' : '');
     if (ui === 'welcome' || ui === 'finish') { const svg = layer.querySelector('.dt-shade'); svg.setAttribute('width', innerWidth); svg.setAttribute('height', innerHeight); }
-    paint(html, focus); if (first && (ui === 'resume' || ui === 'again')) announce(ui === 'resume' ? 'Carry on with the guide?' : 'Want the guide again?');
+    paint(html, focus); if (first && (ui === 'resume' || ui === 'again')) announce(ui === 'resume' ? 'Carry on with the guide?' : S && S.runs ? 'Want the guide again?' : 'Want a guided tour of the Den?');
   }
   let noteText = '';
   function note(t) { noteText = t || 'Okay. The Guide button beside ? brings it back.'; ui = 'note'; renderStatic(); announce(noteText); }
-  function quiet() { ui = 'none'; clearLayer(); }
+  /* Closing the menu or a prompt removes the focused button: the focus goes back to where it was when the menu or the
+     prompt opened, or to the Guide button, never to the page body. */
+  function quiet() { const a = document.activeElement; const had = !!layer && !!a && layer.contains(a); ui = 'none'; clearLayer(); const r = restoreTo; restoreTo = null;
+    if (had || !document.activeElement || document.activeElement === document.body) { const t = r && r.isConnected && r !== document.body && !(layer && layer.contains(r)) ? r : any('guide'); if (t) try { t.focus({ preventScroll: true }); } catch (e) {} } }
   function closeModal() { ui = 'none'; clearLayer(); const r = restoreTo; restoreTo = null; if (r && r.isConnected && r.focus) try { r.focus({ preventScroll: true }); } catch (e) {} }
   function finish() { if (cur) timeOn(); cur = null; put({ status: 'done', completedAt: now() }); ui = 'finish'; restoreTo = null; renderStatic(true); announce('That is a full day on the desk.'); }
   function endTour(to) { put({ status: 'done' }); ui = 'none'; clearLayer(); const el = to === 'today' ? document.getElementById('den-tab-today') : any('help'); if (el) try { el.focus(); } catch (e) {} announce(to === 'today' ? 'Press Enter to open the Board.' : 'Press Enter, or ?, for the keyboard sheet.'); }
@@ -463,13 +483,13 @@
       const panel = document.getElementById('den-tabpanel'); const settled = panel && !one('.den-loading', panel); if (!settled && now() - appSeen < 8000) return; if (dialog()) return;
       asked = true; S = load(); if (ui !== 'none') return;
       if (!S) return welcome(); if (S.ask === 'never') return;
-      ui = S.status === 'active' || S.status === 'paused' ? 'resume' : 'again'; renderStatic(true);
+      ui = S.status === 'active' || S.status === 'paused' ? 'resume' : 'again'; restoreTo = document.activeElement; renderStatic(true);
     } catch (e) { fail(e); }
   }
   // what the person does, seen and never stopped: capture phase, passive, no preventDefault
   const onEv = e => { try { if (layer && e.target && e.target.nodeType === 1 && layer.contains(e.target)) return;
     if (e.type === 'den:did' && ui === 'step' && e.detail) { const w = Object.assign({}, S.w || {}); const d = e.detail; if (d.what === 'pin') w.pin = (w.pin || 0) + 1; if (d.what === 'aside') w.aside = (w.aside || 0) + (Array.isArray(d.items) ? d.items.length : 1); if (d.what === 'file' && d.sec) w.file = (w.file || 0) + 1; put({ w }); }
-    if (ui === 'step' && cur && !cur.flash) { const st = STEPS[cur.idx]; if (st.on) st.on(cur.m, e, ctx()); } schedule(); } catch (x) {} };
+    if (ui === 'step' && cur && !cur.flash) { if (e.type !== 'focusin' && e.type !== 'den:did') cur.back = false; const st = STEPS[cur.idx]; if (st.on) st.on(cur.m, e, ctx()); } schedule(); } catch (x) {} };
   ['click', 'input', 'change', 'keydown', 'dragstart', 'drop', 'dragend', 'focusin'].forEach(t => document.addEventListener(t, onEv, { capture: true, passive: true }));
   window.addEventListener('den:did', onEv); window.addEventListener('resize', schedule); document.addEventListener('scroll', schedule, { capture: true, passive: true });
   // the guide's own keys: Alt+G between the card and the control; Escape only from inside the card; Tab kept inside a modal
@@ -477,6 +497,7 @@
     if (ui === 'none' || !layer) return; const inCard = layer.contains(document.activeElement);
     if (e.altKey && (e.code === 'KeyG' || /^g$/i.test(e.key))) { if (ui === 'step') { e.preventDefault(); if (inCard) toTarget(); else doFocus('h2', true); } else if (ui !== 'welcome' && ui !== 'finish') { e.preventDefault(); doFocus(inCard ? '.dt-btn' : '.dt-btn.dt-primary'); } return; }
     if (e.key === 'Escape' && inCard) { if (ui === 'welcome') { put({ status: 'dismissed' }); closeModal(); } else if (ui === 'finish') endTour('today'); else if (ui === 'step') later(); else quiet(); return; }
+    if ((ui === 'welcome' || ui === 'finish') && !/^(Tab|Enter| |Spacebar)$/.test(e.key)) e.stopPropagation();   // Alt+1-5, ?, / and Ctrl+S never reach the Den behind the modal
     if (e.key === 'Tab' && (ui === 'welcome' || ui === 'finish')) { const f = Array.from(slot().querySelectorAll('button:not([disabled]), input')); if (!f.length) return; const a = f[0], z = f[f.length - 1];
       if (!inCard) { e.preventDefault(); a.focus(); } else if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); } else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); } }
   } catch (x) {} }, true);
@@ -491,7 +512,7 @@
     asked = true; for (const k in X) delete X[k]; ui = 'none'; clearLayer(); if (!app()) { note('The guide needs a desk. Ask an admin to set one up, then open the Guide again.'); return; } goIdx(i, true);
   }
   window.DenTour = {
-    open() { asked = true; mount(); if (!app()) { note('The guide needs a desk. Ask an admin to set one up, then open the Guide again.'); return; } if (ui === 'step' && cur) { timeOn(); put({ status: 'paused' }); cur = null; } ui = 'menu'; renderStatic(true); },
+    open() { asked = true; mount(); if (!(layer && layer.contains(document.activeElement))) restoreTo = document.activeElement; if (!app()) { note('The guide needs a desk. Ask an admin to set one up, then open the Guide again.'); return; } if (ui === 'step' && cur) { timeOn(); put({ status: 'paused' }); cur = null; } ui = 'menu'; renderStatic(true); },
     start(id) { start(id); },
     pause() { if (ui === 'step') later(); },
     stop() { if (cur) timeOn(); cur = null; put({ status: 'dismissed' }); quiet(); },

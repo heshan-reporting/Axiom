@@ -95,7 +95,7 @@ await t('an evidence card is headed by its source in words; a row the Board has 
   const card = id => p2.locator('.den-evpane li[data-cite="' + id + '"]');
   const a = card('S:777777'); await a.waitFor();
   eq(await a.locator('.den-evsrc').innerText(), 'Mastodon post'); ok(/windfall tax on gas is overdue/.test(await a.locator('.den-t').innerText())); ok(/55 interactions/.test(await a.locator('.den-sub').innerText()));
-  ok(/^Cite S:777777: /.test(await a.locator('.den-evcard').getAttribute('aria-label')), 'the id stays in the accessible name'); eq((await a.locator('.den-evcode').innerText()).trim(), 'S:777777', 'and in a small code');
+  ok(/^Cite S:777777: /.test(await a.locator('.den-evcard').getAttribute('aria-label')), 'the id stays in the accessible name'); eq(await a.locator('.den-evcode').count(), 0, 'and nowhere on the card face (release review)'); ok(!/S:777777/.test(await a.innerText()), 'no raw id printed on the card');
   ok(!/^[A-Z]:\d+/.test((await a.locator('.den-evcard').innerText()).trim()), 'the card does not lead with an id');
   const b = card('S:777778'); eq(await b.locator('.den-evsrc').innerText(), 'Bluesky post'); ok(!/S:777778/.test(await b.locator('.den-evcard').innerText()), 'no raw id on the face of a label-only card');
   ok((await b.locator('.den-t').innerText()).length > 10, 'a label-only post still says something in words');
@@ -108,8 +108,8 @@ await t('an evidence card is headed by its source in words; a row the Board has 
 });
 
 await t('a tone figure, a Sentinel alert and agency memory say nothing about filing; chips carry the narrative\'s name, "Tone: <issue>", and a number shared with the card', async () => {
-  for (const k of ['tone', 'alert']) { const li = p2.locator('.den-evpane li[data-kind="' + k + '"]'); ok(await li.count() >= 1, k + ' card listed'); const tx = await li.first().textContent(); ok(!/not filed|filed under|File here|Unfile/.test(tx), k + ': ' + tx); eq(await li.first().getAttribute('data-filed'), 'na'); }
-  ok(/not filed/.test(await p2.locator('.den-evpane li[data-kind="narrative"]').first().textContent()), 'a narrative can be filed, so it says when it is not');
+  for (const k of ['tone', 'alert']) { const li = p2.locator('.den-evpane li[data-kind="' + k + '"]'); ok(await li.count() >= 1, k + ' card listed'); const tx = await li.first().textContent(); ok(!/not filed|filed under|File here|Unfile|Add to this section|Remove/.test(tx), k + ': ' + tx); eq(await li.first().getAttribute('data-filed'), 'na'); }
+  { const nli = p2.locator('.den-evpane li[data-kind="narrative"]').first(); eq(await nli.getAttribute('data-filed'), 'none', 'a narrative can be filed, and is not'); ok(!/not filed/.test(await nli.textContent()), 'without the words "not filed" on the card (release review)'); }
   const chips = await all(p2, S + ' .den-cites button.den-cite'); ok(chips.indexOf('Tone: Gas taxation') >= 0 && chips.indexOf('Sentinel alert') >= 0, JSON.stringify(chips));
   ok(chips.some(c => /^Narrative: Diesel rebate criticism/.test(c) && c.length <= 'Narrative: '.length + 29), 'the narrative chip names it, shortened: ' + JSON.stringify(chips));
   ok(chips.indexOf('pointpost') >= 0 && chips.indexOf('pointpost 2') >= 0, 'two stories of one outlet read apart: ' + JSON.stringify(chips));
@@ -127,7 +127,7 @@ await t('a read-only key reads only: no Edit, no hint, a textarea out of the tab
   const pt = await sentenceAt(p, /^Coverage of the gas taxation/); await p.mouse.click(pt.x, pt.y); await p.waitForTimeout(300);
   eq(await mode(p), 'read', 'a click on a sentence does not open an editor'); ok(await p.evaluate(() => !document.activeElement || document.activeElement.tagName !== 'TEXTAREA'));
   eq(await p.locator('.den-evpane .den-evcard').first().evaluate(e => getComputedStyle(e).opacity), '1', 'a card is not dimmed for a reader');
-  eq(await p.locator('#den-tabpanel button', { hasText: /^(File here|Unfile|Edit|Read)$/ }).count(), 0, 'nothing that files or edits');
+  eq(await p.locator('#den-tabpanel button', { hasText: /^(File here|Unfile|Add to this section|Remove|Edit|Read)$/ }).count(), 0, 'nothing that files or edits');
   eq(p.served.filter(s => /^POST \/den\//.test(s)), [], 'and nothing was sent'); eq(p.errors, []); await p.context().close();
 });
 
@@ -169,7 +169,7 @@ await t('a filing with a gap and a check lists the check only; the gap is never 
   eq(sent.map(b => !!b.acknowledge), [false, false, true]);
   // a filed brief reads: no editor, no add to this section, the pull list's button is there and cannot be pressed
   eq(await mode(p), 'read'); eq(await p.locator(S + ' .den-modes').count(), 0); eq(await p.locator(S + ' textarea').getAttribute('tabindex'), '-1');
-  await p.locator('.den-pull .den-fold').click(); const fh = p.locator('.den-pulllist li button', { hasText: 'File here' }); if (await fh.count()) ok(await fh.first().isDisabled(), 'File here cannot be pressed on a filed brief');
+  await p.locator('.den-pull .den-fold').click(); const fh = p.locator('.den-pulllist li button', { hasText: 'Add to this section' }); if (await fh.count()) ok(await fh.first().isDisabled(), 'Add to this section cannot be pressed on a filed brief');
   eq(p.errors, []); await p.context().close();
 });
 

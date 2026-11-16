@@ -19,6 +19,8 @@
  *       rotation stays as the deep pass)
  *   DW10 the seed gains the addresses that answered when probed (a Lemmy community, two publishers' own feeds); no id
  *        twice, and an outlet held only through Google News gains its own feed ahead of it
+ *   DW11 a failing search host (502s, timeouts) stops the social run's Bluesky searches after three terms, and a
+ *        wall-clock budget bounds a slow one
  * Run: node --experimental-sqlite tests/den-widen-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 
@@ -127,7 +129,7 @@ await S.t('DW5 Bluesky search asks api.bsky.app first and falls back to the publ
   // both refused: a failure by name, not a quiet run
   const w3 = await mk(); w3.answer(/searchPosts/, () => J({ error: 'Forbidden' }, 403));
   const r3 = await w3.t.bskySweep(w3.env, { queries: ['fuel tax credit', 'diesel rebate', 'fuel excise', 'critical minerals', 'iron ore', 'gas prices'], threads: 0 }); eq(r3.ok, false); ok(/403/.test(r3.detail), r3.detail);
-  ok(r3.stoppedEarly && /three terms running were refused/.test(r3.stoppedEarly) && /other 3 were not asked/.test(r3.stoppedEarly), 'a host that refuses outright is not asked every term: ' + r3.stoppedEarly);
+  ok(r3.stoppedEarly && /three terms running failed/.test(r3.stoppedEarly) && /other 3 were not asked/.test(r3.stoppedEarly), 'a host that refuses outright is not asked every term: ' + r3.stoppedEarly);
   eq(w3.outbound.filter(o => /searchPosts/.test(o.url)).length, 4, 'the search host once, then the public host for three terms');
 });
 
@@ -213,6 +215,21 @@ await S.t('DW10 the seed gains the probed addresses', async () => {
   ok(by.v67_guardian_energy.methods[0] === 'rss' && /theguardian\.com\/australia-news\/energy-australia\/rss$/.test(by.v67_guardian_energy.urls.rss), JSON.stringify(by.v67_guardian_energy));
   ok(by.v67_treasury_ministers.methods[0] === 'rss' && by.v67_treasury_ministers.tier === 'official');
   ok(by.wn_aemc.methods[0] === 'rss' && by.wn_aemc.methods.indexOf('gnews') > 0, 'the feed first, Google News kept behind it: ' + JSON.stringify(by.wn_aemc.methods));
+});
+
+await S.t('DW11 a failing search host (502s, timeouts) stops the social run\'s Bluesky searches after three terms, and a budget bounds a slow one', async () => {
+  const sleeps = []; const w = await mk({ __collectSleep: async ms => { sleeps.push(ms); } });
+  const qs = await w.t.bskyCronQueries(w.env); ok(qs.length > 10, 'a social run asks many terms: ' + qs.length);
+  w.answer(/bsky\.app\/xrpc\/app\.bsky\.feed\.searchPosts/, () => J({ error: 'UpstreamFailure' }, 502));
+  const before = w.outbound.length;
+  const r = await w.t.bskySweep(w.env, { queries: qs, threads: 15, days: 3 });
+  const terms = new Set(w.outbound.slice(before).filter(o => /searchPosts/.test(o.url)).map(o => new URL(o.url).searchParams.get('q')));
+  ok(terms.size <= 3, 'at most three terms are searched against a host answering 502: ' + terms.size);
+  ok(r.stoppedEarly && /three terms running failed/.test(r.stoppedEarly), r.stoppedEarly);
+  // a budget: a host that answers, slowly, is not asked past the run's seconds
+  const w2 = await mk(); let clock = 0; w2.answer(/searchPosts/, () => { clock++; return J({ posts: [] }); });
+  const r2 = await w2.t.bskySweep(w2.env, { queries: qs, threads: 0, budgetMs: 1 });
+  ok(clock < qs.length && /seconds/.test(r2.stoppedEarly || ''), 'the budget stops the searches: ' + clock + ' of ' + qs.length + ', ' + r2.stoppedEarly);
 });
 
 const res = S.done(); process.exit(res.fail ? 1 : 0);

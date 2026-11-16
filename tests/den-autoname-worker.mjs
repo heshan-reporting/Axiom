@@ -7,7 +7,9 @@
  *   AN1 a fresh narrative has a working title at birth, with zero Anthropic requests
  *   AN2 a two-row narrative (too small for the namer) has one, and the list says it is automatic
  *   AN3 the title is a cleaned member headline: outlet suffix and "Live:" stripped, at most fourteen words; never a
- *       comment's words; a post naming somebody who is not on the register is not used
+ *       comment's words; a post's own words are never the title (the template stands in)
+ *   AN3b nobody unregistered is named: lower case, capitals, a lone name, initials, other scripts, headlines and call
+ *       titles all fall back to the template, which prints only words the rows write in plain lower case
  *   AN4 the title does not change until the narrative has doubled
  *   AN5 a model's name wins over the working title (named: 'model')
  *   AN6 a person's name wins over both and survives a run
@@ -20,6 +22,7 @@
  *   AN10 claim before the call: two drains started together never send the same narrative twice
  *   AN11 three strikes: a cluster the model cannot name is set aside for a day, then tried again
  *   AN12 the window's cron names a narrative that did not move in that tick
+ *   AN14 the drain names only narratives active in the last seven days, and one window tick keeps to its share of calls
  * Run: node --experimental-sqlite tests/den-autoname-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 
@@ -109,14 +112,53 @@ await S.t('AN3 the title is a cleaned member headline, at most fourteen words, n
   const privatePost = G.narrAutoLabel([{ kind: 'sig_thread', title: 'x post', body: 'Shane Doolan from Ballarat says the fuel tax credit rort must end now.' }], terms, { issue: 'Fuel tax credits', known: ['Minerals Council of Australia'] });
   ok(!/Doolan|Shane/.test(privatePost), 'a post naming somebody not on the register is not used: ' + privatePost);
   const publicPost = G.narrAutoLabel([{ kind: 'sig_thread', title: 'x post', body: 'The fuel tax credit rort for billionaire miners has to end. Sign it.' }], terms, { issue: 'Fuel tax credits' });
-  eq(publicPost, 'The fuel tax credit rort for billionaire miners has to end.', 'a post\'s own first sentence is the last fallback');
-  const tmpl = G.narrAutoLabel([], terms, { names: ['Minerals Council of Australia'], issue: 'Fuel tax credits' });
+  eq(publicPost, 'Fuel tax credits: rort, billionaire, miners, fuel', 'a post\'s own words are never the title (release review): the template stands in');
+  const plain = [{ kind: 'sig_thread', title: 'x post', body: 'The rort for billionaire miners and the fuel tax credit goes on.' }];
+  const tmpl = G.narrAutoLabel(plain, terms, { names: ['Minerals Council of Australia'], issue: 'Fuel tax credits' });
   ok(/^Minerals Council of Australia on Fuel tax credits: /.test(tmpl) && words(tmpl) <= 14, 'a template from register names, the issue and the shared words: ' + tmpl);
+  eq(G.narrAutoLabel([], terms, { names: ['Minerals Council of Australia'], issue: 'Fuel tax credits' }), 'A narrative on Minerals Council of Australia on Fuel tax credits', 'with no rows to show the words are plain, no shared word is printed');
   ok(G.narrAutoLabel([], {}, {}).length > 0, 'never empty');
   // through the run: an outlet suffix is gone on the stored title
   const a = w.put('news', 'pointpost', 'Exclusive: Billionaire miners rort the fuel tax credit, documents show, in a long running scheme the Treasury knew about for years - Example Times', 'x', { issues: ['ftc'], reg: 1 }, 3 * H);
   await w.place(); const t = w.nOf(w.of(a)).auto_label; ok(!/Example Times|Exclusive/.test(t) && words(t) <= 14, 'stored: ' + t);
   eq(w.anth.length, 0, 'no model call');
+});
+
+await S.t('AN3b nobody unregistered is named: lower case, capitals, a lone name, initials, other scripts, headlines and transcripts', async () => {
+  const w = await mk(); const G = w.mod.__test;
+  const known = ['Minerals Council of Australia', 'Harbour Watch'];
+  const terms = { fuel: 3, tax: 3, credit: 3, rort: 2, levy: 2, harbour: 2, protest: 2 };
+  const ctx = { issue: 'Fuel tax credits', known };
+  const NAMES = /shane|doolan|jane|citizen|zo|ngstr|albanese|karen|brien/i;
+  const cases = [
+    { kind: 'forum', title: 'shane doolan from ballarat is right about the fuel tax rort', body: '' },
+    { kind: 'sig_thread', title: 'x post', body: 'SHANE DOOLAN says the fuel tax credit rort must end now.' },
+    { kind: 'reddit_thread', title: 'Doolan says the fuel tax credit rort must end', body: '' },
+    { kind: 'news', title: 'Doolan says the fuel tax credit rort must end - Example Post', body: '' },
+    { kind: 'news', title: 'Zo\u00eb \u00c5ngstr\u00f6m says the fuel tax credit is a rort - Example Post', body: '' },
+    { kind: 'transcript', title: 'Caller Shane Doolan on the fuel tax credit rort and his farm', body: '' },
+    { kind: 'news', title: 'Shane from Ballarat on the fuel tax credit and the harbour levy', body: '' },
+    { kind: 'news', title: 'My neighbour J. Doolan lost the farm to the fuel tax credit', body: '' },
+    { kind: 'sig_thread', title: 'x post', body: 'jane citizen says the harbour levy protest is on.' },
+    { kind: 'sig_thread', title: 'x post', body: 'Shane says the harbour levy protest is on Saturday.' },
+    { kind: 'news', title: 'Mother of three Jane Citizen leads harbour levy protest - The Daily Example', body: '' },
+    { kind: 'news', title: 'Harbour levy protest organiser Shane Doolan arrested - Example Post', body: '' },
+    { kind: 'news', title: 'Dr Jane Citizen: the fuel tax credit has to go - Example Post', body: '' },
+    { kind: 'news', title: 'Karen O\'Brien leads the fuel tax credit fight - Example Post', body: '' },
+    { kind: 'sig_thread', title: 'x post', body: 'Albanese is a liar and a traitor on the fuel tax credit.' },
+    { kind: 'news', title: 'FUEL TAX CREDIT ROW: DOOLAN SPEAKS OUT', body: '' },
+  ];
+  cases.forEach(r => { const t = G.narrAutoLabel([r], terms, ctx); ok(!NAMES.test(t), r.kind + ' "' + (r.title === 'x post' ? r.body : r.title) + '" gave: ' + t); });
+  // the template never prints a surname that dominates the shared words, cased or not
+  const surname = G.narrAutoLabel([
+    { kind: 'sig_thread', title: 'x post', body: 'Petition from Shane Doolan in Ballarat on the fuel tax credit is growing.' },
+    { kind: 'sig_thread', title: 'x post', body: 'shane doolan petition ballarat fuel tax' },
+    { kind: 'comments', title: 'Comment on: x', body: 'Doolan is right, sign the Doolan petition' },
+  ], { shane: 5, doolan: 5, petition: 4, ballarat: 3, fuel: 2 }, ctx);
+  ok(!/shane|doolan|ballarat/i.test(surname) && /^Fuel tax credits/.test(surname), 'the template keeps only plainly written words: ' + surname);
+  // a register name and an institution are fine in a headline
+  eq(G.narrAutoLabel([{ kind: 'news', title: 'Minerals Council of Australia defends the fuel tax credit in the Senate - Example Post', body: '' }], terms, ctx),
+    'Minerals Council of Australia defends the fuel tax credit in the Senate', 'register names and institutions pass');
 });
 
 await S.t('AN4 the title does not change until the narrative has doubled', async () => {
@@ -166,7 +208,7 @@ await S.t('AN7 a narrative row written without the new columns still has a title
   ok(!/not yet named/.test(JSON.stringify(b)), 'the placeholder is gone');
   const n1 = b.narratives.find(n => n.id === 'nold1'), n2 = b.narratives.find(n => n.id === 'nold2');
   ok(n1 && n1.label && words(n1.label) <= 14, 'a title with no terms held: ' + (n1 && n1.label)); eq(n1.named, 'auto');
-  ok(n2 && /levy/.test(n2.label) && words(n2.label) <= 14, 'a title from the shared words: ' + (n2 && n2.label)); eq(n2.named, 'auto');
+  ok(n2 && /Gas taxation/.test(n2.label) && !/levy|export|giants/.test(n2.label) && words(n2.label) <= 14, 'a title from the desk\'s issue; the stored shared words are not printed with no rows to show they are plain: ' + (n2 && n2.label)); eq(n2.named, 'auto');
   eq(w.anth.length, 0, 'the Board made no model call');
   const dr = await w.call('POST', '/den/brief', { desk: 'aep_au' }, 'full-key'); eq(dr.status, 200, dr.text.slice(0, 200));
   const sent = w.anth[w.anth.length - 1]; const line = (sent.match(/^\[N:nold2\][^\n]*$/m) || [''])[0];
@@ -246,10 +288,31 @@ await S.t('AN13 B1 is off unless the owner sets NARRATIVE_AUTO=tick; then a held
   const on = await G.narrAutoTick(w.env, held); eq(on.calls, 2, 'two calls a tick'); eq(on.named, 10); eq(w.anth.length, 2);
   ok(!w.anth.some(u => /Queue offdesk|Queue quiet/.test(u)), 'only client-issue narratives that moved in the last day');
   const u = await G.aiUsage(w.env, 'narr_auto'); eq(u.reserved, 2, 'its own ledger'); eq((await G.aiUsage(w.env, 'narratives')).reserved, 0, 'the window\'s cap is untouched');
+  const st = (await w.call('GET', '/narratives/status', null, 'read-key')).body;
+  ok(st.budgetAuto && st.budgetAuto.mode === 'tick' && JSON.stringify(st.budgetAuto) !== JSON.stringify(Object.assign({ mode: 'tick' }, st.budget)), '/narratives/status reports the narr_auto ledger beside the window\'s: ' + JSON.stringify(st.budgetAuto) + ' vs ' + JSON.stringify(st.budget));
   w.env.NARRATIVE_AUTO_DAILY_CALLS = '3'; const capped = await G.narrAutoTick(w.env, held); eq(capped.calls, 1, 'the auto cap holds'); eq(capped.stopped, 'done', 'the last waiting one was named');
   w.raw('nqdelta2', { titles: ['Queue deltatwo story one on fuel tax', 'Queue deltatwo story two on fuel tax'] });
   const spent = await G.narrAutoTick(w.env, held); eq(spent.calls, 0); eq(spent.stopped, 'budget');
   delete w.env.NARRATIVE_AUTO; delete w.env.NARRATIVE_AUTO_DAILY_CALLS;
+});
+
+await S.t('AN14 the drain names only narratives active in the last seven days, and the window\'s cron keeps to its share', async () => {
+  const w = await mk(); const G = w.mod.__test;
+  w.raw('nqrecent', { titles: ['Queue recent story one on fuel tax', 'Queue recent story two on fuel tax'] });
+  ['old30', 'old90'].forEach(k => w.raw('nq' + k, { titles: ['Queue ' + k + ' story one on fuel tax', 'Queue ' + k + ' story two on fuel tax'] }));
+  w.db.prepare('UPDATE narratives SET last_ts=? WHERE id=?').run(NOW - 30 * 24 * H, 'nqold30');
+  w.db.prepare('UPDATE narratives SET last_ts=? WHERE id=?').run(NOW - 90 * 24 * H, 'nqold90');
+  const st0 = (await w.call('GET', '/narratives/status', null, 'read-key')).body; eq(st0.awaitingModel, 1, 'the status counts the same seven days the drain works through');
+  const out = await G.narrLabelQueue(w.env, {}); eq(out.named, 1); eq(out.waiting, 0);
+  eq(w.nOf('nqrecent').label, 'Named queue recent');
+  eq(w.nOf('nqold30').label, '', 'a narrative last active thirty days ago is not sent'); eq(w.nOf('nqold90').label, '');
+  ok(!w.anth.some(u => /Queue old30|Queue old90/.test(u)), 'no call carried history');
+  // the window tick's drain stops at its share (NARR_WINDOW_CALLS), well under the day's cap
+  const w2 = await mk(); const N = (G.NARR_WINDOW_CALLS || 20) * 5 + 10;
+  for (let i = 0; i < N; i++) w2.raw('nqw' + i, { titles: ['Queue w' + i + ' story one on fuel tax', 'Queue w' + i + ' story two on fuel tax'] });
+  await w2.mod.__test.narrativesCron(w2.env);
+  ok(w2.anth.length > 0 && w2.anth.length <= (G.NARR_WINDOW_CALLS || 20), 'calls in one window tick: ' + w2.anth.length);
+  ok(w2.db.prepare("SELECT COUNT(*) n FROM narratives WHERE label=''").get().n > 0, 'the rest wait for the next window with their working titles');
 });
 
 const res = S.done(); process.exit(res.fail ? 1 : 0);

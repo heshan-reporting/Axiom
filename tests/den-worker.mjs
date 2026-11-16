@@ -234,6 +234,20 @@ await S.t('DK11 saving', async () => {
   const h = await F(hand, 'POST', '/den/brief/save', { id: h0.body.brief.id, revision: 1, sections: { summary: 'Written by hand, with no draft and no model.' } }); eq([h.status, h.body.brief.sections.summary.edited, h.body.brief.revision], [200, true, 2]);
 });
 
+await S.t('DK11b a flag the draft raised survives a save while its sentence stands uncited', async () => {
+  const w = await mk({ ANTHROPIC_API_KEY: 'test-anthropic' }); await seedDay(w);
+  model(w, (ev, ids) => ({ sections: { summary: 'Coverage continued [' + ids('M')[0] + ']. A campaigner is behind it [M:999999]. Quiet otherwise.', bottom: 'Steady [' + ids('M')[0] + '].' }, ratings: {} }));
+  const br = (await F(w, 'POST', '/den/brief', { desk: 'aep_au' })).body.brief; const m1 = br.sections.summary.cites[0];
+  eq(br.sections.summary.uncited, ['A campaigner is behind it.'], 'the draft flags the sentence resting on an invented id');
+  const s1 = await F(w, 'POST', '/den/brief/save', { id: br.id, revision: br.revision, sections: { summary: br.sections.summary.text + ' One more word.' } });
+  eq(s1.status, 200); eq(s1.body.brief.sections.summary.uncited, ['A campaigner is behind it.'], 'a one-word edit elsewhere keeps the flag');
+  const fixed = s1.body.brief.sections.summary.text.replace('A campaigner is behind it.', 'A campaigner is behind it [' + m1 + '].');
+  const s2 = await F(w, 'POST', '/den/brief/save', { id: br.id, revision: s1.body.brief.revision, sections: { summary: fixed } });
+  eq(s2.body.brief.sections.summary.uncited, [], 'a citation on the sentence clears its flag');
+  const s3 = await F(w, 'POST', '/den/brief/save', { id: br.id, revision: s1.body.brief.revision + 1, sections: { summary: 'Coverage continued [' + m1 + ']. Quiet otherwise.' } });
+  eq(s3.body.brief.sections.summary.uncited, [], 'a sentence that is gone takes its flag with it');
+});
+
 await S.t('DK12 filing', async () => {
   const w = await mk({ ANTHROPIC_API_KEY: 'test-anthropic' }); await seedDay(w); await F(w, 'GET', '/sentinel/alerts');
   w.env.MIND_DB.db.prepare("INSERT INTO arc_alerts(ns,client,issue,label,severity,hot,baseline,ratio,srcs,detected_ts) VALUES('aep','AEP','gastax','Gas taxation','high',9,2.9,3.1,5,?)").run(NOW - 2 * H);

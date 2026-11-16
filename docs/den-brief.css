@@ -175,3 +175,6 @@
 .den-dochint.on{color:var(--dn-ink-1)}
 .den-dochint.on b{color:var(--dn-ink-0);font-weight:600}
 .den-dochint>span:not(.den-evcode){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the foot's chips are presses (release review): a chip that leads to what is left */
+.den-foot button.den-chip-btn{border:0;cursor:pointer;font:600 var(--dn-fs-xs)/1.2 var(--dn-text)}
+.den-foot button.den-chip-btn:hover{text-decoration:underline}

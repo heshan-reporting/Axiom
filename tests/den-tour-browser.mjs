@@ -26,6 +26,11 @@ const until = (p, fn, what) => p.waitForFunction(fn, null, { timeout: 15000 }).c
 const B = (p, name) => p.locator('#den-tour').getByRole('button', { name, exact: true });
 const rings = p => p.$$eval('#den-tour .dt-ring', r => r.filter(x => getComputedStyle(x).display !== 'none').map(x => { const b = x.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; }));
 // press what is under the middle of ring i: the control a person is shown
+// release review: the day, the foot and each tab's second half are presses too; a step with nothing to press is shown
+const day = async p => { await at(p, 'day'); eq((await S(p)).view.mode, 'do', 'Check the day is a press'); await press(p); await p.keyboard.press('Escape'); };
+const toDo = p => p.waitForFunction(() => { const s = window.DenTour.state(); return s.view && s.view.mode === 'do'; }, null, { timeout: 4000 }).then(() => true, () => false);   // a panel still loading is shown until its controls are there
+const lookAt = async (p, id) => { await at(p, id, 'look'); if (await toDo(p)) await press(p); else await B(p, 'Got it').click(); };
+const foot = async p => { await at(p, 'foot'); if ((await S(p)).view.mode === 'show') await B(p, 'Got it').click(); else { await press(p); } };
 const press = async (p, i) => { await p.waitForTimeout(120); const r = (await rings(p))[i || 0]; ok(r, 'a ring is drawn'); await p.mouse.click(r.x + r.w / 2, r.y + r.h / 2); };
 const under = async (p, i, sel) => { const r = (await rings(p))[i || 0]; ok(r, 'a ring is drawn'); return p.evaluate(([x, y, sel]) => { const el = document.elementFromPoint(x, y); const h = el && el.closest(sel); return h ? (h.dataset.key || h.dataset.sec || h.dataset.goto || h.id || h.getAttribute('data-tour')) : ''; }, [r.x + r.w / 2, r.y + r.h / 2, sel]); };
 // the ringed control is the hook asked for, it is not covered (what is hit at its middle is it), the ring is around it
@@ -79,7 +84,7 @@ await t('from step 1 to step 24 each step advances only on the real action, and 
   const w = await world(); const p = await open(w, 'full-key', { tour: true }); await B(p, 'Start the guide').click();
   const still = async id => { await p.waitForTimeout(350); eq((await S(p)).step, id, 'a press elsewhere does not advance ' + id); };
   await at(p, 'desk'); await p.dispatchEvent('.den-brand', 'click'); await still('desk'); await B(p, 'Keep AEP national').click();
-  await at(p, 'day'); await B(p, 'Got it').click();
+  await day(p);
   await at(p, 'checks'); await press(p); await at(p, 'checks', 'close'); await p.keyboard.press('Escape');
   await at(p, 'card'); await press(p);
   await at(p, 'find'); await p.fill('#den-root [data-tour="search"]', 'ha'); await at(p, 'find', 'reset'); await p.fill('#den-root [data-tour="search"]', '');
@@ -99,21 +104,23 @@ await t('from step 1 to step 24 each step advances only on the real action, and 
   if (!(await p.locator(ED).count())) await press(p);
   await p.locator(ED).click(); await p.keyboard.press('End'); await p.keyboard.type(' The guide was here.');
   await at(p, 'cite'); await press(p);
-  // citing keeps the person in the words (one save for many cites); the chips show once they read again
-  await at(p, 'jump'); if ((await S(p)).view.phase === 'read') { await press(p); await p.waitForFunction(() => window.DenTour.state().view.phase !== 'read'); await at(p, 'jump'); } await press(p);
-  // leaving the text to press the chip saved it; new words make the save step one the person does
-  await at(p, 'save'); if ((await S(p)).view.mode === 'show') { if (!(await p.locator(ED).count())) await p.click('#den-root [data-tour="edit"]'); await p.locator(ED).click(); await p.keyboard.press('End'); await p.keyboard.type(' Saved by hand.'); await p.waitForFunction(() => window.DenTour.state().view.mode === 'do'); }
+  // citing keeps the person in the words, unsaved (one save for many cites): Save comes next and is always a real action
+  await at(p, 'save'); eq((await S(p)).view.mode, 'do', 'after citing, Save is a step the person does (release review)');
   const saves = denPosts(p).filter(s => /brief\/save/.test(s)).length; await press(p);
-  await at(p, 'regen'); ok(denPosts(p).filter(s => /brief\/save/.test(s)).length > saves, 'saved by the person\'s press'); await press(p); await at(p, 'regen', 'form'); await p.click('#den-root [data-tour="regen-cancel"]');
+  await at(p, 'jump'); ok(denPosts(p).filter(s => /brief\/save/.test(s)).length > saves, 'saved by the person\'s press');
+  if ((await S(p)).view.phase === 'read') { await press(p); await p.waitForFunction(() => window.DenTour.state().view.phase !== 'read'); await at(p, 'jump'); } await press(p);
+  await at(p, 'regen'); await press(p); await at(p, 'regen', 'form'); await p.click('#den-root [data-tour="regen-cancel"]');
   await at(p, 'history'); await press(p); await at(p, 'history', 'close'); await press(p);
-  await at(p, 'foot'); await B(p, 'Got it').click();
+  await at(p, 'foot'); ok(await toDo(p), 'Read the foot is a press: the brief has a sentence that needs a source'); await press(p);
+  await p.waitForFunction(() => { const s = window.DenTour.state(); return s.step !== 'foot' || (s.view && s.view.flash); }, null, { timeout: 5000 });
+  ok(await p.waitForFunction(() => !!(document.activeElement && document.activeElement.closest('.den-flag, .den-uncheck')), null, { timeout: 3000 }).then(() => true, () => false), 'the press landed on what is left: ' + await p.evaluate(() => document.activeElement.outerHTML.slice(0, 120)));
   await at(p, 'export'); await press(p); await at(p, 'export', 'pick'); await p.click('#den-root [data-tour="export-menu"] button:has-text("Copy the Slack summary")');
   await at(p, 'file'); await press(p);
   await p.waitForFunction(() => document.querySelector('#den-root [data-tour="file-dialog"]') || document.querySelector('#den-root [data-tour="status"][data-status="filed"]'));
   if (await p.locator('#den-root [data-tour="file-dialog"]').count()) { await at(p, 'file', 'dialog'); await p.locator('#den-root [data-tour="file-dialog"]').getByRole('button', { name: 'File anyway' }).click(); }
-  await at(p, 'watch'); ok(await p.$('#den-root [data-tour="status"][data-status="filed"]'), 'filed by the person'); await press(p); await at(p, 'watch', 'look'); await B(p, 'Got it').click();
-  await at(p, 'collection'); await press(p); await at(p, 'collection', 'look'); await B(p, 'Got it').click();
-  await at(p, 'options'); await press(p); await at(p, 'options', 'look'); await B(p, 'Got it').click();
+  await at(p, 'watch'); ok(await p.$('#den-root [data-tour="status"][data-status="filed"]'), 'filed by the person'); await press(p); await at(p, 'watch', 'look'); ok(await toDo(p), 'the Watch tab\'s second half is a press'); await lookAt(p, 'watch');
+  await at(p, 'collection'); await press(p); await lookAt(p, 'collection');
+  await at(p, 'options'); await press(p); await lookAt(p, 'options');
   await p.waitForSelector('#den-tour [role="dialog"]'); const fin = await txt(p, '#den-tour [role="dialog"]'); ok(/That is a full day on AEP national/.test(fin) && /pinned 1 card/.test(fin), fin);
   const s = await S(p); eq(s.done.length, 24, 'every one of the 24 steps was done, none skipped: ' + JSON.stringify(s.skipped)); eq(s.skipped, []);
   await B(p, 'Back to the Board').click(); eq((await S(p)).status, 'done'); eq(w.calls.length, 1, 'one model call in all'); eq(p.errors, []); await p.context().close();
@@ -125,7 +132,7 @@ await t('the paid step: the sample path spends nothing and is labelled; the Den\
   eq(await clear(p, '[data-tour="draft"]'), '', 'the Draft button is pointed at, not pressed'); ok(/Costs 1 model call/.test(await txt(p, '#den-tour .dt-cost')), 'a cost badge');
   const bad = await axe(p, 'the paid step');
   await B(p, 'Skip: show me with a sample').click(); await at(p, 'outline'); ok(/Sample: not your desk's data/.test(await txt(p, '#den-tour .dt-card')), 'the sample says it is a sample');
-  for (const id of ['outline', 'edit', 'cite', 'jump', 'save', 'regen', 'history', 'foot', 'export', 'file']) { await at(p, id); ok(/Sample: not your desk's data/.test(await txt(p, '#den-tour .dt-card')), id + ' is a labelled sample'); await B(p, 'Got it').click(); }
+  for (const id of ['outline', 'edit', 'cite', 'save', 'jump', 'regen', 'history', 'foot', 'export', 'file']) { await at(p, id); ok(/Sample: not your desk's data/.test(await txt(p, '#den-tour .dt-card')), id + ' is a labelled sample'); await B(p, 'Got it').click(); }
   await at(p, 'watch'); eq(w.calls.length, 0, 'the sample path made no model call'); eq(denPosts(p), [], 'and posted nothing');
   await startAt(p, 'start'); await at(p, 'start'); await p.click('#den-root [data-tour="draft"]'); await p.waitForSelector('#den-tour .dt-card .dt-status:has-text("Writing")', { timeout: 8000 }).catch(() => {});
   await at(p, 'outline'); eq(w.calls.length, 1, 'one call, from the Den\'s own button'); eq(bad, [], 'accessibility'); eq(p.errors, []); await p.context().close();
@@ -151,7 +158,7 @@ await t('a reload resumes at the same step; a wrong tab, a past day and unsaved 
 
 await t('after the guide ends, each open asks "Want the guide again?" once; Don\'t ask again holds; Guide and the ? sheet still replay', async () => {
   const w = await world(); const p = await open(w, 'full-key', { tour: true }); await B(p, 'Start the guide').click(); await at(p, 'desk');
-  await startAt(p, 'options'); await at(p, 'options'); await press(p); await at(p, 'options', 'look'); await B(p, 'Got it').click();
+  await startAt(p, 'options'); await at(p, 'options'); await press(p); await lookAt(p, 'options');
   await p.waitForSelector('#den-tour [role="dialog"]'); const bad = await axe(p, 'the finish'); await B(p, 'Back to the Board').click(); eq((await S(p)).status, 'done'); await p.waitForSelector('#den-tour [role="dialog"]', { state: 'detached' });
   await reopen(p); await p.waitForSelector('#den-tour .dt-prompt', { timeout: 15000 }); ok(/Want the guide again\?/.test(await txt(p, '#den-tour .dt-prompt')));
   eq(await p.evaluate(() => !!document.activeElement.closest('#den-tour')), false, 'the question does not take the focus'); for (const n of ['Yes, guide me', 'Not now', 'Don\'t ask again']) ok(await B(p, n).isVisible(), n);
@@ -166,20 +173,20 @@ await t('after the guide ends, each open asks "Want the guide again?" once; Don\
 await t('a read-only key: every step is shown or done without a write, and the guide posts nothing', async () => {
   const w = await world(); const p = await open(w, 'read-key', { tour: true }); await p.waitForFunction(() => window.AX_ROLE === 'read');
   await p.waitForSelector('#den-tour [role="dialog"]', { timeout: 15000 }); ok(/view-only/.test(await txt(p, '#den-tour [role="dialog"]')), 'the welcome says the key is view-only'); await B(p, 'Start the guide').click();
-  await at(p, 'desk'); await B(p, 'Keep AEP national').click(); await at(p, 'day'); await B(p, 'Got it').click();
+  await at(p, 'desk'); await B(p, 'Keep AEP national').click(); await day(p);
   await at(p, 'checks'); await press(p); await at(p, 'checks', 'close'); await p.keyboard.press('Escape');
   await at(p, 'card'); await press(p); await at(p, 'find'); await p.fill('#den-root [data-tour="search"]', 'ha'); await at(p, 'find', 'reset'); await p.fill('#den-root [data-tour="search"]', '');
   for (const id of ['pin', 'aside', 'drag', 'key']) { await at(p, id); eq((await S(p)).view.mode, 'show', id + ' is shown, not done'); ok(/view-only/.test(await txt(p, '#den-tour .dt-card')), id + ' says why'); await B(p, 'Got it').click(); }
   await at(p, 'write'); await press(p); await at(p, 'start'); eq((await S(p)).view.mode, 'show');
-  await B(p, 'Got it').click(); for (const id of ['outline', 'edit', 'cite', 'jump', 'save', 'regen', 'history', 'foot', 'export', 'file']) { await at(p, id); eq((await S(p)).view.mode, 'show', id); await B(p, 'Got it').click(); }
-  for (const id of ['watch', 'collection', 'options']) { await at(p, id); await press(p); await at(p, id, 'look'); await B(p, 'Got it').click(); }
+  await B(p, 'Got it').click(); for (const id of ['outline', 'edit', 'cite', 'save', 'jump', 'regen', 'history', 'foot', 'export', 'file']) { await at(p, id); eq((await S(p)).view.mode, 'show', id); await B(p, 'Got it').click(); }
+  for (const id of ['watch', 'collection', 'options']) { await at(p, id); await press(p); await lookAt(p, id); }
   await p.waitForSelector('#den-tour [role="dialog"]'); await B(p, 'Back to the Board').click();
   eq(denPosts(p), [], 'the read-only walk posted nothing'); eq(w.calls.length, 0); eq(p.errors, []); await p.context().close();
 });
 
 await t('an empty desk has no dead end: the sorting chapter says why and carries on, and every step has a way forward', async () => {
   const w = await world(); const p = await open(w, 'full-key', { tour: true }); await B(p, 'Start the guide').click();
-  await at(p, 'desk'); await p.selectOption('#den-root [data-tour="desk"]', 'guns_au'); await at(p, 'day'); await p.waitForFunction(() => /Firearms/.test(document.querySelector('.den-win').textContent)); await B(p, 'Got it').click();
+  await at(p, 'desk'); await p.selectOption('#den-root [data-tour="desk"]', 'guns_au'); await at(p, 'day'); await p.waitForFunction(() => /Firearms/.test(document.querySelector('.den-win').textContent)); await press(p); await p.keyboard.press('Escape');
   await at(p, 'checks'); await press(p); await at(p, 'checks', 'close'); await p.keyboard.press('Escape');
   await at(p, 'card'); await p.waitForSelector('#den-root [data-tour="unsorted"][data-n="0"]'); await p.waitForFunction(() => window.DenTour.state().view.mode === 'show');
   ok(/Nothing has been collected for Firearms/.test(await txt(p, '#den-tour .dt-card')) && /Collection tab/.test(await txt(p, '#den-tour .dt-card')), await txt(p, '#den-tour .dt-card'));
@@ -187,13 +194,14 @@ await t('an empty desk has no dead end: the sorting chapter says why and carries
   await at(p, 'write'); await press(p); await at(p, 'start'); await p.click('#den-root [data-tour="by-hand"]');
   await at(p, 'outline'); await press(p); await at(p, 'edit'); if (!(await p.locator(ED).count())) await press(p);
   await p.locator(ED).click(); await p.keyboard.type('A quiet day for the desk.');
-  for (const id of ['cite', 'jump']) { await at(p, id); eq((await S(p)).view.mode, 'show', id + ': nothing here can be cited, so it is shown'); await B(p, 'Got it').click(); }
+  await at(p, 'cite'); eq((await S(p)).view.mode, 'show', 'cite: nothing here can be cited, so it is shown'); await B(p, 'Got it').click();
   await at(p, 'save'); const v = (await S(p)).view; if (v.mode === 'show') await B(p, 'Got it').click(); else await press(p);
+  await at(p, 'jump'); eq((await S(p)).view.mode, 'show', 'jump: nothing here can be cited, so it is shown'); await B(p, 'Got it').click();
   await at(p, 'regen'); await press(p); await at(p, 'regen', 'form'); await p.click('#den-root [data-tour="regen-cancel"]');
-  await at(p, 'history'); await press(p); await at(p, 'history', 'close'); await press(p); await at(p, 'foot'); await B(p, 'Got it').click();
+  await at(p, 'history'); await press(p); await at(p, 'history', 'close'); await press(p); await foot(p);
   await at(p, 'export'); await press(p); await at(p, 'export', 'pick'); await p.click('#den-root [data-tour="export-menu"] button:has-text("Copy the Slack summary")');
   await at(p, 'file'); await B(p, 'Not yet, show me the rest').click();
-  for (const id of ['watch', 'collection', 'options']) { await at(p, id); await press(p); await at(p, id, 'look'); await B(p, 'Got it').click(); }
+  for (const id of ['watch', 'collection', 'options']) { await at(p, id); await press(p); await lookAt(p, id); }
   await p.waitForSelector('#den-tour [role="dialog"]'); const s = await S(p); eq(s.skipped.sort(), ['aside', 'card', 'drag', 'find', 'key', 'pin'].sort(), 'only the sorting chapter was passed over, and said so');
   eq(w.calls.length, 0); eq(p.errors, []); await p.context().close();
 });

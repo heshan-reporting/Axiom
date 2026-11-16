@@ -4,7 +4,8 @@
  *   DR1 the draft's prompt carries no collection fault: no "NOT READ" shout, no collector, sign-in or repair; one neutral
  *       line says which channels were read and which were not, and the rules say never to read an unread channel as quiet
  *   DR2 the brief's view carries what an evidence card needs: the row's own words (text) and one line of figures (sub);
- *       a social row is labelled by its words, never by an account; a subscriber row's excerpt never leaves the worker
+ *       a social row is labelled by its channel only (never its words or an account; the Source List prints the label);
+ *       a subscriber row's excerpt never leaves the worker
  *   DR3 a brief stored before p67 (no text, no sub) still views, and gains card words from its stored line
  *   DR4 the tone line counts only the rows a model judged, never the rows marked as mentioning nothing
  *   DR5 a brief started by hand can cite: it holds the window's evidence from the start, and a save that cites a row
@@ -52,7 +53,12 @@ await S.t('DR2 the view carries text and sub for an evidence card', async () => 
   const sid = Object.keys(view.evidence).find(k => /^S:/.test(k)); const s = view.evidence[sid];
   ok(/windfall tax on gas is overdue/.test(s.text) && s.text.length <= 160, 'the post\'s own words: ' + JSON.stringify(s));
   ok(/likes|interactions|no counts held/.test(s.sub) && s.sub.length <= 120 && /\bX\b/.test(s.sub), 'one line of figures: ' + s.sub);
-  ok(/^x post: The windfall tax on gas/.test(s.label) && s.label.length <= 160, 'a social row is labelled by its words, after its channel: ' + s.label);
+  eq(s.label, 'x post', 'a social row is labelled by its channel only: the label is printed in the Source List (release review)');
+  const md = (await F(w, 'GET', '/den/brief?id=' + br.id + '&format=md', null, 'read-key')).text;
+  const htm = (await F(w, 'GET', '/den/brief?id=' + br.id + '&format=html', null, 'read-key')).text;
+  ok(/x post/.test(md) && !/windfall tax on gas is overdue|sign the petition/.test(md), 'the Markdown Source List never prints a post\'s words: ' + md.slice(md.indexOf('Social'), md.indexOf('Social') + 160));
+  ok(!/windfall tax on gas is overdue|sign the petition/.test(htm), 'nor does the HTML document');
+  ok(!view.sourceList.some(g => g.items.some(i => /overdue|petition/.test(i.label || ''))), 'nor the Source List the page shows');
   ok(!/Jo Citizen/.test(JSON.stringify(view)), 'never an author'); ok(!('line' in s), 'the line stays on the worker');
   const gid = Object.keys(view.evidence).find(k => /^M:/.test(k) && view.evidence[k].gated); const g = view.evidence[gid];
   ok(g && /Producers answer the windfall tax push/.test(g.text) && /afr|pointpost/.test(g.sub), 'a subscriber story is its headline and its outlet: ' + JSON.stringify(g));
