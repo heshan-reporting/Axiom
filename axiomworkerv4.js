@@ -5399,6 +5399,11 @@ const SOURCE_SEED_EXT = [
   ['lex_gnews', 'Lexicon sweep: Google News', 'sweep', 'au', '', { x: 'gnews' }, 30],
   ['lex_gdelt', 'Lexicon sweep: GDELT', 'sweep', 'au', '', { x: 'gdelt' }, 60],
   ['lemmy_aussiezone', 'Lemmy: aussie.zone', 'community', 'au', '', { l: 'aussie.zone' }, 60],
+  // -- p67: addresses that answered 200 from the build machine on 15 November 2026 (map-collection s.7 rows 7 and 10;
+  //    aussie.zone answered a Cloudflare challenge that day). Unverified from the worker until a sweep proves them --
+  ['v67_lemmy_world_au', 'Lemmy: lemmy.world/c/australia', 'community', 'au', '', { l: 'lemmy.world/c/australia' }, 60],
+  ['v67_guardian_energy', 'Guardian Australia: energy', 'national', 'au', 'energy,gas,electrify', { r: 'https://www.theguardian.com/australia-news/energy-australia/rss' }],
+  ['v67_treasury_ministers', 'Treasury ministers: media releases', 'official', 'au', 'econ,col', { r: 'https://ministers.treasury.gov.au/rss.xml' }],
   ['hn_australia', 'Hacker News: stories that name Australia', 'community', 'au', '', { k: 'australia,australian' }, 180],
   ['forum_ozpolitic', 'OzPolitic forum', 'community', 'au', 'gov', { f: 'https://www.ozpolitic.com/forum/YaBB.pl?action=RSSrecent' }, 60],
   ['forum_propertychat', 'PropertyChat forum', 'community', 'au', 'housing', { f: 'https://www.propertychat.com.au/community/index.rss' }, 60],
@@ -5408,7 +5413,7 @@ const SOURCE_SEED_EXT = [
   ['wn_onestep', 'One Step Off The Grid', 'sector', 'au', 'energy,electrify', { s: 'onestepoffthegrid.com.au' }],
   ['wn_arena', 'ARENA', 'official', 'au', 'energy', { s: 'arena.gov.au' }],
   ['wn_cefc', 'Clean Energy Finance Corporation', 'official', 'au', 'energy', { s: 'cefc.com.au' }],
-  ['wn_aemc', 'Australian Energy Market Commission', 'official', 'au', 'energy,gas', { s: 'aemc.gov.au' }],
+  ['wn_aemc', 'Australian Energy Market Commission', 'official', 'au', 'energy,gas', { s: 'aemc.gov.au', r: 'https://www.aemc.gov.au/rss.xml' }],
   ['wn_energycouncil', 'Australian Energy Council', 'sector', 'au', 'energy,gas', { s: 'energycouncil.com.au' }],
   ['wn_energynetworks', 'Energy Networks Australia', 'sector', 'au', 'energy,gas,electrify', { s: 'energynetworks.com.au' }],
   ['wn_nopta', 'NOPTA', 'official', 'au', 'gasprojects', { s: 'nopta.gov.au' }],

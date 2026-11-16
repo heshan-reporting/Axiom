@@ -17,6 +17,8 @@
  *   DW8 a desk's registered X accounts are read every run; only the rest of the list rotates
  *   DW9 Google News by issue: one OR-query an issue, the desks' issues first, inside the lexicon run (the per-term
  *       rotation stays as the deep pass)
+ *   DW10 the seed gains the addresses that answered when probed (a Lemmy community, two publishers' own feeds); no id
+ *        twice, and an outlet held only through Google News gains its own feed ahead of it
  * Run: node --experimental-sqlite tests/den-widen-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 
@@ -202,6 +204,15 @@ await S.t('DW9 Google News by issue: one OR-query an issue, the desks\' issues f
   // the rest rotate; the desks' issues are asked again
   asked.length = 0; await F(w, 'POST', '/sources/sweep', { ids: ['lex_test'] }); const next = asked.filter(q => / OR /.test(q));
   eq(next.slice(0, k), issueQs.slice(0, k), 'the desks\' issues again'); ok(next.slice(k).every(q => issueQs.slice(k).indexOf(q) < 0), 'the next of the rest: ' + next.slice(k).join(' | '));
+});
+
+await S.t('DW10 the seed gains the probed addresses', async () => {
+  const w = await mk(); const d = (await F(w, 'GET', '/sources?status=', null, 'read-key')).body; const by = {}; d.sources.forEach(x => { by[x.id] = x; });
+  eq(d.sources.length, new Set(d.sources.map(x => x.id)).size, 'no id twice');
+  eq([by.v67_lemmy_world_au.methods, by.v67_lemmy_world_au.urls.lemmy, by.v67_lemmy_world_au.tier], [['lemmy'], 'lemmy.world/c/australia', 'community']);
+  ok(by.v67_guardian_energy.methods[0] === 'rss' && /theguardian\.com\/australia-news\/energy-australia\/rss$/.test(by.v67_guardian_energy.urls.rss), JSON.stringify(by.v67_guardian_energy));
+  ok(by.v67_treasury_ministers.methods[0] === 'rss' && by.v67_treasury_ministers.tier === 'official');
+  ok(by.wn_aemc.methods[0] === 'rss' && by.wn_aemc.methods.indexOf('gnews') > 0, 'the feed first, Google News kept behind it: ' + JSON.stringify(by.wn_aemc.methods));
 });
 
 const res = S.done(); process.exit(res.fail ? 1 : 0);
