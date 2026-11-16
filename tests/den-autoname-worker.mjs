@@ -233,4 +233,23 @@ await S.t('AN12 the window\'s cron names a narrative that did not move in that t
   eq(w.nOf('nqromeo').label, 'Named queue romeo', 'named although nothing joined it and its recount was not due');
 });
 
+await S.t('AN13 B1 is off unless the owner sets NARRATIVE_AUTO=tick; then a held tick makes at most two calls, client issues only, on its own capped ledger', async () => {
+  const w = await mk(); const G = w.mod.__test; const held = { mode: 'daily', run: false };
+  ['sierra', 'tango', 'uniform', 'victor', 'whiskey', 'xray', 'yankee', 'zulu', 'amber', 'basil', 'cedar'].forEach(k => w.raw('nq' + k, { titles: ['Queue ' + k + ' story one on fuel tax', 'Queue ' + k + ' story two on fuel tax'] }));
+  w.raw('nqoffdesk', { ns: '', issues: [], n24: 5, titles: ['Queue offdesk story one, unrelated', 'Queue offdesk story two, unrelated'] });
+  w.raw('nqquiet', { n24: 0, titles: ['Queue quiet story one on fuel tax', 'Queue quiet story two on fuel tax'] });
+  eq(G.narrAutoMode(w.env), 'window', 'the default keeps naming in the window');
+  const off = await G.narrAutoTick(w.env, held); eq(off.skipped, true); eq(w.anth.length, 0, 'default: a held tick makes no call');
+  w.env.NARRATIVE_AUTO = 'tick';
+  eq((await G.narrAutoTick(w.env, { mode: 'off', run: false })).skipped, true, 'AI_AUTOMATION=off stops it too'); eq(w.anth.length, 0);
+  eq((await G.narrAutoTick(w.env, { mode: 'daily', run: true })).skipped, true, 'inside the window the window\'s drain does the work');
+  const on = await G.narrAutoTick(w.env, held); eq(on.calls, 2, 'two calls a tick'); eq(on.named, 10); eq(w.anth.length, 2);
+  ok(!w.anth.some(u => /Queue offdesk|Queue quiet/.test(u)), 'only client-issue narratives that moved in the last day');
+  const u = await G.aiUsage(w.env, 'narr_auto'); eq(u.reserved, 2, 'its own ledger'); eq((await G.aiUsage(w.env, 'narratives')).reserved, 0, 'the window\'s cap is untouched');
+  w.env.NARRATIVE_AUTO_DAILY_CALLS = '3'; const capped = await G.narrAutoTick(w.env, held); eq(capped.calls, 1, 'the auto cap holds'); eq(capped.stopped, 'done', 'the last waiting one was named');
+  w.raw('nqdelta2', { titles: ['Queue deltatwo story one on fuel tax', 'Queue deltatwo story two on fuel tax'] });
+  const spent = await G.narrAutoTick(w.env, held); eq(spent.calls, 0); eq(spent.stopped, 'budget');
+  delete w.env.NARRATIVE_AUTO; delete w.env.NARRATIVE_AUTO_DAILY_CALLS;
+});
+
 const res = S.done(); process.exit(res.fail ? 1 : 0);
