@@ -10052,7 +10052,8 @@ async function sentimentStatus(env) {
 // ==============================================================================
 let NARR_READY = false;
 const NARR_WINDOW_H = 72;       // rows this old are still placed
-const NARR_SINGLE_KEEP_H = 48;  // a singleton (one row) with nothing newer is pruned; a row this old that joins nothing is set aside, never started (p68)
+const NARR_SINGLE_KEEP_H = 48;  // a singleton (one row) with nothing newer is pruned; a fresh cluster still of one row this old when the run writes is set aside, never written (p68)
+const NARR_SINGLE_CAND_H = 24;  // a singleton is a candidate to join this long after its row; keep it <= NARR_SINGLE_KEEP_H (a pruned singleton is never one)
 const NARR_LIVE_H = 96;         // a narrative with nothing newer is asleep: not matched against
 const NARR_SCAN = 300;          // rows placed per run
 const NARR_SIM = 0.84;          // cosine to join, with a shared leading issue or entity (bge-base: the same story across outlets scores about 0.84-0.93; the anchor, the frozen centroid and the rising bar keep a lower bar from drifting)
@@ -10306,19 +10307,28 @@ const NARR_SYS = 'You name political narratives for an Australian intelligence p
  * 2026 Opus 5.5's answer and its retry at the same limit did not parse and all five failed. */
 const NARR_OUT_BASE = 600, NARR_OUT_PER = 450, NARR_OUT_MAX = 4096;
 function narrOutTokens(n) { return Math.min(NARR_OUT_MAX, NARR_OUT_BASE + NARR_OUT_PER * Math.max(1, n || 1)); }
+const NARR_CALL_MS = 45000;   // one naming call's own timeout; shorter than NARR_CLAIM_MS, which a claim renewed before each call relies on
 /* One batch of up to five clusters. p68: when the answer does not parse the batch is asked again in halves, then the singles
  * of a half that failed, instead of failing all five; a batch of one is asked once more with the JSON-only nudge (the p67
  * retry). Every provider call is reserved and settled inside claudeMsg on the same ledger scope, and o.allow(callsSoFar)
  * says before each one whether the run may make it ('' yes; else 'budget', 'calls' or 'time'), so a split never passes the
  * day's cap or the run's share. Two singles failing with nothing named in the batch stops the splitting: the model, not a
- * cluster, is then the likely cause. A provider error is not mended by asking again smaller: the rest of the batch fails.
- * Returns { named, failed: [{ ids, why, kind }], calls, stopped, unasked: [cluster] }. */
+ * cluster, is then the likely cause. A batch of five costs at most eight calls (five, three and two, then the five singles,
+ * when a single has been named so the rule above does not stop it); one the model cannot name at all costs five. An answer
+ * that does not come within NARR_CALL_MS is mended like one cut off; any other provider error is not mended by asking again
+ * smaller: the rest of the batch fails. o.hold(clusters) (p68, review), when given, renews the run's claims on every
+ * narrative of the batch still waiting before each call and returns those still held; one another drain has taken is
+ * dropped, never asked again here.
+ * Returns { named, failed: [{ ids, why, kind }], calls, stopped, unasked: [cluster], sent: Set(id), lost: [id] }: sent is
+ * every narrative that was in a request that reached the provider; why is the reason only - the answer's first words go to
+ * the console line, never to errors, where a model's words would read as a stop signal (a narrative about the budget). */
 async function narrLabelBatch(env, clusters, log, scope, o) {
   o = o || {}; log = log || (async () => {}); const allow = typeof o.allow === 'function' ? o.allow : (() => '');
+  const hold = typeof o.hold === 'function' ? o.hold : null;
   const issuesList = CLIENT_ISSUES.map(ci => ci.id + ' = ' + ci.label).join('; ');
   const model = (await narrBudget(env, scope)).model;
   const known = new Set(CLIENT_ISSUES.map(ci => ci.id));
-  const res = { named: [], failed: [], calls: 0, stopped: '', unasked: [] };
+  const res = { named: [], failed: [], calls: 0, stopped: '', unasked: [], sent: new Set(), lost: [] };
   const take = (group, parsed) => {
     const got = new Set();
     parsed.clusters.forEach(cl => {
@@ -10332,26 +10342,29 @@ async function narrLabelBatch(env, clusters, log, scope, o) {
     const left = group.filter(c => !got.has(c.id));
     if (left.length) res.failed.push({ ids: left.map(c => c.id), why: 'the answer left ' + (left.length === 1 ? 'it' : 'them') + ' out', kind: 'json' });
   };
-  // one provider call: { parsed } or { bad: 'cut' | 'json', why } - why carries the stop reason and the answer's first words
+  // one provider call: { parsed } or { bad: 'cut' | 'json', why, excerpt } - why is the reason (errors carry it), excerpt the
+  // answer's first words (the console line only)
   const ask = async (group, prev) => {
     const user = 'ISSUES: ' + issuesList + '\n\n' + group.map((c, i) => '[' + (i + 1) + '] shared terms: ' + c.terms.join(', ') + '; channels: ' + c.chan + '; ' + c.n + ' rows\n' + c.samples.map(s => '- ' + s.replace(/\s+/g, ' ').slice(0, 320)).join('\n')).join('\n\n');
     const nudge = prev === 'cut' ? ' Your previous answer was cut off before it ended; keep every field short.' : prev ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : '';
     const info = {}; const maxTok = narrOutTokens(group.length); let txt;
-    try { txt = await claudeMsg(env, NARR_SYS + nudge, user, maxTok, 45000, model, { scope: scope || 'narratives', retry: !!prev, info }); res.calls++; }
+    try { txt = await claudeMsg(env, NARR_SYS + nudge, user, maxTok, NARR_CALL_MS, model, { scope: scope || 'narratives', retry: !!prev, info }); res.calls++; }
     catch (e) {
       const m = String((e && e.message) || e);
       if (/budget_exhausted/.test(m)) throw e;   // refused at the reservation: nothing was sent
       res.calls++;
       // an answer that was given but is no use (declined, or cut off before any text) is mended like one that is not JSON
-      if (/^refusal/.test(m)) return { bad: 'json', why: 'declined: "' + llmExcerpt(m.replace(/^refusal: the model declined this request( - )?/, '')).slice(0, 120) + '"' };
-      if (/^empty_answer/.test(m)) return { bad: 'cut', why: 'cut off at max_tokens ' + maxTok + ' before any text: "(empty answer)"' };
+      if (/^refusal/.test(m)) return { bad: 'json', why: 'declined', excerpt: llmExcerpt(m.replace(/^refusal: the model declined this request( - )?/, '')).slice(0, 120) };
+      if (/^empty_answer/.test(m)) return { bad: 'cut', why: 'cut off at max_tokens ' + maxTok + ' before any text', excerpt: '' };
+      // p68 (review): no answer within the call's own timeout is mended like one cut off - a smaller ask answers sooner
+      if ((e && e.name === 'TimeoutError') || /timed? ?out/i.test(m)) return { bad: 'cut', why: 'no answer within ' + Math.round(NARR_CALL_MS / 1000) + ' s (timed out)', excerpt: '' };
       throw e;
     }
     const parsed = relJson(txt);
     if (parsed && Array.isArray(parsed.clusters)) return { parsed };
     const cut = info.stop === 'max_tokens';
     const obj = parsed && /\{[\s\S]*\}/.test(String(txt || ''));   // relJson reads text with no braces at all as {}
-    return { bad: cut ? 'cut' : 'json', why: (cut ? 'cut off at max_tokens ' + maxTok : obj ? 'JSON without a clusters list' : 'not JSON') + ': "' + llmExcerpt(txt).slice(0, 120) + '"' };
+    return { bad: cut ? 'cut' : 'json', why: cut ? 'cut off at max_tokens ' + maxTok : obj ? 'JSON without a clusters list' : 'not JSON', excerpt: llmExcerpt(txt).slice(0, 120) };
   };
   const ids = g => g.map(c => c.id);
   let queue = [{ group: clusters, prev: '' }]; let anyOk = false, singlesFailed = 0;
@@ -10359,16 +10372,26 @@ async function narrLabelBatch(env, clusters, log, scope, o) {
   for (let level = 0; level < 3 && queue.length; level++) {
     const next = [];
     for (let qi = 0; qi < queue.length; qi++) {
-      const { group, prev } = queue[qi];
+      let { group, prev } = queue[qi];
       const stop = allow(res.calls);
       if (stop) { res.stopped = stop; queue.slice(qi).concat(next).forEach(q => res.unasked.push(...q.group)); queue = []; next.length = 0; break; }
       if (level > 0 && group.length === 1 && prev && !anyOk && singlesFailed >= 2) { res.failed.push({ ids: ids(group), why: 'not asked alone: every answer in this batch failed, so the model, not the narrative, is the likely cause', kind: 'skipped' }); continue; }
+      if (hold) {
+        // renew every narrative of the batch still waiting on an answer (this group, the groups queued after it), not only
+        // this group, so none of them lapses while the split runs
+        const pending = group.concat(...queue.slice(qi + 1).map(q => q.group), ...next.map(q => q.group));
+        const kept = new Set((await hold(pending)).map(c => c.id));
+        const lost = pending.filter(c => !kept.has(c.id) && res.lost.indexOf(c.id) < 0);
+        if (lost.length) { res.lost.push(...ids(lost)); await log('info', ids(lost).join(', ') + ': taken by another drain while this one ran (its claim had lapsed); not asked again here'); }
+        group = group.filter(c => kept.has(c.id)); if (!group.length) continue;
+      }
       let a;
-      try { a = await ask(group, prev); }
+      try { a = await ask(group, prev); group.forEach(c => res.sent.add(c.id)); }
       catch (e) {
         const m = String((e && e.message) || e).slice(0, 200);
         if (/budget_exhausted/.test(m)) { res.stopped = 'budget'; res.budgetError = m; queue.slice(qi).concat(next).forEach(q => res.unasked.push(...q.group)); queue = []; next.length = 0; break; }
-        queue.slice(qi).forEach(q => res.failed.push({ ids: ids(q.group), why: m, kind: 'error' })); next.forEach(q => res.failed.push({ ids: ids(q.group), why: m, kind: 'error' }));
+        group.forEach(c => res.sent.add(c.id));   // a provider error: the request was sent
+        res.failed.push({ ids: ids(group), why: m, kind: 'error' }); queue.slice(qi + 1).forEach(q => res.failed.push({ ids: ids(q.group), why: m, kind: 'error' })); next.forEach(q => res.failed.push({ ids: ids(q.group), why: m, kind: 'error' }));
         queue = []; next.length = 0; break;
       }
       if (a.parsed) { anyOk = true; take(group, a.parsed); continue; }
@@ -10378,7 +10401,7 @@ async function narrLabelBatch(env, clusters, log, scope, o) {
         parts.forEach(p => next.push({ group: p, prev: a.bad })); then = '; asking again as ' + parts.map(p => p.length).join(' + ');
       } else if (group.length === 1 && !prev) { next.push({ group, prev: a.bad }); then = '; asking once more'; }
       else { res.failed.push({ ids: ids(group), why: a.why, kind: 'json' }); if (group.length === 1) singlesFailed++; }
-      await log('err', 'the answer for ' + group.length + ' narrative' + (group.length === 1 ? '' : 's') + ' was ' + a.why + then);
+      await log('err', 'the answer for ' + group.length + ' narrative' + (group.length === 1 ? '' : 's') + ' (' + ids(group).join(', ') + ') was ' + a.why + (a.excerpt ? ': "' + a.excerpt + '"' : '') + then);
     }
     queue = next;
   }
@@ -10386,8 +10409,10 @@ async function narrLabelBatch(env, clusters, log, scope, o) {
 }
 /** Name the narratives that have earned it (three rows, or doubled since
  *  their last naming), five to a call, within the day's budget. p68: out.calls counts provider calls (the ledger's own
- *  unit, a retry and a split included), and maxCalls is the run's share of them. */
-async function narrLabel(env, ids, log, left, scope, maxCalls) {   // scope: the ledger ('narratives'; 'narr_auto' for B1)
+ *  unit, a retry and a split included), and maxCalls is the run's share of them. hold (p68, review): narrLabelQueue's claim
+ *  renewal, passed to each batch; out.sent lists every narrative that was in a request sent, out.lost those another drain
+ *  took meanwhile. */
+async function narrLabel(env, ids, log, left, scope, maxCalls, hold) {   // scope: the ledger ('narratives'; 'narr_auto' for B1)
   const db = env.MIND_DB; const now = Date.now();
   left = typeof left === 'function' ? left : (() => 1e9);
   maxCalls = maxCalls > 0 ? maxCalls : 1e9;
@@ -10397,7 +10422,7 @@ async function narrLabel(env, ids, log, left, scope, maxCalls) {   // scope: the
     const part = ids.slice(i, i + 90); const marks = part.map(() => '?').join(',');
     rows.push(...((await db.prepare('SELECT * FROM narratives WHERE id IN (' + marks + ') AND muted=0 AND edited=0 AND status<>\'broad\' AND n>=? AND (label=\'\' OR labelled_n*2<=n OR COALESCE(scope,\'\')=\'\')').bind(...part, NARR_LABEL_MIN).all()).results || []));
   }
-  const out = { named: 0, calls: 0, errors: [], deferred: 0, stopped: '' };
+  const out = { named: 0, calls: 0, errors: [], deferred: 0, stopped: '', sent: [], lost: [] };
   if (!rows.length) return out;
   const budget = await narrBudget(env, scope);
   const clusters = [];
@@ -10424,15 +10449,16 @@ async function narrLabel(env, ids, log, left, scope, maxCalls) {   // scope: the
     const stop = allow(0); if (stop) { await halt(stop, clusters.length - i); break; }
     const batch = clusters.slice(i, i + 5);
     await log('cmd', 'claude ' + budget.model + ' name ' + batch.length + ' narrative' + (batch.length === 1 ? '' : 's') + ' (' + batch.map(c => c.n + ' rows').join(', ') + ')');
-    const r = await narrLabelBatch(env, batch, log, scope, { allow });   // reserved and settled per provider call inside claudeMsg
-    out.calls += r.calls;
+    const r = await narrLabelBatch(env, batch, log, scope, { allow, hold });   // reserved and settled per provider call inside claudeMsg
+    out.calls += r.calls; out.sent.push(...r.sent); out.lost.push(...r.lost);
     // a name clears the namer's strikes and its claim (p67); label_tries / label_try_ts exist once ensureNarratives ran
     const named = r.named;
     const stmts = named.map(x => { const ns = (CLIENT_ISSUES.find(ci => ci.id === x.issues[0]) || {}).ns || ''; return db.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, proponents=?, issues=CASE WHEN ?<>\'[]\' THEN ? ELSE issues END, ns=CASE WHEN ?<>\'\' THEN ? ELSE ns END, scope=?, relevance=?, scope_why=?, labelled_n=n, model=?, label_tries=0, label_try_ts=0, updated=? WHERE id=?').bind(x.label, x.summary, x.claim, x.counter, x.proponents, JSON.stringify(x.issues), JSON.stringify(x.issues), ns, ns, x.scope, x.relevance, x.why, x.model, now, x.id); });
     if (stmts.length) await db.batch(stmts);
     out.named += named.length;
     named.forEach(x => log('out', '"' + x.label + '"' + (x.issues.length ? ' [' + x.issues.join(', ') + ']' : '') + ' - ' + x.scope + (x.scope === 'off' ? ', hidden' : '') + (x.why ? ' (' + x.why + ')' : '')));
-    // what failed keeps its strike (taken at the claim); each error names the narratives and why, with the answer's first words
+    // what failed keeps its strike (taken at the claim); each error names the narratives and the reason (the answer's first
+    // words are in the console line logged as it came, never here: see narrLabelBatch)
     for (const f of r.failed) {
       const m = (f.kind === 'json' ? 'the naming model answered without valid JSON for ' + f.ids.join(', ') + ' (' + f.why + ')' : f.kind === 'skipped' ? f.ids.join(', ') + ': ' + f.why : f.why + ' (' + f.ids.join(', ') + ')').slice(0, 300);
       out.errors.push(m); if (f.kind !== 'json' || /^the answer left/.test(f.why)) await log('err', m);   // an unparsed answer was logged as it came
@@ -10445,7 +10471,8 @@ async function narrLabel(env, ids, log, left, scope, maxCalls) {   // scope: the
  * same ledger scope ('narratives'), same daily cap (NARRATIVE_DAILY_CALLS) and the cron's own eight minutes. A narrative is
  * claimed before its call (one compare-and-set per row: two drains, or the cron and a person's "Finish all waiting", never
  * send the same one twice); a call that fails is a strike, and three strikes in a day set it aside until the next day, so
- * one cluster the model cannot name cannot spend a call every pass. A claim lapses after two minutes. */
+ * one cluster the model cannot name cannot spend a call every pass. A claim lapses after two minutes; p68 renews it before
+ * each call of a split (narrRenew), and a stop takes back only the claims and strikes of what was never sent. */
 const NARR_ELIGIBLE = "muted=0 AND edited=0 AND status<>'broad' AND n>=? AND (label='' OR labelled_n*2<=n OR COALESCE(scope,'')='')";
 const NARR_CLAIM_MS = 120000;
 const NARR_STRIKES = 3;
@@ -10462,9 +10489,23 @@ async function narrClaim(env, ids, now) {
   const res = await env.MIND_DB.batch(ids.map(id => env.MIND_DB.prepare('UPDATE narratives SET label_try_ts=?, label_tries=COALESCE(label_tries,0)+1 WHERE id=? AND COALESCE(label_try_ts,0)<?').bind(now, id, now - NARR_CLAIM_MS)));
   return ids.filter((id, i) => ((res[i] && res[i].meta && res[i].meta.changes) || 0) > 0);
 }
-/** Nothing was asked of the model for these (the cap, or the clock): the claim and the strike are taken back. */
-async function narrUnclaim(env, ids) {
-  for (let i = 0; i < (ids || []).length; i += 90) { const part = ids.slice(i, i + 90); await env.MIND_DB.prepare('UPDATE narratives SET label_try_ts=0, label_tries=MAX(COALESCE(label_tries,0)-1,0) WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).run(); }
+/** Nothing was asked of the model for these (the cap, or the clock): the claim and the strike are taken back. With `held`
+ *  (id -> this drain's claim time, p68), only where that claim still stands, so another drain's claim is never undone. */
+async function narrUnclaim(env, ids, held) {
+  ids = ids || [];
+  if (held) { if (ids.length) await env.MIND_DB.batch(ids.map(id => env.MIND_DB.prepare('UPDATE narratives SET label_try_ts=0, label_tries=MAX(COALESCE(label_tries,0)-1,0) WHERE id=? AND label_try_ts=?').bind(id, held.get(id)))); return; }
+  for (let i = 0; i < ids.length; i += 90) { const part = ids.slice(i, i + 90); await env.MIND_DB.prepare('UPDATE narratives SET label_try_ts=0, label_tries=MAX(COALESCE(label_tries,0)-1,0) WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).run(); }
+}
+/** p68 (review): a split can outlast NARR_CLAIM_MS (a person's step may start calls until 135 s, a window batch until its
+ *  four minutes run out), so the drain renews its claims before each call - compare-and-set on the claim time it holds, so
+ *  a claim another drain took after this one lapsed is never taken back. Returns the ids still held and moves `held` on
+ *  (an id lost is dropped from it). One call never outlasts the claim: NARR_CALL_MS < NARR_CLAIM_MS. */
+async function narrRenew(env, ids, held) {
+  const t = Date.now(); const mine = (ids || []).filter(id => held.has(id)); const ok = new Set();
+  if (!mine.length) return ok;
+  const res = await env.MIND_DB.batch(mine.map(id => env.MIND_DB.prepare('UPDATE narratives SET label_try_ts=? WHERE id=? AND label_try_ts=?').bind(t, id, held.get(id))));
+  mine.forEach((id, i) => { if (((res[i] && res[i].meta && res[i].meta.changes) || 0) > 0) { ok.add(id); held.set(id, t); } else held.delete(id); });
+  return ok;
 }
 /* p68: what a person can name now - eligible and active in NARR_QUEUE_DAYS, neither in a two-minute claim (a batch that has
  * just failed, or another drain's) nor set aside after NARR_STRIKES failures today. The name step reports all three. */
@@ -10496,9 +10537,15 @@ async function narrLabelQueue(env, o) {
     cand.forEach(id => tried.add(id));
     const mine = await narrClaim(env, cand, now);
     if (!mine.length) continue;
-    const nm = await narrLabel(env, mine, log, left, o.scope, maxCalls - out.calls);
+    // p68 (review): this drain's claim time for each, renewed before every call of a split (narrRenew)
+    const held = new Map(mine.map(id => [id, now]));
+    const hold = async cs => { const ok = await narrRenew(env, cs.map(c => c.id), held); return cs.filter(c => ok.has(c.id)); };
+    const nm = await narrLabel(env, mine, log, left, o.scope, maxCalls - out.calls, hold);
     out.named += nm.named; out.calls += nm.calls; out.errors.push(...nm.errors); out.deferred += nm.deferred || 0;
-    if (nm.stopped) { await narrUnclaim(env, mine); out.stopped = nm.stopped; break; }
+    // a stop (the cap, the run's share, the clock) takes back the claim and the strike only of what was never sent; what was
+    // sent and not named keeps both, like any failure (p68, review: releasing all of `mine` after a stop inside a split let a
+    // batch the model cannot name escape its strikes, so it was never set aside and came back at the top of the queue)
+    if (nm.stopped) { const sent = new Set(nm.sent || []); await narrUnclaim(env, mine.filter(id => !sent.has(id) && held.has(id)), held); out.stopped = nm.stopped; break; }
     if (nm.calls && o.maxBatches > 0 && ++batches >= o.maxBatches) { out.stopped = 'batch'; break; }   // a person's step: one batch a press
   }
   try { const now = Date.now(); out.waiting = Number(((await db.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE + ' ' + open).bind(NARR_LABEL_MIN, recent(), NARR_STRIKES, now - 86400000, now + 1).first()) || {}).n) || 0; } catch (e) {}
@@ -10576,7 +10623,7 @@ async function narrativesRun(env, opts) {
   const rows = (await db.prepare('SELECT a.id, a.kind, a.src, a.title, a.body, a.url, a.ts, a.meta FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ') ORDER BY a.ts ASC LIMIT ?').bind(now - hours * 3600000, ...SENT_KINDS, scan).all()).results || [];
   // candidates: live narratives of two or more rows, plus singletons started in the last day (a
   // singleton older than that has had its chance); bounded so a run stays inside its time
-  const liveRows = (await db.prepare('SELECT id, issues, issue_counts, entities, n, first_ts, last_ts, terms, centroid, dim FROM narratives WHERE last_ts>? AND muted=0 AND n<? AND (n>=2 OR first_ts>?) ORDER BY n DESC, last_ts DESC LIMIT 1500').bind(now - NARR_LIVE_H * 3600000, narrMax(env), now - 24 * 3600000).all()).results || [];
+  const liveRows = (await db.prepare('SELECT id, issues, issue_counts, entities, n, first_ts, last_ts, terms, centroid, dim FROM narratives WHERE last_ts>? AND muted=0 AND n<? AND (n>=2 OR first_ts>?) ORDER BY n DESC, last_ts DESC LIMIT 1500').bind(now - NARR_LIVE_H * 3600000, narrMax(env), now - NARR_SINGLE_CAND_H * 3600000).all()).results || [];
   const live = liveRows.map(r => { let ic = pjs(r.issue_counts, {}); if (!Object.keys(ic).length) { ic = {}; pjs(r.issues, []).forEach(x => { ic[x] = 1; }); } return { id: r.id, ic, top: new Set(narrTopIssues(ic, 3)), ents: new Set(pjs(r.entities, [])), n: r.n || 0, vec: b64f32(r.centroid), tok: pjs(r.terms, {}), first_ts: r.first_ts || 0, last_ts: r.last_ts || 0, fresh: false, touched: false }; });
   const [simA, simS] = narrSims(env);
   const out = { ok: true, scanned: rows.length, placed: 0, joined: 0, started: 0, skipped: 0, unanchored: 0, aged: 0, live: live.length, named: 0, calls: 0, alerts: 0, mode: env.AI ? 'embeddings' : 'terms', errors: [] };
@@ -10612,14 +10659,10 @@ async function narrativesRun(env, opts) {
     // party, a client, an opponent. Celebrity, crime and foreign stories without one may join, never seed.
     const tight = CLIENT_ISSUES.some(ci => ci.rx.test(text));
     const canStart = !isComment && (tight || ents.size > 0);
-    // p68: a row already older than the singleton prune age seeds nothing: the singleton it started would be pruned by this
-    // same run (under two rows, nothing newer than NARR_SINGLE_KEEP_H), freeing the row to be picked again, oldest first, by
-    // the next - on 16 November 2026 every place step re-placed the same hundred rows. It may still join a live narrative.
-    const aged = (r.ts || now) < now - NARR_SINGLE_KEEP_H * 3600000;
-    if (!best && (!canStart || aged)) {
+    if (!best && !canStart) {
       // a comment, or a row naming no client issue and no entity, is not the seed of a narrative: it
       // may join one that exists; otherwise it is set aside and not looked at again
-      itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(r.id, '', r.ts || now, platform, channel)); out.unanchored++; if (canStart) out.aged++; return;
+      itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(r.id, '', r.ts || now, platform, channel)); out.unanchored++; return;
     }
     if (best) {
       // the centroid moves only while the narrative is young; after NARR_FREEZE rows it is fixed, so
@@ -10632,15 +10675,29 @@ async function narrativesRun(env, opts) {
       itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,?)').bind(r.id, best.id, r.ts || now, platform, channel, Math.round(bestSim * 1000) / 1000));
       touched.add(best.id); out.joined++; touchedBy[best.id] = touchedBy[best.id] || { id: best.id, added: 0, started: false }; touchedBy[best.id].added++;
     } else {
-      bests.push(bestAny);
       const ic = {}; issues.forEach(x => { ic[x] = 1; });
-      const c = { id: narrId(), ic, top: new Set(narrTopIssues(ic, 3)), ents, n: 1, vec: v, tok: tv, first_ts: r.ts || now, last_ts: r.ts || now, fresh: true, touched: true, first_item: r.id, first_platform: platform, first_channel: channel, rows: [{ kind: r.kind, title: r.title, body: String(r.body || '').slice(0, 300) }] };
+      // stmt / bi: where its starter row's statement and its closest-live score sit, for the write-time rule below (p68)
+      const c = { id: narrId(), ic, top: new Set(narrTopIssues(ic, 3)), ents, n: 1, vec: v, tok: tv, first_ts: r.ts || now, last_ts: r.ts || now, fresh: true, touched: true, first_item: r.id, first_platform: platform, first_channel: channel, rows: [{ kind: r.kind, title: r.title, body: String(r.body || '').slice(0, 300) }], stmt: itemStmts.length, bi: bests.length };
+      bests.push(bestAny);
       live.push(c);
       itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,1)').bind(r.id, c.id, r.ts || now, platform, channel));
       touched.add(c.id); out.started++; touchedBy[c.id] = { id: c.id, added: 1, started: true };
     }
     out.placed++;
   });
+  // p68 (review): a cluster this run started that is still one row, and whose row is older than NARR_SINGLE_KEEP_H, is not
+  // written as a narrative: this run's own prune would take it (under two rows, nothing newer than that) and free the row for
+  // the next run to start again, oldest first - on 16 November 2026 every place step re-placed the same hundred rows. Its row
+  // is set aside instead (aged). The rule is applied here, when the run writes, not when a row would start one, so rows of the
+  // same run may still join an old row's cluster (a story whose rows all arrive 48-72h old, or rows freed by a reset).
+  const keepCut = now - NARR_SINGLE_KEEP_H * 3600000;
+  live.forEach(c => {
+    if (!c.fresh || !c.touched || c.n >= 2 || c.last_ts >= keepCut) return;
+    itemStmts[c.stmt] = db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(c.first_item, '', c.first_ts, c.first_platform, c.first_channel);
+    c.touched = false; touched.delete(c.id); delete touchedBy[c.id]; bests[c.bi] = null;
+    out.started--; out.placed--; out.unanchored++; out.aged++;
+  });
+  for (let i = bests.length - 1; i >= 0; i--) if (bests[i] === null) bests.splice(i, 1);
   out.touched = Object.values(touchedBy).sort((a, b) => b.added - a.added).slice(0, 60);
   if (bests.length >= 5 && vecs) {
     const sorted = bests.slice().sort((a, b) => a - b); const q = f => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(f * sorted.length))] * 100) / 100;
@@ -10661,7 +10718,7 @@ async function narrativesRun(env, opts) {
   });
   for (let i = 0; i < itemStmts.length; i += 100) await db.batch(itemStmts.slice(i, i + 100));
   for (let i = 0; i < nStmts.length; i += 50) await db.batch(nStmts.slice(i, i + 50));
-  await log('out', out.placed + ' rows placed: ' + out.joined + ' joined a live narrative, ' + out.started + ' started one; ' + out.skipped + ' too short to place' + (out.unanchored ? ', ' + out.unanchored + ' set aside (a lone comment, a row naming no issue or entity, or a story that only brushes an issue without a politician, party or client in it - and near nothing live' + (out.aged ? '; ' + out.aged + ' of them older than ' + NARR_SINGLE_KEEP_H + 'h, too old to start a narrative' : '') + ')' : ''));
+  await log('out', out.placed + ' rows placed: ' + out.joined + ' joined a live narrative, ' + out.started + ' started one; ' + out.skipped + ' too short to place' + (out.unanchored ? ', ' + out.unanchored + ' set aside (a lone comment, a row naming no issue or entity, or a story that only brushes an issue without a politician, party or client in it - and near nothing live' + (out.aged ? '; ' + out.aged + ' of them older than ' + NARR_SINGLE_KEEP_H + 'h with nothing in this run to join them, too old to stand alone' : '') + ')' : ''));
   // a cluster at or past narrMax(env) is a topic from this moment, whether or not it is recounted this run
   try { await db.prepare("UPDATE narratives SET status='broad', updated=? WHERE n>=? AND status<>'broad'").bind(now, narrMax(env)).run(); } catch (e) { out.errors.push('broad: ' + String((e && e.message) || e).slice(0, 80)); }
   // recount what changed, plus narratives that need their pace re-read
@@ -10696,7 +10753,9 @@ async function narrativesRun(env, opts) {
   if (left() > 2500) { try { await narrCounters(env); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 80)); } }
   if (left() > 2500) { try { const al = await narrAlerts(env, log); out.alerts = al.length; } catch (e) { out.errors.push('alerts: ' + String((e && e.message) || e).slice(0, 80)); } }
   // singletons that never grew are noise: gone after two days (their rows are freed to be placed again: p68, a freed row
-  // joins a live narrative or is set aside, never starts another singleton for this prune to take)
+  // joins a live narrative or one this run starts, or is set aside at the write; it is never written as another singleton
+  // for this prune to take. A singleton written 24-48h old is never a candidate again (NARR_SINGLE_CAND_H), so its row comes
+  // back once, at most, for one more look against what formed since)
   try { const old = ((await db.prepare('SELECT id FROM narratives WHERE n<2 AND last_ts<? LIMIT 4000').bind(now - NARR_SINGLE_KEEP_H * 3600000).all()).results || []).map(r => r.id); for (let i = 0; i < old.length; i += 90) { const part = old.slice(i, i + 90); const m = part.map(() => '?').join(','); await db.batch([db.prepare('DELETE FROM narrative_items WHERE narrative IN (' + m + ')').bind(...part), db.prepare('DELETE FROM narratives WHERE id IN (' + m + ')').bind(...part)]); } out.pruned = old.length; } catch (e) {}
   out.ms = Date.now() - now;
   await log('info', out.named + ' named, ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') + ' raised (' + out.ms + 'ms)');

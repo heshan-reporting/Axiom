@@ -2,7 +2,8 @@
 """tools/daily-brief.py's narrative drain (build p68, 16 November 2026): when it keeps going and when it stops. No network:
 the worker is a stand-in that answers each step from a script. On 16 November 2026 the drain stopped after one failed naming
 batch ("nothing was named this step; stopping") with 642 narratives waiting, and spent 400 place steps on rows that never
-stayed placed. Six of the nine cases fail on p67's tool (the other three hold already and stay held)."""
+stayed placed. Six of the first nine cases fail on p67's tool (the other three hold already and stay held); the two on steps
+that spend calls and name nothing came from the review of p68."""
 import os, sys, io, contextlib, importlib.util
 
 HERE = os.path.dirname(os.path.abspath(__file__)); TOOLS = os.path.join(HERE, '..', 'tools')
@@ -51,6 +52,14 @@ t('an account limit stops it', len(names) == 1 and 'spend limit' in out, out)
 
 r, names, _, out = run([{'named': 5, 'calls': 1, 'remaining': 3, 'setAside': 2}, {'named': 3, 'calls': 1, 'remaining': 0, 'setAside': 2}])
 t('remaining 0 ends it, and the narratives set aside are reported', len(names) == 2 and '2 set aside after three failures' in out, out)
+
+# review of p68: a model that answers nothing usable spends calls on every step; three steps in a row that made calls and
+# named nothing stop the drain, and the first error is shown
+r, names, _, out = run([FAILED, FAILED, FAILED, {'named': 5, 'calls': 1, 'remaining': 0}])
+t('three steps in a row that spent calls and named nothing stop it, showing why', len(names) == 3 and 'named nothing' in out and 'without valid JSON' in out, out)
+
+r, names, _, out = run([FAILED, FAILED, {'named': 5, 'calls': 1, 'remaining': 600}, FAILED, FAILED, {'named': 5, 'calls': 1, 'remaining': 0}])
+t('a step that names something starts the count again', len(names) == 6, out)
 
 stuck = [{'scanned': 100, 'placed': 100, 'started': 100, 'remaining': 132}] * 30
 r, _, places, out = run([{'named': 0, 'calls': 0, 'remaining': 0}], stuck)

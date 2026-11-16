@@ -27,7 +27,8 @@ is spent (SENTIMENT_DAILY_CALLS / NARRATIVE_DAILY_CALLS on the worker), or
 when the Anthropic account's spend limit answers - the message says which.
 Naming (p68) goes on past a batch that names nothing while names still wait
 and the step made a call (the worker sets a failed batch aside for two minutes
-and takes the next five); it stops after two steps in a row that made no call.
+and takes the next five); it stops after two steps in a row that made no call,
+or three in a row that made calls and named nothing (the first error is shown).
 Placing stops when ten steps in a row leave the backlog no lower.
 Stdlib only. The output folder (default ./briefs) is gitignored: a brief is
 client intelligence and stays out of the repository.
@@ -158,6 +159,7 @@ def drain_narratives(worker, key, max_steps):
             break
     named = 0
     nocall = 0
+    barren, why = 0, ''
     for i in range(max_steps):
         d = call(worker, key, '/narratives/step', {'what': 'name'})
         if d.get('error') and not d.get('named'):
@@ -179,11 +181,20 @@ def drain_narratives(worker, key, max_steps):
             say('  stopped: ' + reason); return False
         if not d.get('remaining'):
             break
-        # p68: a batch that named nothing is set aside for two minutes and the next step takes the next five, so only
-        # steps that made no call at all (nothing could be claimed) end the drain - two in a row
+        # p68: a batch that named nothing stays claimed for two minutes and the next step takes the next five, so one
+        # such step is no reason to stop; two steps in a row that made no call at all (nothing could be claimed) are
         nocall = nocall + 1 if not d.get('calls') else 0
         if nocall >= 2:
             say('  no call in two steps in a row (nothing could be claimed); stopping'); break
+        # review of p68: steps that spend calls and name nothing, three in a row, mean the model is failing every answer;
+        # stop before the day's cap is spent on it, and say why
+        if d.get('named'):
+            barren, why = 0, ''
+        elif d.get('calls'):
+            barren += 1
+            why = why or ((d.get('errors') or [''])[0])
+            if barren >= 3:
+                say('  three steps in a row spent calls and named nothing; stopping (the first error: %s)' % (why or 'none given')); break
     say('  %d narratives named in this run' % named)
     return True
 

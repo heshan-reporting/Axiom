@@ -1,5 +1,8 @@
 /* Draining the narrative queues (build p68, 16 November 2026), against the worker module in this process. Written first, from
- * what the owner's drain of 16 November 2026 did on the live worker (p67); every case here fails on p67. No provider is
+ * what the owner's drain of 16 November 2026 did on the live worker (p67). Of the first fourteen, eleven fail on p67; A2, A3
+ * and A5 are guards that already held there. A7 to A9 and B7 to B12 came from the review of p68: A7 to A9 and B7 to B11
+ * failed on the first p68 commit (5eb1da0) and B12 pins a bound that already held there. The narratives A7 to A9 expect are
+ * the ones p67 formed; p67 fails those three only on the new aged count and on A7's lone row, which it started. No provider is
  * contacted: Workers AI is a stub whose marker words pick a direction, the Anthropic API is a stub (w.answer) that each case
  * shapes, and every request to it is counted. Every outlet, post and narrative here is invented.
  * A - placement never loops. On p67 a row 48-72h old that joined nothing started a singleton that the same run pruned (a
@@ -11,6 +14,10 @@
  *   A4 two consecutive place steps on a backlog of only old unmatched rows end with remaining 0 and no narrative created
  *   A5 the prune still removes a three-day-old singleton that never grew (and keeps one that grew)
  *   A6 the tick makes progress through the same backlog (more rows than one pass scans)
+ *   A7 rows older than 48h still form a narrative with each other in the same run (a pair, a three): the rule is applied
+ *      when the run writes, to a fresh cluster still of one row, not when a row would start one
+ *   A8 a story whose first report is 55h old keeps that row as its first when younger rows of it are in the same scan
+ *   A9 rows freed by a reset (all) or by Dissolve broad clusters re-form their narratives, rows older than 48h included
  * B - naming survives a long answer. On p67 five clusters had 300 + 5 x 260 = 1600 output tokens, the answer and its retry
  *     (same limit) did not parse, and all five failed with "the naming model answered without valid JSON" and no reason.
  *   B1 the output budget is sized for what is asked: five full records that need about 2,000 tokens are named in one call
@@ -20,6 +27,16 @@
  *      answer's first words
  *   B5 a split never passes the remaining budget (the ledger cap) or the run's own share of calls
  *   B6 a declined answer is split like one in prose; a provider error (529) is not asked again smaller
+ *   B7 NARRATIVE_AUTO=tick (two calls a tick) and a five the model cannot name: a split stopped by the run's share keeps
+ *      the strikes of what it sent, so after three ticks the five are set aside and the fourth names the next five
+ *   B8 a person's step stopped by the clock inside a split keeps what it sent claimed and struck: the next press names the
+ *      next five and resends none of them
+ *   B9 a batch that runs past two minutes keeps its claim (renewed before each call): a second drain pressing during it
+ *      never sends the same five
+ *   B10 the model's own words stay out of errors (they go to the console lines): an answer about the federal budget and
+ *      bulk billing does not read as a spent budget or an account limit to the page or to tools/daily-brief.py
+ *   B11 an answer that times out for five is asked again in halves, like one cut off
+ *   B12 one batch of five costs at most eight provider calls (five, three and two, then the five singles)
  * C - one failing batch never blocks the queue. On p67 the name step took the five largest eligible narratives with no regard
  *     to claims or strikes; after a failed batch they were claimed for two minutes, so the next step claimed nothing, made no
  *     call, and tools/daily-brief.py stopped ("nothing was named this step").
@@ -77,7 +94,7 @@ const NATO = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', '
 await S.t('A1 a 50h-old row that matches nothing is set aside, not started, and is not selected again', async () => {
   const w = await mk();
   const a = w.put('Fuel tax credit row lone1 in a regional paper', 50 * H);
-  const r = await w.place(); eq(r.scanned, 1); eq(r.started, 0, 'too old to seed a narrative the same run would prune'); eq(r.unanchored, 1, 'counted as set aside');
+  const r = await w.place(); eq(r.scanned, 1); eq(r.started, 0, 'too old to seed a narrative the same run would prune'); eq(r.unanchored, 1, 'counted as set aside'); eq(r.aged, 1, 'and as aged');
   eq(w.of(a), '', 'set aside (narrative_items with no narrative)'); eq(w.count(), 0, 'no narrative was created'); eq(r.remaining, 0);
   const r2 = await w.place(); eq(r2.scanned, 0, 'not selected again'); eq(r2.remaining, 0);
 });
@@ -123,6 +140,51 @@ await S.t('A6 the tick makes progress through the same backlog (more rows than o
   eq((await w.call('GET', '/narratives/status', null, 'read-key')).body.backlog, 0); eq(w.count(), 0);
 });
 
+await S.t('A7 rows older than 48h still form a narrative with each other in the same run', async () => {
+  const w = await mk();
+  const p = [50, 49.5].map((h, i) => w.put('Fuel tax credit story-a for billionaire miners, report ' + i, h * H));
+  const t = [58, 55, 52].map((h, i) => w.put('Fuel tax credit story-b on the mining lobby, report ' + i, h * H));
+  const lone = w.put('Fuel tax credit row lone7 in a regional paper', 50 * H);
+  const r = await w.place();
+  eq(r.started, 2, 'the pair and the three each started one'); eq(r.joined, 3); eq(r.unanchored, 1, 'only the lone row is set aside'); eq(r.aged, 1);
+  const a = w.of(p[0]), b = w.of(t[0]); ok(a && b && a !== b, 'two narratives');
+  eq(w.of(p[1]), a); eq(t.map(w.of), [b, b, b]); eq(w.nOf(a).n, 2); eq(w.nOf(b).n, 3); eq(w.of(lone), '');
+  eq(r.pruned || 0, 0, 'neither is a singleton for the prune');
+  const r2 = await w.place(); eq(r2.scanned, 0, 'nothing comes back to be placed again'); eq(w.count(), 2);
+});
+
+await S.t('A8 a story whose first report is 55h old keeps that row as its first when younger rows of it are in the same scan', async () => {
+  const w = await mk(); const now = Date.now();
+  const first = w.put('Fuel tax credit story-c first report', 55 * H);
+  const x = w.put('Fuel tax credit story-c follow-up', 30 * H); w.put('Fuel tax credit story-c more', 20 * H);
+  const r = await w.place(); eq(r.aged, 0); eq(r.unanchored, 0);
+  const id = w.of(x); ok(id, 'a narrative'); eq(w.of(first), id, 'the 55h row is in it'); const n = w.nOf(id);
+  eq(n.n, 3); eq(n.first_item, first, 'its first row is the first report'); eq(Math.round((now - n.first_ts) / H), 55);
+});
+
+await S.t('A9 rows freed by a reset (all) or by Dissolve broad clusters re-form their narratives, rows older than 48h included', async () => {
+  // reset {all}: a narrative of four rows 57-54h old
+  const w = await mk(); const now = Date.now();
+  w.db.prepare("INSERT INTO narratives(id,label,issues,n,n24,first_ts,last_ts,status,muted,side,spread,created,updated) VALUES('nold4','','[\"ftc\"]',4,0,?,?,'steady',0,'unknown','[]',?,?)").run(now - 57 * H, now - 54 * H, now, now);
+  const four = [57, 56, 55, 54].map((h, i) => { const it = w.put('Fuel tax credit story-d item ' + i, h * H); w.db.prepare("INSERT INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,'nold4',?,'news','pointpost',0.9)").run(it, now - h * H); return it; });
+  const rs = await w.call('POST', '/narratives/reset', { all: true, confirm: 'reset' }, 'full-key'); eq(rs.status, 200); eq(w.count(), 0);
+  const r = await w.place(); eq(r.aged, 0, 'nothing set aside for its age'); const id = w.of(four[0]); ok(id, 're-formed');
+  eq(four.map(w.of), [id, id, id, id]); eq(w.nOf(id).n, 4);
+  // Dissolve broad clusters ({broad:true}): 24 rows 2-71h old across two stories
+  const w2 = await mk(); const now2 = Date.now();
+  w2.db.prepare("INSERT INTO narratives(id,label,issues,n,n24,first_ts,last_ts,status,muted,side,spread,created,updated) VALUES('nbroad','','[\"ftc\"]',24,0,?,?,'broad',0,'unknown','[]',?,?)").run(now2 - 71 * H, now2 - 2 * H, now2, now2);
+  const items = [];
+  for (let i = 0; i < 24; i++) { const story = i % 2 ? 'story-a' : 'story-b'; const age = 2 + i * 3;
+    const it = w2.put('Fuel tax credit ' + story + ' item ' + i, age * H); items.push({ it, age });
+    w2.db.prepare("INSERT INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,'nbroad',?,'news','pointpost',0.9)").run(it, now2 - age * H); }
+  const rb = await w2.call('POST', '/narratives/reset', { broad: true, min: 20 }, 'full-key'); eq(rb.status, 200); eq(rb.body.narratives, 1);
+  let steps = 0, s; do { s = await w2.place(); steps++; } while (s.scanned && s.remaining && steps < 10);
+  const old = items.filter(x => x.age > 48);
+  ok(old.length >= 7, 'the fixture has rows older than 48h: ' + old.length);
+  eq(old.filter(x => w2.of(x.it) === '').length, 0, 'no row older than 48h is set aside');
+  eq(w2.db.prepare('SELECT n FROM narratives ORDER BY n DESC').all().map(x => x.n), [12, 12], 'both stories re-formed whole');
+});
+
 // ---------------------------------------------------------------- B: naming survives a long answer
 // the provider's arithmetic, roughly: four characters a token; past max_tokens the answer stops where it is
 const tokenModel = long => (cs, body) => { const text = JSON.stringify({ clusters: cs.map(c => record(c, long)) }); const need = Math.ceil(text.length / 4);
@@ -158,13 +220,15 @@ await S.t('B3 an answer in prose once, then JSON: all five named, every call on 
 });
 
 await S.t('B4 a narrative that fails even alone takes its strike, the other four are named, and the error says why', async () => {
-  const w = await mk(); five(w);
+  const w = await mk(); five(w); const lines = [];
   w.model = cs => cs.some(c => c.key === 'charlie') ? reply('I cannot answer that.') : reply(JSON.stringify({ clusters: cs.map(c => record(c)) }));
-  const out = await w.G.narrLabelQueue(w.env, {}); eq(out.named, 4);
+  const out = await w.G.narrLabelQueue(w.env, { log: async (k, t) => lines.push(k + ' ' + t) }); eq(out.named, 4);
   ['alpha', 'bravo', 'delta', 'echo'].forEach(k => { eq(w.nOf('nq' + k).label, 'Named queue ' + k); eq(w.nOf('nq' + k).label_tries, 0, k + ': a name clears the strike'); });
   eq(w.nOf('nqcharlie').label, ''); eq(w.nOf('nqcharlie').label_tries, 1, 'charlie keeps its strike');
   eq(out.errors.length, 1, JSON.stringify(out.errors)); const e = out.errors[0];
-  ok(/valid JSON/.test(e) && /nqcharlie/.test(e) && /not JSON/.test(e) && /I cannot answer that\./.test(e), 'the error names the narrative, the reason and the answer\'s first words: ' + e);
+  ok(/valid JSON/.test(e) && /nqcharlie/.test(e) && /not JSON/.test(e), 'the error names the narrative and the reason: ' + e);
+  ok(!/I cannot answer/.test(e), 'the model\'s own words stay out of the error (review of p68): ' + e);
+  ok(lines.some(l => /^err /.test(l) && /not JSON/.test(l) && /I cannot answer that\./.test(l)), 'the console line carries the answer\'s first words: ' + lines.join(' | '));
   ok(!w.anth.some(u => /Queue charlie/.test(u) && /Queue alpha/.test(u) && clustersOf(u).length === 1), 'sanity');
   await calls3(w, out, 'B4');
 });
@@ -174,12 +238,18 @@ await S.t('B5 a split never passes the remaining budget (the ledger cap) or the 
   const w = await mk({ NARRATIVE_DAILY_CALLS: '2' }); five(w); w.model = cut;
   const out = await w.G.narrLabelQueue(w.env, {}); eq(out.stopped, 'budget'); eq(out.calls, 2); eq(w.anth.length, 2, 'the cap holds inside a split');
   eq(out.named, 3, 'the first half was named'); eq((await w.ledger()).reserved, 2);
-  const unasked = w.db.prepare("SELECT id, label_tries, label_try_ts FROM narratives WHERE label=''").all(); eq(unasked.length, 2);
-  unasked.forEach(r => { eq(r.label_try_ts, 0, r.id + ': its claim is released for tomorrow'); });
+  // review of p68: the other two were sent in the batch of five, which failed - they keep that strike and the claim like
+  // any failure (the first p68 commit released every claimed narrative on a stop, so a failing batch never built strikes)
+  const left = w.db.prepare("SELECT id, label_tries, label_try_ts FROM narratives WHERE label=''").all(); eq(left.length, 2);
+  left.forEach(r => { eq(r.label_tries, 1, r.id + ': sent and not named, it keeps its strike'); ok(r.label_try_ts > 0, r.id + ': and its claim'); });
   ok(out.errors.some(e => /budget/.test(e)), JSON.stringify(out.errors));
   const w2 = await mk(); five(w2); w2.model = cut;
   const o2 = await w2.G.narrLabelQueue(w2.env, { maxCalls: 2 }); eq(o2.calls, 2); eq(w2.anth.length, 2, 'the run\'s share (maxCalls) holds inside a split too'); eq(o2.stopped, 'calls');
   await calls3(w2, o2, 'B5');
+  // nothing sent at all (the cap was already spent): the claims and the strikes are taken back
+  const w3 = await mk({ NARRATIVE_DAILY_CALLS: '1' }); five(w3); await w3.G.aiReserve(w3.env, 'narratives');
+  const o3 = await w3.G.narrLabelQueue(w3.env, {}); eq(o3.stopped, 'budget'); eq(o3.calls, 0); eq(w3.anth.length, 0, 'no request');
+  w3.db.prepare("SELECT id, label_tries, label_try_ts FROM narratives").all().forEach(r => { eq(r.label_tries, 0, r.id + ': never sent, no strike'); eq(r.label_try_ts, 0, r.id + ': its claim is released for tomorrow'); });
 });
 
 await S.t('B6 a declined answer is split like one in prose; a provider error is not asked again smaller', async () => {
@@ -193,6 +263,87 @@ await S.t('B6 a declined answer is split like one in prose; a provider error is 
   const o2 = await w2.G.narrLabelQueue(w2.env, {}); eq(o2.named, 0); eq(o2.calls, 1, 'one call: an overloaded provider is not asked four more times'); eq(w2.anth.length, 1);
   ok(o2.errors.some(e => /Overloaded/.test(e) && /nqalpha/.test(e)), JSON.stringify(o2.errors));
   const u = await w2.ledger(); eq(u.failed, 1, 'settled as failed'); eq(u.reserved, 1);
+});
+
+// a fake clock for the cases that need provider latency: every request moves it on by w.lag milliseconds
+const realNow = Date.now.bind(Date); let skew = 0;
+const withClock = async fn => { skew = 0; Date.now = () => realNow() + skew; try { return await fn(); } finally { Date.now = realNow; skew = 0; } };
+const PROSE = 'These clusters are hard to name; here is what I can say about them.';
+const tenWithBadFive = w => { NATO.slice(0, 5).forEach((k, i) => w.raw('nq' + k, { n: 40 + i, n24: 5 })); NATO.slice(5, 10).forEach(k => w.raw('nq' + k, { n: 3, n24: 1 })); };
+const BAD5 = new Set(NATO.slice(0, 5));
+const badFiveModel = cs => cs.some(c => BAD5.has(c.key)) ? reply(PROSE) : reply(JSON.stringify({ clusters: cs.map(c => record(c)) }));
+const sentBad = us => us.filter(u => clustersOf(u).some(c => BAD5.has(c.key))).length;
+
+await S.t('B7 NARRATIVE_AUTO=tick and a five the model cannot name: strikes build up, the five are set aside, the queue moves on', async () => {
+  const w = await mk({ NARRATIVE_AUTO: 'tick' }); tenWithBadFive(w); w.model = badFiveModel;
+  for (let tick = 1; tick <= 3; tick++) {
+    const o = await w.G.narrAutoTick(w.env, {}, async () => {});
+    eq(o.calls, 2, 'tick ' + tick + ': two calls a tick'); eq(o.named, 0); eq(o.stopped, 'calls');
+    NATO.slice(0, 5).forEach(k => eq(w.nOf('nq' + k).label_tries, tick, 'tick ' + tick + ': ' + k + ' was sent and keeps its strike'));
+    w.db.prepare('UPDATE narratives SET label_try_ts=? WHERE label_try_ts>0').run(Date.now() - 5 * 60000);   // the next tick: the claims have lapsed
+  }
+  const before = w.anth.length; const o4 = await w.G.narrAutoTick(w.env, {}, async () => {});
+  eq(o4.named, 5, 'three strikes set the five aside; the fourth tick names the next five'); eq(sentBad(w.anth.slice(before)), 0, 'none of the five is sent again today');
+  eq((await w.ledger('narr_auto')).reserved, 7, 'two, two, two, then one');
+});
+
+await S.t('B8 a person\'s step stopped by the clock inside a split keeps what it sent claimed and struck; the next press moves on', async () => {
+  await withClock(async () => {
+    const w = await mk(); tenWithBadFive(w);
+    w.model = cs => { skew += 40000; return badFiveModel(cs); };   // forty seconds a call
+    const s1 = await w.name(); eq(s1.named, 0); eq(s1.stopped, 'time', 'the step\'s clock stopped the split'); eq(s1.calls, 4);
+    NATO.slice(0, 5).forEach(k => { const r = w.nOf('nq' + k); eq(r.label_tries, 1, k + ' keeps its strike'); ok(r.label_try_ts > 0, k + ' keeps its claim'); });
+    eq(s1.claimed, 5); eq(s1.remaining, 5);
+    const before = w.anth.length; const s2 = await w.name();
+    eq(s2.named, 5, 'the next press names the next five'); eq(sentBad(w.anth.slice(before)), 0, 'and sends none of the five again');
+  });
+});
+
+await S.t('B9 a batch that runs past two minutes keeps its claim: a second drain pressing during it never sends the same five', async () => {
+  await withClock(async () => {
+    const w = await mk(); NATO.slice(0, 5).forEach((k, i) => w.raw('nq' + k, { n: 40 + i, n24: 5 }));
+    let n = 0, b = null; const who = [];
+    w.model = async cs => {
+      if (w.drain === 'B') { who.push('B'); return reply(JSON.stringify({ clusters: cs.map(c => record(c)) })); }
+      who.push('A'); n++; skew += 41000;
+      if (n === 3) { w.drain = 'B'; b = await w.name(); w.drain = 'A'; }   // B presses 123 s after A claimed the five
+      return reply(PROSE);
+    };
+    w.drain = 'A'; const a = await w.name();
+    ok(b, 'drain B pressed'); eq(who.filter(x => x === 'B').length, 0, 'B sent none of A\'s five'); eq(b.named, 0); eq(b.claimed, 5, 'B saw them as claimed');
+    ok(a.calls >= 4, 'A went on with its split: ' + a.calls);
+    NATO.slice(0, 5).forEach(k => eq(w.nOf('nq' + k).label_tries, 1, k + ': claimed once, by A'));
+  });
+});
+
+await S.t('B10 the model\'s own words stay out of errors: an answer about the budget and bulk billing is not a stop signal', async () => {
+  const w = await mk(); five(w);
+  const said = 'I cannot name this cluster: it mixes the federal budget of 2026 with bulk billing rates at GP clinics.';
+  w.model = cs => cs.some(c => c.key === 'charlie') ? reply(said) : reply(JSON.stringify({ clusters: cs.map(c => record(c)) }));
+  const s = await w.name(); eq(s.named, 4); ok(s.errors.length >= 1 && s.errors.some(e => /nqcharlie/.test(e) && /not JSON/.test(e)), JSON.stringify(s.errors));
+  // the stop signals the readers of errors use: docs/narratives.js (the page's Finish all waiting) and tools/daily-brief.py
+  const PAGE = /budget|usage limit|spend limit|regain access/i, LIMIT = /usage limit|spend limit|regain access|credit balance|billing/i, BUDGET = /daily budget|budget of \d+|budget_exhausted/i;
+  s.errors.forEach(e => { ok(!PAGE.test(e) && !LIMIT.test(e) && !BUDGET.test(e), 'no stop signal in: ' + e); ok(!/federal budget/.test(e), 'no model words in: ' + e); });
+  ok(s.lines.some(l => l.kind === 'err' && /federal budget of 2026/.test(l.text)), 'the console line keeps the answer\'s first words');
+  ok(s.stopped !== 'budget');
+});
+
+await S.t('B11 an answer that times out for five is asked again in halves, like one cut off', async () => {
+  const w = await mk(); five(w); const lines = [];
+  w.model = cs => { if (cs.length >= 5) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); return reply(JSON.stringify({ clusters: cs.map(c => record(c)) })); };
+  const out = await w.G.narrLabelQueue(w.env, { log: async (k, t) => lines.push(k + ' ' + t) });
+  eq(out.named, 5, JSON.stringify(out.errors)); eq(out.errors, []); eq(w.anth.length, 3, 'five (timed out), then three and two');
+  ok(lines.some(l => /timed out|no answer within/.test(l)), lines.join(' | '));
+  await calls3(w, out, 'B11');
+});
+
+await S.t('B12 one batch of five costs at most eight provider calls (five, three and two, then the five singles)', async () => {
+  const w = await mk(); five(w);
+  w.model = cs => cs.length > 1 || cs[0].key === 'alpha' ? reply(PROSE) : reply(JSON.stringify({ clusters: cs.map(c => record(c)) }));
+  const out = await w.G.narrLabelQueue(w.env, { maxBatches: 1 });
+  eq(out.calls, 8); eq(w.anth.map(u => clustersOf(u).length), [5, 3, 2, 1, 1, 1, 1, 1]); eq(out.named, 4);
+  eq(w.nOf('nqalpha').label_tries, 1, 'alpha failed alone and keeps its strike');
+  await calls3(w, out, 'B12');
 });
 
 // ---------------------------------------------------------------- C: one failing batch never blocks the queue

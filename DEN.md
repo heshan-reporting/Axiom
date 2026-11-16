@@ -1482,9 +1482,17 @@ Both causes were confirmed by reading the code, the first also by a harness, bef
    old that joined nothing started a singleton whose newest row was itself, the same run pruned it, and the next run took
    the row again, first in line: reproduced on p67 as "5 scanned, 5 placed, 5 started, 5 pruned, remaining 5" on every
    step. The tick (300 a pass) got past them but spent those slots and their embeddings every pass. Now one constant,
-   `NARR_SINGLE_KEEP_H` = 48, sets both the prune and a new rule: a row older than that which finds no live narrative is
-   set aside (narrative `''`, counted in `unanchored` and in the new `aged`), never started. It still joins a live
-   narrative it matches; a younger row still starts one; the prune of singletons that never grew is unchanged.
+   `NARR_SINGLE_KEEP_H` = 48, sets both the prune and a new rule applied when the run writes: a cluster the run started
+   that is still one row, and whose row is older than that, is not written as a narrative; its row is set aside
+   (narrative `''`, counted in `unanchored` and in the new `aged`). Rows of the same run may still join an old row's
+   cluster, so a story whose rows all reach placement 48 to 72 hours old (a backlog after an outage, rows freed by
+   **Dissolve broad clusters** or a reset) still forms its narrative, and a story keeps its first report as its first row.
+   (The first p68 commit applied the rule when a row would start a cluster; the review found that it stranded those
+   stories for good, so it moved to the write.) An old row still joins a live narrative it matches; a younger row still
+   starts one; the prune of singletons that never grew is unchanged. A singleton written 24 to 48 hours old is never a
+   candidate again (`NARR_SINGLE_CAND_H` = 24, which must stay at most `NARR_SINGLE_KEEP_H`), so its row comes back once
+   after the prune for one more look against what formed since, and is then joined or set aside: one extra embedding a
+   row at most, where p67 looped for ever.
 2. **One long batch failed, then blocked the queue.** `narrLabelBatch` gave five clusters 300 + 5 x 260 = 1,600 output
    tokens for a label, a two-sentence summary, claim, counter, proponents, issues, scope, relevance and why each, and its
    retry used the same limit. The ledger shows two answered calls and one retry, so both answers came back and neither
@@ -1494,19 +1502,37 @@ Both causes were confirmed by reading the code, the first also by a harness, bef
    call, and the tool stopped. Now: the budget is 600 + 450 a cluster (2,850 for five, at most 4,096); an answer that
    does not parse is asked again in halves, then the singles of a half that failed, and a batch of one once more with
    the JSON-only nudge, so one unnameable cluster takes its own strike and the others are named; a declined answer is
-   split the same way, a provider error is not; two singles failing with nothing named stops the splitting. Each
-   provider call is reserved and settled on the same ledger scope (`narratives`, or `narr_auto`) and checked against the
-   day's cap and the run's share before it is sent. Errors name the narratives and say why, with the answer's first 120
-   characters ("cut off at max_tokens 2850: ...", "not JSON: ..."). `calls` now counts provider calls, the ledger's own
+   split the same way, and so is an answer that does not come within the call's 45 seconds; any other provider error is
+   not; two singles failing with nothing named stops the splitting. A batch of five costs at most eight provider calls
+   (five, three and two, then the five singles, when a single has been named); one the model cannot name at all costs
+   five. Each provider call is reserved and settled on the same ledger scope (`narratives`, or `narr_auto`) and checked
+   against the day's cap and the run's share before it is sent. Errors name the narratives and the reason ("cut off at
+   max_tokens 2850", "not JSON", "declined", "no answer within 45 s"); the answer's first 120 characters go to the console
+   line only, because the page and the tool read errors for budget and spend-limit words and a narrative about the federal
+   budget or bulk billing would otherwise stop them (found in review). `calls` now counts provider calls, the ledger's own
    unit; p67 counted a batch and its retry as one, which made `NARRATIVE_AUTO=tick`'s two a tick up to four and the
    window's 20 up to 40. The name step uses the window's own queue (`narrLabelQueue`, one batch a press, no call started after
    135 of its 150 seconds), so it skips narratives in a claim or set aside after three failures today and names only those
    active in seven days, and it answers `remaining` (what can be named now), `setAside`, `claimed` and `stopped`.
-   `tools/daily-brief.py` goes on past a step that named nothing but made a call, stops on the budget, an account limit
-   or two steps in a row with no call, and stops placing when ten steps in a row leave the backlog no lower.
+   A batch can stop inside its split (the cap, the run's share, the clock): what it sent and did not name keeps its claim
+   and its strike, and only what was never sent is released, so a batch the model cannot name builds its three strikes
+   and is set aside (the first p68 commit released all five, which brought the blocked queue back; found in review). A
+   split can also outlast the two-minute claim, so the drain renews its claims on every narrative of the batch still
+   waiting before each call (`narrRenew`, compare-and-set on the claim time it holds); a second drain pressing meanwhile
+   never sends the same five, and one whose claim was taken is dropped, never asked again by the first.
+   `tools/daily-brief.py` goes on past a step that named nothing but made a call; it stops at `remaining` 0, on the
+   budget, on an account limit, after two steps in a row with no call, or after three steps in a row that made calls and
+   named nothing (showing the first error); and it stops placing when ten steps in a row leave the backlog no lower. The
+   page's **Finish all waiting** loop is unchanged (no page change in p68): it stops on the budget or the account limit
+   read from errors, which now carry no model words, at `remaining` 0, after a step with neither a name nor a call, or
+   after 80 steps.
 
-Tests first, each failing on p67: `tests/narr-drain-worker.mjs` (14: A1 to A6, B1 to B6, C1, C2) and
-`tests/daily-brief-test.py` (9, six failing on p67's tool). One assertion changed: `tests/den-autoname-worker.mjs` AN11
+Tests first: `tests/narr-drain-worker.mjs` (23: A1 to A9, B1 to B12, C1, C2) and `tests/daily-brief-test.py` (11). Of the
+first fourteen worker cases eleven fail on p67 (A2, A3 and A5 are guards that already held); of the first nine tool cases
+six fail on p67's tool. A7 to A9, B7 to B12 and the two tool cases on steps that spend calls and name nothing came from the
+review of p68: A7 to A9 and B7 to B11 failed on the first p68 commit (5eb1da0), B12 pins the eight-call bound, and B4 and
+B5 were tightened (the model's words stay out of errors; a stop keeps the strikes of what was sent and releases only what
+was never sent). One assertion changed: `tests/den-autoname-worker.mjs` AN11
 pinned p67's count of one call per strike where two provider calls were sent and settled; it now expects two.
 Not verified: the live answers themselves. If the `ai_usage` row for scope `narratives` and day `20261116` held about
 3,200 output tokens over its first two settled calls, they were cut off. The owner's steps: deploy p68

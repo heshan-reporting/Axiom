@@ -1195,7 +1195,8 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   A wide-tag-only story may still join a narrative it resembles, but it
   cannot seed one, which is what keeps celebrity, crime, sport and weather
   news from becoming narratives of their own.
-  Singletons that never grow are pruned after 48h and their rows freed.
+  Singletons that never grow are pruned after 48h and their rows freed (p68: a run never writes a one-row cluster
+  whose row is already older than that; the row is set aside instead, so a freed row is placed once more, not for ever).
   Without AI bound the run falls back to term vectors (`narrTokens`, stop
   list; thresholds 0.32 / 0.47). Rows under 20 characters are marked with
   narrative `''` so they are never looked at again. Every id list sent to D1
@@ -1225,15 +1226,22 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   (a model's or a person's name only). The daily window drains the naming queue (`narrLabelQueue`: the last seven
   days, client issues first, a claim before each call, three strikes a day, `NARR_WINDOW_CALLS` 20 and four minutes a
   window). `tests/den-autoname-worker.mjs` (15).
-- **Draining (build p68, 16 November 2026; `DEN.md` s.10.10).** A row older than `NARR_SINGLE_KEEP_H` = 48h that joins
-  no live narrative is set aside (`unanchored`, `aged`), never started: p67's prune took such singletons the same run
-  and the next run re-placed the row forever. Naming gives `narrOutTokens(n)` = 600 + 450 a cluster (at most 4,096);
-  an answer that does not parse (or is declined) is asked again in halves, then singles, each call reserved on the same
-  ledger and checked against the cap and the run's share; errors carry the reason and the answer's first 120
-  characters; `calls` counts provider calls. `POST /narratives/step {what:'name'}` runs `narrLabelQueue` for one batch
-  (claims, three strikes, seven days honoured) and answers `remaining` (nameable now), `setAside`, `claimed`, `stopped`;
-  `tools/daily-brief.py` stops only on the budget, an account limit or two steps with no call.
-  `tests/narr-drain-worker.mjs` (14), `tests/daily-brief-test.py` (9).
+- **Draining (build p68, 16 November 2026; `DEN.md` s.10.10).** When a run writes, a cluster it started that is still
+  one row older than `NARR_SINGLE_KEEP_H` = 48h is not written; its row is set aside (`unanchored`, `aged`): p67's prune
+  took such singletons the same run and the next run re-placed the row forever. Rows of the same run may still join an
+  old row's cluster, so old rows still form narratives together (after a reset, Dissolve broad clusters or a backlog).
+  Singletons are candidates for `NARR_SINGLE_CAND_H` = 24h (keep it <= `NARR_SINGLE_KEEP_H`). Naming gives
+  `narrOutTokens(n)` = 600 + 450 a cluster (at most 4,096); an answer that does not parse, is declined or times out
+  (`NARR_CALL_MS` 45 s) is asked again in halves, then singles (at most eight calls a batch of five), each call reserved
+  on the same ledger and checked against the cap and the run's share; errors carry the narratives and the reason, the
+  answer's first 120 characters go to the console lines only (a model's words in errors read as a budget or spend-limit
+  stop to the page and the tool); `calls` counts provider calls. The drain renews its claims before each call
+  (`narrRenew`, compare-and-set), and a stop inside a split releases only what was never sent: what was sent keeps its
+  claim and strike. `POST /narratives/step {what:'name'}` runs `narrLabelQueue` for one batch (claims, three strikes,
+  seven days honoured) and answers `remaining` (nameable now), `setAside`, `claimed`, `stopped`. `tools/daily-brief.py`
+  stops naming at `remaining` 0, on the budget, an account limit, two steps in a row with no call, or three in a row
+  that made calls and named nothing; it stops placing after ten steps that leave the backlog no lower.
+  `tests/narr-drain-worker.mjs` (23), `tests/daily-brief-test.py` (11).
 - **Naming, counters, alerts.** `narrLabel()` sends narratives with >=
   `NARR_LABEL_MIN` = 3 rows that are unnamed or have doubled since their last
   naming to Claude five at a time (`narrLabelBatch`, strict JSON: a label of
