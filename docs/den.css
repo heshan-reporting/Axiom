@@ -133,7 +133,7 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-strip-h{display:flex;align-items:baseline;gap:6px;font:500 var(--dn-fs-sm)/1.2 var(--dn-text);color:var(--dn-ink-2);white-space:nowrap}
 .den-strip-h span{font-weight:500}
 .den-strip-h span::before{content:"\00b7";margin-right:6px;color:var(--dn-ink-4)}
-.den-strip-h .un{color:var(--dn-warn-ink)} .den-strip-h .ok{color:var(--dn-pos-ink)}
+.den-strip-h .un{color:var(--dn-warn-ink)} .den-strip-h .ok{color:var(--dn-pos-ink)} .den-strip-h .ack{color:var(--dn-ink-2)}
 .den-strip>ul{display:flex;gap:6px;list-style:none;margin:0;padding:0;min-width:0}
 .den-strip>ul>li{min-width:0}
 /* a pill is neutral chrome: it says what it found by its count and its dot, in the kind's colour; only the open pill is tinted */
@@ -143,15 +143,17 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-check i{flex:0 0 8px;width:8px;height:8px;border-radius:var(--dn-r-pill);border:1.5px solid currentColor;opacity:.8}
 .den-check i.ok{border-color:var(--dn-ink-3);opacity:.6}
 .den-check i.cov{background:var(--dn-pos);border-color:var(--dn-pos);opacity:1}
+/* acknowledged at filing: neutral, never the warn colour (a filed brief is not an alarm) */
+.den-check i.ack,.den-check.has i.ack{border-color:var(--dn-ink-3);background:var(--dn-ink-3);opacity:.6}
 .den-check.clear{background:none;border-color:var(--dn-line);color:var(--dn-ink-3)}
 .den-check.has{background:var(--dn-neutral-dim);color:var(--dn-ink-0)}
-.den-check.has.spike b,.den-check.has.gap b{color:var(--dn-neg-ink)} .den-check.has.spike i.un,.den-check.has.gap i.un{border-color:var(--dn-neg)}
+.den-check.has.spike b{color:var(--dn-neg-ink)} .den-check.has.spike i.un{border-color:var(--dn-neg)}
 .den-check.has.emerging b,.den-check.has.burst b{color:var(--dn-warn-ink)} .den-check.has.emerging i.un,.den-check.has.burst i.un{border-color:var(--dn-warn)}
 .den-check.has.outlier b{color:var(--dn-accent-text)} .den-check.has.outlier i.un{border-color:var(--dn-accent)}
 .den-check.has.first_seen b{color:var(--dn-info-ink)} .den-check.has.first_seen i.un{border-color:var(--dn-info)}
 .den-check:hover{border-color:var(--dn-line-3);color:var(--dn-ink-0)}
 .den-check.open{border-color:currentColor}
-.den-check.has.spike.open,.den-check.has.gap.open{background:var(--dn-neg-dim);color:var(--dn-neg-ink)}
+.den-check.has.spike.open{background:var(--dn-neg-dim);color:var(--dn-neg-ink)}
 .den-check.has.emerging.open,.den-check.has.burst.open{background:var(--dn-warn-dim);color:var(--dn-warn-ink)}
 .den-check.has.outlier.open{background:var(--dn-accent-dim);color:var(--dn-accent-text)}
 .den-check.has.first_seen.open{background:var(--dn-info-dim);color:var(--dn-info-ink)}
@@ -183,6 +185,8 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-chip.warn{background:var(--dn-warn-dim);color:var(--dn-warn-ink)}
 .den-chip.acc{background:var(--dn-accent-dim);color:var(--dn-accent-text)}
 .den-chip.info{background:var(--dn-info-dim);color:var(--dn-info-ink)}
+/* a narrative's working title (computed, not reviewed): a quiet tag, never a state */
+.den-chip.den-worktitle{background:none;box-shadow:inset 0 0 0 1px var(--dn-line);color:var(--dn-ink-3);font-weight:500}
 .den-col-meta .den-chip:not(.pos):not(.neg):not(.warn):not(.acc):not(.info),.den-src .den-chip:not(.pos):not(.neg):not(.warn):not(.acc):not(.info){background:none;padding-inline:0;color:var(--dn-ink-3);font-weight:500}
 .den-src .den-chip:not(.pos):not(.neg):not(.warn):not(.acc):not(.info){padding-inline:2px;box-shadow:inset 0 0 0 1px var(--dn-line-2);border-radius:var(--dn-r-xs)}
 .den-link{color:var(--dn-accent-text);text-decoration:underline;text-underline-offset:2px;background:none;border:0;padding:0;font:inherit;cursor:pointer}
@@ -248,8 +252,11 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
    ghost for Unsorted, then narrow ones; the words sit above them */
 .den-loading.board{position:relative;flex-direction:row;align-items:stretch;gap:var(--dn-sp-3);height:calc(100% - 2 * var(--dn-sp-3));margin:var(--dn-sp-3) var(--dn-sp-4);padding:28px 0 0;overflow:hidden}
 .den-loading.board .den-loadtxt{position:absolute;top:4px;left:2px;font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
-.den-loading.board .den-skel{flex:0 0 var(--dn-col-w-c);width:auto;height:auto;min-height:240px;border:1px solid var(--dn-line);border-radius:var(--dn-r-lg)}
-.den-loading.board .den-skel:first-child,.den-loading.board .den-loadtxt+.den-skel{flex-basis:var(--dn-uns-w)}
+.den-loading.board>.den-skel{display:none}
+.den-loading.board .den-skelcols{display:flex;flex:1;min-width:0;gap:var(--dn-sp-3);align-items:stretch}
+.den-loading.board .den-skelcol{display:flex;flex-direction:column;gap:var(--dn-sp-2);flex:0 0 var(--dn-col-w-c);min-height:240px;padding:var(--dn-sp-3);border:1px solid var(--dn-line);border-radius:var(--dn-r-lg);background:var(--dn-bg-1)}
+.den-loading.board .den-skelcol.wide{flex-basis:var(--dn-uns-w)}
+.den-loading.board .den-skelcol i{display:block;height:64px;border-radius:var(--dn-r-md);background:linear-gradient(90deg,var(--dn-s2) 0,var(--dn-s3) 40%,var(--dn-s2) 80%);background-size:200% 100%;animation:den-shimmer 1.4s linear infinite}
 .den-skel{display:block;height:12px;width:62%;border-radius:var(--dn-r-xs);background:linear-gradient(90deg,var(--dn-s2) 0,var(--dn-s3) 40%,var(--dn-s2) 80%);background-size:200% 100%;animation:den-shimmer 1.4s linear infinite}
 .den-skel.s2{width:44%} .den-skel.s3{width:53%}
 @keyframes den-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
@@ -308,9 +315,6 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-col-h:hover .den-colsub,.den-col-h:focus-within .den-colsub{white-space:normal;overflow:visible}
 .den-col-meta{display:flex;align-items:center;gap:6px;padding:8px 12px 0;min-height:40px}
 .den-col-tools{display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:8px 12px 0}
-.den-gapline{display:block;width:100%;text-align:left;padding:8px 12px;border:1px solid var(--dn-line-2);border-left:3px solid var(--dn-warn);border-radius:var(--dn-r-sm);background:var(--dn-s1);color:var(--dn-ink-1);font:400 var(--dn-fs-sm)/1.35 var(--dn-text);cursor:pointer}
-.den-gapline b{font-weight:600}
-.den-gapline span{text-decoration:underline;text-underline-offset:2px}
 .den-search{display:block}
 .den-search input{width:100%}
 /* the kind filter: one row where the column is wide enough (1600 and up), two at most; never a kind scrolled out of sight */
@@ -367,7 +371,7 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-card-title.body{font-weight:400;color:var(--dn-ink-1)}
 .den-who{font:600 var(--dn-fs-base)/1.3 var(--dn-text)}
 .den-role{font-weight:400;font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
-.den-pinmark{display:inline-flex;align-items:center;gap:4px;margin-right:6px;padding:1px 6px;border-radius:var(--dn-r-xs);background:var(--dn-accent-dim);color:var(--dn-accent-text);font:600 var(--dn-fs-xs)/1.5 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;vertical-align:1px}
+.den-pinmark{display:inline-flex;align-items:center;margin-right:6px;color:var(--dn-accent-text);vertical-align:-1px}
 .den-card-title>.den-ic{color:var(--dn-accent-text);margin-right:4px}
 .den-card-meta{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:var(--dn-fs-sm);color:var(--dn-ink-2);font-variant-numeric:tabular-nums}
 .den-chips{display:flex;flex-wrap:wrap;gap:4px}

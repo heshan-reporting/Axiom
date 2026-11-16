@@ -177,8 +177,15 @@ await t('a brief started by hand says plainly whether its cards can be cited, an
   const wh = await world(); const p = await open(wh); await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state'); await p.getByRole('button', { name: 'Write it by hand' }).click();
   await p.waitForSelector(S + ' textarea', { state: 'attached' }); eq(wh.calls.length, 0, 'nothing was spent');
   eq(await mode(p), 'edit', 'an empty section opens as the editor: the placeholder is the invitation'); ok(/Click a card on the right to cite it/.test(await p.getAttribute(S + ' textarea', 'placeholder')));
-  const live = await p.locator('.den-evpane .den-evcard:not([disabled])').count();
-  if (!live) ok(/started by hand/.test(await txt(p, '.den-evhead')), 'with nothing citable the pane says why: ' + await txt(p, '.den-evhead'));
+  // under worker p66 a hand-started brief holds no evidence and the pane says so; from p67 the worker fills the window's
+  // rows at the start (no model call), and the pane then invites a cite and its cards under More from this window cite
+  const got = await wh.F('GET', '/den/brief?desk=aep_au'); const held = Object.keys(((got.body || {}).brief || {}).evidence || {}).length; const head = await txt(p, '.den-evhead');
+  if (!held) ok(/started by hand/.test(head), 'with nothing citable the pane says why: ' + head);
+  else {
+    ok(!/started by hand/.test(head) && /Click a card to cite it/.test(head), 'evidence is held, so the pane invites a cite: ' + head);
+    const pull = p.locator('.den-evpane [data-tour="pull"]'); if (await pull.count() && (await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
+    await p.waitForSelector('.den-evpane [data-tour="pull-file"]'); ok(await p.locator('.den-evpane [data-tour="pull-file"]').count() > 0, 'the window\'s rows are there to file here and cite');
+  }
   eq(p.errors, []); await p.context().close();
 });
 

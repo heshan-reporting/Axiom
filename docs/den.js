@@ -205,7 +205,7 @@
     const need = !handed || late || (!handed.loading && !handed.data);
     const self = useLoad(() => (need ? get('/den/missed?' + q({ desk: deskId, to }), 'signals') : Promise.resolve(null)), [deskId, tick, need, to], deskId + '|' + to);
     const m = need ? self : handed; const [open, setOpen] = useState(''); const box = useRef(null);
-    useEffect(() => { if (onSignals) onSignals(m.data ? (m.data.signals || []) : null); }, [m.data]);   // eslint-disable-line
+    useEffect(() => { if (onSignals) onSignals(m.data ? (m.data.signals || []) : (m.err && !m.loading ? false : null)); }, [m.data, m.err, m.loading]);   // eslint-disable-line
     useEffect(() => { if (!open) return; const out = e => { if (box.current && !box.current.contains(e.target)) setOpen(''); };
       const key = e => { if (e.key === 'Escape') { const b = box.current && box.current.querySelector('.den-check.open'); setOpen(''); if (b) b.focus(); } };
       document.addEventListener('mousedown', out); document.addEventListener('keydown', key); return () => { document.removeEventListener('mousedown', out); document.removeEventListener('keydown', key); }; }, [open]);
@@ -344,6 +344,8 @@
       setUndo({ text: (sec ? 'Filed under ' + t : 'Back to Unsorted') + ': ' + String(c.title || '').slice(0, 50), run: async () => { const n = Object.assign({}, fref.current); if (was) n[c.key] = was; else delete n[c.key]; setFiling(n);
         if (posted) { try { await call('/den/pin', pinnedNow ? { desk: desk.id, item: c.id, clear: true } : { desk: desk.id, item: c.id, section: was }); } catch (e) { toastMsg(say(e), true); } b.reload(); } } });
       // the board is read again after every write, so a read that was in flight when the pin went out cannot bring the old section back over it
+      // the card settles where it lands with a fading ring (den.css den-settle, a shadow only), so the eye finds it
+      setTimeout(() => { const el = root.current && Array.from(root.current.querySelectorAll('.den-card[data-key]')).find(x => x.dataset.key === c.key); if (el) { el.setAttribute('data-settle', '1'); setTimeout(() => el.removeAttribute('data-settle'), 450); } }, 30);
       tell('file', { key: c.key, sec: sec || '', desk: desk.id }); if (posted) b.reload(); };
     const drop = sec => e => { e.preventDefault(); let k = drag; try { k = e.dataTransfer.getData('text/plain') || drag; } catch (x) {} setOver(''); setDrag(''); const c = cards.find(x => x.key === k); if (c) fileCard(c, sec); };
     const dragOver = sec => e => { if (!drag) return; e.preventDefault(); if (over !== (sec || 'unsorted')) setOver(sec || 'unsorted'); };
@@ -471,9 +473,9 @@
     const bump = what => { if (what === 'budget' || what === 'desk') call('/den/desks').then(d => { setBudget(d.budget); if (what === 'desk') D.set(d); }, () => {}); if (what === 'collected' || what === 'marks' || what === 'filed') setTick(t => t + 1); };
     useEffect(() => { const key = e => { const root = document.getElementById('v-den'); if (!root || !root.classList.contains('on') && getComputedStyle(root).display === 'none') return; if (e.altKey && /^Digit[1-5]$/.test(e.code)) { e.preventDefault(); setTab(TABS[+e.code.slice(5) - 1][0]); } if (e.key === '?' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName || '')) setKeys(true); };
       window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, []);   // eslint-disable-line
-    const did = desk ? desk.id : ''; const bid = did + '|' + to; const mine = board && board.id === bid ? board.d : null; const rawSigs = mine && mine.missed && Array.isArray(mine.missed.signals) ? mine.missed.signals : (sigs && sigs.id === bid ? sigs.s : null);
+    const did = desk ? desk.id : ''; const bid = did + '|' + to; const mine = board && board.id === bid ? board.d : null; const rawSigs = mine && mine.missed && Array.isArray(mine.missed.signals) ? mine.missed.signals : (sigs && sigs.id === bid && sigs.s ? sigs.s : null);
     // a channel that delivered nothing (sig 'gap') is said on Collection only (owner, 16 November 2026); the Board and the Brief read the rest
-    const gaps = useMemo(() => (rawSigs ? rawSigs.filter(s => s.sig === 'gap').map(s => Object.assign({}, s, { channel: s.channel || String(s.key || '').replace(/^G:/, '') })) : undefined), [rawSigs]);
+    const gaps = useMemo(() => (rawSigs ? rawSigs.filter(s => s.sig === 'gap').map(s => Object.assign({}, s, { channel: s.channel || String(s.key || '').replace(/^G:/, '') })) : (sigs && sigs.id === bid && sigs.failed ? null : undefined)), [rawSigs, sigs, bid]);
     const mySigs = useMemo(() => (rawSigs ? rawSigs.filter(s => s.sig !== 'gap') : null), [rawSigs]);
     const cards = useMemo(() => (mine ? deck(mine, mySigs || []) : null), [mine, mySigs]);
     // opened on another tab than the Board (the last tab used is kept): the window is read once here too, so the Brief's
@@ -520,7 +522,7 @@
       <//>
       <div class="den-rail">
         <div class="den-tabs" role="tablist" aria-label="Anne's Den">${TABS.map(t => html`<button key=${t[0]} role="tab" id=${'den-tab-' + t[0]} class="den-tab" data-attn=${t[0] === 'collection' && gaps && gaps.length ? '1' : null} aria-selected=${tab === t[0] ? 'true' : 'false'} aria-controls="den-tabpanel" onClick=${() => setTab(t[0])}>${t[1]}</button>`)}</div>
-        <${Boundary} name="The checks" resetKey=${desk.id + tick}><${Strip} deskId=${desk.id} to=${to} setTab=${setTab} tick=${tick} handed=${tab === 'today' ? (boardStrip || STRIP_PENDING) : undefined} onSignals=${s => setSigs(s ? { id: bid, s } : null)} cov=${cov} /><//>
+        <${Boundary} name="The checks" resetKey=${desk.id + tick}><${Strip} deskId=${desk.id} to=${to} setTab=${setTab} tick=${tick} handed=${tab === 'today' ? (boardStrip || STRIP_PENDING) : undefined} onSignals=${s => setSigs(s ? { id: bid, s } : s === false ? { id: bid, failed: true } : null)} cov=${cov} /><//>
       </div>
       <div role="tabpanel" id="den-tabpanel" class=${'tab-' + tab} aria-labelledby=${'den-tab-' + tab} tabIndex=${tab === 'today' || tab === 'brief' ? null : '0'}>
         <${Boundary} name=${TABS.find(t => t[0] === tab)[1]} resetKey=${desk.id + tab}>

@@ -142,6 +142,8 @@
 .den-briefwrap .den-fold{display:flex;align-items:center;gap:var(--dn-sp-2);width:100%;min-height:var(--dn-hit);padding:0 var(--dn-sp-1);border:0;background:none;color:var(--dn-ink-1);font:600 var(--dn-fs-md)/1 var(--dn-text);text-align:left;cursor:pointer}
 .den-briefwrap .den-fold:hover{color:var(--dn-ink-0)}
 .den-briefwrap .den-fold .den-ic{width:14px;height:14px;color:var(--dn-ink-2)}
+/* the chevron icon is the fold's marker here: den.css's drawn triangle would be a second one */
+.den-briefwrap .den-fold::before{content:none}
 .den-briefwrap .den-pulllist{margin-top:var(--dn-sp-2)}
 .den-briefwrap .den-pulllist li{align-items:center;gap:var(--dn-sp-3);padding:10px var(--dn-sp-3);border-radius:var(--dn-r-md);background:var(--dn-s2)}
 .den-briefwrap .den-pull-t{display:flex;flex-direction:column;gap:3px}

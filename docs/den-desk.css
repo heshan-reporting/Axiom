@@ -53,3 +53,6 @@
 #den-root .den-page .sig-line.err .k{color:var(--dn-warn-ink)}
 .den-zero{color:var(--dn-ink-2)}
 .den-setup ul{list-style:disc}
+/* Options: a section's title field takes its column, so a long title is not cut off mid-word */
+[data-tour="opt-sections"] .den-table td:first-child{width:40%}
+[data-tour="opt-sections"] .den-table td:first-child .den-in{box-sizing:border-box;width:100%;min-width:16em}

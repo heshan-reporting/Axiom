@@ -15,6 +15,9 @@ const SRC = fs.readFileSync(new URL('../docs/den-tour.js', import.meta.url), 'ut
 const CSS = fs.readFileSync(new URL('../docs/den-tour.css', import.meta.url), 'utf8');
 const AXE = fs.readFileSync(new URL('../node_modules/axe-core/axe.min.js', import.meta.url), 'utf8');
 
+/* the editor a person can type into: on the section page the textarea lies under the reading view (opacity 0, no
+ * pointer events) until the section is in edit mode, so it counts only then */
+const ED = '#den-root .den-sec:not([data-mode="read"]) [data-tour="editor"]:visible';
 const S = p => p.evaluate(() => (window.DenTour ? window.DenTour.state() : null));
 // the tour is on step `id` (and its phase, when given), with no "Done" flash in progress
 const at = (p, id, phase) => p.waitForFunction(([id, ph]) => { const s = window.DenTour && window.DenTour.state(); return !!(s && s.status === 'active' && s.step === id && s.view && !s.view.flash && (!ph || s.view.phase === ph)); }, [id, phase || ''], { timeout: 15000 })
@@ -93,12 +96,13 @@ await t('from step 1 to step 24 each step advances only on the real action, and 
   ok(!(await p.locator('#den-tour .dt-card button[data-paid]').count()), 'no button on the card spends'); await still('start'); eq(w.calls.length, 0);
   await p.click('#den-root [data-tour="draft"]'); await at(p, 'outline'); eq(w.calls.length, 1, 'exactly one model call, from the Den\'s own button');
   await press(p); await at(p, 'edit');
-  if (!(await p.locator('#den-root [data-tour="editor"]:visible').count())) await press(p);
-  await p.locator('#den-root [data-tour="editor"]:visible').click(); await p.keyboard.press('End'); await p.keyboard.type(' The guide was here.');
+  if (!(await p.locator(ED).count())) await press(p);
+  await p.locator(ED).click(); await p.keyboard.press('End'); await p.keyboard.type(' The guide was here.');
   await at(p, 'cite'); await press(p);
-  await at(p, 'jump'); await press(p);
+  // citing keeps the person in the words (one save for many cites); the chips show once they read again
+  await at(p, 'jump'); if ((await S(p)).view.phase === 'read') { await press(p); await p.waitForFunction(() => window.DenTour.state().view.phase !== 'read'); await at(p, 'jump'); } await press(p);
   // leaving the text to press the chip saved it; new words make the save step one the person does
-  await at(p, 'save'); if ((await S(p)).view.mode === 'show') { await p.locator('#den-root [data-tour="editor"]:visible').click(); await p.keyboard.press('End'); await p.keyboard.type(' Saved by hand.'); await p.waitForFunction(() => window.DenTour.state().view.mode === 'do'); }
+  await at(p, 'save'); if ((await S(p)).view.mode === 'show') { if (!(await p.locator(ED).count())) await p.click('#den-root [data-tour="edit"]'); await p.locator(ED).click(); await p.keyboard.press('End'); await p.keyboard.type(' Saved by hand.'); await p.waitForFunction(() => window.DenTour.state().view.mode === 'do'); }
   const saves = denPosts(p).filter(s => /brief\/save/.test(s)).length; await press(p);
   await at(p, 'regen'); ok(denPosts(p).filter(s => /brief\/save/.test(s)).length > saves, 'saved by the person\'s press'); await press(p); await at(p, 'regen', 'form'); await p.click('#den-root [data-tour="regen-cancel"]');
   await at(p, 'history'); await press(p); await at(p, 'history', 'close'); await press(p);
@@ -139,7 +143,7 @@ await t('a reload resumes at the same step; a wrong tab, a past day and unsaved 
   await until(p, () => { const s = window.DenTour.state(); return s.step === 'drag' && s.view.mode === 'route' && s.view.route === 'today'; }, 'the Today route'); eq(await clear(p, '[data-tour="today"]'), '', 'Today is ringed');
   await press(p); await until(p, () => { const s = window.DenTour.state(); return s.step === 'drag' && s.view.mode === 'do'; }, 'back on today, the step carries on');
   await startAt(p, 'start'); await at(p, 'start'); if ((await S(p)).view.mode === 'route') { await press(p); await at(p, 'start'); } await p.click('#den-root [data-tour="by-hand"]'); await at(p, 'outline');
-  await p.locator('#den-root [data-tour="editor"]:visible').first().click().catch(() => {}); if (!(await p.locator('#den-root [data-tour="editor"]:visible').count())) await p.locator('#den-root [data-tour="reads"]:visible').first().click();
+  await p.locator(ED).first().click().catch(() => {}); if (!(await p.locator(ED).count())) await p.locator('#den-root [data-tour="reads"]:visible').first().click();
   await p.keyboard.type('Words not yet saved.'); await startAt(p, 'regen');
   await until(p, () => { const s = window.DenTour.state(); return s.step === 'regen' && s.view.mode === 'route' && s.view.route === 'saved'; }, 'the save route'); await press(p); await at(p, 'regen');
   eq(w.calls.length, 0); eq(p.errors, []); await p.context().close();
@@ -181,8 +185,8 @@ await t('an empty desk has no dead end: the sorting chapter says why and carries
   ok(/Nothing has been collected for Firearms/.test(await txt(p, '#den-tour .dt-card')) && /Collection tab/.test(await txt(p, '#den-tour .dt-card')), await txt(p, '#den-tour .dt-card'));
   ok(await B(p, 'Try another desk').isVisible()); await B(p, 'Carry on').click();
   await at(p, 'write'); await press(p); await at(p, 'start'); await p.click('#den-root [data-tour="by-hand"]');
-  await at(p, 'outline'); await press(p); await at(p, 'edit'); if (!(await p.locator('#den-root [data-tour="editor"]:visible').count())) await press(p);
-  await p.locator('#den-root [data-tour="editor"]:visible').click(); await p.keyboard.type('A quiet day for the desk.');
+  await at(p, 'outline'); await press(p); await at(p, 'edit'); if (!(await p.locator(ED).count())) await press(p);
+  await p.locator(ED).click(); await p.keyboard.type('A quiet day for the desk.');
   for (const id of ['cite', 'jump']) { await at(p, id); eq((await S(p)).view.mode, 'show', id + ': nothing here can be cited, so it is shown'); await B(p, 'Got it').click(); }
   await at(p, 'save'); const v = (await S(p)).view; if (v.mode === 'show') await B(p, 'Got it').click(); else await press(p);
   await at(p, 'regen'); await press(p); await at(p, 'regen', 'form'); await p.click('#den-root [data-tour="regen-cancel"]');

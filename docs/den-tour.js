@@ -216,7 +216,7 @@
     briefStep({ id: 'jump', ch: 3, title: 'Follow a citation', sampleBody: 'Every citation is a chip. Press one to land on its card in the evidence pane; from there Open goes to the original.',
       view() { const s = openSec(); const chips = s ? all(H('cite-chip'), s) : [];
         if (chips.length) return { mode: 'do', body: 'Every citation is a chip. Press one to land on its card; from there Open goes to the original.', line: 'Press a citation chip', targets: [chips[0]] };
-        if (s && s.querySelector(H('cite-chip'))) return { mode: 'do', phase: 'read', body: 'This section has citations; they show as chips when you are reading, not typing.', line: 'Click outside the text to read it', targets: [hook('reads', s) || s] };
+        if (s && s.querySelector(H('cite-chip'))) return { mode: 'do', phase: 'read', body: 'This section has citations; they show as chips when you are reading, not typing.', line: 'Press Read, or click outside the text', targets: [hook('done', s) || hook('done') || hook('reads', s) || s] };
         const other = every(H('section')).find(x => x.querySelector(H('cite-chip'))); const it = other && one(H('outline-item') + '[data-goto="' + other.dataset.section + '"]');
         if (it) return { mode: 'do', phase: 'go', body: 'This section cites nothing yet. Open one that does.', line: 'Press ' + secTitle(other.dataset.section), targets: [it] };
         return show({ phase: 'none', sample: true, body: 'No section cites a card yet. When one does, each citation is a chip that leads to its card.', targets: [] }); },

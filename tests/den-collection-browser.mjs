@@ -81,7 +81,9 @@ await t('Collect now is offered only where a channel has a collection route', as
 });
 
 await t('the analysis pipeline, the last tick and the accounts that could not be read are said when the worker sends them, and absent when it does not', async () => {
-  let p = await open(w); await tab(p, 'collection'); await p.waitForSelector('section.den-panel[aria-label="Channels"] tr.den-row'); eq(await p.locator('#den-tabpanel [data-tour="pipeline"]').count(), 0, 'no placeholder when the worker sends nothing'); await p.context().close();
+  // a worker older than p67 sends neither field (worker p67 always sends pipeline, and tick once a tick has run)
+  w.hooks = [rewrite(/^\/den\/collection\?/, b => { delete b.pipeline; delete b.tick; return b; })];
+  let p = await open(w); await tab(p, 'collection'); await p.waitForSelector('section.den-panel[aria-label="Channels"] tr.den-row'); eq(await p.locator('#den-tabpanel [data-tour="pipeline"]').count(), 0, 'no placeholder when the worker sends nothing'); await p.context().close(); w.hooks = [];
   w.hooks = [rewrite(/^\/den\/collection\?/, b => Object.assign(b, { pipeline: { unplaced: 12, oldestUnplacedMin: 34, titled: 3, awaitingModel: 2 }, tick: { at: NOW - 5 * 60000, total: 41200, stages: [['core', 2100], ['registry', 30100]], ai: false }, accounts: [{ platform: 'x', value: 'harbourwatch', last_ok: NOW - 26 * H, last_error: 'rate limited' }] }))];
   try {
     p = await open(w); await tab(p, 'collection'); await p.waitForSelector('#den-tabpanel [data-tour="pipeline"]'); const s = await txt(p, '#den-tabpanel [data-tour="pipeline"]');
