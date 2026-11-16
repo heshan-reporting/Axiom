@@ -313,7 +313,7 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-unsorted .den-col-h h3{flex:0 1 auto;font-size:var(--dn-fs-lg);font-weight:700}
 .den-colsub{flex:1 1 100%;margin:0;font-size:var(--dn-fs-sm);line-height:1.4;color:var(--dn-ink-3);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .den-col-h:hover .den-colsub,.den-col-h:focus-within .den-colsub{white-space:normal;overflow:visible}
-.den-col-meta{display:flex;align-items:center;gap:6px;padding:8px 12px 0;min-height:40px}
+.den-col-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 12px 0;min-height:40px}
 .den-col-tools{display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:8px 12px 0}
 .den-search{display:block}
 .den-search input{width:100%}
