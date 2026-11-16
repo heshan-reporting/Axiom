@@ -27,7 +27,10 @@ await t('reading is the default: one text, no raw citation mark in sight, and th
   ok(!(await page.locator(S).innerText()).match(/citations are typed as|As it reads/), 'no Write label and no second copy heading');
   eq(await page.locator(S + ' input').count(), 0, 'no input in the section at rest');
   eq(await page.locator(S + ' .den-modes button').evaluateAll(b => b.map(x => x.textContent.trim() + ':' + x.getAttribute('aria-pressed'))), ['Read:true', 'Edit:false']);
-  eq(await page.locator(S + ' .den-eyebrow .den-chip').count(), 0, 'the eyebrow does not repeat the state the title carries (a drafted section has no flag chip there)');
+  eq(await page.locator(S + ' .den-eyebrow .den-chip:not(.warn)').count(), 0, 'the eyebrow does not repeat the state the title carries; only a flag count is said there');
+  ok(/1 flag/.test(await txt(page, S + ' .den-eyebrow')) && /drafted/.test(await txt(page, S + ' h4')), 'one state by the title, the flag count above it');
+  const nums = await page.$$eval('.den-outline [data-goto]:not(.den-out-src) .den-outn', els => els.map(e => e.textContent.trim()));
+  eq(nums, nums.map((x, i) => String(i + 1)), 'the outline numbers its sections 1 to n (a tenth reads 10, not a key cap 0)');
   eq(page.errors, []);
 });
 
@@ -47,13 +50,13 @@ await t('leaving without typing sends nothing; leaving after typing saves once a
   eq(saves(page), before, 'entering and leaving the editor without typing sends no save');
   await page.locator(S + ' .den-modes button', { hasText: 'Edit' }).click(); await page.waitForSelector(S + '[data-mode="edit"]');
   await page.waitForFunction(() => document.activeElement && document.activeElement.tagName === 'TEXTAREA');
-  await page.keyboard.press('End'); await page.keyboard.type(' Anne added this.');
-  ok(/not saved/.test(await txt(page, S + ' h4')));
+  await page.locator(S + ' textarea').evaluate(e => e.setSelectionRange(e.value.length, e.value.length)); await page.keyboard.type(' Anne added this.');   // End would stop at the end of a wrapped line
+  ok(/not saved/.test(await txt(page, S + ' h4')), 'the title says the words are not saved: ' + await txt(page, S + ' h4'));
   await page.locator('.den-outline-h').click(); await page.waitForSelector(S + '[data-mode="read"]');
   await page.waitForFunction(() => /Saved, revision 2/.test(document.querySelector('.den-bar[role="status"]').textContent));
-  eq(saves(page), before + 1, 'one save, on leaving'); ok(/edited by Anne/.test(await txt(page, S + ' h4')));
+  eq(saves(page), before + 1, 'one save, on leaving'); ok(/edited by Anne/.test(await txt(page, S + ' h4')), 'marked as a person\'s edit');
   ok(/Anne added this\./.test(await page.locator(S + ' .den-reads').innerText()), 'the reading view shows the saved words');
-  ok((await w.F('GET', '/den/brief?desk=aep_au')).body.brief.sections.summary.text.endsWith('Anne added this.'));
+  const saved = (await w.F('GET', '/den/brief?desk=aep_au')).body.brief.sections.summary.text; ok(/Anne added this\.$/.test(saved), 'the worker holds them: ' + saved.slice(-60));
 });
 
 await t('a card pressed while editing cites at the cursor, keeps the editor open, and the whole edit is one revision', async () => {
