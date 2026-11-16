@@ -171,7 +171,10 @@ await S.t('DK8 a draft', async () => {
   const b0 = await board(w, 'aep_au'); await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: b0.social[1].id });
   const r = await F(w, 'POST', '/den/brief', { desk: 'aep_au' }); eq([r.status, r.body.ok, r.body.calls], [200, true, 1], r.text.slice(0, 300)); eq(calls.length, 1, 'one model call');
   const sent = calls[0].messages[0].content; ok(/REPORTING WINDOW: /.test(sent) && /\[M:\d+\] pointpost/.test(sent) && /also carried by 2 other outlets/.test(sent) && /Facebook: 300 reactions, 40 comments, 22 shares/.test(sent), 'media evidence with ids and counts');
-  ok(/PINNED \| x/.test(sent) && /SUBSCRIBER TEXT, QUOTE AT MOST THIRTY WORDS/.test(sent) && /SAY PLAINLY THAT THIS CHANNEL WAS NOT READ|SIGNALS NOT TO MISS/.test(sent) === true || true);
+  ok(/PINNED \| x/.test(sent) && /SUBSCRIBER TEXT, QUOTE AT MOST THIRTY WORDS/.test(sent), 'a pinned post and the subscriber mark');
+  // p67 (the owner, 15 November 2026): a collection fault is the Collection tab's, never the client's report
+  ok(!/NOT READ|SAY PLAINLY/.test(sent) && !/collector|signed-in|delivered nothing/i.test(sent) && !/say so plainly|say which channels were not read/i.test(calls[0].system), 'no collection fault is put before the model');
+  ok(/^CHANNELS READ IN THIS WINDOW: [^\n]*News/m.test(sent) && /never describe a channel that was not read as quiet/i.test(calls[0].system) && /never write about collect/i.test(calls[0].system), 'one neutral line says what the brief rests on: ' + (sent.match(/^CHANNELS[^\n]*/m) || [''])[0]);
   ok(!/Jo Citizen/.test(sent) && !/fuel tax credit story/.test(sent) && !/Yesterday's gas story/.test(sent), 'no author, no other desk\'s row, nothing outside the window'); ok(/SOURCE SAFETY/.test(calls[0].system) && /Never invent an id/.test(calls[0].system) && /never name a private individual/.test(calls[0].system));
   ok(/"summary":"\.\.\."/.test(calls[0].system) && !/"sources"/.test(calls[0].system), 'the model is asked for the desk\'s sections and never the Source List');
   const br = r.body.brief; eq([br.status, br.revision, br.day.length, br.by], ['draft', 1, 10, 'Anne']); eq(br.ratings.momentum, { level: 'Moderate', trend: 'Stable' });
@@ -237,7 +240,7 @@ await S.t('DK12 filing', async () => {
   model(w, (ev, ids) => ({ sections: { summary: 'Coverage of the gas taxation debate continued through the window, led by regional outlets and carried by others [' + ids('M')[0] + ']. Producers answered the push in a subscriber outlet, and the conversation on X stayed small [' + ids('S')[0] + '].', bottom: 'Activity is steady and the client is not directly targeted [' + ids('M')[0] + '].' }, ratings: { momentum: { level: 'Moderate', trend: 'Stable' } } }));
   const br = (await F(w, 'POST', '/den/brief', { desk: 'aep_au' })).body.brief; ok(br.missed.some(s => s.key.indexOf('A:') === 0), 'what the strip held when it was drafted is kept with it');
   eq((await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 99 })).status, 409);
-  const ask = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 1 }); eq([ask.status, ask.body.error], [409, 'uncited_signals']); ok(ask.body.signals.some(s => /Sentinel spike/.test(s.title)) && /file anyway or go back/.test(ask.body.detail)); eq((await F(w, 'GET', '/den/brief?id=' + br.id)).body.brief.status, 'draft');
+  const ask = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 1 }); eq([ask.status, ask.body.error], [409, 'uncited_signals']); ok(ask.body.signals.some(s => /Sentinel spike/.test(s.title)) && /file anyway or go back/.test(ask.body.detail)); ok(!ask.body.signals.some(s => s.sig === 'gap'), 'a collection gap is never asked about at filing'); eq((await F(w, 'GET', '/den/brief?id=' + br.id)).body.brief.status, 'draft');
   const filed = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: 1, acknowledge: true }); eq([filed.status, filed.body.brief.status, filed.body.brief.filed_by, filed.body.brief.revision], [200, 'filed', 'Anne', 2]); ok(filed.body.acknowledged.length >= 1 && filed.body.brief.acknowledged.length >= 1);
   eq((await F(w, 'POST', '/den/brief/save', { id: br.id, revision: 2, sections: { bottom: 'After filing.' } })).body.error, 'brief_filed'); eq((await F(w, 'POST', '/den/brief', { desk: 'aep_au', replace: true })).body.error, 'brief_filed'); eq((await F(w, 'POST', '/den/brief/section', { id: br.id, section: 'bottom', revision: 2 })).body.error, 'brief_filed');
   const md = (await F(w, 'GET', '/den/brief?id=' + br.id + '&format=md')).text; ok(!/DRAFT/.test(md), 'a filed brief is not labelled a draft');
@@ -248,6 +251,13 @@ await S.t('DK12 filing', async () => {
   const f2 = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: covered.body.brief.revision }); ok(f2.status === 200 || (f2.body.error === 'uncited_signals' && !f2.body.signals.some(s => /Sentinel spike/.test(s.title))), 'a signal the brief cites is not asked about: ' + f2.text.slice(0, 300));
   const thin = await mk(); const t = (await F(thin, 'POST', '/den/brief/save', { desk: 'aep_au', sections: { summary: 'Too little.' } })).body.brief; eq((await F(thin, 'POST', '/den/brief/file', { id: t.id, revision: t.revision, acknowledge: true })).body.error, 'brief_empty');
   const prev = (await F(w, 'GET', '/den/brief?desk=aep_au&prev=1&day=2999-01-01')).body.brief; ok(f2.status !== 200 || prev.id === br.id, 'the last filed brief before a day, for the comparison');
+  // p67: a brief whose only open signal is a gap files with no ask, and the history names the channel instead
+  const g = await mk({ ANTHROPIC_API_KEY: 'test-anthropic' }); await seedDay(g); await F(g, 'POST', '/den/watch/add', { ns: 'aep', kind: 'account', platform: 'facebook', value: 'harbourwatchpage', name: 'Harbour Watch' });
+  model(g, (ev, ids) => ({ sections: { summary: 'Coverage of the gas taxation debate continued through the window, led by regional outlets and carried by others [' + ids('M')[0] + ']. Producers answered the push in a subscriber outlet, and the conversation on X stayed small [' + ids('S')[0] + '].', bottom: 'Activity is steady and the client is not directly targeted [' + ids('M')[0] + '].' }, ratings: {} }));
+  ok((await F(g, 'GET', '/den/missed?desk=aep_au')).body.signals.some(s => s.key === 'G:facebook'), 'the strip still holds the gap, for Collection');
+  const gb = (await F(g, 'POST', '/den/brief', { desk: 'aep_au' })).body.brief; const gf = await F(g, 'POST', '/den/brief/file', { id: gb.id, revision: gb.revision });
+  eq([gf.status, gf.body.brief && gf.body.brief.status, gf.body.acknowledged], [200, 'filed', []], 'nothing to ask: ' + gf.text.slice(0, 300));
+  const gh = (await F(g, 'GET', '/den/brief/history?id=' + gb.id)).body.revisions[0].note; ok(/^filed; not read in this window: Facebook$/.test(gh), gh);
 });
 
 await S.t('DK13 one desk never reads another\'s', async () => {
