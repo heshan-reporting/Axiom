@@ -25,7 +25,8 @@
 
   const TABS = [['today', 'Board'], ['brief', 'Brief'], ['watch', 'Watch'], ['collection', 'Collection'], ['options', 'Options']];
   const CH = { news: 'News', x: 'X', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', reddit: 'Reddit', bluesky: 'Bluesky', mastodon: 'Mastodon', substack: 'Substack', petitions: 'Petitions', forum: 'Forum', linkedin: 'LinkedIn', tiktok: 'TikTok', threads: 'Threads', meta: 'Facebook / Instagram' };
-  const SIG = { gap: ['Not collected', 'warn'], spike: ['Spike', 'neg'], emerging: ['Emerging', 'acc'], outlier: ['Unusual reach', 'acc'], first_seen: ['First seen', ''], burst: ['Above baseline', 'warn'] };
+  // a collection gap ('gap') is the Collection tab's alone (owner, 16 November 2026): only Collection names one, and in its own words
+  const SIG = { gap: ['Not delivering', 'warn'], spike: ['Spike', 'neg'], emerging: ['Emerging', 'acc'], outlier: ['Unusual reach', 'acc'], first_seen: ['First seen', ''], burst: ['Above baseline', 'warn'] };
   const ASIDE = ['not relevant', 'duplicate', 'foreign', 'old news'];
   const fmtAest = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
   const fmtDay = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', weekday: 'short', day: 'numeric', month: 'long' });
@@ -86,6 +87,40 @@
   /* What a person just did, said to anything listening (the guided tour, docs/den-tour.js): window event 'den:did' with
      { what, ... } after a write or a step succeeds. Nothing in the Den listens to it; it changes nothing by itself. */
   const tell = (what, d) => { try { window.dispatchEvent(new CustomEvent('den:did', { detail: Object.assign({ what }, d || {}) })); } catch (e) {} };
+  /* Icons sit beside the words, never instead of them: a control's name is its words (the tests find buttons by name).
+     The glyphs are the ones the owner chose in design/prototypes/annes-den-concepts/concept-a.js. Each is hidden from a
+     screen reader and never takes the focus; its size and stroke are attributes, so it draws right before den.css styles
+     .den-ic, and den.css can override them. */
+  const ICONS = {
+    back: 'M15 6l-6 6 6 6', chev: 'M6 9l6 6 6-6', right: 'M9 6l6 6-6 6', left: 'M15 6l-6 6 6 6',
+    pin: 'M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6zM12 15v5', x: 'M6 6l12 12M18 6L6 18',
+    aside: 'M4 7h16M6 7v11a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7M9 4h6M10 11l4 4M14 11l-4 4',
+    open: 'M14 5h5v5M19 5l-8 8M11 7H6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-5',
+    check: 'M5 12.5l4.5 4.5L19 7.5', alert: 'M12 4l9 16H3L12 4zM12 10v4M12 17.2v.3',
+    spike: 'M3 17l5-5 4 3 8-9M15 6h5v5', emerging: 'M3 9c3-3 6 3 9 0s6 3 9 0M3 15c3-3 6 3 9 0s6 3 9 0',
+    first_seen: 'M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3.5 20c.6-3.4 3.2-5.5 6.5-5.5s5.9 2.1 6.5 5.5M18 7v6M15 10h6',
+    outlier: 'M13 3L5 14h6l-1 7 8-11h-6l1-7z', burst: 'M5 20V10M12 20V4M19 20v-7',
+    search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.9-3.9', undo: 'M9 6L4 11l5 5M4 11h10a5 5 0 0 1 0 10h-3',
+    pen: 'M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19l-4 1zM14 7l3 3',
+    refresh: 'M20 11a8 8 0 0 0-14.3-4.3L4 8.5M4 4v4.5h4.5M4 13a8 8 0 0 0 14.3 4.3L20 15.5M20 20v-4.5h-4.5',
+    file: 'M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM14 3v5h5M9 14.5l2.2 2.2L15.5 12',
+    download: 'M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14', copy: 'M9 9h10v11H9zM5 15V4h10',
+    clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5V12l3 2',
+    media: 'M5 5h11v14H6a1 1 0 0 1-1-1V5zM16 9h3v8a2 2 0 0 1-2 2M8 9h5M8 12.5h5M8 16h3',
+    social: 'M5 5h14v10H10l-4 4v-4H5z', actor: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20c.8-3.6 3.8-6 7.5-6s6.7 2.4 7.5 6',
+    narrative: 'M3 9c3-3 6 3 9 0s6 3 9 0M3 15c3-3 6 3 9 0s6 3 9 0', upcoming: 'M5 6h14v14H5zM5 10h14M9 3.5V7M15 3.5V7',
+    lock: 'M7 11h10v9H7zM9 11V8a3 3 0 0 1 6 0v3', plus: 'M12 5v14M5 12h14',
+    history: 'M4 12a8 8 0 1 0 2.6-5.9L4 8.5M4 4v4.5h4.5M12 8v4.5l3 1.5',
+    keys: 'M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8',
+    eye: 'M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
+    play: 'M7 5l12 7-12 7z', quote: 'M7 7h4v4c0 3-1.5 5-4 6M14 7h4v4c0 3-1.5 5-4 6',
+    info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8v.01',
+    mute: 'M4 10v4h3l5 4V6L7 10H4zM16 9.5l5 5M21 9.5l-5 5', send: 'M4 12l16-8-6 16-3-7-7-1z',
+    board: 'M4 5h4v14H4zM10 5h4v9h-4zM16 5h4v12h-4z', sliders: 'M5 7h9M18 7h1M5 17h3M12 17h7M14 5v4M8 15v4',
+    radar: 'M12 3a9 9 0 1 0 9 9M12 8a4 4 0 1 0 4 4M12 12l7-7', swatch: 'M5 5h6v6H5zM13 5h6v6h-6zM5 13h6v6H5zM13 13h6v6h-6z',
+    guide: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM15.5 8.5l-2 5-5 2 2-5 5-2z'
+  };
+  const Ic = (n, cls) => html`<svg class=${'den-ic' + (cls ? ' ' + cls : '')} viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d=${ICONS[n] || ICONS.info} /></svg>`;
   function openEvidence(o, setTab) { if (!o) return; if (o.tab) return setTab(o.tab); if (o.view && window.AXUI.goto) return window.AXUI.goto(o.view, o.params || {}); if (o.url && /^https?:/.test(o.url)) window.open(o.url, '_blank', 'noopener'); }
 
 
@@ -133,18 +168,17 @@
   const deck = (d, signals) => { const now = Date.now(); return toCards(d).map(c => Object.assign(c, { w: weigh(c, signals, now), sigs: sigsFor(c, signals) })); };
   const byWeight = (a, b) => (b.pinned - a.pinned) || (b.w.score - a.w.score) || ((b.ts || 0) - (a.ts || 0));
   /* Is a check in the brief? The rule the worker applies when a brief is filed, on the words now in the editor: the brief
-     cites a row the check names, or names it in words, or says plainly that a channel was not read. */
+     cites a row the check names, or names it in words. A collection gap is never a check (it is said on Collection only). */
   function covered(s, brief, texts) {
     if (!brief) return false; const cites = new Set(); const T = texts || {};
     const body = Object.keys(brief.sections || {}).map(k => (T[k] != null ? T[k] : (brief.sections[k] || {}).text) || '').join('\n'); (body.match(/\[[A-Z]:[A-Za-z0-9_.-]{1,40}\]/g) || []).forEach(x => cites.add(x.slice(1, -1)));
-    const low = body.toLowerCase(); const first = String(s.title || '').split(' ')[0].replace(/[^A-Za-z0-9]/g, '');
-    return (s.cover || []).some(c => cites.has(c)) || (s.words || []).some(w => w && low.indexOf(String(w).toLowerCase()) >= 0) || (s.sig === 'gap' && !!first && new RegExp('\\b' + first + '\\b[^.]{0,80}\\b(not (read|collected|available)|delivered nothing|no collector|was not)', 'i').test(body));
+    const low = body.toLowerCase();
+    return (s.cover || []).some(c => cites.has(c)) || (s.words || []).some(w => w && low.indexOf(String(w).toLowerCase()) >= 0);
   }
   const secOfKind = (secs, kinds) => { for (const k of kinds) { const s = secs.find(x => x.kind === k || x.id === k); if (s) return s.id; } return (secs[0] || {}).id || ''; };
   const KIND_SEC = { media: ['media'], social: ['social', 'developments'], actors: ['actors'], narratives: ['narratives', 'developments'], upcoming: ['developments', 'summary'] };
   /* The section a check belongs under: where the row it names is filed, else the section of that kind of row. */
   function sigSec(s, cards, filing, secs) {
-    if (s.sig === 'gap') return secOfKind(secs, ['risks', 'implications', 'momentum', 'summary']);
     const c = (cards || []).find(x => x.sigs && x.sigs.indexOf(s) >= 0); if (c) return (filing[c.key] && secs.some(x => x.id === filing[c.key]) ? filing[c.key] : secOfKind(secs, KIND_SEC[c.kind] || []));
     return secOfKind(secs, s.sig === 'emerging' ? ['narratives', 'developments'] : s.sig === 'first_seen' || s.sig === 'outlier' ? ['actors', 'social'] : ['momentum', 'summary']);
   }
@@ -157,9 +191,10 @@
      was written from, so it is matched by what it says. */
   function citeOf(c, ev) { if (!ev) return ''; if (c.kind !== 'upcoming') return ev[c.cite] ? c.cite : ''; return Object.keys(ev).find(k => /^U:/.test(k) && ev[k].label === c.label) || ''; }
 
-  /* ---- Nothing critical missed: the six checks, as a rail of pills ---- */
+  /* ---- Nothing critical missed: the five checks, as a rail of pills. A channel that delivered nothing is not a check: it
+     is a collection fact, said on the Collection tab only (owner's item (a), 16 November 2026). ---- */
   const STRIP_PENDING = { data: null, loading: true, err: '', reload() {} };
-  const CHECKS = [['gap', 'Not collected', 'Every channel this desk relies on delivered something in this window.'], ['spike', 'Spike', 'No Sentinel spike on this desk\'s issues in this window.'], ['emerging', 'Emerging', 'No narrative on this desk\'s issues became emerging in this window.'],
+  const CHECKS = [['spike', 'Spike', 'No Sentinel spike on this desk\'s issues in this window.'], ['emerging', 'Emerging', 'No narrative on this desk\'s issues became emerging in this window.'],
     ['outlier', 'Unusual reach', 'No registered account\'s post drew far more than its posts usually do.'], ['first_seen', 'First seen', 'No actor appeared on this desk for the first time in fourteen days.'], ['burst', 'Above baseline', 'No issue is running above its own fourteen-day baseline.']];
   /* On the Board the board's own answer carries the checks (one read of the window, not two). The rail asks for itself on
      the other tabs, and on the Board only when the board came back without them: the board failed, or took too long to say. */
@@ -177,19 +212,23 @@
     const head = html`<h3 class="den-sr">Nothing critical missed</h3>`;
     if (!m.data && !m.err) return html`<section class="den-strip" data-tour="strip" aria-label="Nothing critical missed">${head}<${Loading} what="the checks" /></section>`;
     if (m.err && !m.data) return html`<section class="den-strip" data-tour="strip" aria-label="Nothing critical missed">${head}<${Failed} what="The checks" err=${m.err} onRetry=${m.reload} /></section>`;
-    const s = m.data.signals || []; const hasBrief = !!(cov && cov.brief); const isCov = x => hasBrief && covered(x, cov.brief, cov.texts);
+    // the raw list went up to the Den above (the Collection tab reads its gaps from it); the rail shows the checks only
+    const s = (m.data.signals || []).filter(x => x && x.sig !== 'gap'); const hasBrief = !!(cov && cov.brief); const isCov = x => hasBrief && covered(x, cov.brief, cov.texts);
+    // once the brief is filed, a check it does not hold was acknowledged at filing (or arrived after it): said plainly, never as a warning
+    const filed = hasBrief && cov.brief.status === 'filed'; const ackd = new Set(filed ? (cov.brief.acknowledged || []).map(a => (a && typeof a === 'object' ? a.key : a)) : []);
+    const unWords = (n, l) => { if (!filed) return n + ' not in the brief'; const a = l.filter(x => !isCov(x) && ackd.has(x.key)).length; return [a ? a + ' acknowledged at filing' : '', n - a ? (n - a) + ' not in the filed brief' : ''].filter(Boolean).join(', '); };
     const kinds = CHECKS.concat(Array.from(new Set(s.map(x => x.sig))).filter(k => !CHECKS.some(c => c[0] === k)).map(k => [k, (SIG[k] || [k])[0], '']));
     const cur = kinds.find(k => k[0] === open); const list = cur ? s.filter(x => x.sig === cur[0]) : []; const un = s.filter(x => !isCov(x)).length;
     return html`<section class="den-strip" data-tour="strip" aria-label="Nothing critical missed" ref=${box}>${head}
-      <span class="den-strip-h" title="Six checks computed from the archive. No model is asked.">${s.length ? s.length + ' to read' : 'six checks, nothing found'}${hasBrief && s.length ? html`<span class=${un ? 'un' : 'ok'}>${un ? un + ' not in the brief' : 'all in the brief'}</span>` : null}</span>
+      <span class="den-strip-h" title="Five checks computed from the archive. No model is asked.">${s.length ? s.length + ' to read' : 'five checks, nothing found'}${hasBrief && s.length ? html`<span class=${un ? (filed ? 'ack' : 'un') : 'ok'}>${un ? unWords(un, s) : 'all in the brief'}</span>` : null}</span>
       <ul id="den-strip-list">${kinds.map(k => { const l = s.filter(x => x.sig === k[0]); const u = l.filter(x => !isCov(x)).length; const on = open === k[0];
-        const words = l.length ? plural(l.length, 'finding') + (hasBrief ? (u ? ', ' + u + ' not yet in the brief' : ', covered in the brief') : '') : 'nothing found';
+        const words = l.length ? plural(l.length, 'finding') + (hasBrief ? (u ? ', ' + (filed ? unWords(u, l) : u + ' not yet in the brief') : ', covered in the brief') : '') : 'nothing found';
         return html`<li key=${k[0]} data-sig=${k[0]}><button data-tour="check" class=${'den-check ' + (l.length ? 'has ' + k[0] : 'clear') + (on ? ' open' : '')} data-n=${l.length} aria-expanded=${on ? 'true' : 'false'} title=${k[1] + ': ' + words} onClick=${() => setOpen(on ? '' : k[0])}>
-          <span class="den-check-l">${k[1]}</span>${l.length ? html`<b>${l.length}</b>` : null}<i class=${!l.length ? 'ok' : hasBrief && !u ? 'cov' : 'un'} aria-hidden="true"></i><span class="den-sr">${words}</span></button></li>`; })}</ul>
+          ${Ic(k[0])}<span class="den-check-l">${k[1]}</span>${l.length ? html`<b>${l.length}</b>` : null}<i class=${!l.length ? 'ok' : hasBrief && !u ? 'cov' : filed ? 'ack' : 'un'} aria-hidden="true"></i><span class="den-sr">${words}</span></button></li>`; })}</ul>
       ${cur ? html`<div class="den-pop" data-tour="check-pop" role="region" aria-label=${cur[1]}>
         <header><span class=${'den-chip ' + (list.length ? (SIG[cur[0]] || ['', ''])[1] : 'pos')}>${cur[1]}</span><span class="den-mono" title="Computed from the archive. No model is asked.">computed, no model</span><span class="den-spacer"></span><button class="den-mini quiet" onClick=${() => setOpen('')}>Close</button></header>
         ${list.length ? html`<ul>${list.map(x => html`<li key=${x.key}><span class="den-t">${x.title}</span><span class="d">${x.detail}</span>
-            <span class="den-pop-act">${hasBrief ? html`<span class=${'den-chip ' + (isCov(x) ? 'pos' : 'warn')}>${isCov(x) ? 'in the brief' : 'not yet in the brief'}</span>` : html`<span class="den-chip">no brief yet</span>`}
+            <span class="den-pop-act">${hasBrief ? html`<span class=${'den-chip ' + (isCov(x) ? 'pos' : filed ? '' : 'warn')}>${isCov(x) ? 'in the brief' : filed ? (ackd.has(x.key) ? 'acknowledged at filing' : 'not in the filed brief') : 'not yet in the brief'}</span>` : html`<span class="den-chip">no brief yet</span>`}
               ${x.open && (x.open.tab || x.open.view || x.open.url) ? html`<button class="den-link" onClick=${() => { setOpen(''); openEvidence(x.open, setTab); }} aria-label=${'Open the evidence for: ' + x.title}>${x.open.tab ? 'Open Collection' : x.open.view ? 'Open in ' + x.open.view.charAt(0).toUpperCase() + x.open.view.slice(1) : 'Open the post'}</button>` : null}</span></li>`)}</ul>`
           : html`<p class="den-pop-none">${cur[2] || 'Nothing found in this window.'}</p>`}
       </div>` : null}
@@ -200,25 +239,28 @@
   function RowActions({ r, kind, desk, canWrite, onDone }) {
     const [ask, setAsk] = useState(false); const [why, setWhy] = useState(ASIDE[0]); const [own_, setOwn] = useState(''); const [busy, setBusy] = useState(false);
     const send = async (path, body) => { setBusy(true); try { const d = await call(path, Object.assign({ desk: desk.id, item: r.id }, body)); onDone(d, r); } catch (e) { toastMsg(say(e), true); } setBusy(false); setAsk(false); };
-    const link = web(r.url) ? html`<a class="den-link" href=${web(r.url)} target="_blank" rel="noopener" aria-label=${'Open the source of this ' + kind}>Open</a>` : null;
+    const link = web(r.url) ? html`<a class="den-link" href=${web(r.url)} target="_blank" rel="noopener" aria-label=${'Open the source of this ' + kind}>${Ic('open')}Open</a>` : null;
     if (!canWrite) return link;
     if (ask) return html`<span class="den-form den-asideform" data-tour="aside-form">
       <select class="den-in" data-tour="aside-why" value=${why} aria-label="Why it is set aside" onChange=${e => setWhy(e.target.value)}>${ASIDE.map(a => html`<option key=${a} value=${a}>${a}</option>`)}<option value="other">other (say why)</option></select>
       ${why === 'other' ? html`<input class="den-in" value=${own_} maxlength="200" placeholder="Why" aria-label="Your reason" onInput=${e => setOwn(e.target.value)} />` : null}
       <button class="den-mini" data-tour="aside-go" disabled=${busy || (why === 'other' && own_.trim().length < 3)} onClick=${() => send('/den/aside', { reason: why === 'other' ? own_ : why })}>Set aside</button><button class="den-mini quiet" data-tour="aside-cancel" onClick=${() => setAsk(false)}>Cancel</button></span>`;
     return html`<span class="den-acts">
-      <button data-tour="card-pin" class=${'den-mini row' + (r.pinned ? ' on' : '')} disabled=${busy} aria-pressed=${r.pinned ? 'true' : 'false'} title=${r.pinned ? 'Pinned to the report: a draft must cover it. Press to unpin.' : 'Pin to the report: a draft must cover it'} onClick=${() => send('/den/pin', r.pinned ? { clear: true } : {})}>${r.pinned ? 'Pinned' : 'Pin'}</button>
-      <button class="den-mini row" data-tour="card-aside" disabled=${busy} title="Take it off this desk's board, with a reason" onClick=${() => setAsk(true)}>Set aside</button>
+      <button data-tour="card-pin" class=${'den-mini row' + (r.pinned ? ' on' : '')} disabled=${busy} aria-pressed=${r.pinned ? 'true' : 'false'} title=${r.pinned ? 'Pinned to the report: a draft must cover it. Press to unpin.' : 'Pin to the report: a draft must cover it'} onClick=${() => send('/den/pin', r.pinned ? { clear: true } : {})}>${Ic('pin')}${r.pinned ? 'Pinned' : 'Pin'}</button>
+      <button class="den-mini row" data-tour="card-aside" disabled=${busy} title="Take it off this desk's board, with a reason" onClick=${() => setAsk(true)}>${Ic('aside')}Set aside</button>
       ${link}</span>`;
   }
+  /* A narrative the worker named by itself (build p67 sends named: 'auto') carries its computed name as a working title
+     until a person or the model names it. Under an older worker the field is absent and nothing is shown. */
+  const WORKTITLE_T = 'A working title computed from the narrative\'s own rows, not yet reviewed by a person. It changes when a person or the model names it.';
   const layerTitle = l => (l === 1 ? 'Layer 1: an official route' : l === 2 ? 'Layer 2: a signed-in collector on the Mac' : 'Layer 3: a keyless read from the worker');
   /* One evidence card. The same card in Unsorted and under a section; what differs by kind is what the row carries. */
   function Card({ c, desk, canWrite, onDone, onFile, secs, cited, onDrag, picked, onPick }) {
     const r = c.r, k = c.kind; const lvl = c.w.score >= 60 ? 3 : c.w.score >= 30 ? 2 : 1; const pick = !!(canWrite && onPick && c.pin);
-    const kindWord = k === 'media' ? 'story' : k === 'social' ? 'post' : k === 'actors' ? 'post by ' + r.who : k === 'narratives' ? 'Narrative' : 'Upcoming';
+    const kindWord = k === 'media' ? 'story' : k === 'social' ? 'post' : k === 'actors' ? 'post by ' + r.who : k === 'narratives' ? (r.named === 'auto' ? 'Narrative, working title' : 'Narrative') : 'Upcoming';
     const name = (c.pinned ? 'Pinned. ' : '') + (k === 'upcoming' ? 'Upcoming: ' + r.event + ' on ' + r.date : kindWord + ': ' + String(c.title || '').slice(0, 120));
     const src = k === 'media' ? html`<span class="den-src"><b>${r.outlet}</b> ${r.tier ? html`<span>${r.tier}${r.juris && r.juris !== 'au' ? ', ' + r.juris.toUpperCase() : ''}</span>` : null}</span>`
-      : k === 'narratives' ? html`<span class="den-src"><b>Narrative</b></span>` : k === 'upcoming' ? html`<span class="den-src"><b>Upcoming</b></span>`
+      : k === 'narratives' ? html`<span class="den-src"><b>Narrative</b>${r.named === 'auto' ? html` <span class="den-chip den-worktitle" title=${WORKTITLE_T}>working title</span>` : null}</span>` : k === 'upcoming' ? html`<span class="den-src"><b>Upcoming</b></span>`
       : html`<span class="den-src"><b>${CH[r.platform] || r.platform}</b> ${r.sub ? html`<span>r/${r.sub} </span>` : null}${k === 'social' && r.registered ? html`<span>registered </span>` : null}${(r.layers || []).map(l => html`<span key=${l} class="den-chip" title=${layerTitle(l)}>L${l}</span>`)}</span>`;
     const when = k === 'upcoming' ? html`<span>${String(r.weekday || '').slice(0, 3)} ${r.date}${r.yearWritten ? '' : html` <span title="The source wrote no year: this is the next time that day comes">*</span>`}</span>` : k === 'narratives' ? (r.last ? aest(r.last) : '') : (k !== 'media' && r.eng_at ? 'read ' + since(r.eng_at) : aest(r.ts));
     const meta = [];
@@ -230,7 +272,7 @@
         onClick=${e => { if (!pick || !e.shiftKey || (e.target.closest && e.target.closest('button, a, select, input, textarea'))) return; e.preventDefault(); onPick(c.key, !picked); }}>
       <div class="den-card-top">${pick ? html`<input type="checkbox" class="den-pick" data-tour="card-pick" checked=${!!picked} aria-label=${'Select: ' + String(c.title || '').slice(0, 80)} title="Select it, to set several aside at once (shift-click selects too)" onChange=${e => onPick(c.key, e.target.checked)} />` : null}<span class="den-w" title=${'Weight ' + c.w.score + ' of 99' + (c.w.why.length ? ': ' + c.w.why.join(', ') : '') + '. Worked out on this page from the row\'s own figures.'}><span class="den-sr">Weight </span>${c.w.score}</span>${src}<span class="den-when">${when}</span></div>
       ${k === 'actors' ? html`<div class="den-who"><span class="den-t">${r.who}</span> <span class="den-role">${r.role === 'mp' ? 'MP' + (r.party ? ', ' + r.party : '') : r.role === 'org' ? 'organisation' : r.role}</span></div>` : null}
-      <div class=${'den-card-title' + (k === 'actors' ? ' body' : ' den-t')}>${c.pinned ? html`<span class="den-pinmark" title="Pinned to the report: a draft must cover it">Pinned</span>` : null}${c.title}</div>
+      <div class=${'den-card-title' + (k === 'actors' ? ' body' : ' den-t')}>${c.pinned ? html`<span class="den-pinmark" title="Pinned to the report: a draft must cover it">${Ic('pin')}<span class="den-sr">Pinned</span></span>` : null}${c.title}</div>
       ${k === 'media' && r.n > 1 ? html`<span class="den-sub">also in ${r.outlets.slice(1, 6).join(', ')}${r.n > 6 ? ' and ' + (r.n - 6) + ' more' : ''}</span>` : null}
       ${k === 'social' && (r.term || r.hashtag) ? html`<span class="den-sub">found by ${r.hashtag ? '#' + r.hashtag : '"' + r.term + '"'}</span>` : null}
       ${k === 'narratives' && r.claim ? html`<span class="den-sub">${r.claim}</span>` : null}
@@ -246,8 +288,8 @@
       </div>
       <div class="den-card-act">
         ${c.pin ? html`<${RowActions} r=${Object.assign({}, r, { pinned: c.pinned })} kind=${kindWord} desk=${desk} canWrite=${canWrite} onDone=${onDone} />`
-          : k === 'narratives' ? html`<button class="den-link" onClick=${() => window.AXUI.goto('narratives', { id: r.id })} aria-label=${'Open the narrative: ' + r.label}>Open</button>`
-          : web(r.url) ? html`<a class="den-link" href=${web(r.url)} target="_blank" rel="noopener" aria-label="Open the source of this date">Open</a>` : null}
+          : k === 'narratives' ? html`<button class="den-link" onClick=${() => window.AXUI.goto('narratives', { id: r.id })} aria-label=${'Open the narrative: ' + r.label}>${Ic('open')}Open</button>`
+          : web(r.url) ? html`<a class="den-link" href=${web(r.url)} target="_blank" rel="noopener" aria-label="Open the source of this date">${Ic('open')}Open</a>` : null}
         ${canWrite && onFile ? html`<select class="den-in den-file" data-tour="card-file" aria-label="File under a section" title=${c.pin ? 'Where this card is filed is kept with the desk, for everyone on it' : 'Where this card is filed is kept on this computer'} value=${c.sec || ''} onChange=${e => onFile(c, e.target.value)}><option value="">${c.sec ? 'Back to Unsorted' : 'File under...'}</option>${secs.map((s, i) => html`<option key=${s.id} value=${s.id}>${secKey(i) ? secKey(i) + '  ' : ''}${s.title}</option>`)}</select>` : null}
       </div>
     </article>`;
@@ -265,7 +307,8 @@
     const root = useRef(null); const last = useRef(''); const fref = useRef(filing); fref.current = filing;
     // a card that was moved or redrawn under the keyboard keeps the focus: the card itself, or the one that took its place
     useEffect(() => { if (!last.current || !root.current || document.activeElement !== document.body) return; const el = Array.from(root.current.querySelectorAll('.den-row')).find(x => x.dataset.key === last.current); if (el) el.focus({ preventScroll: true }); });
-    const sigs = b.data && b.data.missed && Array.isArray(b.data.missed.signals) ? b.data.missed.signals : [];
+    // the checks that weigh a card and sit under a column; a collection gap is none of them (it is said on Collection only)
+    const sigs = useMemo(() => (b.data && b.data.missed && Array.isArray(b.data.missed.signals) ? b.data.missed.signals.filter(s => s && s.sig !== 'gap') : []), [b.data]);
     const secs = useMemo(() => desk.sections.filter(s => s.kind !== 'sources' && desk.options.hidden.indexOf(s.id) < 0), [desk]);
     const cards = useMemo(() => deck(b.data, sigs).map(c => Object.assign(c, { sec: filing[c.key] && secs.some(s => s.id === filing[c.key]) ? filing[c.key] : '' })), [b.data, filing, secs]);   // eslint-disable-line
     const unfile = keys => { const m = Object.assign({}, fref.current); let ch = false; keys.forEach(k => { if (m[k]) { delete m[k]; ch = true; } }); if (ch) setFiling(m); };
@@ -320,7 +363,8 @@
     const uns = cards.filter(x => !x.sec); const counts = uns.reduce((a, x) => { a[x.kind] = (a[x.kind] || 0) + 1; return a; }, {}); const needle = find.trim().toLowerCase();
     const shown = uns.filter(x => (kind === 'all' || x.kind === kind) && (!needle || (String(x.title || '') + ' ' + (x.r.outlet || '') + ' ' + (x.r.who || '') + ' ' + (x.r.what || '') + ' ' + (x.r.claim || '')).toLowerCase().indexOf(needle) >= 0)).sort(byWeight);
     const main = shown.filter(x => x.pinned || x.w.score >= LOW), low = shown.filter(x => !x.pinned && x.w.score < LOW);
-    const gaps = sigs.filter(s => s.sig === 'gap'); const unc = sigs.filter(s => !covered(s, brief, texts));
+    // a check is "not in the brief" only once there is a brief to be in; once filed, what it left out was acknowledged at filing
+    const unc = brief ? sigs.filter(s => !covered(s, brief, texts)) : []; const filedB = !!(brief && brief.status === 'filed'); const ackd = new Set(filedB ? (brief.acknowledged || []).map(a => (a && typeof a === 'object' ? a.key : a)) : []);
     const selected = sel.map(k => uns.find(x => x.key === k)).filter(x => x && x.pin);   // a card that left Unsorted leaves the selection
     const card = x => html`<${Card} key=${x.key} c=${x} desk=${desk} canWrite=${canWrite} onDone=${done} onFile=${fileCard} secs=${secs} cited=${citedN(x)} onDrag=${setDrag} picked=${!x.sec && sel.indexOf(x.key) >= 0} onPick=${!x.sec ? pickCard : null} />`;
     const total = { media: (d.media || []).length, social: (d.social || []).length, actors: (d.actors || []).length, narratives: (d.narratives || []).length, upcoming: (d.upcoming || []).length };
@@ -331,12 +375,11 @@
       ${b.err ? html`<div class="den-notice bad" role="alert">The board could not be refreshed: ${b.err} What is shown is the last read. <button class="den-mini" onClick=${b.reload}>Try again</button></div>` : null}
       ${d.capped ? html`<div class="den-notice">This window holds more rows than one board reads (${fmtN(4000)}). The newest are shown; shorten the window in Options to see all of a busy day.</div>` : null}
       ${offer ? html`<div class="den-notice" data-tour="mute-offer" role="alert">${offer.text} A mute hides its rows on this desk only, and can be removed in Options. <div><button class="den-mini primary" onClick=${() => mute(true)}>Mute it on this desk</button><button class="den-mini" onClick=${() => mute(false)}>Not now</button></div></div>` : null}
-      <div class="den-board">
+      <div class=${'den-board' + (drag ? ' dragging' : '')}>
         <section class=${'den-col den-unsorted' + (over === 'unsorted' ? ' over' : '')} aria-label="Unsorted" data-tour="unsorted" data-n=${uns.length} onDragOver=${dragOver('')} onDrop=${drop('')} onDragLeave=${() => setOver('')}>
           <header class="den-col-h"><h3>Unsorted</h3><span class="den-count" title="Cards not yet filed under a section">${uns.length}</span>
             <p class="den-colsub">${canWrite ? 'The window\'s triage queue. Drag a card to a section, or focus it and press the section\'s number. Where a story or post is filed is kept with the desk, for everyone on it; a narrative or a date is filed on this computer only.' :'The window\'s rows, by weight. Your key is read-only: filing, pinning and setting aside need a full key.'}</p></header>
           <div class="den-col-tools">
-            ${gaps.map(g => html`<button key=${g.key} class="den-gapline" onClick=${() => setTab('collection')} title=${g.detail}><b>${g.title}.</b> <span>Not a quiet day: see why</span></button>`)}
             <label class="den-search"><span class="den-sr">Search the unsorted cards</span><input class="den-in" type="search" data-tour="search" value=${find} placeholder="Search rows ( / )" onInput=${e => setFind(e.target.value)} /></label>
             <div class="den-filter" data-tour="filter" role="group" aria-label="Kind of row">${[['all', 'All']].concat(KINDS_ROW).map(k => html`<button key=${k[0]} class="den-seg" data-kind=${k[0]} aria-pressed=${kind === k[0] ? 'true' : 'false'} onClick=${() => setKind(k[0])}>${k[1]} <span class="n">${k[0] === 'all' ? uns.length : counts[k[0]] || 0}</span></button>`)}</div>
             ${canWrite ? html`<button class="den-mini quiet den-undo" data-tour="undo" data-what=${undo ? undo.text : ''} disabled=${!undo} title=${undo ? undo.text : 'Nothing to undo'} onClick=${() => { const u = undo; setUndo(null); if (u) u.run(); }}>Undo${undo ? html`<span class="den-undo-t">: ${undo.text}</span>` : null}</button>` : null}
@@ -366,8 +409,8 @@
           // a column with no card is compact (den.css .den-col.empty): it keeps its place, its key, its state and Write, and takes a drop, so a quiet desk is not a row of wide empty boxes
           return html`<section key=${s.id} class=${'den-col sp' + (i % 11) + (over === s.id ? ' over' : '') + (mine.length ? '' : ' empty')} data-sec=${s.id} data-tour="col" aria-label=${s.title} onDragOver=${dragOver(s.id)} onDrop=${drop(s.id)} onDragLeave=${() => setOver('')}>
             <header class="den-col-h">${key ? html`<span class="den-kbd" title=${'Press ' + key + ' to file the focused card here'}>${key}</span>` : null}<h3>${s.title}</h3><span class="den-count" title="Cards filed here">${mine.length}</span></header>
-            <div class="den-col-meta"><span class=${'den-chip ' + st[1]}>${st[0]}</span>${un.length ? html`<span class="den-chip neg" title=${un.map(x => x.title).join('; ')}>${plural(un.length, 'check')} uncovered</span>` : null}<span class="den-spacer"></span>
-              <button class="den-mini" data-tour="col-write" aria-label=${'Write ' + s.title} onClick=${() => onWrite(s.id)}>${canWrite ? 'Write' : 'Read'}</button></div>
+            <div class="den-col-meta"><span class=${'den-chip ' + st[1]}>${st[0]}</span>${un.length ? html`<span class="den-chip den-unc" title=${un.map(x => x.title).join('; ')}>${filedB ? (un.every(x => ackd.has(x.key)) ? un.length + ' acknowledged at filing' : plural(un.length, 'check') + ' not in the filed brief') : plural(un.length, 'check') + ' not in the brief yet'}</span>` : null}<span class="den-spacer"></span>
+              <button class="den-mini" data-tour="col-write" aria-label=${'Write ' + s.title} onClick=${() => onWrite(s.id)}>${Ic(canWrite ? 'pen' : 'eye')}${canWrite ? 'Write' : 'Read'}</button></div>
             <div class="den-col-body">${mine.length ? mine.map(card) : html`<p class="den-drop">${canWrite ? html`<span>Drop here${key ? html`<span>, or press <span class="den-kbd">${key}</span> on a card</span>` : null}.</span>` : 'No card is filed here.'}</p>`}</div>
             ${String(text || '').trim() ? html`<div class="den-excerpt"><span class="den-mono">${wc(text)} words</span><p>${String(text).replace(/\s*\[[A-Z]:[^\]]+\]/g, '').slice(0, 170)}${String(text).length > 170 ? '...' : ''}</p></div>` : null}
           </section>`; })}
@@ -391,7 +434,7 @@
     fmtDay, aest, since, ls, say, web, q, BUSY_WAITS, get, getText, useLoad, Loading, Failed, Empty, Boundary, Panel,
     Dialog, engText, tell, openEvidence, KINDS_ROW, fbTotal, sydDay, sydOffset, dayEnd, dayWords, BUDGET_T, wc, plural,
     toCards, sigsFor, weigh, LOW, deck, byWeight, covered, secOfKind, KIND_SEC, sigSec, secState, secKey, citeOf,
-    STRIP_PENDING, CHECKS, Strip, RowActions, layerTitle, Card, Board
+    STRIP_PENDING, CHECKS, Strip, RowActions, layerTitle, Card, Board, ICONS, Ic, WORKTITLE_T
   };
   const { BriefPanel } = PARTS.brief(D);
   const { WatchPanel, CollectionPanel, OptionsPanel } = PARTS.desk(D);
@@ -403,7 +446,7 @@
   }
   const backToAxiom = () => { if (typeof window.go === 'function') window.go('command'); else if (window.AXUI.goto) window.AXUI.goto('command', {}); };
   /* The Den's own top bar. It is drawn even when no desk could be read, so the way back is never lost. */
-  function TopBar({ children }) { return html`<header class="den-top den-head"><button class="den-back" onClick=${backToAxiom}><span aria-hidden="true">${'\u2039'}</span> Back to AXIOM</button><span class="den-brand">Anne's Den</span>${children || null}</header>`; }
+  function TopBar({ children }) { return html`<header class="den-top den-head"><button class="den-back" onClick=${backToAxiom}>${Ic('back')} Back to AXIOM</button><span class="den-brand">Anne's Den</span>${children || null}</header>`; }
 
   function DenApp() {
     const D = useLoad(() => get('/den/desks', 'desks'), [], 'desks'); const [deskId, setDeskId] = useState(() => ls.get('ax_den_desk', '')); const [tab, setTabRaw] = useState(() => ls.get('ax_den_tab', 'today')); const [tick, setTick] = useState(0); const [keys, setKeys] = useState(false);
@@ -468,7 +511,7 @@
         ${budget ? html`<span class="den-budget" data-tour="budget" data-left=${budget.left} data-cap=${budget.cap} title=${BUDGET_T}><span>model calls today: <b>${budget.used} of ${budget.cap}</b></span>
           <span class="den-meter" role="meter" aria-label="Model calls today, used of the cap" aria-valuemin="0" aria-valuemax=${budget.cap} aria-valuenow=${Math.min(budget.used, budget.cap)} title=${BUDGET_T}><i class=${budget.cap && budget.used >= budget.cap ? 'full' : budget.cap && budget.used / budget.cap >= 0.75 ? 'near' : ''} style=${{ width: (budget.cap ? Math.min(100, Math.round(budget.used / budget.cap * 100)) : 0) + '%' }} aria-hidden="true"></i></span></span>` : null}
         ${canWrite ? null : html`<span class="den-chip warn" data-tour="readonly">read-only key</span>`}
-        <button class="den-mini quiet" onClick=${() => setTick(t => t + 1)} title="Read the archive again">Refresh</button>${window.DenTour && typeof window.DenTour.open === 'function' ? html`<button class="den-mini quiet den-guide" data-tour="guide" aria-label="Guided tour" title="Guided tour: one day on the desk, step by step" onClick=${() => window.DenTour.open({ via: 'guide' })}>Guide</button>` : null}<button class="den-mini quiet den-keys" data-tour="help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick=${() => setKeys(true)}>?</button>
+        <button class="den-mini quiet" onClick=${() => setTick(t => t + 1)} title="Read the archive again">${Ic('refresh')}Refresh</button>${window.DenTour && typeof window.DenTour.open === 'function' ? html`<button class="den-mini quiet den-guide" data-tour="guide" aria-label="Guided tour" title="Guided tour: one day on the desk, step by step" onClick=${() => window.DenTour.open({ via: 'guide' })}>${Ic('guide')}Guide</button>` : null}<button class="den-mini quiet den-keys" data-tour="help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick=${() => setKeys(true)}>${Ic('keys')}<span aria-hidden="true">?</span></button>
       <//>
       <div class="den-rail">
         <div class="den-tabs" role="tablist" aria-label="Anne's Den">${TABS.map(t => html`<button key=${t[0]} role="tab" id=${'den-tab-' + t[0]} class="den-tab" data-attn=${t[0] === 'collection' && gaps && gaps.length ? '1' : null} aria-selected=${tab === t[0] ? 'true' : 'false'} aria-controls="den-tabpanel" onClick=${() => setTab(t[0])}>${t[1]}</button>`)}</div>
