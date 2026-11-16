@@ -1226,8 +1226,9 @@ wait a minute and ask again.
 
 ## 10. Release 8 - the release-ready Den (16 November 2026; build `2026-11-16.studio-p67`, page `den.css?v=r48`, `den.js?v=r52`, five new part files at `?v=r1`)
 
-Branch `claude/den-release`, cut from `main` at c2cff62 (worker p66, page `den.js?v=r51`, `den.css?v=r47`). **Not pushed,
-not merged to `main`, not deployed**: s.10.8 is the owner's. The page is now six files: `docs/den.js` (the shell: shared
+Branch `claude/den-release`, cut from `main` at c2cff62 (worker p66, page `den.js?v=r51`, `den.css?v=r47`). Merged to
+`main` (93bf0fd) and live on GitHub Pages on 16 November 2026; the owner deployed the worker the same day at 06:08 UTC
+(s.10.8 records the deploy). The page is now six files: `docs/den.js` (the shell: shared
 helpers, the rail, the Board, the top bar, `DenApp`), `docs/den-brief.js` and `docs/den-brief.css` (the Brief),
 `docs/den-desk.js` and `docs/den-desk.css` (Watch, Collection, Options), `docs/den-tour.js` and `docs/den-tour.css` (the
 guided tour), with `docs/den.css` still the frame and the tokens. `den-brief.js` and `den-desk.js` are factories that
@@ -1420,6 +1421,14 @@ full `node tests/run.mjs all` was not run here; CI on the pushed branch is the f
 | Firefox and WebKit | Not installed here | CI |
 
 ### 10.8 The owner's steps for this release
+
+Done on 16 November 2026. The branch was pushed, CI ran on it, and the owner merged it to `main` (93bf0fd); GitHub Pages
+then served `den.js?v=r52`, `den.css?v=r48` and the five part files at `?v=r1`. A first deploy at 04:58 UTC ran before
+the merge and uploaded the p66 code again, which changed nothing. The owner deployed again from the merged `main` at
+06:08 UTC: the live worker answers build `2026-11-16.studio-p67`, revision 93bf0fd, deploy token `aa4787ea59c482f4`, and
+`/engine/status` answered 200 after the upload. Bindings, vars, secrets and crons were unchanged. Still open from s.10.7:
+real rows, a real draft under the new prompt, working titles on real clusters, and the tick's real wall clock (items 3,
+4 and 6 below).
 
 ```
 git push origin claude/den-release                                                   # then wait for CI to pass
