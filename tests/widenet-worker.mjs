@@ -36,7 +36,8 @@ const gnews = items => '<?xml version="1.0"?><rss><channel><title>g</title>' + i
 
 await S.t('WN1 the lexicon sweep through Google News', async () => {
   const w = await mk(); const asked = []; const auq = w.mod.__test.AU_QUERY_RX;
-  w.answer(/news\.google\.com\/rss\/search/, u => { const q = decodeURIComponent((String(u).match(/[?&]q=([^&]+)/) || [])[1] || '').replace(/\+/g, ' '); asked.push(q);
+  // p67: the run also asks one OR-query an issue (tests/den-widen-worker.mjs DW9); this case reads the per-term pass
+  w.answer(/news\.google\.com\/rss\/search/, u => { const q = decodeURIComponent((String(u).match(/[?&]q=([^&]+)/) || [])[1] || '').replace(/\+/g, ' '); if (!/ OR /.test(q)) asked.push(q);
     return T(gnews([{ id: 'a' + asked.length, t: 'Senate to debate the fuel tax credit scheme again', o: 'Regional Daily' }, { id: 'b' + asked.length, t: 'Local bakery wins a ribbon at the show', o: 'Town Crier' }]), 200, 'application/rss+xml'); });
   await add(w, { id: 'lex_test', name: 'Lexicon sweep (test)', tier: 'sweep', urls: { lexicon: 'gnews' } });
   const a = await sweep(w, 'lex_test'); eq([a.ok, a.method], [true, 'lexicon'], JSON.stringify(a).slice(0, 300));

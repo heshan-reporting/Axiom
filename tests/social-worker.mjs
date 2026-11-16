@@ -48,7 +48,7 @@ globalThis.fetch = async (url, init) => {
   const u = String(url); const method = (init && init.method) || 'GET';
   calls.push({ u, method, body: init && init.body ? String(init.body) : '', headers: (init && init.headers) || {} });
   // Bluesky
-  if (u.startsWith('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts')) {
+  if (/^https:\/\/(public\.)?api\.bsky\.app\/xrpc\/app\.bsky\.feed\.searchPosts/.test(u)) {   // p67: search asks api.bsky.app first
     const q = decodeURIComponent((u.match(/q=([^&]+)/) || [])[1] || '');
     if (/fuel tax credit/.test(q)) return R({ posts: [bpost(AU1, 'did:plc:aaa', 'The fuel tax credit fight is on: the Minerals Council says it is not a subsidy #auspol', [12, 3, 4]), bpost(US1, 'did:plc:ccc', 'Our fuel tax credit in Texas is a joke, Congress should act', [2, 0, 0]), bpost(AU2, 'did:plc:bbb', 'Albanese hedges on the diesel rebate in Perth today', [30, 8, 1])] });
     if (/auspol/.test(q)) return R({ posts: [bpost(AU1, 'did:plc:aaa', 'auspol post', [1, 0, 0])] });

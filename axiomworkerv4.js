@@ -443,7 +443,7 @@ const FEED_TIMEOUT = 5000;  // per-feed abort; repeat offenders get circuit-brok
  * stale-while-revalidate background refresh, and the cron pre-warm.
  * Returns the JSON string (and writes it to KV unless debug).
  */
-async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, onHealth = null } = {}) {
+async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, onHealth = null, onCore = null } = {}) {
   const qw  = q.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
   const cacheKey = `allnews2_${q || 'all'}_${max}_${hours}`;
   const now  = Date.now();
@@ -491,6 +491,9 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, 
 
   let items = [];
   results.forEach((v) => { if (Array.isArray(v)) items.push(...v); });
+  // p67: the cron archives the core feeds' own items here, before the registry rows are merged in and before the newest-`max`
+  // cut, so a busy half hour or a late-indexed sweep item is still filed (copies: the snapshot below enriches its own)
+  if (onCore) { try { await onCore(items.map(it => Object.assign({}, it))); } catch (e) {} }
   // The registry's sources (mastheads without a working feed, official offices,
   // sector press, podcasts...) are swept by the cron into the archive; merge
   // their recent rows here so /allnews is the whole estate, not just the core.
@@ -2471,10 +2474,10 @@ async function mindCoverage(env, ns, limit) {
 async function socialBsky(tag) {
   const posts = [];
   try {
-    // Public AppView search - no auth required.
-    const r = await cfetch('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=' +
-      encodeURIComponent('#' + tag) + '&limit=25&sort=latest',
-      { headers: { 'User-Agent': 'AXIOM/6.0' }, signal: abortAfter(6000) });
+    // AppView search - no auth required. api.bsky.app first; the public host when that refuses (p67, see bskySearchGet)
+    const qs = 'q=' + encodeURIComponent('#' + tag) + '&limit=25&sort=latest';
+    let r = await cfetch('https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?' + qs, { headers: { 'User-Agent': 'AXIOM/6.0' }, signal: abortAfter(6000) });
+    if (r.status === 403) r = await cfetch('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?' + qs, { headers: { 'User-Agent': 'AXIOM/6.0' }, signal: abortAfter(6000) });
     if (!r.ok) return posts;
     const d = await r.json();
     ((d && d.posts) || []).forEach((p) => {
@@ -4946,17 +4949,78 @@ async function archiveItems(env, kind, rows, strict) {
     return counted ? res.reduce((a, r) => a + ((r && r.meta && r.meta.changes) || 0), 0) : batch.length;
   } catch (e) { if (strict) throw e; return 0; }
 }
-/** Archive an /allnews snapshot (the JSON string buildAllNews returns). */
+/* p67: a core feed's row carries what the Den's Board admits rows by - meta.issues (the wide collection tagging, the same
+ * issueTag every registry row gets), the feed key (source), its tier and jurisdiction, and the outlet's name (for a Google
+ * News sweep the outlet is the headline's own " - Outlet" suffix, moved off the headline the way gnewsItems does). Never
+ * reg:1: buildAllNews reads reg=1 rows back as registry rows. tagv is the lexicon the tags were computed under, so the
+ * back-fill can tag them again when a person approves a desk term. */
+const ARC_GN_DASH = '-' + String.fromCharCode(8211, 8212);   // a hyphen, an en dash, an em dash (the worker source stays ASCII)
+const ARC_GN_SUFFIX = new RegExp('\\s[' + ARC_GN_DASH + ']\\s([^' + ARC_GN_DASH + ']{2,60})$');
+function arcLexVersion() { return arcHash(JSON.stringify(DESK_LEX.q || {}) + '|' + CLIENT_ISSUES.map(ci => ci.id + ':' + String((ci.wide || ci.rx).source).length).join(',')); }
+function arcCoreRow(it, lexv) {
+  const src = String(it.src || ''); const cm = CORE_META[src] || null; let title = String(it.title || ''); let outlet = cm ? cm[0] : '';
+  if (/^gnews_/.test(src)) { const m = title.match(ARC_GN_SUFFIX); if (m) { outlet = m[1].trim(); title = title.slice(0, m.index).trim(); } }
+  const meta = { source: src, tier: cm ? (cm[1] || 'core') : 'sweep', juris: cm ? (cm[2] || 'au') : 'au', issues: issueTag(title + ' ' + String(it.desc || '')), tagv: lexv || arcLexVersion() };
+  if (outlet) meta.outlet = outlet.slice(0, 60);
+  if (it.parties && it.parties.length) meta.parties = it.parties;
+  return { src, title, body: it.desc, url: it.link, tone: it.tone, meta, ts: Date.parse(it.date || '') || 0 };
+}
+/** Archive an /allnews snapshot (the JSON string buildAllNews returns), or a list of core items. */
 async function arcNewsSnap(env, jsonStr) {
   try {
-    const d = JSON.parse(jsonStr);
+    const items = Array.isArray(jsonStr) ? jsonStr : (JSON.parse(jsonStr).items || []);
     // registry rows came out of the archive; only the core feeds' items go back in
-    return archiveItems(env, 'news', (d.items || []).filter(it => !it.reg).map(it => ({
-      src: it.src, title: it.title, body: it.desc, url: it.link, tone: it.tone,
-      meta: it.parties && it.parties.length ? { parties: it.parties } : null,
-      ts: Date.parse(it.date) || 0,
-    })));
+    const lexv = arcLexVersion(); const rows = items.filter(it => it && !it.reg && it.title).map(it => arcCoreRow(it, lexv));
+    let n = 0; for (let i = 0; i < rows.length; i += 150) n += await archiveItems(env, 'news', rows.slice(i, i + 150));
+    return n;
   } catch (e) { return 0; }
+}
+const CORE_ARCHIVE_MAX = 600;   // core items offered to the archive a tick (newest first; the rest are older than the window)
+/** The tick's core step: the snapshot the dashboard reads, and the core feeds' items archived before its cut (p67). */
+async function coreNewsTick(env) {
+  let core = []; const now = Date.now();
+  const snap = await buildAllNews(env, { q: '', max: 120, hours: 24, onHealth: h => sourcesCoreHealth(env, h), onCore: items => { core = items; } });
+  const seen = new Set(); const cut = now - 24 * 3600000;
+  const pick = core.map(it => { const t = Date.parse(it.date || ''); return Object.assign(it, { _t: isNaN(t) ? 0 : t }); })
+    .filter(it => it.link && it.title && (it._t === 0 || it._t >= cut) && !seen.has(it.link) && seen.add(it.link))
+    .sort((a, b) => b._t - a._t).slice(0, CORE_ARCHIVE_MAX).map(it => { delete it._t; return enrichItem(it); });
+  const archived = await arcNewsSnap(env, pick);
+  return { snap, offered: pick.length, archived };
+}
+/* p67: the back-fill. News rows of the last week that carry no meta.issues (core rows filed before p67, rows handed in
+ * without tags), or whose tags the worker computed under an older lexicon (meta.tagv: a person approved a desk term since),
+ * are tagged here and written back - [] included, so a row is not asked again. Newest first, a bounded number a tick: a
+ * walk down from the newest row (KV tagfill {v, hi, lo}); rows filed after the walk began are taken from the top. A row
+ * tagged at collection (registry, lexicon, social) carries no tagv and is left as it is. */
+const TAGFILL_LIMIT = 300;
+async function arcTagFill(env, opts) {
+  opts = opts || {}; const limit = Math.min(Math.max(parseInt(opts.limit, 10) || TAGFILL_LIMIT, 1), 1000);
+  const out = { ok: true, read: 0, tagged: 0 };
+  if (!env.MIND_DB || !(await ensureArchive(env))) return Object.assign(out, { ok: false });
+  try { await deskLexiconLoad(env); } catch (e) {}
+  const db = env.MIND_DB; const now = Date.now(); const lexv = arcLexVersion(); const since = now - 7 * 86400000;
+  let st = {}; try { st = JSON.parse((await kvGet(env.AXIOM_KV, 'tagfill')) || '{}') || {}; } catch (e) { st = {}; }
+  const top = Number(((await db.prepare('SELECT MAX(id) m FROM arc_items').first()) || {}).m) || 0;
+  if (st.v !== lexv || !(st.hi >= 0)) st = { v: lexv, hi: top, lo: top + 1 };
+  const need = "(meta IS NULL OR instr(meta,'\"issues\"')=0 OR (instr(meta,'\"tagv\"')>0 AND json_valid(meta) AND json_extract(meta,'$.tagv')<>?))";
+  const pick = [];
+  // rows filed since the walk began, oldest of them first (they are few: collection tags its own rows)
+  if (top > st.hi) {
+    const rs = ((await db.prepare("SELECT id, title, substr(body,1,300) body, meta FROM arc_items WHERE kind='news' AND id>? AND ts>? AND " + need + ' ORDER BY id ASC LIMIT ?').bind(st.hi, since, lexv, limit).all()).results) || [];
+    pick.push(...rs); st.hi = rs.length >= limit ? rs[rs.length - 1].id : top;
+  }
+  // the walk down from the newest
+  if (st.lo > 0 && pick.length < limit) {
+    const n = limit - pick.length;
+    const rs = ((await db.prepare("SELECT id, title, substr(body,1,300) body, meta FROM arc_items WHERE kind='news' AND id<? AND ts>? AND " + need + ' ORDER BY id DESC LIMIT ?').bind(st.lo, since, lexv, n).all()).results) || [];
+    pick.push(...rs); st.lo = rs.length >= n ? rs[rs.length - 1].id : 0;
+  }
+  out.read = pick.length;
+  const stmts = pick.map(r => db.prepare("UPDATE arc_items SET meta=json_set(CASE WHEN json_valid(meta) THEN meta ELSE '{}' END,'$.issues',json(?),'$.tagv',?) WHERE id=?").bind(JSON.stringify(issueTag(String(r.title || '') + ' ' + String(r.body || ''))), lexv, r.id));
+  for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100));
+  out.tagged = stmts.length; out.walking = st.lo > 0;
+  await kvPut(env.AXIOM_KV, 'tagfill', JSON.stringify(st), 30 * 86400);
+  return out;
 }
 /** Escape LIKE wildcards in user queries. */
 function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) + '%'; }
@@ -5841,7 +5905,7 @@ async function srcRender(env, src) {
  * articles on an issue. Every request to a site added here goes through pubFetch: robots.txt obeyed, the honest user
  * agent, ten seconds a host, a refusal backed off for a day. Nobody is named: no creator, author or commenter is read.
  * Every address and answer shape is as each service documents it, and unverified until a live sweep (DEN.md s.9). */
-const LEX_PER_RUN = { gnews: 12, gdelt: 3 };
+const LEX_PER_RUN = { gnews: 12, gdelt: 3, issues: 14 };   // issues: Google News OR-queries by issue a run (p67), the desks' first
 const LEMMY_HOST_RX = /^[a-z0-9][a-z0-9.-]{1,80}\.[a-z]{2,24}(\/c\/[a-z0-9_]{1,60})?$/;
 const COMMUNITY_POLITICS_RX = /politic|auspol/i;
 const WP_COMMENT_SOURCES = 12;                 // WordPress sites whose articles are looked through for comments in one run, in turn
@@ -5860,11 +5924,42 @@ async function lexTerms(env, src, n) {
 }
 /** Source Registry method `lexicon` (urls.lexicon = gnews | gdelt): the lexicon's own terms asked of a news index, a
  *  few a run. Only a headline that carries a client issue is kept; the term that found it rides on the row (meta.q). */
+/* p67: Google News by issue. Each issue's terms (the lexicon's and those a person approved on a desk) asked as one quoted
+ * OR-query, at most LEX_ISSUE_TERMS terms a query (an issue with more is split evenly), for the last day. The issues a desk
+ * owns are asked every run; the other clients' issues fill the rest of the run in turn. The per-term rotation below stays
+ * as the deep pass (two days, every term on its own). Only a headline that carries a client issue is kept, as before. */
+const LEX_ISSUE_TERMS = 8;
+function lexIssueChunks(ids) {
+  const out = [];
+  ids.forEach(id => { const ci = CLIENT_ISSUES.find(c => c.id === id); if (!ci) return;
+    const terms = []; (ci.q || []).concat(DESK_LEX.q[id] || []).forEach(t => { t = String(t).replace(/["()]/g, ' ').replace(/\s+/g, ' ').trim(); if (t && terms.indexOf(t) < 0) terms.push(t); });
+    if (!terms.length) return; const k = Math.ceil(terms.length / LEX_ISSUE_TERMS); const size = Math.ceil(terms.length / k);
+    for (let i = 0; i < terms.length; i += size) { const part = terms.slice(i, i + size); out.push('(' + part.map(t => '"' + t + '"').join(' OR ') + ')' + (part.some(t => AU_QUERY_RX.test(t)) ? '' : ' australia') + ' when:1d'); } });
+  return out;
+}
+async function lexIssueQueries(env, src) {
+  const deskIds = await deskIssueIds(env); const desk = lexIssueChunks(deskIds); const rest = lexIssueChunks(CLIENT_ISSUES.map(ci => ci.id).filter(id => deskIds.indexOf(id) < 0));
+  const cap = LEX_PER_RUN.issues; const key = 'lexi_cur_' + ((src && src.id) || 'x');
+  let cur = {}; try { cur = JSON.parse((await kvGet(env.AXIOM_KV, key)) || '{}') || {}; } catch (e) { cur = {}; }
+  const d = Number(cur.d) || 0, r = Number(cur.r) || 0;
+  const first = desk.length > cap ? rotateTake(desk, d, cap) : desk;
+  const rot = rotateTake(rest, r, Math.max(0, cap - first.length));
+  if (!(src && src.probe)) await kvPut(env.AXIOM_KV, key, JSON.stringify({ d: desk.length > cap ? (d + cap) % desk.length : 0, r: rest.length ? (r + rot.length) % rest.length : 0 }), 30 * 86400);
+  return first.concat(rot);
+}
 async function srcLexicon(env, src) {
   const engine = String((src.urls || {}).lexicon || '') === 'gdelt' ? 'gdelt' : 'gnews';
   const terms = await lexTerms(env, src, LEX_PER_RUN[engine]);
   if (!terms.length) return { ok: false, items: [], detail: 'the lexicon has no search terms' };
   const items = []; const errs = []; const seen = new Set(); let answered = 0; let refused = false;
+  if (engine === 'gnews' && !src.probe) {
+    for (const q of await lexIssueQueries(env, src)) {
+      const f = await srcFetch('https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-AU&gl=AU&ceid=AU:en', 'application/rss+xml,application/xml,text/xml,*/*', 8000);
+      if (!f.ok) { errs.push(q.slice(0, 60) + ': ' + String(srcFail(f).detail || 'failed')); continue; }
+      answered++;
+      gnewsItems(f.text).forEach(it => { if (!it.link || seen.has(it.link) || !issueTag(it.title).length) return; seen.add(it.link); it.q = q.slice(0, 300); items.push(it); });
+    }
+  }
   for (const term of terms) {
     let got = [];
     if (engine === 'gnews') {
@@ -6638,10 +6733,27 @@ function bskyNorm(p, q) {
     likes: p.likeCount || 0, reposts: p.repostCount || 0, replies: p.replyCount || 0, quotes: p.quoteCount || 0,
     url: did && rkey ? 'https://bsky.app/profile/' + did + '/post/' + rkey : 'x:sig:bluesky:' + rkey, q: q || '', reply: !!rec.reply, lang: (rec.langs || [])[0] || '' };
 }
-async function bskySearch(q, limit, sinceIso) {
-  const r = await socialJson(BSKY_API + 'app.bsky.feed.searchPosts?q=' + encodeURIComponent(q) + '&limit=' + Math.min(Math.max(limit || 40, 1), 100) + '&sort=latest' + (sinceIso ? '&since=' + encodeURIComponent(sinceIso) : ''));
-  if (!r.ok) return { ok: false, posts: [], detail: r.error };
-  return { ok: true, posts: ((r.json || {}).posts || []).map(p => bskyNorm(p, q)), more: !!(r.json || {}).cursor };
+/* p67: keyword search asks api.bsky.app first. searchPosts on the public AppView host answered 403 when probed on 15
+ * November 2026 while the same call on api.bsky.app answered 200 (map-collection s.0.3, probed from a Mac, not from
+ * Cloudflare's egress). On a 403 the public host is asked instead, and a run that fell back keeps asking it (st.host).
+ * Threads and author feeds stay on BSKY_API, which answers them. */
+const BSKY_SEARCH_API = 'https://api.bsky.app/xrpc/';
+async function bskySearchGet(qs, st, ms) {
+  st = st || {};
+  if (st.host !== 'public.api.bsky.app') {
+    const r = await socialJson(BSKY_SEARCH_API + 'app.bsky.feed.searchPosts?' + qs, null, ms);
+    if (r.status !== 403) { st.host = 'api.bsky.app'; r.host = 'api.bsky.app'; return r; }
+    st.fallback = (st.fallback || 0) + 1; st.refused = r.error;
+  }
+  const r = await socialJson(BSKY_API + 'app.bsky.feed.searchPosts?' + qs, null, ms);
+  st.host = 'public.api.bsky.app'; r.host = 'public.api.bsky.app'; r.fellBack = true;
+  if (!r.ok && st.refused) r.error = 'api.bsky.app: ' + st.refused + '; public.api.bsky.app: ' + r.error;
+  return r;
+}
+async function bskySearch(q, limit, sinceIso, st) {
+  const r = await bskySearchGet('q=' + encodeURIComponent(q) + '&limit=' + Math.min(Math.max(limit || 40, 1), 100) + '&sort=latest' + (sinceIso ? '&since=' + encodeURIComponent(sinceIso) : ''), st);
+  if (!r.ok) return { ok: false, posts: [], detail: r.error, status: r.status, host: r.host, fellBack: !!r.fellBack };
+  return { ok: true, posts: ((r.json || {}).posts || []).map(p => bskyNorm(p, q)), more: !!(r.json || {}).cursor, host: r.host, fellBack: !!r.fellBack };
 }
 async function bskyThread(uri, depth) {
   const r = await socialJson(BSKY_API + 'app.bsky.feed.getPostThread?uri=' + encodeURIComponent(uri) + '&depth=' + (depth || 6) + '&parentHeight=0');
@@ -6660,12 +6772,21 @@ async function bskySweep(env, opts) {
   const days = Math.min(Math.max(parseInt(opts.days, 10) || 7, 1), 90);
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const out = { ok: true, platform: 'bluesky', queries: queries.length, found: 0, kept: 0, threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [] };
-  const seen = new Map();
-  await log('info', 'Bluesky: ' + queries.length + ' keywords on the public AppView, last ' + days + ' days');
+  const seen = new Map(); const st = {}; let refusals = 0;
+  await log('info', 'Bluesky: ' + queries.length + ' keywords on the AppView search, last ' + days + ' days');
   for (const q of queries) {
     await log('cmd', 'GET app.bsky.feed.searchPosts q="' + q + '" sort=latest');
-    const r = await bskySearch(q, perQuery, since);
-    if (!r.ok) { out.errors.push(q + ': ' + r.detail); await log('err', q + ': ' + r.detail); await rdSleep(SOCIAL_PACE); continue; }
+    const r = await bskySearch(q, perQuery, since, st);
+    if (r.host) out.host = r.host;
+    if (st.fallback) out.fallback = st.fallback;
+    if (!r.ok) {
+      out.errors.push(q + ': ' + r.detail); await log('err', q + ': ' + r.detail);
+      // p67: with every desk term asked a run, a search host that refuses outright (both hosts, three terms running) is
+      // not asked the other sixty: the run stops and says why, and the next run tries again
+      if ([401, 403, 404, 410].indexOf(Number(r.status)) >= 0 && ++refusals >= 3 && queries.length > 3) { out.stoppedEarly = 'three terms running were refused (' + r.detail.slice(0, 80) + '); the other ' + (queries.length - queries.indexOf(q) - 1) + ' were not asked this run'; out.errors.push(out.stoppedEarly); await log('err', out.stoppedEarly); break; }
+      await rdSleep(SOCIAL_PACE); continue;
+    }
+    refusals = 0;
     let kept = 0;
     r.posts.forEach(p => { out.found++; if (!p.text || seen.has(p.uri)) return; if (!auRelevant('', p.text, q)) return; seen.set(p.uri, p); kept++; });
     out.kept += kept;
@@ -6787,6 +6908,7 @@ async function xWatchList(env) {
   let list = []; try { list = JSON.parse((await kvGet(env.AXIOM_KV, 'x_watch')) || '[]'); } catch (e) { list = []; }
   return (Array.isArray(list) ? list : []).map(w => ({ handle: String((w && (w.handle || w)) || '').replace(/^@/, '').trim().slice(0, 30), ns: String((w && w.ns) || '').slice(0, 24), name: String((w && w.name) || '').slice(0, 80) })).filter(w => /^[A-Za-z0-9_]{1,15}$/.test(w.handle));
 }
+const X_DEN_EVERY_RUN = 20;   // registered X accounts read in every run of the timeline sweep
 async function xSyndSweep(env, opts) {
   opts = opts || {}; const log = opts.log || (async () => {});
   const days = Math.min(Math.max(parseInt(opts.days, 10) || 7, 1), 90);
@@ -6804,9 +6926,13 @@ async function xSyndSweep(env, opts) {
     const want = opts.handles.map(h => String(h).replace(/^@/, '').toLowerCase()).filter(Boolean).slice(0, max);
     accounts = want.map(h => all.find(a => a.handle.toLowerCase() === h) || { handle: h, name: '', ns: '', mp: null });
   } else if (all.length > max) {
-    const cur = Number(await kvGet(env.AXIOM_KV, 'x_synd_cursor') || 0) % all.length;
-    accounts = all.slice(cur, cur + max).concat(cur + max > all.length ? all.slice(0, cur + max - all.length) : []);
-    await kvPut(env.AXIOM_KV, 'x_synd_cursor', String((cur + max) % all.length), 7 * 86400);
+    // p67: a desk's registered accounts are read every run (up to X_DEN_EVERY_RUN, never more than half the run); only the
+    // watch list and the MPs rotate behind them, so a registered actor no longer waits behind six hundred MPs
+    const fixed = all.filter(a => a.den).slice(0, Math.min(X_DEN_EVERY_RUN, Math.max(1, Math.floor(max / 2))));
+    const rest = all.filter(a => fixed.indexOf(a) < 0); const n = max - fixed.length;
+    const cur = Number(await kvGet(env.AXIOM_KV, 'x_synd_cursor') || 0) % Math.max(1, rest.length);
+    accounts = fixed.concat(rotateTake(rest, cur, n));
+    await kvPut(env.AXIOM_KV, 'x_synd_cursor', String((cur + n) % Math.max(1, rest.length)), 7 * 86400);
   }
   const out = { ok: true, platform: 'x', mode: 'timelines', accounts: accounts.length, watched: watch.length, registered: den.length, mps: mps.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [] };
   const since = Date.now() - days * 86400000; const trows = [];
@@ -7210,7 +7336,7 @@ async function socialCoverage(env, probe) {
   if (probe) {
     const t = async (fn) => { const t0 = Date.now(); try { const r = await fn(); return Object.assign({ ms: Date.now() - t0 }, r); } catch (e) { return { ok: false, ms: Date.now() - t0, detail: String((e && e.message) || e).slice(0, 120) }; } };
     const probes = {
-      bluesky: () => bskySearch('auspol', 3).then(r => ({ ok: r.ok, detail: r.ok ? r.posts.length + ' posts for auspol' : r.detail })),
+      bluesky: () => bskySearch('auspol', 3).then(r => ({ ok: r.ok, host: r.host || '', detail: r.ok ? r.posts.length + ' posts for auspol (' + (r.host || 'search') + (r.fellBack ? ', after api.bsky.app refused' : '') + ')' : r.detail })),
       mastodon: () => mastoTag(MASTO_INSTANCES[0], 'auspol', 5).then(r => ({ ok: r.ok, detail: r.ok ? r.posts.length + ' posts on ' + MASTO_INSTANCES[0] : r.detail })),
       x: () => xTimeline('AlboMP').then(r => ({ ok: r.ok, detail: r.ok ? r.tweets.length + ' posts in the embed timeline of the PM\'s account' : r.detail })),
       youtube: () => ytChannelId(env, '@abcnewsaustralia').then(r => ({ ok: r.ok, detail: r.ok ? 'channel resolves to ' + r.id : r.detail })),
@@ -7243,7 +7369,30 @@ function socialSummary(r) {
   if (r.read != null) { s.listed = r.listed; s.read = r.read; s.snapshots = r.snapshots; }
   if (r.videos != null) { s.videos = r.videos; s.transcripts = r.transcripts; }
   if (r.accounts != null) { s.accounts = r.accounts; }
+  if (r.host) s.host = r.host;            // p67: which Bluesky host answered the search, and how often api.bsky.app refused it
+  if (r.fallback) s.fallback = r.fallback;
+  if (r.registered != null && r.platform === 'x') s.registered = r.registered;
   return s;
+}
+/* p67: the issues a desk owns (every issue of a namespace that has a desk). Their search terms - the lexicon's own and
+ * those a person approved on the desk - are asked before the rest, which rotate. */
+async function deskIssueIds(env) {
+  let ns = [];
+  try { if (await ensureDesks(env)) ns = (((await env.MIND_DB.prepare('SELECT DISTINCT ns FROM den_desks').all()).results) || []).map(r => String(r.ns || '')); } catch (e) { ns = []; }
+  return CLIENT_ISSUES.filter(ci => ns.indexOf(ci.ns) >= 0).map(ci => ci.id);
+}
+function rotateTake(list, cur, n) { if (!list.length) return []; cur = cur % list.length; n = Math.min(n, list.length); return list.slice(cur, cur + n).concat(cur + n > list.length ? list.slice(0, cur + n - list.length) : []); }
+const BSKY_DESK_MAX = 80;   // desk terms asked a run (all of them today: 62 plus what people approve); beyond this they rotate
+const BSKY_ROTATE = 10;     // the other clients' terms asked a run, in turn
+async function bskyCronQueries(env) {
+  const ids = await deskIssueIds(env); const desk = ids.length ? issueQueries(ids) : [];
+  const rest = issueQueries().filter(q => desk.indexOf(q) < 0);
+  let first = desk;
+  if (desk.length > BSKY_DESK_MAX) { const dc = Number(await kvGet(env.AXIOM_KV, 'bsky_d_cursor') || 0) % desk.length; first = rotateTake(desk, dc, BSKY_DESK_MAX); await kvPut(env.AXIOM_KV, 'bsky_d_cursor', String((dc + BSKY_DESK_MAX) % desk.length), 7 * 86400); }
+  const cur = Number(await kvGet(env.AXIOM_KV, 'bsky_q_cursor') || 0) % Math.max(1, rest.length);
+  const rot = rotateTake(rest, cur, BSKY_ROTATE);
+  await kvPut(env.AXIOM_KV, 'bsky_q_cursor', String((cur + rot.length) % Math.max(1, rest.length)), 7 * 86400);
+  return first.concat(rot);
 }
 /** Every tick, at most two-hourly: a slice of the client keywords on Bluesky,
  *  the Australian tags on Mastodon, thirty X account timelines, comments and
@@ -7256,10 +7405,7 @@ async function socialCron(env) {
   await kvPut(env.AXIOM_KV, 'social_last_run', String(now), 86400);
   let res = {}; try { res = JSON.parse((await kvGet(env.AXIOM_KV, 'social_last')) || '{}'); } catch (e) { res = {}; }
   const run = async (id, fn) => { try { res[id] = Object.assign({ at: now }, socialSummary(await fn())); } catch (e) { res[id] = { at: now, ok: false, detail: String((e && e.message) || e).slice(0, 160) }; } };
-  const all = issueQueries(); const slice = 10;
-  const cur = Number(await kvGet(env.AXIOM_KV, 'bsky_q_cursor') || 0) % Math.max(1, all.length);
-  const qs = all.slice(cur, cur + slice).concat(cur + slice > all.length ? all.slice(0, cur + slice - all.length) : []);
-  await kvPut(env.AXIOM_KV, 'bsky_q_cursor', String((cur + slice) % Math.max(1, all.length)), 7 * 86400);
+  const qs = await bskyCronQueries(env);
   await run('bluesky', () => bskySweep(env, { queries: qs, threads: 15, days: 3 }));
   await run('bluesky_accounts', () => bskyActorSweep(env, { max: 20 }));
   if (env.OPENAUSTRALIA_KEY) { const hz = await hansardSweep(env, {}); if (!hz.skipped) res.hansard = Object.assign({ at: now }, socialSummary(hz)); }
@@ -8793,6 +8939,32 @@ function denBriefDoc(v, desk, fmt) {
   if (v.sourceList.length) md.push('## Source List\n\n' + v.sourceList.map(g => '### ' + g.group + '\n\n' + g.items.map((i, n) => (n + 1) + '. ' + i.label + ' - ' + i.url).join('\n')).join('\n\n') + '\n');
   return md.join('\n');
 }
+/* p67: how far the analysis is behind collection, for the Collection tab. Every read names its kinds and its window and is
+ * bounded: rows of the narrative window not yet placed (counted up to 5,000, with how long the oldest has waited since it
+ * was collected), and this desk's narratives that carry only a working title, and those waiting for the model's name. */
+function tickClock() {
+  const t0 = Date.now(); let last = t0; const stages = [];
+  return { t0, stages, mark(name) { const n = Date.now(); stages.push([String(name || '').slice(0, 24), n - last]); last = n; } };
+}
+async function tickSave(env, clk, ai, partial) {
+  const rec = { at: clk.t0, total: Date.now() - clk.t0, stages: clk.stages.slice(0, 40), ai: ai ? { mode: String(ai.mode || ''), run: !!ai.run } : null };
+  if (partial) rec.partial = true;
+  try { await kvPut(env.AXIOM_KV, 'tick_last', JSON.stringify(rec), 7 * 86400); } catch (e) {}
+  return rec;
+}
+async function denPipeline(env, desk, now) {
+  now = now || Date.now();
+  const out = { unplaced: 0, oldestUnplacedMin: 0, capped: false, titled: 0, awaitingModel: 0, window: { hours: NARR_WINDOW_H, narrativeDays: 7, kinds: SENT_KINDS.slice(), ns: desk.ns } };
+  try {
+    await ensureNarratives(env);
+    const r = await env.MIND_DB.prepare('SELECT COUNT(*) n, MIN(seen) oldest FROM (SELECT a.seen seen FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + SENT_KINDS.map(() => '?').join(',') + ') LIMIT 5000)').bind(now - NARR_WINDOW_H * 3600000, ...SENT_KINDS).first();
+    out.unplaced = Number((r || {}).n) || 0; out.capped = out.unplaced >= 5000;
+    out.oldestUnplacedMin = out.unplaced && (r || {}).oldest ? Math.max(0, Math.round((now - Number(r.oldest)) / 60000)) : 0;
+    const n = await env.MIND_DB.prepare("SELECT SUM(CASE WHEN label='' AND COALESCE(auto_label,'')<>'' THEN 1 ELSE 0 END) titled, SUM(CASE WHEN " + NARR_ELIGIBLE + " THEN 1 ELSE 0 END) waiting FROM narratives WHERE last_ts>? AND ns=? AND n>=2 AND muted=0 AND COALESCE(status,'')<>'broad'").bind(NARR_LABEL_MIN, now - 7 * 86400000, desk.ns).first();
+    out.titled = Number((n || {}).titled) || 0; out.awaitingModel = Number((n || {}).waiting) || 0;
+  } catch (e) { out.error = 'not_counted'; }
+  return out;
+}
 /** Which channels read for this desk, how, and what each delivered; the gated sources; the last recall result. */
 async function denCollection(env, deskId) {
   const desk = await deskGet(env, deskId); if (!desk) return DESK_UNKNOWN; await ensureArchive(env); const now = Date.now(); const mine = desk.issues.map(i => i.id);
@@ -8815,7 +8987,10 @@ async function denCollection(env, deskId) {
   ].map(c => Object.assign(c, { delivered: pub[c.id] ? Object.assign({ layers: {} }, pub[c.id], { layers: { 3: 1 } }) : (got[c.id] || { d1: 0, d7: 0, last: 0, layers: {} }) })).map(c => Object.assign(c, { delivered: Object.assign({}, c.delivered, { layers: Object.keys(c.delivered.layers).map(Number).sort() }) }));
   let gated = []; try { await ensureSources(env); await ensureGated(env); gated = (((await env.MIND_DB.prepare('SELECT id, name, tier, access, cleared_by, cleared_at FROM sources ORDER BY name LIMIT 1000').all()).results) || []).map(s => ({ id: s.id, name: s.name, access: sourceAccessOf(s), cleared: Number(s.cleared_at) > 0, cleared_by: s.cleared_by || '', cleared_at: Number(s.cleared_at) || 0 })).filter(s => GATED_NEEDS_CLEARANCE.indexOf(s.access) >= 0).slice(0, 80); } catch (e) { gated = []; }
   let backtest = null; try { backtest = JSON.parse((await kvGet(env.AXIOM_KV, 'den_backtest_' + desk.id)) || 'null'); } catch (e) { backtest = null; }
-  return { ok: true, desk: desk.id, channels: CH, reach: { off: reach.off, agents: reach.agents, challenges: reach.challenges }, hashtags: await igHashtagLedger(env), gated, backtest, notBuilt: ['TikTok, Threads and LinkedIn are not collected: no usable route, and no link to any of them in the reports read.', 'Today\'s reads against each platform\'s cap are counted on the Mac (its settings file), not here.'] };
+  // p67 (additive): the last tick as the cron recorded it (null until one has), and the analysis pipeline's counts
+  let tick = null; try { tick = JSON.parse((await kvGet(env.AXIOM_KV, 'tick_last')) || 'null'); } catch (e) { tick = null; }
+  const pipeline = await denPipeline(env, desk, now);
+  return { ok: true, desk: desk.id, tick, pipeline, channels: CH, reach: { off: reach.off, agents: reach.agents, challenges: reach.challenges }, hashtags: await igHashtagLedger(env), gated, backtest, notBuilt: ['TikTok, Threads and LinkedIn are not collected: no usable route, and no link to any of them in the reports read.', 'Today\'s reads against each platform\'s cap are counted on the Mac (its settings file), not here.'] };
 }
 /** Collect now: one job for one channel of one desk, the same job the Signals view starts. */
 async function denCollect(env, b, who, ctx) {
@@ -18704,7 +18879,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve, narrCleanTitle, narrAutoLabel, narrTemplate, narrPersonish, narrNamed, narrRow, narrLabelQueue, narrClaim, narrativesCron, narrativesRun, narrAutoTick, narrAutoMode };
+export const __test = { sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve, narrCleanTitle, narrAutoLabel, narrTemplate, narrPersonish, narrNamed, narrRow, narrLabelQueue, narrClaim, narrativesCron, narrativesRun, narrAutoTick, narrAutoMode, arcNewsSnap, arcCoreRow, coreNewsTick, arcTagFill, buildAllNews, bskySearch, bskyCronQueries, deskIssueIds, socialSummary, tickClock, tickSave, denPipeline, lexIssueQueries };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -23391,26 +23566,34 @@ export default AXIOM_WORKER;
 async function handleScheduled(env) {
   CF_ENV = env;
   console.log('AXIOM Auto-Collect triggered at', new Date().toISOString());
+  // p67: every stage's milliseconds, written to KV tick_last (after the collectors, and at the end) and shown on /den/collection
+  const clk = tickClock();
   try { await deskLexiconLoad(env, true); } catch (e) {}   // the desks' approved terms tag everything this tick collects
   // before anything reads the archive: the index that makes those reads walk a window, not a whole kind (made once)
   try { const ix = await archiveIndexEnsure(env); if (ix.made && ix.made.length) console.log('Archive index made:', ix.made.join(', '), '(' + ix.ms + 'ms)'); else if (!ix.ok) console.log('Archive index not made:', ix.detail); } catch (e) {}
+  clk.mark('setup');
 
   // Pre-warm the default /allnews snapshot so dashboard loads are instant,
   // and append a pulse-history point (share-of-voice + tone time series).
-  try {
-    // the reporter mirrors each core feed's result into the Source Registry
-    const snap = await buildAllNews(env, { q: '', max: 120, hours: 24, onHealth: h => sourcesCoreHealth(env, h) });
-    await arcNewsSnap(env, snap); // hourly permanent archive - runs with nobody watching
-  } catch (e) {}
+  // p67: the core feeds' items are archived before the snapshot's cut, tagged with their issues so the Den's Board sees them
+  try { const cn = await coreNewsTick(env); if (cn && cn.archived) console.log('Core feeds:', cn.archived, 'new rows of', cn.offered); } catch (e) { console.log('core feeds failed', String(e).slice(0, 120)); }
+  clk.mark('core');
+  // p67: untagged news of the last week tagged (and re-tagged after a desk term is approved), 300 rows a tick, newest first
+  try { const tf = await arcTagFill(env); if (tf && tf.tagged) console.log('Tagged:', tf.tagged, 'news rows', tf.walking ? '(more next tick)' : ''); } catch (e) { console.log('tag back-fill failed', String(e).slice(0, 120)); }
+  clk.mark('tagfill');
   try { await snapshotPulse(env); } catch (e) {}
+  clk.mark('pulse');
   // The Source Registry: the sources beyond the core whose schedule has come
   // round - feed, WordPress API, sitemap, listing page, Google News, in turn.
   try { const sw = await sourceSweep(env); if (sw && sw.ran) console.log('Sources:', sw.succeeded, 'of', sw.ran, 'delivered,', sw.added, 'new rows'); } catch (e) { console.log('source sweep failed', String(e).slice(0, 120)); }
+  clk.mark('sources');
   // Full text for the news of the last two days that arrived as a headline and
   // a blurb: reader extraction, AMP, the archives, a rendered page.
   try { const ft = await fulltextCron(env); if (ft && ft.tried) console.log('Full text:', ft.got, 'of', ft.tried); } catch (e) { console.log('fulltext cron failed', String(e).slice(0, 120)); }
+  clk.mark('fulltext');
   // the subscriber read: jobs for the Mac that holds a cleared publisher's signed-in profile; no model call, never gated by AI_AUTOMATION
   try { await gatedCron(env); } catch (e) { console.log('gated cron failed', String(e).slice(0, 120)); }
+  clk.mark('gated');
   // The Sentinel runs every tick: detect spikes on client issues, draft the
   // angle, push it to Slack. This is the loop that makes response time small.
   // Automated model spend is gated (AI_AUTOMATION: always / daily / off): detection, alerts and every collector run on;
@@ -23421,6 +23604,7 @@ async function handleScheduled(env) {
     const s = await sentinelScan(env, { noAngle: !ai.run });
     if (s && s.fired) console.log('Sentinel fired', s.fired, 'alert(s)', ai.run ? '' : '(angles not drafted: automated model work held)');
   } catch (e) { console.log('Sentinel scan failed', String(e).slice(0, 120)); }
+  clk.mark('sentinel');
   try {
     const [ms, rd, bs] = await Promise.all([
       socialMastodon('auspol').catch(() => []),
@@ -23435,37 +23619,51 @@ async function handleScheduled(env) {
   // Paid-political advertising disclosures (opposition watch). Reddit's own
   // transparency feed; Meta Ad Library and Google political-ads land here too.
   try { await archiveItems(env, 'oppads', await socialRedditPoliticalAds()); } catch (e) {}
+  clk.mark('quicksocial');
   // Meta direct: own campaign performance + Ad Library opposition sweep (6-hourly).
   try { await metaCron(env); } catch (e) {}
+  clk.mark('meta');
   try { await redditCron(env); } catch (e) {}
+  clk.mark('reddit');
   // Signals: the clients' own LinkedIn and Meta pages, 6-hourly, so the view is
   // never empty when someone opens it. X and Reddit come from the desktop agent.
   try { await signalsCron(env); } catch (e) {}
+  clk.mark('signals');
   // Social capture: Bluesky, Mastodon, X timelines, YouTube comments and captions, petitions (two-hourly).
   try { await socialCron(env); } catch (e) { console.log('social cron failed', String(e).slice(0, 120)); }
+  clk.mark('social');
   // the signed-in layer's morning plan: jobs for the collectors that are connected; no model call, never gated
   try { await denReachCron(env); } catch (e) { console.log('reach plan failed', String(e).slice(0, 120)); }
   try { await bridgeExpire(env, {}); } catch (e) { console.log('bridge expiry failed', String(e).slice(0, 120)); }
+  clk.mark('reach');
   try { await denDiscoverCron(env); } catch (e) { console.log('desk discovery failed', String(e).slice(0, 120)); }
+  clk.mark('discover');
+  // a partial record now: a tick the platform cuts short (CPU or wall clock) still says how far it got
+  await tickSave(env, clk, ai, true);
   // Sentiment: the newest rows that mention an entity get their verdicts, within the day's budget (a model call per batch:
   // held outside the day's window).
   if (ai.run) { try { const sn = await sentimentCron(env); if (sn && sn.classified) console.log('Sentiment:', sn.classified, 'rows,', sn.mentions, 'stances'); } catch (e) { console.log('sentiment cron failed', String(e).slice(0, 120)); } }
+  clk.mark('sentiment');
   // Narratives: the newest rows join or start the stories the conversation is telling; new ones are named and, when they take
   // off on a client issue, reported. Placement embeds with Workers AI (not the model account) and runs every tick; naming
   // spends model calls and waits for the day's window.
   try { const nr = ai.run ? await narrativesCron(env) : await narrativesRun(env, { budgetMs: 120000, skipNaming: true }); if (nr && nr.placed) console.log('Narratives:', nr.placed, 'rows placed,', nr.started, 'started,', nr.named || 0, 'named', ai.run ? '' : '(naming held)'); } catch (e) { console.log('narratives cron failed', String(e).slice(0, 120)); }
   // p67 (B1): only when the owner has set NARRATIVE_AUTO=tick - at most two naming calls on the capped 'narr_auto' ledger
   if (!ai.run && narrAutoMode(env) === 'tick') { try { const na = await narrAutoTick(env, ai); if (na && na.named) console.log('Narratives named outside the window (NARRATIVE_AUTO=tick):', na.named, 'in', na.calls, 'call(s)'); } catch (e) { console.log('narrative auto-naming failed', String(e).slice(0, 120)); } }
+  clk.mark('narratives');
   // Creative Studio jobs: anything queued, or abandoned by a runner that stopped, is claimed and run here.
   try { const sj = await studioCron(env, 120000); if (sj && sj.ran) console.log('Studio jobs:', sj.ran, 'run,', sj.done, 'done,', sj.failed, 'failed'); } catch (e) { console.log('studio cron failed', String(e).slice(0, 120)); }
+  clk.mark('studio');
   // p44: retractions a failed index deletion left pending are finished here (spends nothing; never gated)
   try { const rp = await mindRetractPending(env, 20); if (rp.tried) console.log('Retractions:', rp.done, 'of', rp.tried, 'finished'); } catch (e) { console.log('retraction retry failed', String(e).slice(0, 120)); }
   // The daily brief: written once after 7am Sydney from what the modules above keep; rewritten on demand from the app or tools/daily-brief.py.
   // (already once a day by its own guard; held only when automated model work is off)
   if (ai.run) { try { const dn = await denBriefCron(env); if (dn && dn.drafted && dn.drafted.length) console.log('Den morning drafts:', dn.drafted.join(', ')); } catch (e) { console.log('den brief cron failed', String(e).slice(0, 120)); } }
   if (ai.mode !== 'off') { try { const br = await briefCron(env); if (br && br.ok && br.brief) console.log('Brief:', br.day, br.brief.headline); } catch (e) { console.log('brief cron failed', String(e).slice(0, 120)); } }
+  clk.mark('briefs');
   // Topics: SIFA's keyword list hourly (no model), then the two stalest topics researched (a model call each: the day's window).
   try { await topicsCron(env, { research: ai.run }); } catch (e) { console.log('topics cron failed', String(e).slice(0, 120)); }
+  clk.mark('topics');
   try {
     const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest(), forumPropertyChat()]);
     const th = jf.flatMap(s => (s.status === 'fulfilled' ? s.value : []));
@@ -23473,6 +23671,7 @@ async function handleScheduled(env) {
       src: t.source, title: t.text, url: t.url, ts: Date.parse(t.date) || 0,
     })));
   } catch (e) {}
+  clk.mark('forums');
 
   // Default watchlist topics - overridable via KV
   const savedTopics = await kvGet(env.AXIOM_KV, 'auto_watchlist');
@@ -23562,6 +23761,8 @@ async function handleScheduled(env) {
     try { const r=await cfetch(url,{headers:{'User-Agent':'AXIOM-Cron/4.0'}});if(r.ok){const xml=await r.text();const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(m=>{const b=m[1];return{title:stripHtml((b.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1]||'')),link:(b.match(/<link[^>]*href="([^"]+)"/)??b.match(/<link[^>]*>(https?[^<]+)<\/link>/)??[])[1]?.trim(),date:(b.match(/<pubDate>([\s\S]*?)<\/pubDate>/)??[])[1]?.trim()};}).filter(i=>i.title);await kvPut(env.AXIOM_KV,'rss_'+key,JSON.stringify({items}),3600);} } catch {}
   }
 
+  clk.mark('legacy');
+  await tickSave(env, clk, ai);
   console.log(`AXIOM Cron complete: ${totalItems} items across ${topicsArr.length} topics`);
 }
 
