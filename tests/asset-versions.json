@@ -56,8 +56,20 @@
   "sha": "37ba84a9f394526b"
  },
  "den.css": {
-  "v": "r47",
+  "v": "r48",
   "sha": "bd6e71f75b339946"
+ },
+ "den-brief.css": {
+  "v": "r1",
+  "sha": "38bf7de65cb75f68"
+ },
+ "den-desk.css": {
+  "v": "r1",
+  "sha": "65c7418f5906d4f9"
+ },
+ "den-tour.css": {
+  "v": "r1",
+  "sha": "325bdb48371b9256"
  },
  "studio-render.js": {
   "v": "r45",
@@ -99,9 +111,21 @@
   "v": "r2",
   "sha": "c9311c6b76833f84"
  },
+ "den-brief.js": {
+  "v": "r1",
+  "sha": "030f04fa10bdbf0b"
+ },
+ "den-desk.js": {
+  "v": "r1",
+  "sha": "e6ce24ff9013728e"
+ },
  "den.js": {
-  "v": "r51",
+  "v": "r52",
   "sha": "f7323edc8a5de312"
+ },
+ "den-tour.js": {
+  "v": "r1",
+  "sha": "18ff9c154f428c1f"
  },
  "sentiment.js": {
   "v": "r1",

@@ -36,9 +36,11 @@ export async function world(env) {
 }
 export const browser = await chromium.launch();
 export async function open(w, key, o) {
-  o = o || {}; const ctx = await browser.newContext({ viewport: { width: o.width || 1440, height: o.height || 900 }, acceptDownloads: true }); await ctx.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+  o = o || {}; const ctx = await browser.newContext(Object.assign({ viewport: { width: o.width || 1440, height: o.height || 900 }, acceptDownloads: true }, o.reducedMotion ? { reducedMotion: 'reduce' } : {})); await ctx.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
   const page = await ctx.newPage(); page.errors = []; page.on('pageerror', e => { page.errors.push(e.message); console.log('  [pageerror] ' + e.message.slice(0, 200)); });
-  await page.addInitScript(({ W, key }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', key); window.confirm = () => true; }, { W, key: key || 'full-key' });
+  // The guided tour (docs/den-tour.js) opens by itself on a first visit; every case but the tour's own starts with it already
+  // seen and never asked again, so nothing covers the page. open(w, key, { tour: true }) leaves the tour's record alone.
+  await page.addInitScript(({ W, key, tour }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', key); window.confirm = () => true; if (!tour) localStorage.setItem('ax_den_tour', JSON.stringify({ v: 1, status: 'done', ask: 'never' })); }, { W, key: key || 'full-key', tour: !!o.tour });
   await page.route(/^https:\/\/(?!newsaus\.)[^/]+\//, route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   w.hooks = w.hooks || []; page.served = [];
   await page.route(W + '/**', async route => { const r = route.request(); const u = new URL(r.url()); const path = u.pathname + u.search; page.served.push(r.method() + ' ' + path);
