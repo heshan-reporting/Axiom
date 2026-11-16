@@ -3533,7 +3533,7 @@ async function jobRunLocal(env, job) {
       out = await sentimentRun(env, Object.assign({}, job.params, { log: log }));
       ok = !!(out && out.ok);
     } else if (job.source === 'narratives') {
-      out = await narrativesRun(env, Object.assign({}, job.params, { log: log, budgetMs: 22000 }));
+      out = await narrativesRun(env, Object.assign({}, job.params, { log: log, budgetMs: 22000, merge: true, leaseWaitMs: 5000 }));
       ok = !!(out && out.ok);
     } else if (SOCIAL_PLATFORMS.indexOf(job.source) >= 0) {
       out = await socialSweep(env, Object.assign({}, job.params, { platform: job.source }), log);
@@ -8568,7 +8568,11 @@ async function denBoard(env, deskId, opts) {
   // recorded dates (read from a parliament's own page) lead; a stage row's own sentence is not read again as a guess
   let recorded = []; try { recorded = await processUpcoming(env, mine, now); } catch (e) { recorded = []; }
   const upcoming = recorded.concat(denUpcoming(live.filter(r => !(r.meta && r.meta.process)), now)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(0, 40);
-  return { ok: true, desk, window: win, narratives, media, social, actors, upcoming, aside, pinned: live.filter(r => r.pinned).map(r => r.id),
+  // p69, additive: absorbed id -> survivor for merges into this board's narratives (a brief or a browser note may hold the old id)
+  const aliases = {};
+  try { const nids = narratives.map(n => n.id); for (let i = 0; i < nids.length && Object.keys(aliases).length < 200; i += 90) { const part = nids.slice(i, i + 90);
+    (((await env.MIND_DB.prepare('SELECT from_id, into_id FROM narrative_merges WHERE undone_at=0 AND at>? AND into_id IN (' + part.map(() => '?').join(',') + ') ORDER BY at DESC LIMIT 200').bind(win.from - 7 * 86400000, ...part).all()).results) || []).forEach(r => { if (Object.keys(aliases).length < 200 && !aliases[r.from_id]) aliases[r.from_id] = r.into_id; }); } } catch (e) { /* no merge table yet */ }
+  return { ok: true, desk, window: win, narratives, aliases, media, social, actors, upcoming, aside, pinned: live.filter(r => r.pinned).map(r => r.id),
     counts: { rows: live.length, news: news.length, media: media.length, social: social.length, actors: actors.length, narratives: narratives.length, upcoming: upcoming.length, aside: aside.length, muted: nMuted, underMinimum: nLow, otherRegions: nRegion }, capped: raw.length >= DEN_BOARD_ROWS,
     byChannel: live.reduce((a, r) => { a[r.ch] = (a[r.ch] || 0) + 1; return a; }, {}), _rows: opts.keepRows ? live : undefined };
 }
@@ -8931,11 +8935,17 @@ async function denBriefFile(env, b, who) {
   const sections = denJ(row.sections, {}); const body = Object.keys(sections).map(k => sections[k].text).join('\n'); if (body.replace(/\s/g, '').length < 200) return { ok: false, status: 409, error: 'brief_empty', detail: 'There is too little written to file. Draft it or write it first.' };
   const cites = new Set(); Object.keys(sections).forEach(k => (sections[k].cites || []).forEach(c => cites.add(c))); const low = body.toLowerCase();
   const board = await denBoard(env, desk, { hours: row.window_h, to: row.to_ts, keepRows: true }); const missed = await denMissed(env, desk, { board, to: denPastTo(row.day, row.to_ts) });
+  // p69: a cited narrative merged since the draft. A person's merge (every hop in the chain a person's) says the two are one
+  // story, so the cite covers the survivor; an automatic one does not decide that for the person filing: the survivor's
+  // signal stays on the list with the merge named, so a wrong merge never lets a filing skip the survivor's own story.
+  const viaAuto = {};
+  try { const nc = Array.from(cites).filter(c => /^N:/.test(c)).map(c => c.slice(2)); if (nc.length) { await ensureNarratives(env); const al = await narrAliasMany(env, nc);
+    nc.forEach(id => { const x = al[id]; if (!x || !x.survivor || !x.chain.length) return; if (x.merges.every(mm => mm.how === 'person')) cites.add('N:' + x.survivor); else { const am = x.merges.find(mm => mm.how !== 'person'); viaAuto['N:' + x.survivor] = 'this brief cites [N:' + id + '], merged into it automatically on ' + new Date(Number(am.at) || Date.now()).toISOString().slice(0, 10) + ' (merge ' + am.merge + '); file anyway if that covers it'; } }); } } catch (e) { /* the cover test stands as it is */ }
   // a collection gap is never asked about at filing (p67, the owner, 15 November 2026): it is the Collection tab's. The
   // channels a desk relies on that were not read are written into the history line instead, so the record stays true.
   const open = missed.signals.filter(s => s.sig !== 'gap' && !(s.cover.some(c => cites.has(c)) || s.words.some(w => w && low.indexOf(String(w).toLowerCase()) >= 0)));
   const unread = Array.from(new Set(missed.signals.filter(s => s.sig === 'gap').map(s => DEN_CH_NAME[s.channel] || s.channel).filter(Boolean)));
-  if (open.length && !b.acknowledge) return { ok: false, status: 409, error: 'uncited_signals', detail: open.length + ' thing' + (open.length === 1 ? '' : 's') + ' on the strip ' + (open.length === 1 ? 'is' : 'are') + ' not in this brief. Read the list, then file anyway or go back.', signals: open.map(s => ({ sig: s.sig, key: s.key, title: s.title, detail: s.detail })) };
+  if (open.length && !b.acknowledge) return { ok: false, status: 409, error: 'uncited_signals', detail: open.length + ' thing' + (open.length === 1 ? '' : 's') + ' on the strip ' + (open.length === 1 ? 'is' : 'are') + ' not in this brief. Read the list, then file anyway or go back.', signals: open.map(s => ({ sig: s.sig, key: s.key, title: s.title, detail: viaAuto[s.key] ? (s.detail ? s.detail + '. ' : '') + viaAuto[s.key] : s.detail })) };
   const u = await env.MIND_DB.prepare("UPDATE den_briefs SET status='filed', filed_by=?, filed_at=?, acknowledged=?, revision=revision+1, updated=? WHERE id=? AND revision=?").bind(String(who || '').slice(0, 60), Date.now(), JSON.stringify(open.map(s => s.key)), Date.now(), row.id, row.revision).run();
   if (!((u && u.meta && u.meta.changes) || 0)) return denStale(await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE id=?').bind(row.id).first(), desk);
   const fresh = await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE id=?').bind(row.id).first(); await denRevision(env, fresh, who, 'filed' + (open.length ? ' with ' + open.length + ' signal' + (open.length === 1 ? '' : 's') + ' acknowledged as not covered' : '') + (unread.length ? '; not read in this window: ' + unread.join(', ') : ''));
@@ -9709,13 +9719,19 @@ let ENTITY_CACHE = null;
 async function entityMatcher(env) {
   if (ENTITY_CACHE && Date.now() - ENTITY_CACHE.at < 5 * 60000) return ENTITY_CACHE.m;
   const rows = await entitiesList(env, { active: true });
+  const esc = a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+').replace(/'/g, "['\\u2019]");
+  const ACRO = /^[A-Z][A-Z0-9&]{1,7}$/;   // p69 (P4): an all-capitals alias takes no plural ("PHON" matched "phones")
   const list = rows.map(e => {
-    const parts = e.aliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+').replace(/'/g, "['\\u2019]")).filter(Boolean);
-    if (!parts.length) return null;
-    let rx = null; try { rx = new RegExp('(?<![A-Za-z0-9])(?:' + parts.join('|') + ')(?:s|es)?(?![A-Za-z0-9])', 'i'); } catch (e) { rx = null; }
+    const words = e.aliases.filter(a => !ACRO.test(a)).map(esc).filter(Boolean), acros = e.aliases.filter(a => ACRO.test(a)).map(esc).filter(Boolean);
+    if (!words.length && !acros.length) return null;
+    const body = (words.length ? '(?:' + words.join('|') + ')(?:s|es)?' : '') + (words.length && acros.length ? '|' : '') + (acros.length ? '(?:' + acros.join('|') + ')' : '');
+    let rx = null; try { rx = new RegExp('(?<![A-Za-z0-9])(?:' + body + ')(?![A-Za-z0-9])', 'i'); } catch (e) { rx = null; }
     return rx ? { id: e.id, kind: e.kind, name: e.name, role: e.role, party: e.party, side: e.side, rx } : null;
   }).filter(Boolean);
+  // p69: every register name's words, dropped from P1's headline evidence and the merge pass's term cosine (the anchor counts them)
+  const nameTok = new Set(); rows.forEach(e => narrTokens([e.name].concat(e.aliases).join(' ')).forEach(t => nameTok.add(t.replace(/'s$/, ''))));
   const m = {
+    nameTok,
     entities: list,
     byId: Object.fromEntries(list.map(e => [e.id, e])),
     /* The longest name wins: "Hanson" inside "Hanson-Young" is not Pauline Hanson, and "the Greens" inside a longer name that
@@ -10067,6 +10083,15 @@ function narrSims(env) {
   return [a >= 0.5 && a <= 0.99 ? a : NARR_SIM, b >= 0.5 && b <= 0.99 ? b : NARR_SIM_STRICT];
 }
 const NARR_TOKEN_SIM = 0.32;    // the term-vector fallback
+// p69 (P1, DEN.md s.10.11): the same story in another text form (a bare headline, a forum page) scores just under the bar.
+// A near miss may join the candidate whose member headlines cover its headline; shadow by default (recorded, joins nothing)
+const NARR_NEAR = 0.05;         // a near miss: within this of the row's bar
+const NARR_LEX = 0.45;          // the headline cover bar (var NARRATIVE_NEAR_LEX 0.30-0.90; KV narr_near_mode.lex wins)
+const NARR_LEX_SHARED = 2;      // ...on at least this many shared evidence words
+const NARR_NEAR_H = 48;         // ...and the candidate had a row within 48h before the row's own time (or any time after it)
+const NARR_NEAR_FETCH = 12;     // existing candidates whose headlines one run may read
+const NARR_NEAR_PER = 3;        // near joins into one narrative a run
+const NARR_LEX_STOP = new Set(("has have had it's i'm don't doesn't won't can't that's here's let's get got make makes made now today today's yesterday latest week year years day days reactions reaction comments comment replies reply img image images video photo photos posted post posts thread threads forum cookies cookie browser in-app please enable javascript login subscribe subscriber share shares").split(' '));
 const NARR_LABEL_MIN = 3;       // rows before Claude names it
 const NARR_ALERT_MIN = 6;       // rows within 48h of first sight before an emergence alert
 const NARR_DAILY_CALLS = 120;   // naming calls a day unless NARRATIVE_DAILY_CALLS says otherwise (five narratives a call)
@@ -10091,6 +10116,23 @@ async function ensureNarratives(env) {
   try { await env.MIND_DB.prepare('ALTER TABLE narratives ADD COLUMN auto_n INTEGER DEFAULT 0').run(); } catch (e) { /* already there */ }
   try { await env.MIND_DB.prepare('ALTER TABLE narratives ADD COLUMN label_tries INTEGER DEFAULT 0').run(); } catch (e) { /* already there */ }
   try { await env.MIND_DB.prepare('ALTER TABLE narratives ADD COLUMN label_try_ts INTEGER DEFAULT 0').run(); } catch (e) { /* already there */ }
+  // p69 (DEN.md s.10.11): who last edited (an undo never hands a person's text back), where a narrative was born (P1's
+  // reach), the merge log and its moved rows, keep-apart, P1's near records, the placement lease and the mode log
+  for (const c of ['person_ts INTEGER DEFAULT 0', "person_by TEXT DEFAULT ''", "born_near TEXT DEFAULT ''", 'born_sim REAL DEFAULT 0', 'born_bar REAL DEFAULT 0'])
+    try { await env.MIND_DB.prepare('ALTER TABLE narratives ADD COLUMN ' + c).run(); } catch (e) { /* already there */ }
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare("CREATE TABLE IF NOT EXISTS narrative_merges(id TEXT PRIMARY KEY, into_id TEXT NOT NULL, from_id TEXT NOT NULL, how TEXT NOT NULL, who TEXT DEFAULT '', rule TEXT DEFAULT '', clause TEXT DEFAULT '', score TEXT DEFAULT '{}', at INTEGER NOT NULL, from_row TEXT NOT NULL, into_before TEXT NOT NULL, into_after TEXT DEFAULT '', alert_before TEXT DEFAULT '{}', weights TEXT DEFAULT '', n_items INTEGER DEFAULT 0, counters TEXT DEFAULT '[]', undone_at INTEGER DEFAULT 0, undone_by TEXT DEFAULT '', undo_tok TEXT DEFAULT '', undo_note TEXT DEFAULT '')"),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS narrative_merges_from ON narrative_merges(from_id, undone_at)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS narrative_merges_into ON narrative_merges(into_id, at)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS narrative_merge_items(merge TEXT NOT NULL, item INTEGER NOT NULL, PRIMARY KEY(merge, item))'),
+    env.MIND_DB.prepare("CREATE TABLE IF NOT EXISTS narrative_keep(id TEXT PRIMARY KEY, a TEXT NOT NULL, b TEXT NOT NULL, why TEXT NOT NULL, merge TEXT DEFAULT '', who TEXT DEFAULT '', note TEXT DEFAULT '', at INTEGER NOT NULL, undone_at INTEGER DEFAULT 0, undone_by TEXT DEFAULT '')"),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS narrative_keep_a ON narrative_keep(a, undone_at)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS narrative_keep_b ON narrative_keep(b, undone_at)'),
+    env.MIND_DB.prepare("CREATE TABLE IF NOT EXISTS narrative_near(item INTEGER PRIMARY KEY, narrative TEXT NOT NULL, mode TEXT NOT NULL, sim REAL, lex REAL, shared TEXT DEFAULT '', lean REAL DEFAULT 0, at INTEGER NOT NULL, undone_at INTEGER DEFAULT 0, undone_by TEXT DEFAULT '')"),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS narrative_near_at ON narrative_near(at)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS narr_lease(name TEXT PRIMARY KEY, holder TEXT, until INTEGER)'),
+    env.MIND_DB.prepare("CREATE TABLE IF NOT EXISTS narr_mode_log(id TEXT PRIMARY KEY, at INTEGER NOT NULL, who TEXT DEFAULT '', what TEXT NOT NULL, before TEXT DEFAULT '', after TEXT DEFAULT '')"),
+  ]);
   NARR_READY = true;
   return true;
 }
@@ -10297,8 +10339,11 @@ async function narrRefresh(env, id, now) {
   const velocity = nprev ? Math.round((n24 / nprev) * 100) / 100 : (n24 ? n24 : 0);
   const fresh = (t.first_ts || 0) > now - 48 * 3600000;
   const status = t.n >= narrMax(env) ? 'broad' : t.n < NARR_LABEL_MIN ? 'new' : (fresh && t.n >= NARR_ALERT_MIN) ? 'emerging' : (t.last_ts < now - 36 * 3600000 || (nprev && n24 < nprev / 2)) ? 'fading' : (n24 > nprev && n24 >= 3) ? 'growing' : 'steady';
-  await db.prepare('UPDATE narratives SET n=?, n24=?, nprev=?, velocity=?, first_ts=?, last_ts=?, platforms=?, spread=?, channels=?, amplifiers=?, sentiment=?, side=?, entities=?, status=?, auto_label=?, auto_n=?, updated=? WHERE id=?')
-    .bind(t.n, n24, nprev, velocity, t.first_ts, t.last_ts, JSON.stringify(platforms), JSON.stringify(spread), JSON.stringify(channels), JSON.stringify(amplifiers), JSON.stringify(sentiment), stand, JSON.stringify(entities), status, autoLabel, autoN, now, id).run();
+  // p69 (P3): the entities placement wrote stay while no row has a sentiment verdict (178 of 300 live narratives had lost
+  // every entity, and with it the anchor that sets the 0.84 bar across runs); judged rows decide once there are any
+  const entJson = JSON.stringify(entities);
+  await db.prepare("UPDATE narratives SET n=?, n24=?, nprev=?, velocity=?, first_ts=?, last_ts=?, platforms=?, spread=?, channels=?, amplifiers=?, sentiment=?, side=?, entities=CASE WHEN ?='[]' THEN entities ELSE ? END, status=?, auto_label=?, auto_n=?, updated=? WHERE id=?")
+    .bind(t.n, n24, nprev, velocity, t.first_ts, t.last_ts, JSON.stringify(platforms), JSON.stringify(spread), JSON.stringify(channels), JSON.stringify(amplifiers), JSON.stringify(sentiment), stand, entJson, entJson, status, autoLabel, autoN, now, id).run();
   return { n: t.n, n24, nprev, velocity, status, side: stand, platforms, spread, sentiment, first_ts: t.first_ts, last_ts: t.last_ts, autoLabel };
 }
 const NARR_SYS = 'You name political narratives for an Australian intelligence platform. A narrative is a claim or story that people keep repeating in different words. For each numbered cluster of texts write: label - at most twelve words, the claim as its proponents would put it, no hashtags, no quotation marks; summary - two plain sentences: what is being said, and in general terms by whom (parties, groups, outlets, ordinary posters - never a private individual\'s name); claim - one sentence, the core assertion; counter - one sentence, the strongest opposing claim as its own proponents would put it, or an empty string when there is none; proponents - a short phrase for who tends to push it (e.g. "Greens and climate groups", "mining industry and Coalition MPs", "Reddit posters"); issues - the ids from the ISSUES list that the cluster is really about, at most three; scope - "client" when it is really about an issue in the ISSUES list, "politics" when it is Australian politics, government, public policy, the economy or finance but not a listed issue, "off" when it is celebrity, sport, entertainment, lifestyle, ordinary crime, weather or foreign news with no Australian political actor, policy or economic stake (a kidnapping, a footballer, a TV host - off, unless a politician or a policy is the point); relevance - 0 to 3, how much an Australian public-affairs agency and its clients should care; why - six words on the scope call. Reply with strict JSON only: {"clusters":[{"n":1,"label":"...","summary":"...","claim":"...","counter":"...","proponents":"...","issues":["ftc"],"scope":"client","relevance":3,"why":"..."}]}.';
@@ -10620,40 +10665,89 @@ async function narrativesRun(env, opts) {
   const budget = Math.min(Math.max(parseInt(opts.budgetMs, 10) || 8 * 60000, 5000), 14 * 60000);
   const left = () => budget - (Date.now() - now);
   const kinds = SENT_KINDS.map(() => '?').join(',');
-  const rows = (await db.prepare('SELECT a.id, a.kind, a.src, a.title, a.body, a.url, a.ts, a.meta FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ') ORDER BY a.ts ASC LIMIT ?').bind(now - hours * 3600000, ...SENT_KINDS, scan).all()).results || [];
-  // candidates: live narratives of two or more rows, plus singletons started in the last day (a
-  // singleton older than that has had its chance); bounded so a run stays inside its time
-  const liveRows = (await db.prepare('SELECT id, issues, issue_counts, entities, n, first_ts, last_ts, terms, centroid, dim FROM narratives WHERE last_ts>? AND muted=0 AND n<? AND (n>=2 OR first_ts>?) ORDER BY n DESC, last_ts DESC LIMIT 1500').bind(now - NARR_LIVE_H * 3600000, narrMax(env), now - NARR_SINGLE_CAND_H * 3600000).all()).results || [];
-  const live = liveRows.map(r => { let ic = pjs(r.issue_counts, {}); if (!Object.keys(ic).length) { ic = {}; pjs(r.issues, []).forEach(x => { ic[x] = 1; }); } return { id: r.id, ic, top: new Set(narrTopIssues(ic, 3)), ents: new Set(pjs(r.entities, [])), n: r.n || 0, vec: b64f32(r.centroid), tok: pjs(r.terms, {}), first_ts: r.first_ts || 0, last_ts: r.last_ts || 0, fresh: false, touched: false }; });
   const [simA, simS] = narrSims(env);
-  const out = { ok: true, scanned: rows.length, placed: 0, joined: 0, started: 0, skipped: 0, unanchored: 0, aged: 0, live: live.length, named: 0, calls: 0, alerts: 0, mode: env.AI ? 'embeddings' : 'terms', errors: [] };
+  const out = { ok: true, scanned: 0, placed: 0, joined: 0, started: 0, skipped: 0, unanchored: 0, aged: 0, live: 0, named: 0, calls: 0, alerts: 0, mode: env.AI ? 'embeddings' : 'terms', errors: [] };
+  // p69 (P5): one placement at a time. Two runs at once each placed the same rows (INSERT OR REPLACE) and left a ghost
+  // narrative counting rows it no longer held; a merge between placement's read and its write left rows on a deleted id.
+  // Busy: no rows are placed this run; the recount, titles, the merge scan, naming, counters and alerts go on.
+  const leaseTok = await narrLeaseTake(env, 'place', NARR_LEASE_MS, parseInt(opts.leaseWaitMs, 10) || 0);
+  let rows = [], live = [], vecs = null, matcher = { match: () => [], byId: {}, entities: [], nameTok: new Set() };
+  const itemStmts = []; const touched = new Set(); const touchedBy = {}; const bests = []; const nStmts = [];
+  if (!leaseTok) { out.busy = true; out.touched = []; await log('info', 'another placement holds the lease: no rows are placed this run (the recount, titles, the merge scan and naming go on)'); }
+  else try {   // ---- placement, inside the lease (freed in the finally below, after the writes) ----
+  await narrSweep(env, now, out, touched);
+  if (out.repaired) await log('info', 'repaired rows left on a missing narrative: ' + out.repaired.moved + ' moved to the survivor of a merge, ' + out.repaired.backlog + ' back to the backlog, ' + out.repaired.setAside + ' set aside');
+  // p69 (P1): a row whose near join a person undid is never near-joined again
+  rows = (await db.prepare('SELECT a.id, a.kind, a.src, a.title, a.body, a.url, a.ts, a.meta, COALESCE(nn.undone_at,0) near_undone FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id LEFT JOIN narrative_near nn ON nn.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ') ORDER BY a.ts ASC LIMIT ?').bind(now - hours * 3600000, ...SENT_KINDS, scan).all()).results || [];
+  // candidates: live narratives of two or more rows, plus singletons started in the last day or placed in the last day (p69,
+  // P2: a row placed 24-48h after its own time started a singleton that was never a candidate); bounded so a run stays inside
+  // its time
+  const liveRows = (await db.prepare('SELECT id, issues, issue_counts, entities, n, first_ts, last_ts, terms, centroid, dim FROM narratives WHERE last_ts>? AND muted=0 AND n<? AND (n>=2 OR first_ts>? OR created>?) ORDER BY n DESC, last_ts DESC LIMIT 1500').bind(now - NARR_LIVE_H * 3600000, narrMax(env), now - NARR_SINGLE_CAND_H * 3600000, now - NARR_SINGLE_CAND_H * 3600000).all()).results || [];
+  live = liveRows.map(r => { let ic = pjs(r.issue_counts, {}); if (!Object.keys(ic).length) { ic = {}; pjs(r.issues, []).forEach(x => { ic[x] = 1; }); } return { id: r.id, ic, top: new Set(narrTopIssues(ic, 3)), ents: new Set(pjs(r.entities, [])), n: r.n || 0, vec: b64f32(r.centroid), tok: pjs(r.terms, {}), first_ts: r.first_ts || 0, last_ts: r.last_ts || 0, fresh: false, touched: false }; });
+  out.scanned = rows.length; out.live = live.length;
   const texts = rows.map(narrText);
-  const vecs = await narrEmbed(env, texts.map(t => t || ' '));
+  vecs = await narrEmbed(env, texts.map(t => t || ' '));
   if (!vecs && env.AI) { out.mode = 'terms (embedding failed)'; }
-  const matcher = await entityMatcher(env);
+  matcher = await entityMatcher(env);
   await log('info', out.scanned + ' rows of the last ' + hours + 'h not yet placed; ' + live.length + ' live narratives; matching by ' + out.mode);
-  const itemStmts = []; const touched = new Set(); const touchedBy = {}; const bests = [];
-  rows.forEach((r, i) => {
+  // p69 (P1): the near-miss join. A row within NARR_NEAR of its bar that joins nothing may join the closest such candidate
+  // when the candidate's member headlines cover its headline (IDF over the run's candidates' term maps, register names and
+  // issue words dropped), it does not lean to the candidate's counter-claim, the anchor holds and the candidate had a row
+  // within 48h. Member headlines are the narrative as it stood when the run began, so one near join never eases the next.
+  // Every near miss looked at is recorded in narrative_near (on: joined; shadow: would have; miss: did not qualify).
+  const nearCfg = narrNearMode(env, await narrKvJson(env, 'narr_near_mode'));
+  const nearOn = nearCfg.mode !== 'off' && !!vecs;
+  out.near = { mode: nearCfg.mode, lex: nearCfg.lex, would: 0, joined: 0, missed: 0, capped: 0, sample: [] };
+  const nearDf = new Map(); live.forEach(c => { new Set(Object.keys(c.tok).map(narrStrip)).forEach(t => nearDf.set(t, (nearDf.get(t) || 0) + 1)); });
+  const nearIdf = (N => t => Math.log((N + 1) / ((nearDf.get(t) || 0) + 0.5)))(live.length);
+  const nearHeads = new Map(); const nearTaken = {}; let nearRead = 0;
+  const nameTok = matcher.nameTok || new Set();
+  for (let i = 0; i < rows.length; i++) { const r = rows[i];
     let meta = {}; try { meta = JSON.parse(r.meta || '{}') || {}; } catch (e) { meta = {}; }
     const text = texts[i];
     const platform = platformOf(r.kind, meta); const channel = narrChannel(r.kind, meta, r.src);
-    if (text.length < 20) { itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(r.id, '', r.ts || now, platform, channel)); out.skipped++; return; }
+    if (text.length < 20) { itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(r.id, '', r.ts || now, platform, channel)); out.skipped++; continue; }
     const tokens = narrTokens(text); const tv = tokenVec(tokens);
     const issues = new Set(Array.isArray(meta.issues) ? meta.issues : issueTag(text));
     const ents = new Set(matcher.match(text));
     const v = vecs ? vecs[i] : null;
-    let best = null, bestSim = 0, bestAny = 0;
+    const isComment = /comment/.test(r.kind) || r.kind === 'comments';
+    const R = narrHeadToks(narrHead(r), nameTok);
+    let best = null, bestSim = 0, bestAny = 0, bestAnyC = null, bestAnyThr = 0, near = null, nearSim = 0, nearJoin = false;
     for (const c of live) {
       if (c.n >= narrMax(env)) continue;   // a topic, not a narrative: it takes no more rows
       const sim = v && c.vec ? vecCos(v, c.vec) : tokenCos(tv, c.tok);
-      if (sim > bestAny) bestAny = sim;
       // the anchor is a shared LEADING issue (the three its rows name most) or a shared entity, never any issue ever seen
       const anchor = [...issues].some(x => c.top.has(x)) || [...ents].some(x => c.ents.has(x));
       let thr = v && c.vec ? (anchor ? simA : simS) : (anchor ? NARR_TOKEN_SIM : NARR_TOKEN_SIM + 0.15);
       if (c.n >= NARR_BIG) thr += 0.03;   // a large narrative must be tight to keep growing
+      if (sim > bestAny) { bestAny = sim; bestAnyC = c; bestAnyThr = thr; }
       if (sim >= thr && sim > bestSim) { best = c; bestSim = sim; }
+      else if (nearOn && v && c.vec && !isComment && anchor && sim < thr && sim >= thr - NARR_NEAR && sim > nearSim && (c.last_ts || 0) >= (r.ts || now) - NARR_NEAR_H * 3600000) { near = c; nearSim = sim; }
     }
-    const isComment = /comment/.test(r.kind) || r.kind === 'comments';
+    if (!best && near && !r.near_undone) {
+      let mh = null;
+      if ((nearTaken[near.id] || 0) >= NARR_NEAR_PER) mh = null;   // this run's near joins into it are spent
+      else if (near.fresh) mh = { heads: near.heads || [], claim: new Set(), counter: new Set() };
+      else if (nearHeads.has(near.id)) mh = nearHeads.get(near.id);
+      else if (nearRead >= NARR_NEAR_FETCH) out.near.capped++;
+      else {
+        nearRead++; const nr = await db.prepare('SELECT id, amplifiers, claim, counter_claim FROM narratives WHERE id=?').bind(near.id).first();
+        mh = { heads: pjs(nr && nr.amplifiers, []).map(a => String((a && a.title) || '')).filter(t => narrTokens(t).length >= 4).map(t => narrHeadToks(t, nameTok)), claim: narrHeadToks(nr && nr.claim, nameTok), counter: narrHeadToks(nr && nr.counter_claim, nameTok) };
+        nearHeads.set(near.id, mh);
+      }
+      if (mh) {
+        const cov = narrHeadCover(R, mh.heads, nearIdf);
+        const lean = mh.claim.size && mh.counter.size ? narrLean(R, mh.claim, mh.counter, nearIdf) : 0;
+        const qual = cov.lex >= nearCfg.lex && cov.shared >= NARR_LEX_SHARED && lean < 0.10;
+        const mode = !qual ? 'miss' : nearCfg.mode === 'on' ? 'on' : 'shadow';
+        if (mode === 'on') { best = near; bestSim = nearSim; nearJoin = true; nearTaken[near.id] = (nearTaken[near.id] || 0) + 1; out.near.joined++; }
+        else if (mode === 'shadow') out.near.would++; else out.near.missed++;
+        const rec = { item: r.id, narrative: near.id, mode, sim: Math.round(nearSim * 1000) / 1000, lex: Math.round(cov.lex * 1000) / 1000, shared: cov.shared, words: cov.words.slice(0, 12), lean: Math.round(lean * 1000) / 1000 };
+        itemStmts.push(db.prepare("INSERT OR REPLACE INTO narrative_near(item,narrative,mode,sim,lex,shared,lean,at,undone_at,undone_by) VALUES(?,?,?,?,?,?,?,?,0,'')").bind(r.id, near.id, mode, rec.sim, rec.lex, cov.words.join(' '), rec.lean, now));
+        if (out.near.sample.length < 20) out.near.sample.push(rec);
+      }
+    }
     // the wide matchers tag anything that mentions a government or a rent; to START a narrative a story
     // must hit an issue's tight trigger (the Sentinel's own) or name a register entity - a politician, a
     // party, a client, an opponent. Celebrity, crime and foreign stories without one may join, never seed.
@@ -10662,9 +10756,10 @@ async function narrativesRun(env, opts) {
     if (!best && !canStart) {
       // a comment, or a row naming no client issue and no entity, is not the seed of a narrative: it
       // may join one that exists; otherwise it is set aside and not looked at again
-      itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(r.id, '', r.ts || now, platform, channel)); out.unanchored++; return;
+      itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(r.id, '', r.ts || now, platform, channel)); out.unanchored++; continue;
     }
     if (best) {
+      if (best.fresh && !nearJoin && best.heads) best.heads.push(R);   // a cluster this run started: the headlines it took by the bar
       // the centroid moves only while the narrative is young; after NARR_FREEZE rows it is fixed, so
       // later rows must resemble what the narrative was, not what it has drifted toward
       if (v && best.vec && best.n < NARR_FREEZE) { const k = best.n; best.vec = best.vec.map((x, j) => (x * k + v[j]) / (k + 1)); }
@@ -10677,14 +10772,16 @@ async function narrativesRun(env, opts) {
     } else {
       const ic = {}; issues.forEach(x => { ic[x] = 1; });
       // stmt / bi: where its starter row's statement and its closest-live score sit, for the write-time rule below (p68)
-      const c = { id: narrId(), ic, top: new Set(narrTopIssues(ic, 3)), ents, n: 1, vec: v, tok: tv, first_ts: r.ts || now, last_ts: r.ts || now, fresh: true, touched: true, first_item: r.id, first_platform: platform, first_channel: channel, rows: [{ kind: r.kind, title: r.title, body: String(r.body || '').slice(0, 300) }], stmt: itemStmts.length, bi: bests.length };
+      // born (p69): the closest live narrative when it started and the bar it missed - P1's reach is read from these
+      const c = { id: narrId(), ic, top: new Set(narrTopIssues(ic, 3)), ents, n: 1, vec: v, tok: tv, first_ts: r.ts || now, last_ts: r.ts || now, fresh: true, touched: true, first_item: r.id, first_platform: platform, first_channel: channel, rows: [{ kind: r.kind, title: r.title, body: String(r.body || '').slice(0, 300) }], stmt: itemStmts.length, bi: bests.length,
+        heads: [R], born: { near: bestAnyC ? bestAnyC.id : '', sim: Math.round(bestAny * 1000) / 1000, bar: Math.round(bestAnyThr * 1000) / 1000 } };
       bests.push(bestAny);
       live.push(c);
       itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,1)').bind(r.id, c.id, r.ts || now, platform, channel));
       touched.add(c.id); out.started++; touchedBy[c.id] = { id: c.id, added: 1, started: true };
     }
     out.placed++;
-  });
+  }
   // p68 (review): a cluster this run started that is still one row, and whose row is older than NARR_SINGLE_KEEP_H, is not
   // written as a narrative: this run's own prune would take it (under two rows, nothing newer than that) and free the row for
   // the next run to start again, oldest first - on 16 November 2026 every place step re-placed the same hundred rows. Its row
@@ -10705,20 +10802,29 @@ async function narrativesRun(env, opts) {
     await log('info', 'closest live narrative for the ' + bests.length + ' rows that started one: median ' + out.simStats.median + ', 90th percentile ' + out.simStats.p90 + ' (the bar is ' + simA + ' with a shared leading issue, ' + simS + ' without); ' + out.simStats.atOldBar + ' would have joined at 0.80 - NARRATIVE_SIM tunes this');
   }
   // write placements and centres
-  const nStmts = [];
   live.filter(c => c.touched).forEach(c => {
     const terms = {}; narrTopTerms(c.tok, 40).forEach(t => { terms[t] = Math.round(c.tok[t] * 1000) / 1000; });
     const top = narrTopIssues(c.ic, 3); const nsOf = (CLIENT_ISSUES.find(ci => ci.id === top[0]) || {}).ns || '';
     // p67: born with a working title from the rows in hand (no model call), so no narrative exists without one
     if (c.fresh) { const ci0 = CLIENT_ISSUES.find(ci => ci.id === top[0]); const autoLabel = narrAutoLabel(c.rows, terms, { names: [...c.ents].map(id => (matcher.byId[id] || {}).name).filter(Boolean), known: matcher.entities.map(e => e.name).filter(Boolean), issue: ci0 ? ci0.label : (top[0] || ''), n: c.n });
-      nStmts.push(db.prepare("INSERT INTO narratives(id,label,summary,claim,counter_claim,proponents,issues,issue_counts,entities,ns,side,n,n24,nprev,velocity,first_ts,first_item,first_platform,first_channel,last_ts,platforms,channels,spread,amplifiers,sentiment,counter,status,alerted,alert_ts,muted,pinned,edited,terms,centroid,dim,labelled_n,model,created,updated,auto_label,auto_n) VALUES(?,'','','','','',?,?,?,?,'unknown',?,0,0,0,?,?,?,?,?,'{}','[]','[]','[]','{}','','new',0,0,0,0,0,?,?,?,0,'',?,?,?,?) ON CONFLICT(id) DO NOTHING")
-      .bind(c.id, JSON.stringify(top), JSON.stringify(c.ic), JSON.stringify([...c.ents].slice(0, 12)), nsOf, c.n, c.first_ts, c.first_item, c.first_platform, c.first_channel, c.last_ts, JSON.stringify(terms), c.vec ? f32b64(c.vec) : '', c.vec ? c.vec.length : 0, now, now, autoLabel, c.n)); }
+      const born = c.born || { near: '', sim: 0, bar: 0 };
+      nStmts.push(db.prepare("INSERT INTO narratives(id,label,summary,claim,counter_claim,proponents,issues,issue_counts,entities,ns,side,n,n24,nprev,velocity,first_ts,first_item,first_platform,first_channel,last_ts,platforms,channels,spread,amplifiers,sentiment,counter,status,alerted,alert_ts,muted,pinned,edited,terms,centroid,dim,labelled_n,model,created,updated,auto_label,auto_n,born_near,born_sim,born_bar) VALUES(?,'','','','','',?,?,?,?,'unknown',?,0,0,0,?,?,?,?,?,'{}','[]','[]','[]','{}','','new',0,0,0,0,0,?,?,?,0,'',?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING")
+      .bind(c.id, JSON.stringify(top), JSON.stringify(c.ic), JSON.stringify([...c.ents].slice(0, 12)), nsOf, c.n, c.first_ts, c.first_item, c.first_platform, c.first_channel, c.last_ts, JSON.stringify(terms), c.vec ? f32b64(c.vec) : '', c.vec ? c.vec.length : 0, now, now, autoLabel, c.n, born.near, born.sim, born.bar)); }
     else nStmts.push(db.prepare("UPDATE narratives SET issues=CASE WHEN edited=1 THEN issues ELSE ? END, issue_counts=?, entities=?, ns=CASE WHEN ns='' THEN ? ELSE ns END, n=?, last_ts=?, first_ts=?, terms=?, centroid=?, dim=?, updated=? WHERE id=?")
       .bind(JSON.stringify(top), JSON.stringify(c.ic), JSON.stringify([...c.ents].slice(0, 12)), nsOf, c.n, c.last_ts, c.first_ts, JSON.stringify(terms), c.vec ? f32b64(c.vec) : '', c.vec ? c.vec.length : 0, now, c.id));
   });
-  for (let i = 0; i < itemStmts.length; i += 100) await db.batch(itemStmts.slice(i, i + 100));
-  for (let i = 0; i < nStmts.length; i += 50) await db.batch(nStmts.slice(i, i + 50));
+  // p69 (P5): the lease is renewed before the writes; a run that lost it (past NARR_LEASE_MS) writes nothing
+  if (!(await narrLeaseRenew(env, 'place', leaseTok, NARR_LEASE_MS))) {
+    out.errors.push('placement lease lost before the writes: nothing was written this run'); out.busy = true; touched.clear(); live.forEach(c => { c.touched = false; });
+    out.placed = out.joined = out.started = out.skipped = out.unanchored = out.aged = 0; out.touched = [];
+  } else {
+    for (let i = 0; i < itemStmts.length; i += 100) await db.batch(itemStmts.slice(i, i + 100));
+    for (let i = 0; i < nStmts.length; i += 50) await db.batch(nStmts.slice(i, i + 50));
+  }
   await log('out', out.placed + ' rows placed: ' + out.joined + ' joined a live narrative, ' + out.started + ' started one; ' + out.skipped + ' too short to place' + (out.unanchored ? ', ' + out.unanchored + ' set aside (a lone comment, a row naming no issue or entity, or a story that only brushes an issue without a politician, party or client in it - and near nothing live' + (out.aged ? '; ' + out.aged + ' of them older than ' + NARR_SINGLE_KEEP_H + 'h with nothing in this run to join them, too old to stand alone' : '') + ')' : ''));
+  if (out.near.would || out.near.joined || out.near.missed) await log('info', 'near misses read on headline evidence (near mode ' + out.near.mode + '): ' + out.near.joined + ' joined, ' + out.near.would + ' would have joined, ' + out.near.missed + ' did not qualify' + (out.near.capped ? ', ' + out.near.capped + ' past the ' + NARR_NEAR_FETCH + '-candidate read cap' : ''));
+  if (out.near.capped) { try { const d = narrSydDay(now); const p = (await narrKvJson(env, 'narr_near_day')) || {}; await kvPut(env.AXIOM_KV, 'narr_near_day', JSON.stringify({ day: d, capped: (p.day === d ? Number(p.capped) || 0 : 0) + out.near.capped }), 3 * 86400); } catch (e) { /* a count, not a record */ } }
+  } finally { await narrLeaseFree(env, 'place', leaseTok); }   // ---- end of placement inside the lease ----
   // a cluster at or past narrMax(env) is a topic from this moment, whether or not it is recounted this run
   try { await db.prepare("UPDATE narratives SET status='broad', updated=? WHERE n>=? AND status<>'broad'").bind(now, narrMax(env)).run(); } catch (e) { out.errors.push('broad: ' + String((e && e.message) || e).slice(0, 80)); }
   // recount what changed, plus narratives that need their pace re-read
@@ -10739,6 +10845,13 @@ async function narrativesRun(env, opts) {
     for (const id of need) { if (left() < 6000) break; try { const rf = await narrRefresh(env, id, now); if (rf && rf.autoLabel) out.titled++; } catch (e) { out.errors.push('title ' + id + ': ' + String((e && e.message) || e).slice(0, 80)); } }
     if (out.titled) await log('info', out.titled + ' narrative' + (out.titled === 1 ? '' : 's') + ' given a working title from their rows (no model call)');
   } catch (e) { out.errors.push('titles: ' + String((e && e.message) || e).slice(0, 80)); }
+  // p69: the merge pass, after the recount and the titles and before naming, so a survivor is named once and nothing is
+  // named that is about to vanish. Model-free; proposals only unless the owner set the merge mode to auto.
+  if (opts.merge && left() >= 10000) {
+    try { out.merge = await narrMergePass(env, { now: Date.now(), left, live });
+      if (out.merge.mode !== 'off') await log('info', 'merge pass (' + out.merge.mode + (out.merge.paused ? ', paused' : '') + '): ' + out.merge.proposals + ' proposals, ' + (out.merge.applied.length ? out.merge.applied.length + ' merged (' + out.merge.applied.map(a => '"' + a.fromTitle + '" into "' + a.intoTitle + '", undo: merge ' + a.merge).join('; ') + ')' : out.merge.automatic + ' would merge by themselves under auto') + (out.merge.busy ? '; the lease was busy, nothing applied' : '') + ' (' + out.merge.ms + 'ms)'); }
+    catch (e) { out.errors.push('merge pass: ' + String((e && e.message) || e).slice(0, 120)); }
+  }
   // names, counters, alerts - each only while the budget allows; the cron tick finishes what is left. From the day's window
   // (opts.queue, p67) the namer takes the whole waiting queue, client-issue narratives first, not only what moved this tick.
   if (!env.ANTHROPIC_API_KEY) await log('info', 'ANTHROPIC_API_KEY is not set: narratives stay unnamed by the model (their working titles, terms and rows are still here)');
@@ -10754,12 +10867,20 @@ async function narrativesRun(env, opts) {
   if (left() > 2500) { try { const al = await narrAlerts(env, log); out.alerts = al.length; } catch (e) { out.errors.push('alerts: ' + String((e && e.message) || e).slice(0, 80)); } }
   // singletons that never grew are noise: gone after two days (their rows are freed to be placed again: p68, a freed row
   // joins a live narrative or one this run starts, or is set aside at the write; it is never written as another singleton
-  // for this prune to take. A singleton written 24-48h old is never a candidate again (NARR_SINGLE_CAND_H), so its row comes
-  // back once, at most, for one more look against what formed since)
-  try { const old = ((await db.prepare('SELECT id FROM narratives WHERE n<2 AND last_ts<? LIMIT 4000').bind(now - NARR_SINGLE_KEEP_H * 3600000).all()).results || []).map(r => r.id); for (let i = 0; i < old.length; i += 90) { const part = old.slice(i, i + 90); const m = part.map(() => '?').join(','); await db.batch([db.prepare('DELETE FROM narrative_items WHERE narrative IN (' + m + ')').bind(...part), db.prepare('DELETE FROM narratives WHERE id IN (' + m + ')').bind(...part)]); } out.pruned = old.length; } catch (e) {}
+  // for this prune to take). p69 (P2): only when both clocks have run - nothing newer than 48h AND placed more than 24h ago,
+  // the day it was a candidate - and a row about to leave the 72h window is set aside rather than freed, so a singleton
+  // placed when its row was 47h old does not hand the next run a row it may never see. Inside the lease; busy: next run.
+  const pruneTok = await narrLeaseTake(env, 'place', NARR_LEASE_MS, 0);
+  if (pruneTok) try {
+    const old = ((await db.prepare('SELECT id FROM narratives WHERE n<2 AND last_ts<? AND COALESCE(created,0)<? LIMIT 4000').bind(now - NARR_SINGLE_KEEP_H * 3600000, now - NARR_SINGLE_CAND_H * 3600000).all()).results || []).map(r => r.id);
+    const edge = now - (NARR_WINDOW_H - 0.5) * 3600000; let aside = 0;
+    for (let i = 0; i < old.length; i += 90) { const part = old.slice(i, i + 90); const m = part.map(() => '?').join(','); const res = await db.batch([db.prepare("UPDATE narrative_items SET narrative='', sim=0 WHERE narrative IN (" + m + ') AND ts<?').bind(...part, edge), db.prepare('DELETE FROM narrative_items WHERE narrative IN (' + m + ')').bind(...part), db.prepare('DELETE FROM narratives WHERE id IN (' + m + ')').bind(...part)]); aside += (res[0] && res[0].meta && res[0].meta.changes) || 0; }
+    out.pruned = old.length; if (aside) out.prunedAside = aside;
+    await db.prepare('DELETE FROM narrative_near WHERE at<?').bind(now - 14 * 86400000).run();   // P1's records are kept 14 days
+  } catch (e) { /* the next run prunes */ } finally { await narrLeaseFree(env, 'place', pruneTok); }
   out.ms = Date.now() - now;
   await log('info', out.named + ' named, ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') + ' raised (' + out.ms + 'ms)');
-  out.summary = out.placed + ' rows placed (' + out.joined + ' joined a live narrative, ' + out.started + ' started one)' + (out.unanchored ? ', ' + out.unanchored + ' set aside' : '') + '; ' + recounted + ' recounted' + (out.deferred ? ' (' + out.deferred + ' deferred to the tick)' : '') + '; ' + (out.namingDeferred ? 'naming deferred to the tick' : out.named + ' named') + (out.alerts ? '; ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') : '') + (out.pruned ? '; ' + out.pruned + ' empty singletons pruned' : '') + ' - ' + (out.ms / 1000).toFixed(1) + 's';
+  out.summary = out.placed + ' rows placed (' + out.joined + ' joined a live narrative, ' + out.started + ' started one)' + (out.unanchored ? ', ' + out.unanchored + ' set aside' : '') + '; ' + recounted + ' recounted' + (out.deferred ? ' (' + out.deferred + ' deferred to the tick)' : '') + '; ' + (out.namingDeferred ? 'naming deferred to the tick' : out.named + ' named') + (out.alerts ? '; ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') : '') + (out.pruned ? '; ' + out.pruned + ' empty singletons pruned' : '') + (out.busy ? '; placement skipped (another run held the lease)' : '') + narrMergeSummary(out.merge) + ' - ' + (out.ms / 1000).toFixed(1) + 's';
   if (out.errors.length && !out.placed && !out.named) { out.ok = false; out.detail = out.errors[0]; }
   await kvPut(env.AXIOM_KV, 'narr_last', jsonFit(Object.assign({ at: now }, out), 4000), 7 * 86400);
   return out;
@@ -10774,7 +10895,7 @@ async function narrativesCron(env) {
     const budget = total - (Date.now() - t0);
     if (budget < 75000) break;
     // p67 (B0): the window's namer takes the waiting queue (narrLabelQueue), within the same cap, and its bounded share
-    const out = await narrativesRun(env, { budgetMs: budget, queue });
+    const out = await narrativesRun(env, { budgetMs: budget, queue, merge: i === 0 });   // p69: the merge pass once a tick (pass 0; acc carries its result)
     if (!acc) acc = out; else { ['scanned', 'placed', 'joined', 'started', 'skipped', 'unanchored', 'aged', 'named', 'calls', 'alerts', 'pruned', 'titled'].forEach(k => { acc[k] = (acc[k] || 0) + (out[k] || 0); }); acc.errors = (acc.errors || []).concat(out.errors || []); acc.passes = i + 1; acc.namesWaiting = out.namesWaiting; acc.namingStopped = out.namingStopped; }
     // another pass while rows wait to be placed, or while names wait and only the clock (not the cap) stopped the namer
     const drainLeft = queue.calls < NARR_WINDOW_CALLS && Date.now() < queue.until - 15000;
@@ -10844,7 +10965,760 @@ async function narrativesStatus(env) {
   let awaitingModel = 0; try { awaitingModel = Number(((await env.MIND_DB.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE + ' AND last_ts>?').bind(NARR_LABEL_MIN, now - NARR_QUEUE_DAYS * 86400000).first()) || {}).n) || 0; } catch (e) {}
   // B1's own ledger ('narr_auto', off unless NARRATIVE_AUTO=tick) is reported beside the window's, so no spend is unseen
   let budgetAuto = null; try { budgetAuto = Object.assign({ mode: narrAutoMode(env) }, await narrBudget(env, 'narr_auto')); } catch (e) { budgetAuto = { mode: narrAutoMode(env) }; }
-  return { ok: true, budgetAuto, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, titled: c.titled || 0, awaitingModel, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, off: c.off || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: narrMax(env) };
+  // p69, additive: the merge pass and the near-miss join - modes and their source, the last tick's proposals, the last
+  // day's automatic merges with their undo ids (nothing here depends on a run's log)
+  let merge = null; try { merge = await narrMergeStatus(env, now); } catch (e) { merge = { error: String((e && e.message) || e).slice(0, 120) }; }
+  return { ok: true, budgetAuto, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, titled: c.titled || 0, awaitingModel, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, off: c.off || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: narrMax(env), merge };
+}
+
+// ==============================================================================
+// p69 (DEN.md s.10.11): one story, one narrative. On 16 November 2026 a third of the live narratives sat in 34 groups that
+// told one story: a row in another text form (a bare headline, a forum page) scores just under the join bar and starts a
+// narrative of its own; late rows and the prune re-placed rows into singletons no run could join; the recount wiped the
+// entity anchor; and nothing ever compared two narratives. Prevention sits in narrativesRun (the near-miss join, the
+// singleton's second clock, the lease). Here: the merge pass (model-free scores between narratives: the centroid cosine, an
+// IDF term cosine and the census word score), the merge every route goes through, its undo, keep-apart, and the aliases
+// that let an absorbed id keep resolving. Every merge is logged in narrative_merges and undone by a route; an undone
+// merge or a rejected proposal keeps that pair apart until a person lifts it. The automatic pass is off unless the owner
+// switches it on (KV narr_merge_mode, written only by POST /narratives/merges {mode}, logged), never touches a narrative a
+// person edited, pinned or muted, and makes no model call.
+// ==============================================================================
+const NARR_MERGE_GAP_H = NARR_LIVE_H;   // a pair's spans at most this far apart (a narrative this quiet is asleep)
+const NARR_MERGE_AUTO_GAP_H = 24;       // ...and within a day for an automatic merge
+const NARR_MERGE_SCAN_MS = 1500;        // scan time a tick (8000 in the dry route); past it the answer is partial
+const NARR_MERGE_TICK = 5;              // automatic merges a tick (var NARRATIVE_MERGE_TICK 1-10)
+const NARR_MERGE_DAY = 40;              // automatic merges a Sydney day (merges not undone)
+const NARR_MERGE_SURV_DAY = 3;          // automatic absorptions into one survivor a Sydney day
+const NARR_MERGE_UNDO_TRIP = 3;         // automatic merges people undo within 24h that pause the automatic pass
+const NARR_LEASE_MS = 180000;           // the placement lease; every take is freed in a finally, this is the crash bound
+const NARR_MERGE_MODES = ['off', 'propose', 'auto'];
+const NARR_NEAR_MODES = ['off', 'shadow', 'on'];
+// the census scorer's extra stop words (narrTokens lacks them; 34 of 300 live leading-term lists carried one)
+const NARR_S_EXTRA = new Set(("has have had it's i'm don't doesn't won't can't that's here's let's get got make makes made now today today's yesterday latest week year years day days").split(' '));
+const NARR_TPL_RX1 = /^A narrative (on|of) /;
+const NARR_TPL_RX2 = /^([^:]{0,80}): ([a-z0-9$'\-]+(, [a-z0-9$'\-]+)*)\.*$/;
+const NARR_CLAUSE_SPEC = {
+  cHi: { v: 'NARRATIVE_MERGE_SIM', lo: 0.85, hi: 0.99, words: 'cHi (the centroid bar) is 0.85 to 0.99' },
+  cForm: { v: 'NARRATIVE_MERGE_FORM_C', lo: 0.79, hi: 0.95, words: 'cForm (the form clause\'s centroid bar) is 0.79 to 0.95' },
+  form: { v: 'NARRATIVE_MERGE_FORM', set: ['s', 't', 'off'], words: 'form is s, t or off' },
+  formT: { v: 'NARRATIVE_MERGE_FORM_T', lo: 0.30, hi: 0.90, words: 'formT (the term cosine bar) is 0.30 to 0.90' },
+  formS: { v: 'NARRATIVE_MERGE_FORM_S', lo: 0.25, hi: 0.70, words: 'formS (the word score bar of the form clause) is 0.25 to 0.70' },
+  sCorr: { v: 'NARRATIVE_MERGE_CORR', lo: 0.15, hi: 0.60, words: 'sCorr (the centroid clause\'s word score) is 0.15 to 0.60' },
+  crossNs: { v: 'NARRATIVE_MERGE_CROSS_NS', set: ['off', 'issue'], words: 'crossNs is off or issue' },
+};
+const narrR3 = x => (x == null || !isFinite(x) ? null : Math.round(x * 1000) / 1000);
+function narrMid(p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function narrSydStart(now) { const off = auOffsetMs(now); return Math.floor((now + off) / 86400000) * 86400000 - off; }
+function narrSydDay(now) { return new Date(now + auOffsetMs(now)).toISOString().slice(0, 10); }
+function narrRangeNum(v, lo, hi) { if (v == null || v === '') return null; const x = typeof v === 'number' ? v : parseFloat(v); return isFinite(x) && x >= lo && x <= hi ? x : null; }
+async function narrKvJson(env, k) { try { return JSON.parse((await kvGet(env.AXIOM_KV, k)) || 'null'); } catch (e) { return null; } }
+function narrClauseVal(spec, x) { if (spec.set) { const s = String(x == null ? '' : x).trim().toLowerCase(); return spec.set.indexOf(s) >= 0 ? s : null; } return narrRangeNum(x, spec.lo, spec.hi); }
+/** The automatic clause in force: KV narr_merge_mode.clause field by field, else the ranged var, else the default. */
+function narrMergeClause(env, kvClause) {
+  const k = kvClause && typeof kvClause === 'object' ? kvClause : {}; const out = {}, src = {};
+  const pick = (name, dflt) => { const sp = NARR_CLAUSE_SPEC[name]; const a = narrClauseVal(sp, k[name]); if (a != null) { src[name] = 'kv'; return a; } const b = narrClauseVal(sp, env && env[sp.v]); if (b != null) { src[name] = 'env'; return b; } src[name] = 'default'; return dflt; };
+  out.cHi = pick('cHi', 0.92); out.cLo = narrR3(out.cHi - 0.06); out.cForm = pick('cForm', out.cLo); out.form = pick('form', 's');
+  out.formT = pick('formT', 0.60); out.formS = pick('formS', out.form === 't' ? 0.35 : 0.45); out.sCorr = pick('sCorr', 0.25); out.crossNs = pick('crossNs', 'off');
+  const t = parseInt(env && env.NARRATIVE_MERGE_TICK, 10); out.tick = t >= 1 && t <= 10 ? t : NARR_MERGE_TICK;
+  return { clause: out, source: src };
+}
+/** Merge mode: KV narr_merge_mode.mode (off|propose|auto), else NARRATIVE_MERGE, else propose; paused makes auto behave as propose. */
+function narrMergeMode(env, kv) {
+  kv = kv && typeof kv === 'object' ? kv : {};
+  const e = String((env && env.NARRATIVE_MERGE) || '').trim().toLowerCase();
+  const mode = NARR_MERGE_MODES.indexOf(kv.mode) >= 0 ? kv.mode : NARR_MERGE_MODES.indexOf(e) >= 0 ? e : 'propose';
+  const source = NARR_MERGE_MODES.indexOf(kv.mode) >= 0 ? 'kv' : NARR_MERGE_MODES.indexOf(e) >= 0 ? 'env' : 'default';
+  const paused = kv.paused && typeof kv.paused === 'object' ? kv.paused : null; const c = narrMergeClause(env, kv.clause);
+  return { mode, source, paused, effective: mode === 'auto' && paused ? 'propose' : mode, clause: c.clause, clauseSource: c.source, resumed: Number(kv.resumed) || 0 };
+}
+/** Near mode: KV narr_near_mode.mode, else NARRATIVE_NEAR, else shadow; the headline cover bar likewise (0.30-0.90). */
+function narrNearMode(env, kv) {
+  kv = kv && typeof kv === 'object' ? kv : {};
+  const e = String((env && env.NARRATIVE_NEAR) || '').trim().toLowerCase(); const ok = x => NARR_NEAR_MODES.indexOf(x) >= 0;
+  const kl = narrRangeNum(kv.lex, 0.30, 0.90), el = narrRangeNum(env && env.NARRATIVE_NEAR_LEX, 0.30, 0.90);
+  return { mode: ok(kv.mode) ? kv.mode : ok(e) ? e : 'shadow', source: ok(kv.mode) ? 'kv' : ok(e) ? 'env' : 'default', lex: kl != null ? kl : el != null ? el : NARR_LEX, lexSource: kl != null ? 'kv' : el != null ? 'env' : 'default' };
+}
+async function narrModeLog(env, who, what, before, after) {
+  try { await env.MIND_DB.prepare('INSERT INTO narr_mode_log(id,at,who,what,before,after) VALUES(?,?,?,?,?,?)').bind(narrMid('q'), Date.now(), String(who || '').slice(0, 60), String(what || '').slice(0, 200), JSON.stringify(before == null ? null : before), JSON.stringify(after == null ? null : after)).run(); } catch (e) { /* the mode still changed; the log is best effort */ }
+}
+
+// ---- the placement lease (P5): one placement, prune, merge, undo, near undo or reset at a time
+async function narrLeaseTake(env, name, ms, waitMs) {
+  const tok = narrMid('l'); const sleep = typeof env.__narrLeaseSleep === 'function' ? env.__narrLeaseSleep : (x => new Promise(r => setTimeout(r, x)));
+  const tries = 1 + Math.max(0, Math.floor((Number(waitMs) || 0) / 500));
+  for (let i = 0; i < tries; i++) {
+    if (i) await sleep(500);
+    const now = Date.now();
+    try { const r = await env.MIND_DB.prepare('INSERT INTO narr_lease(name,holder,until) VALUES(?,?,?) ON CONFLICT(name) DO UPDATE SET holder=excluded.holder, until=excluded.until WHERE narr_lease.until<?').bind(name, tok, now + ms, now).run(); if (((r && r.meta && r.meta.changes) || 0) > 0) return tok; } catch (e) { return null; }
+  }
+  return null;
+}
+async function narrLeaseRenew(env, name, tok, ms) { if (!tok) return false; try { const r = await env.MIND_DB.prepare('UPDATE narr_lease SET until=? WHERE name=? AND holder=?').bind(Date.now() + ms, name, tok).run(); return ((r && r.meta && r.meta.changes) || 0) > 0; } catch (e) { return false; } }
+async function narrLeaseFree(env, name, tok) { if (!tok) return; try { await env.MIND_DB.prepare('DELETE FROM narr_lease WHERE name=? AND holder=?').bind(name, tok).run(); } catch (e) { /* it expires */ } }
+const NARR_BUSY = { ok: false, status: 409, error: 'busy', detail: 'Another placement, merge or undo is running. Try again in a few seconds.' };
+
+// ---- aliases: an absorbed id keeps resolving (never rewritten: filed briefs, KV briefs and browsers hold old ids)
+/** For each id: the live narrative it is now, following non-undone merges up to ten hops; { survivor | null, chain, merges }. */
+async function narrAliasMany(env, ids) {
+  const db = env.MIND_DB; const out = {}; ids = Array.from(new Set((ids || []).map(String).filter(Boolean)));
+  const cur = {}; ids.forEach(id => { cur[id] = id; out[id] = { survivor: null, chain: [], merges: [] }; });
+  let pending = ids.slice();
+  for (let hop = 0; hop <= 10 && pending.length; hop++) {
+    const look = Array.from(new Set(pending.map(id => cur[id]))); const live = new Set(); const next = {};
+    for (let i = 0; i < look.length; i += 90) {
+      const part = look.slice(i, i + 90); const mk = part.map(() => '?').join(',');
+      ((await db.prepare('SELECT id FROM narratives WHERE id IN (' + mk + ')').bind(...part).all()).results || []).forEach(r => live.add(r.id));
+      ((await db.prepare('SELECT id, into_id, from_id, how, who, at FROM narrative_merges WHERE undone_at=0 AND from_id IN (' + mk + ') ORDER BY at DESC').bind(...part).all()).results || []).forEach(r => { if (!next[r.from_id]) next[r.from_id] = r; });
+    }
+    const still = [];
+    pending.forEach(id => {
+      const c = cur[id]; if (live.has(c)) { out[id].survivor = c; return; }
+      const m = next[c]; if (!m) return;
+      out[id].chain.push(m.into_id); out[id].merges.push({ merge: m.id, from: m.from_id, into: m.into_id, how: m.how, who: m.who, at: m.at }); cur[id] = m.into_id; still.push(id);
+    });
+    pending = still;
+  }
+  return out;
+}
+async function narrAlias(env, id) { const m = await narrAliasMany(env, [id]); return m[String(id)] || { survivor: null, chain: [], merges: [] }; }
+
+// ---- P1's headline evidence and the scores' tokens
+let NARR_ISSUE_TOK = null;
+function narrIssueTok() { if (!NARR_ISSUE_TOK) { const s = new Set(); CLIENT_ISSUES.forEach(ci => narrTokens([ci.label].concat(ci.q || []).join(' ')).forEach(t => s.add(t))); NARR_ISSUE_TOK = s; } return NARR_ISSUE_TOK; }
+function narrStrip(t) { return String(t).replace(/'s$/, ''); }
+/** A headline's evidence words: @handles out, possessives stripped, filler, register names and issue words dropped. */
+function narrHeadToks(s, nameTok) {
+  const iss = narrIssueTok(); const out = new Set();
+  narrTokens(String(s || '').replace(/(^|\s)@[\w.]+/g, ' ')).forEach(t => { t = narrStrip(t); if (t.length > 2 && !NARR_LEX_STOP.has(t) && !(nameTok && nameTok.has(t)) && !iss.has(t)) out.add(t); });
+  return out;
+}
+function narrHead(r) { const t = String(r.title || '').replace(/^Comment on:\s*/i, '').trim(); return (t || String(r.body || '').replace(/\s+/g, ' ').trim()).slice(0, 160); }
+/** How much of a row's headline (R) the member headlines (Ms) cover, IDF-weighted: { lex, shared, words }. */
+function narrHeadCover(R, Ms, idf) {
+  const U = new Set(); (Ms || []).forEach(M => M.forEach(t => U.add(t)));
+  let num = 0, den = 0; const words = [];
+  R.forEach(t => { const w = idf(t); den += w; if (U.has(t)) { num += w; words.push(t); } });
+  return { lex: den > 0 ? num / den : 0, shared: words.length, words };
+}
+function narrOvlSet(A, B, idf) { if (!A.size || !B.size) return null; let i = 0, a = 0, b = 0; A.forEach(t => { const w = idf(t); a += w; if (B.has(t)) i += w; }); B.forEach(t => { b += idf(t); }); const m = Math.min(a, b); return m > 0 ? i / m : 0; }
+/** Leaning to the counter-claim: overlap with the counter minus overlap with the claim (the same IDF). */
+function narrLean(R, claim, counter, idf) { return (narrOvlSet(R, counter, idf) || 0) - (narrOvlSet(R, claim, idf) || 0); }
+/** The census scorer's tokens: narrTokens with its extra stop words, trailing 's stripped. */
+function narrSTok(text) {
+  return String(text || '').toLowerCase().replace(NARR_RX_SQ, "'").replace(/[^a-z0-9$%'\s-]/g, ' ').split(/\s+/).map(w => w.replace(/^['-]+|['-]+$/g, '').replace(/'s$/, '')).filter(w => w.length > 2 && !NARR_STOP.has(w) && !NARR_S_EXTRA.has(w) && !/^\d+$/.test(w));
+}
+/** Title evidence: a person's or the model's label, else a working title that is a headline (a template repeats the terms). */
+function narrSTitle(r) { if (r.label) return String(r.label); const a = String(r.auto_label || ''); return NARR_TPL_RX1.test(a) || NARR_TPL_RX2.test(a) ? '' : a; }
+
+// ---- the merge scan's features
+/** One narrative's features from its row (a candidate, or a logged snapshot); vecRaw is set by the caller. */
+function narrMergeNode(r, nameTok) {
+  const n = { id: r.id, row: r, n: Number(r.n) || 0, first: Number(r.first_ts) || 0, last: Number(r.last_ts) || 0, ns: String(r.ns || ''), scope: String(r.scope || ''), edited: Number(r.edited) || 0, pinned: Number(r.pinned) || 0, counter: String(r.counter || ''), claimTs: Number(r.label_try_ts) || 0 };
+  let ic = pjs(r.issue_counts, {}); if (!ic || typeof ic !== 'object' || !Object.keys(ic).length) { ic = {}; pjs(r.issues, []).forEach(x => { ic[x] = 1; }); }
+  n.ic = ic; n.top = narrTopIssues(ic, 3); n.ents = new Set(pjs(r.entities, []));
+  const terms = pjs(r.terms, {}); const iss = narrIssueTok(); const tm = {};
+  for (const k in terms) { const t = narrStrip(k); if (t.length <= 2 || NARR_LEX_STOP.has(t) || (nameTok && nameTok.has(t)) || iss.has(t)) continue; tm[t] = (tm[t] || 0) + (Number(terms[k]) || 0); }
+  n.tmap = tm;
+  n.t6 = new Set(narrSTok(narrTopTerms(terms, 6).join(' '))); n.title = new Set(narrSTok(narrSTitle(r)));
+  n.claim = new Set(narrSTok(r.claim)); n.counterClaim = new Set(narrSTok(r.counter_claim));
+  n.heads = pjs(r.amplifiers, []).map(a => new Set(narrSTok((a && a.title) || ''))).filter(s => s.size >= 4);
+  n.hbag = new Set(); n.heads.forEach(h => h.forEach(t => n.hbag.add(t)));
+  n.tt = new Set(n.t6); n.title.forEach(t => n.tt.add(t));
+  n.all = new Set(n.tt); n.claim.forEach(t => n.all.add(t)); n.hbag.forEach(t => n.all.add(t));
+  n.vecRaw = r.centroid ? b64f32(r.centroid) : null;
+  return n;
+}
+function narrDf(nodes, key) { const df = new Map(); nodes.forEach(n => n[key].forEach(t => df.set(t, (df.get(t) || 0) + 1))); return df; }
+function narrIdfMap(df, N) { const m = new Map(); df.forEach((v, t) => m.set(t, Math.log((N + 1) / (v + 0.5)))); return m; }
+/** The IDF tables of a candidate set: the census scorer's (a token outside the set weighs 0), the term cosine's, the claims'. */
+function narrMergeCtx(nodes, clause, nameTok, simA, simS, maxRows) {
+  const N = nodes.length || 1; const ctx = { N, clause, nameTok, simA, simS, maxRows };
+  ctx.idfTT = narrIdfMap(narrDf(nodes, 'tt'), N); ctx.idfE = narrIdfMap(narrDf(nodes, 'ents'), N); ctx.idfH = narrIdfMap(narrDf(nodes, 'hbag'), N); ctx.idfAll = narrIdfMap(narrDf(nodes, 'all'), N);
+  const opp = new Map(); nodes.forEach(n => { const s = new Set(n.claim); n.counterClaim.forEach(t => s.add(t)); s.forEach(t => opp.set(t, (opp.get(t) || 0) + 1)); }); ctx.idfOpp = narrIdfMap(opp, N);
+  const tdf = new Map(); nodes.forEach(n => Object.keys(n.tmap).forEach(t => tdf.set(t, (tdf.get(t) || 0) + 1))); const tIdf = narrIdfMap(tdf, N); const unseen = Math.log((N + 1) / 0.5);
+  ctx.tIdf = t => { const v = tIdf.get(t); return v != null ? v : unseen; };
+  const mass = nodes.map(n => { let s = 0; n.all.forEach(t => { s += ctx.idfAll.get(t) || 0; }); return s; }).sort((a, b) => a - b);
+  ctx.floor = mass.length ? 0.5 * mass[Math.floor(mass.length / 2)] : 0;   // half the median bag mass: a near-empty bag cannot score 1
+  return ctx;
+}
+function narrMass(S, idf) { let s = 0; S.forEach(t => { s += idf.get(t) || 0; }); return s; }
+function narrInter(A, B, idf) { let s = 0; const x = A.size <= B.size ? A : B, y = x === A ? B : A; x.forEach(t => { if (y.has(t)) s += idf.get(t) || 0; }); return s; }
+/** Masses, the IDF term vector and the unit centroid of a node, under a set's tables (once a node). */
+function narrMergePrep(n, ctx) {
+  n.mAll = narrMass(n.all, ctx.idfAll); n.mTT = narrMass(n.tt, ctx.idfTT); n.mE = narrMass(n.ents, ctx.idfE); n.hm = n.heads.map(h => narrMass(h, ctx.idfH));
+  n.mClaim = narrMass(n.claim, ctx.idfOpp); n.mCounter = narrMass(n.counterClaim, ctx.idfOpp);
+  const tv = {}; let nn = 0; for (const t in n.tmap) { const w = n.tmap[t] * ctx.tIdf(t); if (w > 0) { tv[t] = w; nn += w * w; } } nn = Math.sqrt(nn); if (nn) for (const t in tv) tv[t] /= nn; n.tv = nn ? tv : null;
+  n.vec = null; if (n.vecRaw && n.vecRaw.length) { const v = new Float64Array(n.vecRaw.length); let s = 0; for (let i = 0; i < v.length; i++) { v[i] = Number(n.vecRaw[i]) || 0; s += v[i] * v[i]; } s = Math.sqrt(s); if (s > 0) { for (let i = 0; i < v.length; i++) v[i] /= s; n.vec = v; } }
+  return n;
+}
+function narrDot(a, b) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+function narrSparseDot(a, b) { let s = 0; for (const k in a) if (b[k]) s += a[k] * b[k]; return s; }
+/** The best IDF Jaccard over the two narratives' amplifier headlines (H), and H2, the best among pairs disjoint from the
+ *  best pair's two headlines (null with fewer than two a side): one syndicated row cannot carry an automatic decision. */
+function narrHeadsH(a, b, ctx) {
+  if (!a.heads.length || !b.heads.length) return { h: null, h2: null };
+  let best = 0, ba = -1, bb = -1, first = true; const sc = [];
+  for (let i = 0; i < a.heads.length; i++) for (let j = 0; j < b.heads.length; j++) {
+    const inter = narrInter(a.heads[i], b.heads[j], ctx.idfH); const u = a.hm[i] + b.hm[j] - inter; const s = u > 0 ? inter / u : 0; sc.push([s, i, j]);
+    if (first || s > best || (s === best && (i > ba || (i === ba && j > bb)))) { best = s; ba = i; bb = j; first = false; }
+  }
+  let h2 = null; if (a.heads.length >= 2 && b.heads.length >= 2) { let m = -1; sc.forEach(([s, i, j]) => { if (i !== ba && j !== bb && s > m) m = s; }); h2 = m >= 0 ? m : null; }
+  return { h: best, h2 };
+}
+/** The census word score: S = wmean(U .45, H .25, X .15, E .05, Tm .10) over the features present; 0 past 96h. */
+function narrS(f, h) { if (f.gapH > NARR_MERGE_GAP_H) return 0; let s = 0, w = 0; const add = (v, k) => { if (v == null) return; s += k * v; w += k; }; add(f.u, 0.45); add(h, 0.25); add(f.x, 0.15); add(f.e, 0.05); add(f.tm, 0.10); return w ? s / w : 0; }
+/** The opposite-claim veto: both claims known, a counter known, and a claim closer to the other's counter than to its claim. */
+function narrOppositeOf(a, b, ctx) {
+  const ov = (A, mA, B, mB) => { if (!A.size || !B.size) return null; const m = Math.min(mA, mB); return m > 0 ? narrInter(A, B, ctx.idfOpp) / m : 0; };
+  if (!a.claim.size || !b.claim.size || !(a.counterClaim.size || b.counterClaim.size)) return { straight: null, cross: null, fires: false };
+  const st = ov(a.claim, a.mClaim, b.claim, b.mClaim); const cr = Math.max(0, ...[ov(a.claim, a.mClaim, b.counterClaim, b.mCounter), ov(b.claim, b.mClaim, a.counterClaim, a.mCounter)].filter(x => x != null));
+  return { straight: narrR3(st), cross: narrR3(cr), fires: st != null && cr >= st + 0.10 && cr >= 0.25 };
+}
+/** Every feature of a pair. need: compute H even when no bar could use it (pairs mode, member checks, an apply's re-score). */
+function narrPairFeatures(a, b, ctx, need) {
+  const cl = ctx.clause; const f = {};
+  f.c = a.vec && b.vec && a.vec.length === b.vec.length ? narrDot(a.vec, b.vec) : null;
+  f.gapH = Math.max(0, Math.max(a.first, b.first) - Math.min(a.last, b.last)) / 3600000;
+  f.anchor = []; a.top.forEach(x => { if (b.top.indexOf(x) >= 0) f.anchor.push('issue:' + x); }); a.ents.forEach(x => { if (b.ents.has(x)) f.anchor.push('entity:' + x); });
+  f.t = a.tv && b.tv ? narrSparseDot(a.tv, b.tv) : null;
+  f.u = a.all.size && b.all.size ? (() => { const m = Math.max(Math.min(a.mAll, b.mAll), ctx.floor); return m > 0 ? narrInter(a.all, b.all, ctx.idfAll) / m : 0; })() : null;
+  f.x = a.tt.size && b.tt.size ? (() => { const m = Math.min(a.mTT, b.mTT); return m > 0 ? narrInter(a.tt, b.tt, ctx.idfTT) / m : 0; })() : null;
+  f.e = a.ents.size && b.ents.size ? (() => { const i = narrInter(a.ents, b.ents, ctx.idfE); const u = a.mE + b.mE - i; return u > 0 ? i / u : 0; })() : null;
+  f.tm = f.gapH <= 0 ? 1 : Math.exp(-f.gapH / 48);
+  // H and H2 last, and only when even H = 1 could lift S to a bar some rule or clause could still apply to this pair
+  const up = narrS(f, 1); const bars = [0.45];
+  if (f.c != null && f.c >= cl.cLo && f.c < cl.cHi) bars.push(0.25);
+  if (f.c != null && f.c >= cl.cHi) bars.push(cl.sCorr);
+  if (cl.form !== 'off' && f.c != null && f.c >= cl.cForm && (cl.form !== 't' || (f.t != null && f.t >= cl.formT))) bars.push(cl.formS);
+  if (!need && up < Math.min(...bars)) { f.h = null; f.h2 = null; f.s = null; f.sAuto = null; f.sMax = up; }
+  else { const hh = narrHeadsH(a, b, ctx); f.h = hh.h; f.h2 = hh.h2; f.s = narrS(f, f.h); f.sAuto = narrS(f, f.h2); }
+  f.opposite = narrOppositeOf(a, b, ctx);
+  return f;
+}
+/** The proposal rule that fires first (s.3.3), or ''. */
+function narrMergeRule(f, ctx) {
+  const cl = ctx.clause; const c = f.c, hasAnchor = f.anchor.length > 0;
+  if (c != null && c >= cl.cHi) return 'centroid';
+  if (!hasAnchor && c != null && c >= ctx.simS) return 'strict';
+  if (c != null && c >= ctx.simA - NARR_NEAR && f.t != null && f.t >= cl.formT) return 'form';
+  if (c != null && c >= cl.cLo && c < cl.cHi && f.s != null && f.s >= 0.25) return 'centroid+words';
+  if (f.s != null && f.s >= 0.45) return 'words';
+  if (c == null && f.t != null && f.t >= cl.formT) return 'terms';
+  return '';
+}
+/** The automatic clause in force on a pair's features (also used against snapshots in the member check). */
+function narrClauseKind(f, cl) {
+  if (f.c != null && f.c >= cl.cHi && f.sAuto != null && f.sAuto >= cl.sCorr) return 'centroid';
+  if (cl.form !== 'off' && f.c != null && f.c >= cl.cForm && f.sAuto != null && f.sAuto >= cl.formS && (cl.form !== 't' || (f.t != null && f.t >= cl.formT))) return 'form ' + cl.form;
+  return '';
+}
+function narrAutoIf(f, cl) {
+  const c = f.c != null ? f.c : -1, sa = f.sAuto != null ? f.sAuto : -1;   // a pair whose H was skipped cannot reach any clause
+  return { centroid: c >= cl.cHi && sa >= cl.sCorr, formS: c >= cl.cForm && sa >= (cl.form === 's' ? cl.formS : 0.45), formT: c >= cl.cForm && f.t != null && f.t >= cl.formT && sa >= (cl.form === 't' ? cl.formS : 0.35) };
+}
+function narrSurvFirst(a, b) { return a.n !== b.n ? a.n > b.n : a.first !== b.first ? a.first < b.first : a.id < b.id; }
+/** Survivor of a proposal: the person-owned side when exactly one is, else more rows, the older first row, the smaller id. */
+function narrOrient(a, b) { const pa = a.edited || a.pinned, pb = b.edited || b.pinned; if (pa && !pb) return [a, b]; if (pb && !pa) return [b, a]; return narrSurvFirst(a, b) ? [a, b] : [b, a]; }
+const narrKeyOf = (x, y) => (x < y ? x + '|' + y : y + '|' + x);
+function narrHoldsOf(S, X, f, ctx, keeps, now) {
+  const h = []; const cl = ctx.clause;
+  if (f.opposite && f.opposite.fires) h.push('opposite');
+  const k = keeps && keeps.get(narrKeyOf(S.id, X.id)); if (k) h.push(k.why === 'undone' ? 'undone' : 'kept');
+  if (S.edited || S.pinned || X.edited || X.pinned) h.push('person');
+  if (S.ns !== X.ns && !(cl.crossNs === 'issue' && X.top[0] && S.top.indexOf(X.top[0]) >= 0)) h.push('clients');
+  if ((S.scope === 'off') !== (X.scope === 'off') || (S.scope === 'politics' && X.scope === 'client')) h.push('scope');
+  if (S.claimTs > now - NARR_CLAIM_MS || X.claimTs > now - NARR_CLAIM_MS) h.push('naming');
+  return h;
+}
+function narrBriefOf(n) { const r = n.row || {}; return { id: n.id, title: r.label || r.auto_label || n.id, named: narrNamed(r), n: n.n, ns: n.ns, scope: n.scope, first_ts: n.first, last_ts: n.last, person_by: r.person_by || '' }; }
+/** Active keep-apart rows, both ids resolved through aliases; key a|b -> row. */
+async function narrKeepMap(env) {
+  const rows = ((await env.MIND_DB.prepare('SELECT id, a, b, why, merge, who, note, at FROM narrative_keep WHERE undone_at=0 ORDER BY at DESC LIMIT 2000').all()).results || []);
+  const m = new Map(); if (!rows.length) return m;
+  const al = await narrAliasMany(env, rows.flatMap(k => [k.a, k.b]));
+  rows.forEach(k => { const a = (al[k.a] && al[k.a].survivor) || k.a, b = (al[k.b] && al[k.b].survivor) || k.b; if (a !== b && !m.has(narrKeyOf(a, b))) m.set(narrKeyOf(a, b), k); });
+  return m;
+}
+const NARR_MERGE_COLS = 'id, label, auto_label, claim, counter_claim, edited, pinned, muted, status, scope, ns, n, first_ts, last_ts, issues, issue_counts, entities, terms, amplifiers, counter, label_try_ts, born_near, born_sim, born_bar, person_ts, person_by, updated, dim';
+function narrSnapNode(json, ctx) { const r = typeof json === 'string' ? pjs(json, null) : json; if (!r || !r.id) return null; return narrMergePrep(narrMergeNode(r, ctx.nameTok), ctx); }
+/** Does X pass the clause in force, and no opposite veto, against every snapshot? '' or the reason. */
+function narrMemberCheck(X, snaps, ctx) {
+  for (const s of snaps) { if (!s || s.id === X.id) continue; const f = narrPairFeatures(X, s, ctx, true); if (!narrClauseKind(f, ctx.clause)) return 'fails the clause against ' + s.id; if (f.opposite.fires) return 'opposite claims to ' + s.id; }
+  return '';
+}
+/** The model-free scan (s.3.1-3.4): candidates, features, proposals, holds, and this tick's automatic plan by component under
+ *  the caps and the member check. Read-only. o: { now, left, budgetMs, live, modeInfo, clause, pairs: [[a, b]] }. */
+async function narrMergeScan(env, o) {
+  o = o || {}; const db = env.MIND_DB; const t0 = Date.now(); const now = o.now || Date.now();
+  const left = typeof o.left === 'function' ? o.left : (() => 1e9); const budget = o.budgetMs || NARR_MERGE_SCAN_MS;
+  const mm = o.modeInfo || narrMergeMode(env, await narrKvJson(env, 'narr_merge_mode')); const cl = Object.assign({}, mm.clause, o.clause || {});
+  const [simA, simS] = narrSims(env); const maxRows = narrMax(env);
+  let matcher = null; try { matcher = await entityMatcher(env); } catch (e) { matcher = null; }
+  const nameTok = (matcher && matcher.nameTok) || new Set();
+  // two reads unioned by id, the recency read first so the newest small narratives are never cut
+  const where = "n>=2 AND muted=0 AND COALESCE(status,'')<>'broad' AND n<? AND last_ts>?";
+  const byId = new Map();
+  for (const order of ['last_ts DESC LIMIT 400', 'n DESC LIMIT 300']) (((await db.prepare('SELECT ' + NARR_MERGE_COLS + ' FROM narratives WHERE ' + where + ' ORDER BY ' + order).bind(maxRows, now - 7 * 86400000).all()).results) || []).forEach(r => { if (!byId.has(r.id) && byId.size < 600) byId.set(r.id, r); });
+  const rows = Array.from(byId.values());
+  const vecs = new Map(); (o.live || []).forEach(c => { if (c && c.id && c.vec && byId.has(c.id)) vecs.set(c.id, c.vec); });
+  const needV = rows.map(r => r.id).filter(id => !vecs.has(id));
+  for (let i = 0; i < needV.length; i += 90) { const part = needV.slice(i, i + 90); (((await db.prepare('SELECT id, centroid FROM narratives WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results) || []).forEach(r => { const v = b64f32(r.centroid); if (v) vecs.set(r.id, v); }); }
+  const nodes = rows.map(r => { const n = narrMergeNode(r, nameTok); n.vecRaw = vecs.get(r.id) || null; return n; });
+  const ctx = narrMergeCtx(nodes, cl, nameTok, simA, simS, maxRows); nodes.forEach(n => narrMergePrep(n, ctx));
+  const nodeOf = new Map(nodes.map(n => [n.id, n]));
+  const keeps = await narrKeepMap(env);
+  const out = { ok: true, mode: mm.mode, source: mm.source, paused: mm.paused, clause: cl, bars: { cHi: cl.cHi, cLo: cl.cLo, cForm: cl.cForm, form: cl.form, formT: cl.formT, formS: cl.formS, sCorr: cl.sCorr, simA, simS }, considered: nodes.length, scored: 0, partial: false, ms: 0, proposals: [], plan: [], automatic: 0, nearBorn: 0 };
+  const props = []; let it = 0;
+  const cut = () => Date.now() - t0 > budget || left() < 6000;
+  outer: for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < nodes.length; j++) {
+      if ((++it & 1023) === 0 && cut()) { out.partial = true; break outer; }
+      const b = nodes[j];
+      if (a.n + b.n >= maxRows || a.counter === b.id || b.counter === a.id) continue;
+      if (Math.max(a.first, b.first) - Math.min(a.last, b.last) > NARR_MERGE_GAP_H * 3600000) continue;
+      const c = a.vec && b.vec && a.vec.length === b.vec.length ? narrDot(a.vec, b.vec) : null;
+      const anchored = a.top.some(x => b.top.indexOf(x) >= 0) || Array.from(a.ents).some(x => b.ents.has(x));
+      if (!anchored && !(c != null && c >= simS)) continue;
+      out.scored++;
+      const f = narrPairFeatures(a, b, ctx, false); const rule = narrMergeRule(f, ctx); if (!rule) continue;
+      const [S, X] = narrOrient(a, b); const hold = narrHoldsOf(S, X, f, ctx, keeps, now);
+      const kind = narrClauseKind(f, cl);
+      const eligible = !hold.length && f.anchor.length > 0 && f.gapH <= NARR_MERGE_AUTO_GAP_H && !!kind;
+      const born = X.row.born_near ? { near: X.row.born_near, sim: narrR3(Number(X.row.born_sim) || 0), bar: narrR3(Number(X.row.born_bar) || 0) } : null;
+      props.push({ S, X, f, rule, hold, kind, eligible, born });
+    }
+  }
+  // per-component decisions (s.3.4): the survivor is the component's largest node; its candidates are the nodes with an
+  // automatic edge to it, strongest first; caps, the running size and the member check decide what applies this tick
+  const elig = props.filter(p => p.eligible); const parent = new Map(); const find = x => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  elig.forEach(p => { [p.S.id, p.X.id].forEach(id => { if (!parent.has(id)) parent.set(id, id); }); parent.set(find(p.S.id), find(p.X.id)); });
+  const comps = new Map(); elig.forEach(p => { const r = find(p.S.id); if (!comps.has(r)) comps.set(r, { nodes: new Set(), edges: [] }); const cp = comps.get(r); cp.nodes.add(p.S.id); cp.nodes.add(p.X.id); cp.edges.push(p); });
+  const strength = p => [p.kind === 'centroid' ? 1 : 0, p.f.c == null ? -1 : p.f.c, p.f.sAuto == null ? -1 : p.f.sAuto];
+  const stronger = (p, q) => { const a = strength(p), b = strength(q); for (let k = 0; k < 3; k++) if (a[k] !== b[k]) return b[k] - a[k]; return 0; };
+  const list = Array.from(comps.values()).map(cp => { const surv = Array.from(cp.nodes).map(id => nodeOf.get(id)).sort((x, y) => (narrSurvFirst(x, y) ? -1 : 1))[0]; const cand = cp.edges.filter(p => p.S.id === surv.id || p.X.id === surv.id).sort(stronger); return { surv, cand, top: cp.edges.slice().sort(stronger)[0] }; }).sort((x, y) => stronger(x.top, y.top));
+  if (list.length) {
+    const survIds = list.map(x => x.surv.id); const dayStart = narrSydStart(now);
+    let dayUsed = Number(((await db.prepare("SELECT COUNT(*) n FROM narrative_merges WHERE how='auto' AND at>=? AND undone_at=0").bind(dayStart).first()) || {}).n) || 0;
+    const survDay = {}, recent = {};
+    for (let i = 0; i < survIds.length; i += 90) {
+      const part = survIds.slice(i, i + 90); const mk = part.map(() => '?').join(',');
+      (((await db.prepare("SELECT into_id, COUNT(*) n FROM narrative_merges WHERE how='auto' AND undone_at=0 AND at>=? AND into_id IN (" + mk + ') GROUP BY into_id').bind(dayStart, ...part).all()).results) || []).forEach(r => { survDay[r.into_id] = Number(r.n) || 0; });
+      (((await db.prepare("SELECT id, into_id, from_row, into_before, at FROM narrative_merges WHERE how='auto' AND undone_at=0 AND at>? AND into_id IN (" + mk + ') ORDER BY at').bind(now - NARR_MERGE_GAP_H * 3600000, ...part).all()).results) || []).forEach(r => { (recent[r.into_id] = recent[r.into_id] || []).push(r); });
+    }
+    let tickUsed = 0;
+    for (const cp of list) {
+      const S = cp.surv; let total = S.n; const absorbed = []; const rec = recent[S.id] || [];
+      const pre = rec.length ? narrSnapNode(rec[0].into_before, ctx) : S; const members = rec.map(r => narrSnapNode(r.from_row, ctx)).filter(Boolean);
+      for (const p of cp.cand) {
+        const X = p.S.id === S.id ? p.X : p.S;
+        if (mm.paused && mm.mode === 'auto') { p.hold.push('paused'); continue; }
+        if (tickUsed >= cl.tick || dayUsed >= NARR_MERGE_DAY || (survDay[S.id] || 0) + absorbed.length >= NARR_MERGE_SURV_DAY) { p.hold.push('cap'); continue; }
+        if (total + X.n >= NARR_BIG || total + X.n >= maxRows) { p.hold.push('size'); continue; }
+        const why = narrMemberCheck(X, [pre].concat(members, absorbed), ctx); if (why) { p.hold.push('member'); p.memberWhy = why; continue; }
+        p.auto = true; p.into = S; p.from = X; tickUsed++; dayUsed++; total += X.n; absorbed.push(X);
+        out.plan.push({ into: S.id, from: X.id, rule: p.kind, snaps: [pre].concat(members, absorbed.slice(0, -1)), p });
+      }
+    }
+  }
+  out.automatic = out.plan.length;
+  const held = p => p.hold.indexOf('undone') >= 0 || p.hold.indexOf('kept') >= 0;
+  props.sort((p, q) => (held(p) - held(q)) || ((q.auto ? 1 : 0) - (p.auto ? 1 : 0)) || ((q.f.c == null ? -1 : q.f.c) - (p.f.c == null ? -1 : p.f.c)) || ((q.f.s == null ? -1 : q.f.s) - (p.f.s == null ? -1 : p.f.s)));
+  out.proposals = props.map(p => { const S = p.auto ? p.into : p.S, X = p.auto ? p.from : p.X; const f = p.f;
+    const q = { into: narrBriefOf(S), from: narrBriefOf(X), c: narrR3(f.c), t: narrR3(f.t), s: narrR3(f.s), sAuto: narrR3(f.sAuto), parts: { u: narrR3(f.u), h: narrR3(f.h), h2: narrR3(f.h2), x: narrR3(f.x), e: narrR3(f.e), tm: narrR3(f.tm) }, opposite: f.opposite, gapH: narrR3(f.gapH), anchor: f.anchor, rule: p.rule, auto: !!p.auto, autoIf: narrAutoIf(f, cl), hold: p.hold, born: p.born };
+    if (f.sMax != null) q.sMax = narrR3(f.sMax); if (p.memberWhy) q.memberWhy = p.memberWhy; return q; });
+  out.nearBorn = props.filter(p => p.born && p.born.near === p.S.id && p.born.bar > 0 && p.born.bar - p.born.sim <= NARR_NEAR + 1e-9).length;
+  // pairs mode (the calibration instrument): the listed narratives, loaded by id outside the set too, scored with the set's
+  // IDF without joining its population; the pre-filter is reported per pair, not applied
+  if (o.pairs && o.pairs.length) {
+    const want = Array.from(new Set(o.pairs.flat().filter(id => !nodeOf.has(id)))); const extra = new Map();
+    for (let i = 0; i < want.length; i += 90) { const part = want.slice(i, i + 90); (((await db.prepare('SELECT ' + NARR_MERGE_COLS + ', centroid FROM narratives WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results) || []).forEach(r => extra.set(r.id, narrMergePrep(narrMergeNode(r, nameTok), ctx))); }
+    const get = id => nodeOf.get(id) || extra.get(id) || null;
+    out.pairs = o.pairs.map(([x, y]) => {
+      const a = get(x), b = get(y); if (!a || !b) return { a: x, b: y, found: false };
+      const f = narrPairFeatures(a, b, ctx, true); const rule = narrMergeRule(f, ctx); const [S, X] = narrOrient(a, b);
+      const prior = props.find(p => (p.S.id === a.id && p.X.id === b.id) || (p.S.id === b.id && p.X.id === a.id));
+      const holds = prior ? prior.hold.slice() : narrHoldsOf(S, X, f, ctx, keeps, now);
+      const pre = { anchor: f.anchor.length > 0, via: f.anchor.length ? f.anchor : (f.c != null && f.c >= simS ? ['c>=simS'] : []), gap96: f.gapH <= NARR_MERGE_GAP_H, counter: a.counter === b.id || b.counter === a.id, rows: a.n + b.n < maxRows };
+      return { a: x, b: y, found: true, into: S.id, from: X.id, prefilter: pre, features: { c: narrR3(f.c), t: narrR3(f.t), s: narrR3(f.s), sAuto: narrR3(f.sAuto), u: narrR3(f.u), h: narrR3(f.h), h2: narrR3(f.h2), x: narrR3(f.x), e: narrR3(f.e), tm: narrR3(f.tm), opposite: f.opposite }, gapH: narrR3(f.gapH), holds, proposed: !!rule && pre.gap96 && pre.rows && !pre.counter && (pre.anchor || (f.c != null && f.c >= simS)), rule, auto: !!(prior && prior.auto), autoIf: narrAutoIf(f, cl) };
+    });
+  }
+  out.ctx = ctx; out.nodeOf = nodeOf; out.keeps = keeps;
+  out.ms = Date.now() - t0;
+  return out;
+}
+/** What leaves the worker of a scan: no internals. */
+function narrScanView(sc, limit) { return { ok: true, mode: sc.mode, source: sc.source, paused: sc.paused, clause: sc.clause, bars: sc.bars, considered: sc.considered, scored: sc.scored, partial: sc.partial, ms: sc.ms, automatic: sc.automatic, proposals: sc.proposals.slice(0, limit || 100), nearBorn: sc.nearBorn, pairs: sc.pairs }; }
+
+// ---- the merge (s.3.5, s.3.7): every route goes through here, logged and undoable
+function narrAlertPick(vals) {
+  const k = vals.some(v => Number(v[0]) === 1) ? 1 : vals.some(v => Number(v[0]) === 2) ? 2 : 0; if (!k) return [0, 0];
+  const ts = vals.filter(v => Number(v[0]) === k && Number(v[1]) > 0).map(v => Number(v[1])); return [k, ts.length ? Math.min(...ts) : 0];
+}
+const narrTitleOf = r => (r && (r.label || r.auto_label)) || (r && r.id) || '';
+/** a: { into, from, how: 'person'|'auto', who, rule, score, clause, scan, step }. Holds the 'place' lease (the caller takes it). */
+async function narrMergeApply(env, a) {
+  const db = env.MIND_DB; const how = a.how === 'auto' ? 'auto' : 'person'; const who = String(a.who || (how === 'auto' ? 'auto' : '')).slice(0, 60);
+  const into = String(a.into || ''), from = String(a.from || ''); const maxRows = narrMax(env);
+  const fail = (status, error, detail, extra) => Object.assign({ ok: false, status, error, detail }, extra || {});
+  if (!into || !from || into === from) return fail(400, 'missing_ids', 'Give into and from, two different narrative ids.');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const now = Date.now(); const notes = [];
+    const ri = await db.prepare('SELECT * FROM narratives WHERE id=?').bind(into).first(); const rf = await db.prepare('SELECT * FROM narratives WHERE id=?').bind(from).first();
+    for (const [id, r] of [[into, ri], [from, rf]]) if (!r) { const al = await narrAlias(env, id); if (al.chain.length && al.survivor) return fail(409, 'merged', '"' + id + '" was merged into ' + al.survivor + '; use that id.', { into: al.survivor }); return fail(404, 'unknown_narrative', 'There is no narrative ' + id + '.'); }
+    const ni = Number(((await db.prepare('SELECT COUNT(*) n FROM narrative_items WHERE narrative=?').bind(into).first()) || {}).n) || 0;
+    const nf = Number(((await db.prepare('SELECT COUNT(*) n FROM narrative_items WHERE narrative=?').bind(from).first()) || {}).n) || 0;
+    if (ri.muted || rf.muted) return fail(409, 'muted', 'A muted narrative is not merged. Unmute it first.');
+    if (ri.status === 'broad' || rf.status === 'broad') return fail(409, 'broad', 'A broad cluster is a topic, not a narrative: dissolve it instead.');
+    if (ni + nf >= maxRows) return fail(409, 'too_big', 'Together they hold ' + (ni + nf) + ' rows, past the ' + maxRows + ' at which a narrative is a topic.');
+    if (ri.counter === from || rf.counter === into) return fail(409, 'counter', 'These two are each other\'s counter: they face opposite ways on one issue.');
+    const claimCut = now - NARR_CLAIM_MS;
+    if ((Number(ri.label_try_ts) || 0) >= claimCut || (Number(rf.label_try_ts) || 0) >= claimCut) return fail(409, 'naming', 'One of them is being named by the model right now. Try again in two minutes.');
+    // the features of the pair as the rows stand (an automatic apply re-scores with the scan's tables)
+    let matcher = null; try { matcher = await entityMatcher(env); } catch (e) { matcher = null; }
+    const ctx = a.scan && a.scan.ctx ? a.scan.ctx : (() => { const ns = [narrMergeNode(ri, matcher && matcher.nameTok), narrMergeNode(rf, matcher && matcher.nameTok)]; const [sA, sS] = narrSims(env); return narrMergeCtx(ns, narrMergeMode(env, null).clause, matcher && matcher.nameTok, sA, sS, maxRows); })();
+    const S = narrMergePrep(narrMergeNode(ri, ctx.nameTok), ctx), X = narrMergePrep(narrMergeNode(rf, ctx.nameTok), ctx);
+    S.n = ni; X.n = nf; const f = narrPairFeatures(S, X, ctx, true);
+    const keeps = await narrKeepMap(env); const holds = narrHoldsOf(S, X, f, ctx, keeps, now).filter(h => h !== 'naming');
+    if (how === 'auto') {
+      const why = holds.length ? holds.join(', ') : !f.anchor.length ? 'no shared leading issue or entity' : f.gapH > NARR_MERGE_AUTO_GAP_H ? Math.round(f.gapH) + 'h apart' : ni + nf >= NARR_BIG ? 'together ' + (ni + nf) + ' rows, past ' + NARR_BIG : !narrClauseKind(f, ctx.clause) ? 'no longer passes the clause (c ' + narrR3(f.c) + ', words ' + narrR3(f.sAuto) + ')' : (a.step && a.step.snaps ? narrMemberCheck(X, a.step.snaps, ctx) : '');
+      if (why) return fail(409, 'skipped', why);
+    } else {
+      if (holds.indexOf('opposite') >= 0) notes.push('their model claims face opposite ways (claim ' + f.opposite.straight + ', cross ' + f.opposite.cross + '): merged on your say');
+      if (holds.indexOf('undone') >= 0 || holds.indexOf('kept') >= 0) { const k = keeps.get(narrKeyOf(into, from)); notes.push('kept apart on ' + new Date(Number(k && k.at) || now).toISOString().slice(0, 10) + ' by ' + ((k && k.who) || 'a person') + (k && k.why === 'undone' ? ' (an undone merge)' : '') + ': merged on your say'); }
+      if (holds.indexOf('clients') >= 0) notes.push('different clients (' + (ri.ns || 'none') + ' and ' + (rf.ns || 'none') + '): the survivor\'s client board shows the rows now');
+      if (holds.indexOf('scope') >= 0) notes.push('different scopes (' + (ri.scope || 'unset') + ' and ' + (rf.scope || 'unset') + '): ' + (ri.scope === 'off' ? 'the rows are hidden with the survivor' : 'rows that were hidden now show'));
+      if (ni + nf >= NARR_BIG) notes.push('together ' + (ni + nf) + ' rows, past ' + NARR_BIG + ': it must be tight to keep growing');
+      [ri, rf].forEach(r => { if ((r.edited || r.pinned) && r.person_by && r.person_by !== who) notes.push('"' + narrTitleOf(r) + '" was last edited by ' + r.person_by); });
+    }
+    // the survivor's values (s.3.5)
+    const tI = pjs(ri.terms, {}), tF = pjs(rf.terms, {}); const tsum = Object.assign({}, tI); for (const k in tF) tsum[k] = (tsum[k] || 0) + (Number(tF[k]) || 0);
+    const terms = {}; narrTopTerms(tsum, 40).forEach(k => { terms[k] = Math.round(tsum[k] * 1000) / 1000; });
+    const icI = pjs(ri.issue_counts, {}), icF = pjs(rf.issue_counts, {}); const ic = Object.assign({}, icI); for (const k in icF) ic[k] = (ic[k] || 0) + (Number(icF[k]) || 0);
+    const top = narrTopIssues(ic, 3); const nsTop = (CLIENT_ISSUES.find(c => c.id === top[0]) || {}).ns || '';
+    const vI = b64f32(ri.centroid), vF = b64f32(rf.centroid); let cen = ri.centroid || '', dim = Number(ri.dim) || 0, weights = '';
+    if (vI && vF && vI.length === vF.length) { if (ni < NARR_FREEZE) { const wi = Math.min(ni, NARR_FREEZE), wf = Math.min(nf, NARR_FREEZE); if (wi + wf > 0) { const m = vI.map((x, k) => (x * wi + vF[k] * wf) / (wi + wf)); cen = f32b64(m); dim = m.length; weights = JSON.stringify({ into: wi, from: wf }); } } }
+    else if (!vI && vF) { cen = rf.centroid; dim = Number(rf.dim) || vF.length; weights = JSON.stringify({ into: 0, from: Math.min(nf, NARR_FREEZE) }); }
+    const ents = Array.from(new Set(pjs(ri.entities, []).concat(pjs(rf.entities, [])))).slice(0, 12);
+    const older = (Number(rf.first_ts) || 0) > 0 && (Number(rf.first_ts) < (Number(ri.first_ts) || Infinity)) ? rf : ri;
+    const sameNs = String(ri.ns || '') === String(rf.ns || '');
+    const alI = [Number(ri.alerted) || 0, Number(ri.alert_ts) || 0], alF = [Number(rf.alerted) || 0, Number(rf.alert_ts) || 0];
+    const al = sameNs ? narrAlertPick([alI, alF]) : alI;
+    const carry = how === 'person' && Number(rf.edited) === 1 && Number(ri.edited) !== 1;
+    const pinCarry = how === 'person' && (Number(rf.pinned) || 0) > (Number(ri.pinned) || 0);
+    const autoLabel = how === 'person' ? '' : String(ri.auto_label || ''), autoN = how === 'person' ? 0 : (Number(ri.auto_n) || 0);
+    const issuesVal = carry ? String(rf.issues || '[]') : JSON.stringify(top), nsVal = carry ? String(rf.ns || '') : nsTop;
+    const sets = ['terms=?', 'issue_counts=?', carry ? 'issues=?' : 'issues=CASE WHEN edited=1 THEN issues ELSE ? END', carry ? 'ns=?' : "ns=CASE WHEN COALESCE(ns,'')='' THEN ? ELSE ns END", 'centroid=?', 'dim=?', 'entities=?', 'alerted=?', 'alert_ts=?', 'first_item=?', 'first_platform=?', 'first_channel=?', 'auto_label=?', 'auto_n=?'];
+    const vals = [JSON.stringify(terms), JSON.stringify(ic), issuesVal, nsVal, cen, dim, JSON.stringify(ents), al[0], al[1], older.first_item || 0, older.first_platform || '', older.first_channel || '', autoLabel, autoN];
+    if (carry || pinCarry) { sets.push('pinned=MAX(COALESCE(pinned,0),?)', 'person_ts=?', 'person_by=?'); vals.push(Number(rf.pinned) || 0, now, who); }
+    if (carry) { sets.push('label=?', 'summary=?', 'claim=?', 'counter_claim=?', 'proponents=?', 'edited=1'); vals.push(rf.label || '', rf.summary || '', rf.claim || '', rf.counter_claim || '', rf.proponents || ''); }
+    sets.push('updated=?'); vals.push(now);
+    const id = narrMid('m'); const G = ' AND EXISTS (SELECT 1 FROM narrative_merges WHERE id=?)';
+    const score = JSON.stringify(Object.assign({ c: narrR3(f.c), t: narrR3(f.t), s: narrR3(f.s), sAuto: narrR3(f.sAuto), u: narrR3(f.u), h: narrR3(f.h), h2: narrR3(f.h2), x: narrR3(f.x), e: narrR3(f.e), tm: narrR3(f.tm), gapH: narrR3(f.gapH), anchor: f.anchor, opposite: f.opposite.fires }, a.score || {}));
+    const rule = String(a.rule || (how === 'auto' ? 'auto' : 'by hand') + ': centroid ' + narrR3(f.c) + ', words ' + narrR3(f.s) + (f.anchor.length ? ', shared ' + f.anchor.join(' ') : ', no shared issue or entity') + ', ' + Math.round(f.gapH) + 'h apart').slice(0, 300);
+    const cas = 'id=? AND updated IS ? AND COALESCE(label_try_ts,0)<? AND COALESCE(alerted,0)=? AND COALESCE(alert_ts,0)=?';
+    const res = await db.batch([
+      db.prepare('INSERT INTO narrative_merges(id,into_id,from_id,how,who,rule,clause,score,at,from_row,into_before,weights,n_items,counters,alert_before) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COUNT(*) FROM narrative_items WHERE narrative=?),(SELECT json_group_array(id) FROM narratives WHERE counter=?),? WHERE EXISTS (SELECT 1 FROM narratives WHERE ' + cas + ') AND EXISTS (SELECT 1 FROM narratives WHERE ' + cas + ')')
+        .bind(id, into, from, how, who, rule, how === 'auto' ? JSON.stringify(a.clause || ctx.clause || {}) : '', score, now, JSON.stringify(rf), JSON.stringify(ri), weights, from, from, JSON.stringify({ into: alI, from: alF }),
+          into, ri.updated == null ? null : ri.updated, claimCut, alI[0], alI[1], from, rf.updated == null ? null : rf.updated, claimCut, alF[0], alF[1]),
+      db.prepare('INSERT INTO narrative_merge_items(merge,item) SELECT ?, item FROM narrative_items WHERE narrative=?' + G).bind(id, from, id),
+      db.prepare('UPDATE narrative_items SET narrative=? WHERE narrative=?' + G).bind(into, from, id),
+      db.prepare('UPDATE narratives SET ' + sets.join(', ') + ' WHERE id=?' + G).bind(...vals, into, id),
+      db.prepare('DELETE FROM narratives WHERE id=?' + G).bind(from, id),
+      db.prepare("UPDATE narratives SET counter='' WHERE counter=?" + G).bind(from, id),
+    ]);
+    if (!(((res[0] && res[0].meta && res[0].meta.changes) || 0) > 0)) { if (attempt === 0) continue; return how === 'auto' ? fail(409, 'skipped', 'changed while it was read') : fail(409, 'changed', 'One of the two changed while the merge was prepared. Nothing was merged: try again.'); }
+    let rf2 = null; try { rf2 = await narrRefresh(env, into, Date.now()); } catch (e) { notes.push('the recount waits for the next run'); }
+    const s2 = await db.prepare('SELECT terms, issue_counts, centroid, dim, entities, alerted, alert_ts, first_item, first_platform, first_channel, auto_label, auto_n, n, updated FROM narratives WHERE id=?').bind(into).first();
+    if (s2) await db.prepare('UPDATE narrative_merges SET into_after=? WHERE id=?').bind(JSON.stringify(s2), id).run();
+    if (carry) notes.push('the survivor takes the person\'s name of "' + narrTitleOf(rf) + '"');
+    return { ok: true, merge: id, into, from, n: (rf2 && rf2.n) || (s2 && s2.n) || (ni + nf), notes };
+  }
+  return fail(409, 'changed', 'Nothing was merged: try again.');
+}
+
+// ---- undo (s.3.8)
+function narrSubTerms(cur, sub) { const c = pjs(cur, {}), s = pjs(sub, {}); const o = {}; for (const k in c) { const v = (Number(c[k]) || 0) - (Number(s[k]) || 0); if (v > 0.0005) o[k] = v; } const t = {}; narrTopTerms(o, 40).forEach(k => { t[k] = Math.round(o[k] * 1000) / 1000; }); return JSON.stringify(t); }
+function narrSubCounts(cur, sub) { const c = pjs(cur, {}), s = pjs(sub, {}); const o = {}; for (const k in c) { const v = (Number(c[k]) || 0) - (Number(s[k]) || 0); if (v > 0) o[k] = v; } return JSON.stringify(o); }
+const NARR_PERSON_COLS = ['label', 'summary', 'claim', 'counter_claim', 'proponents', 'edited', 'pinned', 'person_ts', 'person_by'];
+const NARR_MODELNAME_COLS = ['scope', 'relevance', 'scope_why', 'labelled_n', 'model', 'issues', 'ns'];
+async function narrMergeUndo(env, u) {
+  const db = env.MIND_DB; const mid = String((u && u.merge) || ''); const who = String((u && u.who) || '').slice(0, 60);
+  const fail = (status, error, detail, extra) => Object.assign({ ok: false, status, error, detail }, extra || {});
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const now = Date.now();
+    const m = await db.prepare('SELECT * FROM narrative_merges WHERE id=?').bind(mid).first();
+    if (!m) return fail(404, 'unknown_merge', 'There is no merge ' + mid + '.');
+    if (m.undone_at) return fail(409, 'already_undone', 'This merge was undone on ' + new Date(Number(m.undone_at)).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' + (m.undone_by ? ' by ' + m.undone_by : '') + '.');
+    const s = await db.prepare('SELECT * FROM narratives WHERE id=?').bind(m.into_id).first();
+    if (!s) { const later = await db.prepare('SELECT id, into_id FROM narrative_merges WHERE from_id=? AND undone_at=0 ORDER BY at DESC LIMIT 1').bind(m.into_id).first();
+      return later ? fail(409, 'survivor_merged', 'The survivor ' + m.into_id + ' was itself merged into ' + later.into_id + ' later (merge ' + later.id + '). Undo that merge first.', { blocking: later.id }) : fail(409, 'survivor_gone', 'The survivor ' + m.into_id + ' no longer exists (dissolved by a reset): the rows are placed again by the next run.'); }
+    if (await db.prepare('SELECT 1 x FROM narratives WHERE id=?').bind(m.from_id).first()) return fail(409, 'exists', 'A narrative ' + m.from_id + ' exists again: nothing to restore.');
+    const fromRow = pjs(m.from_row, {}), before = pjs(m.into_before, {}), after = pjs(m.into_after, {}), ab = pjs(m.alert_before, {});
+    const L = ((await db.prepare('SELECT * FROM narrative_merges WHERE into_id=? AND undone_at=0 AND id<>? ORDER BY at, id').bind(m.into_id, m.id).all()).results) || [];
+    const isLater = x => Number(x.at) > Number(m.at) || (Number(x.at) === Number(m.at) && x.id > m.id);
+    const nNow = Number(((await db.prepare('SELECT COUNT(*) n FROM narrative_items WHERE narrative=?').bind(m.into_id).first()) || {}).n) || 0;
+    const back = Number(((await db.prepare('SELECT COUNT(*) n FROM narrative_items WHERE narrative=? AND item IN (SELECT item FROM narrative_merge_items WHERE merge=?)').bind(m.into_id, m.id).first()) || {}).n) || 0;
+    const notes = [];
+    // terms: verbatim while nothing changed them since; else the absorbed's subtracted
+    let terms = s.terms; if (after.terms != null && s.terms === after.terms) terms = before.terms || '{}'; else { terms = narrSubTerms(s.terms, fromRow.terms); notes.push('terms subtracted'); }
+    const ic = narrSubCounts(s.issue_counts, fromRow.issue_counts);
+    let cen = s.centroid || '', dim = Number(s.dim) || 0;
+    if (m.weights) {
+      if (after.centroid != null && s.centroid === after.centroid) { cen = before.centroid || ''; dim = Number(before.dim) || 0; }
+      else if (nNow < NARR_FREEZE) { const w = pjs(m.weights, {}); const c = b64f32(s.centroid), cf = b64f32(fromRow.centroid); const wf = Number(w.from) || 0;
+        if (c && cf && c.length === cf.length && nNow - wf > 0 && wf > 0) { cen = f32b64(c.map((x, k) => (x * nNow - cf[k] * wf) / (nNow - wf))); dim = c.length; notes.push('centroid un-mixed by counts'); } else notes.push('centroid left as it is'); }
+      else notes.push('centroid left as it is (the survivor holds ' + nNow + ' rows, past ' + NARR_FREEZE + ')');
+    }
+    const added = new Set(pjs(after.entities, []).filter(e => pjs(before.entities, []).indexOf(e) < 0));
+    const ents = JSON.stringify(pjs(s.entities, []).filter(e => !added.has(e)).slice(0, 12));
+    // the naming state as a whole, only while no person has touched the survivor since the merge
+    const restoreNaming = (Number(s.person_ts) || 0) <= Number(m.at);
+    if (!restoreNaming) notes.push('the name was left: a person edited the survivor on ' + new Date(Number(s.person_ts)).toISOString().slice(0, 10));
+    const sameNsL = x => { const fr = pjs(x.from_row, {}), ib = pjs(x.into_before, {}); return String(fr.ns || '') === String(ib.ns || ''); };
+    const alertVals = [ab.into || [0, 0]].concat(L.filter(sameNsL).map(x => (pjs(x.alert_before, {}).from) || [0, 0]));
+    const [bfA, bfT] = narrAlertPick(alertVals);
+    let fi = s.first_item, fp = s.first_platform, fc = s.first_channel;
+    if (after.first_item != null && String(s.first_item) === String(after.first_item) && String(s.first_platform || '') === String(after.first_platform || '') && String(s.first_channel || '') === String(after.first_channel || '')) {
+      const o = [before].concat(L.map(x => pjs(x.from_row, null)).filter(Boolean)).filter(r => Number(r.first_ts) > 0).sort((p, q) => Number(p.first_ts) - Number(q.first_ts))[0] || before; fi = o.first_item; fp = o.first_platform; fc = o.first_channel; }
+    let alab = s.auto_label, an = s.auto_n; if (after.auto_label != null && String(s.auto_label || '') === String(after.auto_label || '') && Number(s.auto_n || 0) === Number(after.auto_n || 0)) { alab = before.auto_label || ''; an = Number(before.auto_n) || 0; }
+    const sets = ['terms=?', 'issue_counts=?', 'centroid=?', 'dim=?', 'entities=?', 'first_item=?', 'first_platform=?', 'first_channel=?', 'auto_label=?', 'auto_n=?',
+      'alerted=CASE WHEN COALESCE(alerted,0)=? AND COALESCE(alert_ts,0)=? THEN ? ELSE alerted END', 'alert_ts=CASE WHEN COALESCE(alerted,0)=? AND COALESCE(alert_ts,0)=? THEN ? ELSE alert_ts END'];
+    const afA = after.alerted == null ? -1 : Number(after.alerted) || 0, afT = after.alert_ts == null ? -1 : Number(after.alert_ts) || 0;
+    const vals = [terms, ic, cen, dim, ents, fi || 0, fp || '', fc || '', alab || '', an || 0, afA, afT, bfA, afA, afT, bfT];
+    const nameVal = k => (before[k] == null ? (/_ts$|edited|pinned|relevance|labelled_n/.test(k) ? 0 : '') : before[k]);
+    if (restoreNaming) NARR_PERSON_COLS.concat(NARR_MODELNAME_COLS).forEach(k => { if (k in before) { sets.push(k + '=?'); vals.push(nameVal(k)); } });
+    else { sets.push('issues=CASE WHEN edited=1 THEN issues ELSE ? END'); vals.push(JSON.stringify(narrTopIssues(pjs(ic, {}), 3))); }
+    sets.push('updated=?'); vals.push(now);
+    const joinedSince = Math.max(0, nNow - (Number(after.n) || (nNow - back)));
+    if (back < Number(m.n_items || 0)) notes.push((Number(m.n_items) - back) + ' moved row' + (Number(m.n_items) - back === 1 ? ' is' : 's are') + ' no longer in the survivor');
+    if (joinedSince) notes.push(joinedSince + ' row' + (joinedSince === 1 ? '' : 's') + ' joined the survivor since the merge and stay with it (their story is not re-sorted)');
+    const tok = narrMid('t'); const keepId = narrMid('k'); const G2 = ' AND EXISTS (SELECT 1 FROM narrative_merges WHERE id=? AND undo_tok=?)';
+    const fcols = Object.keys(fromRow).filter(k => /^[a-z_][a-z0-9_]*$/.test(k)); const fvals = fcols.map(k => k === 'alerted' ? Number((ab.from || [])[0]) || 0 : k === 'alert_ts' ? Number((ab.from || [])[1]) || 0 : k === 'label_try_ts' ? 0 : k === 'updated' ? now : fromRow[k]);
+    const note = notes.join('; ');
+    const stmts = [
+      db.prepare('UPDATE narrative_merges SET undone_at=?, undone_by=?, undo_tok=?, undo_note=? WHERE id=? AND undone_at=0 AND EXISTS (SELECT 1 FROM narratives WHERE id=? AND updated IS ?) AND NOT EXISTS (SELECT 1 FROM narratives WHERE id=?)').bind(now, who, tok, note.slice(0, 600), m.id, m.into_id, s.updated == null ? null : s.updated, m.from_id),
+      db.prepare('INSERT INTO narratives(' + fcols.join(',') + ') SELECT ' + fcols.map(() => '?').join(',') + ' WHERE EXISTS (SELECT 1 FROM narrative_merges WHERE id=? AND undo_tok=?)').bind(...fvals, m.id, tok),
+      db.prepare('UPDATE narrative_items SET narrative=? WHERE narrative=? AND item IN (SELECT item FROM narrative_merge_items WHERE merge=?)' + G2).bind(m.from_id, m.into_id, m.id, m.id, tok),
+      db.prepare('UPDATE narratives SET ' + sets.join(', ') + ' WHERE id=?' + G2).bind(...vals, m.into_id, m.id, tok),
+      db.prepare("UPDATE narratives SET counter=? WHERE id IN (SELECT value FROM json_each(?)) AND COALESCE(counter,'')=''" + G2).bind(m.from_id, m.counters || '[]', m.id, tok),
+      db.prepare("INSERT INTO narrative_keep(id,a,b,why,merge,who,note,at) SELECT ?,?,?,'undone',?,?,?,?" + ' WHERE EXISTS (SELECT 1 FROM narrative_merges WHERE id=? AND undo_tok=?)').bind(keepId, m.into_id, m.from_id, m.id, who, 'merge undone', now, m.id, tok),
+    ];
+    // later merges into the same survivor carry this merge's effect in their snapshots: rebase them (s.3.8)
+    const older = x => L.filter(y => !isLater(y) || Number(y.at) < Number(x.at) || (Number(y.at) === Number(x.at) && y.id < x.id)).filter(y => y.id !== x.id);
+    L.filter(isLater).forEach(x => {
+      const ol = older(x); const patch = {};
+      if (restoreNaming) NARR_PERSON_COLS.concat(NARR_MODELNAME_COLS).forEach(k => { if (k in before) patch[k] = nameVal(k); });
+      const oFirst = [before].concat(ol.map(y => pjs(y.from_row, null)).filter(Boolean)).filter(r => Number(r.first_ts) > 0).sort((p, q) => Number(p.first_ts) - Number(q.first_ts))[0] || before;
+      patch.first_item = oFirst.first_item || 0; patch.first_platform = oFirst.first_platform || ''; patch.first_channel = oFirst.first_channel || ''; patch.auto_label = before.auto_label || ''; patch.auto_n = Number(before.auto_n) || 0;
+      const aIn = narrAlertPick([ab.into || [0, 0]].concat(ol.filter(sameNsL).map(y => (pjs(y.alert_before, {}).from) || [0, 0])));
+      stmts.push(db.prepare("UPDATE narrative_merges SET into_before=json_patch(into_before,?), alert_before=json_set(alert_before,'$.into',json(?)), into_after=CASE WHEN json_valid(into_after) THEN json_patch(json_remove(into_after,'$.terms','$.centroid','$.dim'),(SELECT json_object('alerted',alerted,'alert_ts',alert_ts,'first_item',first_item,'first_platform',first_platform,'first_channel',first_channel,'auto_label',auto_label,'auto_n',auto_n) FROM narratives WHERE id=?)) ELSE into_after END WHERE id=? AND undone_at=0" + G2).bind(JSON.stringify(patch), JSON.stringify(aIn), m.into_id, x.id, m.id, tok));
+    });
+    const res = await db.batch(stmts);
+    if (!(((res[0] && res[0].meta && res[0].meta.changes) || 0) > 0)) { const again = await db.prepare('SELECT undone_at FROM narrative_merges WHERE id=?').bind(m.id).first(); if (again && again.undone_at) return fail(409, 'already_undone', 'This merge was undone a moment ago.'); if (attempt === 0) continue; return fail(409, 'changed', 'The survivor changed while the undo was prepared. Nothing was changed: try again.'); }
+    let rA = null, rB = null; try { rA = await narrRefresh(env, m.from_id, Date.now()); } catch (e) {} try { rB = await narrRefresh(env, m.into_id, Date.now()); } catch (e) {}
+    return { ok: true, merge: m.id, restored: { id: m.from_id, n: (rA && rA.n) || back }, survivor: { id: m.into_id, n: (rB && rB.n) || Math.max(0, nNow - back) }, joinedSince, keep: { id: keepId, a: m.into_id, b: m.from_id },
+      note: (note ? note + '. ' : '') + 'The pair is kept apart (keep ' + keepId + '); POST /narratives/merges {unkeep: "' + keepId + '"} lifts it.' };
+  }
+  return fail(409, 'changed', 'Nothing was changed: try again.');
+}
+
+// ---- the pass (s.5): once a tick, after the recount and the working titles, before naming
+async function narrMergePass(env, o) {
+  o = o || {}; const now = o.now || Date.now(); const t0 = Date.now(); const left = typeof o.left === 'function' ? o.left : (() => 1e9);
+  const kvm = await narrKvJson(env, 'narr_merge_mode'); let mm = narrMergeMode(env, kvm);
+  const res = { mode: mm.mode, source: mm.source, proposals: 0, automatic: 0, applied: [], held: 0, partial: false, ms: 0, busy: false, paused: mm.paused, skipped: [] };
+  if (mm.mode === 'off') { res.ms = Date.now() - t0; return res; }
+  // the undo breaker: people undoing automatic merges is the signal to stop
+  if (mm.mode === 'auto' && !mm.paused) {
+    const u = Number(((await env.MIND_DB.prepare("SELECT COUNT(*) n FROM narrative_merges WHERE how='auto' AND undone_at>?").bind(Math.max(now - 86400000, mm.resumed || 0)).first()) || {}).n) || 0;
+    if (u >= NARR_MERGE_UNDO_TRIP) { const nk = Object.assign({}, kvm || {}, { paused: { at: now, merges: u } }); try { await env.AXIOM_KV.put('narr_merge_mode', JSON.stringify(nk)); } catch (e) {} await narrModeLog(env, 'auto', 'paused after ' + u + ' automatic merges were undone in 24h', kvm, nk); mm = narrMergeMode(env, nk); res.paused = mm.paused; }
+  }
+  const scan = await narrMergeScan(env, { now, left, live: o.live, modeInfo: mm, budgetMs: o.budgetMs || NARR_MERGE_SCAN_MS });
+  res.proposals = scan.proposals.length; res.automatic = scan.plan.length; res.partial = scan.partial; res.held = scan.proposals.filter(p => p.hold.length).length;
+  const title = id => { const n = scan.nodeOf.get(id); return n ? narrTitleOf(n.row) : id; };
+  if (mm.effective === 'auto' && scan.plan.length) {
+    const tok = await narrLeaseTake(env, 'place', NARR_LEASE_MS, 0);
+    if (!tok) res.busy = true;
+    else try {
+      if (typeof env.__narrMergeHook === 'function') await env.__narrMergeHook(scan);
+      for (const st of scan.plan) {
+        if (left() < 3000) { res.skipped.push({ into: st.into, from: st.from, why: 'out of time' }); continue; }
+        const r = await narrMergeApply(env, { into: st.into, from: st.from, how: 'auto', who: 'auto', rule: 'auto, ' + st.rule + ': centroid ' + narrR3(st.p.f.c) + ', words ' + narrR3(st.p.f.s) + ' (S_auto ' + narrR3(st.p.f.sAuto) + '), ' + (st.p.f.anchor.join(' ') || 'no anchor') + ', ' + Math.round(st.p.f.gapH) + 'h apart', clause: mm.clause, scan, step: st });
+        if (r.ok) res.applied.push({ merge: r.merge, into: st.into, from: st.from, rule: st.rule, intoTitle: title(st.into), fromTitle: title(st.from) }); else res.skipped.push({ into: st.into, from: st.from, why: r.detail || r.error });
+        await narrLeaseRenew(env, 'place', tok, NARR_LEASE_MS);
+      }
+    } finally { await narrLeaseFree(env, 'place', tok); }
+  }
+  res.ms = Date.now() - t0;
+  const rec = { at: now, mode: mm.mode, source: mm.source, clause: mm.clause, paused: mm.paused, considered: scan.considered, scored: scan.scored, partial: scan.partial, ms: res.ms, busy: res.busy, proposals: scan.proposals.slice(0, 100), nearBorn: scan.nearBorn, applied: res.applied, automatic: res.automatic };
+  await kvPut(env.AXIOM_KV, 'narr_merge_last', jsonFit(rec, 60000), 7 * 86400);
+  return res;
+}
+/** The sentence the run summary carries. */
+function narrMergeSummary(m) {
+  if (!m || m.mode === 'off') return '';
+  if (m.busy) return '; merge pass: another placement held the lease, nothing applied';
+  const named = (m.applied || []).slice(0, 3).map(a => 'merged "' + a.fromTitle + '" into "' + a.intoTitle + '" (undo: merge ' + a.merge + ')');
+  if (named.length) return '; ' + named.join('; ') + ((m.applied || []).length > 3 ? ' and ' + (m.applied.length - 3) + ' more' : '');
+  if (m.paused) return '; merge pass paused after ' + (m.paused.merges || 0) + ' undone automatic merges (' + m.proposals + ' proposals; POST /narratives/merges {mode: {merge: "auto"}} resumes)';
+  return '; merge pass: ' + m.proposals + ' proposal' + (m.proposals === 1 ? '' : 's') + (m.mode === 'auto' ? '' : ', ' + m.automatic + ' would merge by themselves under auto') + (m.partial ? ' (partial: out of scan time)' : '');
+}
+async function narrMergeStatus(env, now) {
+  const db = env.MIND_DB; now = now || Date.now();
+  const mm = narrMergeMode(env, await narrKvJson(env, 'narr_merge_mode')); const nm = narrNearMode(env, await narrKvJson(env, 'narr_near_mode'));
+  const last = await narrKvJson(env, 'narr_merge_last');
+  const applied24 = ((await db.prepare("SELECT id, into_id, from_id, rule, at FROM narrative_merges WHERE how='auto' AND undone_at=0 AND at>? ORDER BY at DESC LIMIT 20").bind(now - 86400000).all()).results || []).map(r => ({ merge: r.id, into: r.into_id, from: r.from_id, rule: r.rule, at: r.at }));
+  const undone24 = Number(((await db.prepare("SELECT COUNT(*) n FROM narrative_merges WHERE how='auto' AND undone_at>?").bind(now - 86400000).first()) || {}).n) || 0;
+  const keeps = Number(((await db.prepare('SELECT COUNT(*) n FROM narrative_keep WHERE undone_at=0').first()) || {}).n) || 0;
+  return { mode: mm.mode, source: mm.source, effective: mm.effective, clause: mm.clause, clauseSource: mm.clauseSource, paused: mm.paused, near: { mode: nm.mode, source: nm.source, lex: nm.lex, lexSource: nm.lexSource },
+    at: last ? last.at : 0, proposals: last && last.proposals ? last.proposals.length : 0, automatic: last ? (last.automatic || 0) : 0, partial: !!(last && last.partial), ms: last ? (last.ms || 0) : 0, busy: !!(last && last.busy), applied24, undone24, keeps };
+}
+
+// ---- P5: the alias sweep and the orphan repair, at placement start inside the lease
+async function narrSweep(env, now, out, touched) {
+  const db = env.MIND_DB; const rep = { moved: 0, backlog: 0, setAside: 0 }; const edge = now - NARR_WINDOW_H * 3600000;
+  // rows a placement wrote onto a narrative a merge had just absorbed: to the survivor (following the chain)
+  const fr = ((await db.prepare('SELECT DISTINCT m.from_id f FROM narrative_merges m WHERE m.undone_at=0 AND m.at>? AND EXISTS (SELECT 1 FROM narrative_items ni WHERE ni.narrative=m.from_id) LIMIT 200').bind(now - 7 * 86400000).all()).results || []).map(r => r.f);
+  if (fr.length) {
+    const al = await narrAliasMany(env, fr);
+    for (const f of fr) {
+      const a = al[f]; if (!a || (a.survivor === f)) continue;   // a narrative of that id lives again (an undo): its rows are its own
+      if (a.survivor) { const r = await db.prepare('UPDATE narrative_items SET narrative=? WHERE narrative=?').bind(a.survivor, f).run(); const c = (r && r.meta && r.meta.changes) || 0; if (c) { rep.moved += c; touched.add(a.survivor); } }
+      else { const r1 = await db.prepare('DELETE FROM narrative_items WHERE narrative=? AND ts>=?').bind(f, edge).run(); const r2 = await db.prepare("UPDATE narrative_items SET narrative='', sim=0 WHERE narrative=?").bind(f).run(); rep.backlog += (r1 && r1.meta && r1.meta.changes) || 0; rep.setAside += (r2 && r2.meta && r2.meta.changes) || 0; }
+    }
+  }
+  // rows on a narrative that no longer exists and no merge explains (a reset under a placement in flight): hourly, 500 a pass
+  const stamp = Number(await kvGet(env.AXIOM_KV, 'narr_sweep_at')) || 0;
+  if (now - stamp >= 3600000) {
+    const orphan = "SELECT item FROM narrative_items WHERE narrative<>'' AND narrative NOT IN (SELECT id FROM narratives) LIMIT 500";
+    const r1 = await db.prepare('DELETE FROM narrative_items WHERE item IN (' + orphan + ') AND ts>=?').bind(edge).run();
+    const r2 = await db.prepare("UPDATE narrative_items SET narrative='', sim=0 WHERE item IN (" + orphan + ') AND ts<?').bind(edge).run();
+    rep.backlog += (r1 && r1.meta && r1.meta.changes) || 0; rep.setAside += (r2 && r2.meta && r2.meta.changes) || 0;
+    await kvPut(env.AXIOM_KV, 'narr_sweep_at', String(now), 2 * 86400);
+  }
+  if (rep.moved || rep.backlog || rep.setAside) out.repaired = rep;
+  return rep;
+}
+
+// ---- routes (s.4): full key on every one
+async function narrLiveSet(env, ids) { const live = new Set(); ids = Array.from(new Set(ids.filter(Boolean))); for (let i = 0; i < ids.length; i += 90) { const part = ids.slice(i, i + 90); (((await env.MIND_DB.prepare('SELECT id FROM narratives WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results) || []).forEach(r => live.add(r.id)); } return live; }
+const narrCleanId = x => String(x == null ? '' : x).replace(/[^a-z0-9]/gi, '').slice(0, 24);
+function narrDayStartOf(day) { const m = String(day || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); if (!m) return null; const u = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])); return u - auOffsetMs(u + 12 * 3600000); }
+async function narrMergesGet(env, q) {
+  const db = env.MIND_DB; const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);
+  if (q.log) {
+    if (q.modes) return { ok: true, modes: (((await db.prepare('SELECT id, at, who, what, before, after FROM narr_mode_log ORDER BY at DESC, id DESC LIMIT ?').bind(limit).all()).results) || []) };
+    const idq = narrCleanId(q.id);
+    const rows = (((await db.prepare('SELECT id, into_id, from_id, from_row, n_items, how, who, rule, score, at, undone_at, undone_by, undo_note FROM narrative_merges' + (idq ? ' WHERE into_id=? OR from_id=?' : '') + ' ORDER BY at DESC, id DESC LIMIT ?').bind(...(idq ? [idq, idq, limit] : [limit])).all()).results) || []);
+    const live = await narrLiveSet(env, rows.flatMap(r => [r.into_id, r.from_id]));
+    const merges = rows.map(r => { const fr = pjs(r.from_row, {}); const whyNot = r.undone_at ? 'undone' : !live.has(r.into_id) ? 'the survivor was merged again or dissolved: undo that first' : live.has(r.from_id) ? 'a narrative of that id exists again' : '';
+      return { merge: r.id, into: r.into_id, from: r.from_id, fromLabel: fr.label || fr.auto_label || '', nItems: Number(r.n_items) || 0, how: r.how, who: r.who, rule: r.rule, score: pjs(r.score, {}), at: r.at, undoneAt: Number(r.undone_at) || 0, undoneBy: r.undone_by || '', undoable: !whyNot, whyNot, note: r.undo_note || '' }; });
+    const keeps = (((await db.prepare('SELECT id, a, b, why, merge, who, note, at FROM narrative_keep WHERE undone_at=0 ORDER BY at DESC, id DESC LIMIT 200').all()).results) || []);
+    return { ok: true, merges, keeps };
+  }
+  if (q.dry) {
+    const pairs = String(q.pairs || '').split(',').map(s => s.split(':').map(narrCleanId)).filter(p => p.length === 2 && p[0] && p[1] && p[0] !== p[1]).slice(0, 50);
+    const sc = await narrMergeScan(env, { now: Date.now(), budgetMs: 8000, pairs: pairs.length ? pairs : null });
+    const v = narrScanView(sc, Math.min(Math.max(parseInt(q.limit, 10) || 100, 1), 300)); if (!pairs.length) delete v.pairs; return v;
+  }
+  const mm = narrMergeMode(env, await narrKvJson(env, 'narr_merge_mode')); const last = (await narrKvJson(env, 'narr_merge_last')) || {};
+  const props = Array.isArray(last.proposals) ? last.proposals : []; const live = await narrLiveSet(env, props.flatMap(p => [p.into && p.into.id, p.from && p.from.id]));
+  return { ok: true, mode: mm.mode, source: mm.source, clause: mm.clause, paused: mm.paused, at: last.at || 0, proposals: props.filter(p => p.into && p.from && live.has(p.into.id) && live.has(p.from.id)), applied: last.applied || [], nearBorn: last.nearBorn || 0 };
+}
+async function narrMergesPost(env, b, who) {
+  b = b || {}; const db = env.MIND_DB; who = String(who || '').slice(0, 60); const now = Date.now();
+  const withLease = async (wait, fn) => { const tok = await narrLeaseTake(env, 'place', NARR_LEASE_MS, wait); if (!tok) return Object.assign({}, NARR_BUSY); try { return await fn(tok); } finally { await narrLeaseFree(env, 'place', tok); } };
+  if (b.apply != null) {
+    if (!Array.isArray(b.apply) || !b.apply.length || b.apply.length > 10) return { ok: false, status: 400, error: 'bad_apply', detail: 'Apply 1 to 10 pairs at a time: {apply: [{into, from}]}. The survivor is into.' };
+    return withLease(8000, async tok => { const results = [], merges = [];
+      for (const p of b.apply) { const into = narrCleanId(p && p.into), from = narrCleanId(p && p.from); const r = await narrMergeApply(env, { into, from, how: 'person', who });
+        if (r.ok) { results.push({ into, from, ok: true, merge: r.merge, n: r.n, notes: r.notes }); merges.push(r.merge); } else results.push(Object.assign({ into, from, ok: false, status: r.status, error: r.error, detail: r.detail }, r.into && r.error === 'merged' ? { survivor: r.into } : {}));
+        await narrLeaseRenew(env, 'place', tok, NARR_LEASE_MS); }
+      return { ok: true, results, merges }; });
+  }
+  if (b.undo != null) { const mid = narrCleanId(b.undo); if (!mid) return { ok: false, status: 400, error: 'bad_undo', detail: 'Say which merge to undo: {undo: "<merge id>"}.' }; return withLease(8000, () => narrMergeUndo(env, { merge: mid, who })); }
+  if (b.keep != null) {
+    if (!Array.isArray(b.keep) || !b.keep.length || b.keep.length > 20) return { ok: false, status: 400, error: 'bad_keep', detail: 'Keep 1 to 20 pairs apart at a time: {keep: [{a, b, note}]}.' };
+    const pairs = b.keep.map(k => ({ a: narrCleanId(k && k.a), b: narrCleanId(k && k.b), note: String((k && k.note) || '').slice(0, 200) }));
+    if (pairs.some(p => !p.a || !p.b || p.a === p.b)) return { ok: false, status: 400, error: 'bad_keep', detail: 'Each pair needs two different narrative ids (a, b).' };
+    const ids = Array.from(new Set(pairs.flatMap(p => [p.a, p.b]))); const known = await narrLiveSet(env, ids);
+    for (let i = 0; i < ids.length; i += 90) { const part = ids.slice(i, i + 90); (((await db.prepare('SELECT DISTINCT from_id FROM narrative_merges WHERE from_id IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results) || []).forEach(r => known.add(r.from_id)); }
+    const unknown = ids.filter(id => !known.has(id)); if (unknown.length) return { ok: false, status: 404, error: 'unknown_narrative', detail: 'No narrative ' + unknown.join(', ') + ', live or merged.' };
+    const keeps = pairs.map(p => ({ id: narrMid('k'), a: p.a, b: p.b, why: 'person', who, note: p.note, at: now }));
+    await db.batch(keeps.map(k => db.prepare("INSERT INTO narrative_keep(id,a,b,why,merge,who,note,at) VALUES(?,?,?,'person','',?,?,?)").bind(k.id, k.a, k.b, k.who, k.note, k.at)));
+    return { ok: true, keeps, note: 'Kept apart: the merge pass lists these pairs last and never merges them by itself. POST {unkeep: "<id>"} lifts one.' };
+  }
+  if (b.unkeep != null) {
+    const id = narrCleanId(b.unkeep); const r = await db.prepare('UPDATE narrative_keep SET undone_at=?, undone_by=? WHERE id=? AND undone_at=0').bind(now, who, id).run();
+    if (!((r && r.meta && r.meta.changes) || 0)) return { ok: false, status: 404, error: 'unknown_keep', detail: 'No keep-apart ' + id + ' that is still in force.' };
+    return { ok: true, keep: await db.prepare('SELECT * FROM narrative_keep WHERE id=?').bind(id).first() };
+  }
+  if (b.mode != null) {
+    const m = b.mode && typeof b.mode === 'object' ? b.mode : null; const errs = [];
+    if (!m) errs.push('mode is an object: {merge, clause, near, nearLex}');
+    else {
+      if (m.merge != null && ['off', 'propose', 'auto', 'env'].indexOf(m.merge) < 0) errs.push('merge is off, propose, auto or env');
+      if (m.near != null && ['off', 'shadow', 'on', 'env'].indexOf(m.near) < 0) errs.push('near is off, shadow, on or env');
+      if (m.nearLex != null && narrRangeNum(m.nearLex, 0.30, 0.90) == null) errs.push('nearLex is 0.30 to 0.90');
+      if (m.clause != null) { if (typeof m.clause !== 'object' || Array.isArray(m.clause)) errs.push('clause is an object'); else Object.keys(m.clause).forEach(k => { const sp = NARR_CLAUSE_SPEC[k]; if (!sp) errs.push('the clause has no field ' + k); else if (narrClauseVal(sp, m.clause[k]) == null) errs.push(sp.words); }); }
+      if (m.merge == null && m.near == null && m.nearLex == null && m.clause == null) errs.push('say merge, clause, near or nearLex');
+    }
+    if (errs.length) return { ok: false, status: 400, error: 'bad_mode', detail: 'Nothing was changed: ' + errs.join('; ') + '.' };
+    const kvm0 = await narrKvJson(env, 'narr_merge_mode'), kvn0 = await narrKvJson(env, 'narr_near_mode');
+    const put = async (k, v) => { try { if (v && Object.keys(v).length) await env.AXIOM_KV.put(k, JSON.stringify(v)); else await env.AXIOM_KV.delete(k); } catch (e) { /* KV reaches every location within a minute */ } };
+    if (m.merge != null || m.clause != null) {
+      let nk = Object.assign({}, kvm0 || {});
+      if (m.merge === 'env') nk = {};
+      else { if (m.merge) nk.mode = m.merge; if (m.clause) { const c = Object.assign({}, nk.clause || {}); Object.keys(m.clause).forEach(k => { c[k] = narrClauseVal(NARR_CLAUSE_SPEC[k], m.clause[k]); }); nk.clause = c; }
+        if (m.merge === 'auto') { delete nk.paused; nk.resumed = now; } }
+      await put('narr_merge_mode', nk); await narrModeLog(env, who, 'merge mode', kvm0, nk);
+    }
+    if (m.near != null || m.nearLex != null) {
+      let nk = Object.assign({}, kvn0 || {});
+      if (m.near === 'env') nk = {}; else { if (m.near) nk.mode = m.near; if (m.nearLex != null) nk.lex = narrRangeNum(m.nearLex, 0.30, 0.90); }
+      await put('narr_near_mode', nk); await narrModeLog(env, who, 'near mode', kvn0, nk);
+    }
+    const mm = narrMergeMode(env, await narrKvJson(env, 'narr_merge_mode')), nm = narrNearMode(env, await narrKvJson(env, 'narr_near_mode'));
+    return { ok: true, merge: { mode: mm.mode, source: mm.source, paused: mm.paused, clause: mm.clause, clauseSource: mm.clauseSource }, near: { mode: nm.mode, source: nm.source, lex: nm.lex, lexSource: nm.lexSource }, note: 'The next tick reads the new modes (KV reaches every location within about a minute). Undo a change by posting the previous mode.' };
+  }
+  return { ok: false, status: 400, error: 'bad_request', detail: 'Say apply, undo, keep, unkeep or mode.' };
+}
+async function narrNearGet(env, q) {
+  const db = env.MIND_DB; const now = Date.now(); const nm = narrNearMode(env, await narrKvJson(env, 'narr_near_mode'));
+  const day = narrDayStartOf(q.day) != null ? String(q.day) : narrSydDay(now); const from = narrDayStartOf(day), to = from + 86400000;
+  const limit = Math.min(Math.max(parseInt(q.limit, 10) || 100, 1), 500);
+  const c = (await db.prepare("SELECT SUM(mode='shadow') would, SUM(mode='on' AND undone_at=0) joined, SUM(undone_at>0) undone, SUM(mode='miss') missed FROM narrative_near WHERE at>=? AND at<?").bind(from, to).first()) || {};
+  const capRec = (await narrKvJson(env, 'narr_near_day')) || {};
+  const rows = (((await db.prepare('SELECT nn.item, nn.narrative, nn.mode, nn.sim, nn.lex, nn.shared, nn.lean, nn.at, nn.undone_at, nn.undone_by, a.title rt, a.body rb, n.label nl, n.auto_label na FROM narrative_near nn LEFT JOIN arc_items a ON a.id=nn.item LEFT JOIN narratives n ON n.id=nn.narrative WHERE nn.at>=? AND nn.at<? ORDER BY nn.at DESC, nn.item DESC LIMIT ?').bind(from, to, limit).all()).results) || []);
+  return { ok: true, mode: nm.mode, source: nm.source, lex: nm.lex, day, counts: { would: Number(c.would) || 0, joined: Number(c.joined) || 0, undone: Number(c.undone) || 0, missed: Number(c.missed) || 0, capped: capRec.day === day ? Number(capRec.capped) || 0 : 0 },
+    rows: rows.map(r => { const words = String(r.shared || '').split(' ').filter(Boolean); return { item: r.item, narrative: r.narrative, mode: r.mode, sim: r.sim, lex: r.lex, shared: words.length, words, lean: r.lean, at: r.at, undoneAt: Number(r.undone_at) || 0, undoneBy: r.undone_by || '', rowTitle: narrHead({ title: r.rt, body: r.rb }), narrativeTitle: r.nl || r.na || '' }; }) };
+}
+async function narrNearPost(env, b, who) {
+  b = b || {}; const db = env.MIND_DB; who = String(who || '').slice(0, 60);
+  if (b.undo == null) return { ok: false, status: 400, error: 'bad_request', detail: 'Say what to undo: {undo: <item>} or {undo: "day", day: "YYYY-MM-DD"}.' };
+  let recs;
+  if (b.undo === 'day') { const from = narrDayStartOf(b.day); if (from == null) return { ok: false, status: 400, error: 'bad_day', detail: 'day is YYYY-MM-DD (a Sydney day).' }; recs = (((await db.prepare("SELECT item, narrative FROM narrative_near WHERE mode='on' AND undone_at=0 AND at>=? AND at<?").bind(from, from + 86400000).all()).results) || []); }
+  else { const it = parseInt(b.undo, 10); recs = it > 0 ? (((await db.prepare("SELECT item, narrative FROM narrative_near WHERE item=? AND mode='on' AND undone_at=0").bind(it).all()).results) || []) : []; if (!recs.length) return { ok: false, status: 404, error: 'unknown_near', detail: 'No near join of that row that is still in force.' }; }
+  if (!recs.length) return { ok: true, undone: 0, backlog: 0, setAside: 0, recounted: 0, note: 'No near join that day is still in force.' };
+  const tok = await narrLeaseTake(env, 'place', NARR_LEASE_MS, 8000); if (!tok) return Object.assign({}, NARR_BUSY);
+  try {
+    const now = Date.now(); const edge = now - NARR_WINDOW_H * 3600000; let undone = 0, backlog = 0, setAside = 0; const lost = new Map();
+    for (const rec of recs) {
+      const ni = await db.prepare('SELECT narrative, ts FROM narrative_items WHERE item=?').bind(rec.item).first(); const a = await db.prepare('SELECT kind, title, body FROM arc_items WHERE id=?').bind(rec.item).first();
+      if (ni && ni.narrative) { const tv = tokenVec(narrTokens(narrText(a || {}))); const m = lost.get(ni.narrative) || {}; for (const t in tv) m[t] = (m[t] || 0) + tv[t]; lost.set(ni.narrative, m); }
+      if (ni && Number(ni.ts) >= edge) { await db.prepare('DELETE FROM narrative_items WHERE item=?').bind(rec.item).run(); backlog++; }
+      else if (ni) { await db.prepare("UPDATE narrative_items SET narrative='', sim=0 WHERE item=?").bind(rec.item).run(); setAside++; }
+      await db.prepare('UPDATE narrative_near SET undone_at=?, undone_by=? WHERE item=?').bind(now, who, rec.item).run(); undone++;
+    }
+    let recounted = 0; const ids = Array.from(lost.keys());
+    for (const id of ids) {
+      const cur = await db.prepare('SELECT terms FROM narratives WHERE id=?').bind(id).first(); if (!cur) continue;
+      await db.prepare('UPDATE narratives SET terms=? WHERE id=?').bind(narrSubTerms(cur.terms, JSON.stringify(lost.get(id))), id).run();
+      if (recounted < 60) { try { if (await narrRefresh(env, id, Date.now())) recounted++; } catch (e) {} } else await db.prepare('UPDATE narratives SET updated=0 WHERE id=?').bind(id).run();
+    }
+    return { ok: true, undone, backlog, setAside, recounted, note: backlog + ' row' + (backlog === 1 ? '' : 's') + ' back in the backlog (never near-joined again), ' + setAside + ' set aside (outside the ' + NARR_WINDOW_H + 'h window); each narrative they left lost their words from its terms and was recounted (its centroid keeps their contribution: no row vector is stored).' };
+  } finally { await narrLeaseFree(env, 'place', tok); }
 }
 
 // ============================================================================
@@ -11125,7 +11999,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-16.studio-p68';
+const AXIOM_BUILD = '2026-11-16.studio-p69';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -19116,7 +19990,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve, narrCleanTitle, narrAutoLabel, narrTemplate, narrPersonish, narrNamed, narrRow, narrLabelQueue, narrClaim, narrativesCron, narrativesRun, narrAutoTick, narrAutoMode, arcNewsSnap, arcCoreRow, coreNewsTick, arcTagFill, buildAllNews, bskySearch, bskyCronQueries, deskIssueIds, socialSummary, tickClock, tickSave, denPipeline, lexIssueQueries };
+export const __test = { sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve, narrCleanTitle, narrAutoLabel, narrTemplate, narrPersonish, narrNamed, narrRow, narrLabelQueue, narrClaim, narrativesCron, narrativesRun, narrAutoTick, narrAutoMode, narrMergeScan, narrMergeApply, narrMergeUndo, narrMergePass, narrAlias, narrAliasMany, narrHeadCover, narrLeaseTake, narrMergeMode, narrNearMode, narrOpposite: narrOppositeOf, narrRefresh, arcNewsSnap, arcCoreRow, coreNewsTick, arcTagFill, buildAllNews, bskySearch, bskyCronQueries, deskIssueIds, socialSummary, tickClock, tickSave, denPipeline, lexIssueQueries };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -20657,7 +21531,10 @@ const AXIOM_WORKER = {
             const type = String(sb.type || ''); const id = sb.id;
             if (type === 'news') { const r = await env.MIND_DB.prepare('SELECT * FROM arc_items WHERE id=?').bind(parseInt(id, 10) || 0).first(); if (!r) return jsonResp({ error: 'unknown_item' }, 404); const m = pjs(r.meta, {}); name = stStr(r.title, 120); text = [r.title, (m.outlet || r.src || '') + (r.ts ? ', ' + new Date(r.ts).toISOString().slice(0, 10) : ''), r.body].filter(Boolean).join('\n\n'); prov = r.url || 'archive ' + r.id; kind = 'article'; }
             else if (type === 'alert') { const r = await env.MIND_DB.prepare('SELECT * FROM arc_alerts WHERE id=? AND ns=?').bind(parseInt(id, 10) || 0, p.ns).first(); if (!r) return jsonResp({ error: 'unknown_item' }, 404); const ev = pjs(r.evidence, []); name = 'Sentinel: ' + stStr(r.label, 100); text = ['Sentinel alert: ' + r.label + ' - ' + (r.hot || 0) + ' stories in six hours against a baseline of ' + (Math.round((r.baseline || 0) * 10) / 10) + ' (x' + (Math.round((r.ratio || 0) * 10) / 10) + ').'].concat((Array.isArray(ev) ? ev : []).slice(0, 12).map(e => [e.title || e.t || '', e.src || e.outlet || '', e.url || ''].filter(Boolean).join(' - '))).concat(r.angle ? ['Drafted angle: ' + r.angle] : []).join('\n\n'); prov = 'sentinel alert ' + r.id; kind = 'situation'; }
-            else if (type === 'narrative') { const r = await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(stStr(id, 40)).first(); if (!r) return jsonResp({ error: 'unknown_item' }, 404); name = 'Narrative: ' + stStr(r.label, 100); text = ['Narrative: ' + r.label, r.summary, r.claim ? 'Claim: ' + r.claim : '', r.counter_claim ? 'Counter-claim: ' + r.counter_claim : '', r.proponents ? 'Carried by: ' + pjs(r.proponents, []).join(', ') : '', (r.n || 0) + ' rows across channels, status ' + (r.status || '') + ', stance toward the client ' + (r.side || 'unknown') + '.'].filter(Boolean).join('\n\n'); prov = 'narrative ' + r.id; kind = 'situation'; }
+            else if (type === 'narrative') { let r = await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(stStr(id, 40)).first(); let via = '';
+              // p69: an absorbed id resolves to the narrative it was merged into
+              if (!r) { try { await ensureNarratives(env); const al = await narrAlias(env, stStr(id, 40)); if (al.survivor && al.chain.length) { r = await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(al.survivor).first(); via = stStr(id, 40); } } catch (e) { r = null; } }
+              if (!r) return jsonResp({ error: 'unknown_item' }, 404); name = 'Narrative: ' + stStr(r.label, 100); text = ['Narrative: ' + r.label, r.summary, r.claim ? 'Claim: ' + r.claim : '', r.counter_claim ? 'Counter-claim: ' + r.counter_claim : '', r.proponents ? 'Carried by: ' + pjs(r.proponents, []).join(', ') : '', (r.n || 0) + ' rows across channels, status ' + (r.status || '') + ', stance toward the client ' + (r.side || 'unknown') + '.'].filter(Boolean).join('\n\n'); prov = 'narrative ' + r.id + (via ? ' (merged from ' + via + ')' : ''); kind = 'situation'; }
             else if (type === 'brief') { const rec = await briefGet(env, stStr(id, 10)); if (!rec) return jsonResp({ error: 'no_brief', detail: 'No daily brief has been written yet.' }, 404); name = 'Daily brief ' + rec.day; text = rec.md || briefMarkdown(rec); prov = 'daily brief ' + rec.day; kind = 'daily'; }
             else return jsonResp({ error: 'bad_type', detail: 'type is news, alert, narrative or brief' }, 400);
           }
@@ -21360,7 +22237,10 @@ const AXIOM_WORKER = {
     //    GET  /narratives/status             live, emerging, named, alerts, backlog, budget (read)
     //    POST /narratives/run {hours,scan}   place, recount, name, pair, alert - as a job the console tails (full)
     //    POST /narratives/update {id,label,summary,claim,counter_claim,issues,muted,pinned}   an operator's edit (full)
-    //    POST /narratives/merge {into,from}  fold one narrative into another (full)
+    //    POST /narratives/merge {into,from}  fold one narrative into another, logged and undoable (full)
+    //    GET  /narratives/merges[?dry=1[&pairs=a:b,..]|?log=1[&modes=1]]   the merge pass's proposals, computed now, or the log (full)
+    //    POST /narratives/merges {apply:[{into,from}]}|{undo}|{keep:[{a,b,note}]}|{unkeep}|{mode:{merge,clause,near,nearLex}}   (full)
+    //    GET  /narratives/near?day=   POST /narratives/near {undo: item | 'day', day}   P1's near-join records and their undo (full)
     //    POST /narratives/reset {broad:true} | {all:true,confirm:'reset'}   dissolve broad clusters (or everything) so rows are placed again (full)
     //    POST /narratives/step {what:'place'|'recount'|'name',scan,limit}   one step inside the request; the app and tools/daily-brief.py loop it to finish the backlog (full)
     if (path === '/narratives' || path.startsWith('/narratives/')) {
@@ -21372,10 +22252,24 @@ const AXIOM_WORKER = {
         if (path === '/narratives' && req.method === 'GET') return jsonResp(await narrativesList(env, { days: qf('days'), issue: qf('issue'), ns: qf('ns'), platform: qf('platform'), status: qf('status'), side: qf('side'), entity: qf('entity'), scope: qf('scope'), q: qf('q'), sort: qf('sort'), all: qf('all') === '1', muted: qf('muted') === '1', limit: qf('limit') }));
         if (path === '/narratives/one' && req.method === 'GET') {
           const id = String(qf('id')).replace(/[^a-z0-9]/gi, '').slice(0, 24);
-          const r = id ? await narrativeOne(env, id) : null;
+          let r = id ? await narrativeOne(env, id) : null;
+          // p69: an absorbed id opens its survivor, with where it came from (briefs, bookmarks and the Den hold old ids)
+          if (!r && id) {
+            const al = await narrAlias(env, id);
+            if (al.chain.length && !al.survivor) return jsonResp({ error: 'merged_then_dissolved', detail: 'This narrative was merged into ' + al.chain[al.chain.length - 1] + ', which has since been dissolved (a reset). Its rows are placed again by the next run.', chain: al.chain }, 404);
+            if (al.survivor) { r = await narrativeOne(env, al.survivor); const m0 = al.merges[0] || {};
+              const mr = m0.merge ? await env.MIND_DB.prepare('SELECT from_row, n_items FROM narrative_merges WHERE id=?').bind(m0.merge).first() : null; const fr = pjs(mr && mr.from_row, {});
+              if (r) r.mergedFrom = { id, label: fr.label || fr.auto_label || '', named: narrNamed(fr), n: Number((mr && mr.n_items) || fr.n) || 0, at: m0.at || 0, who: m0.who || '', how: m0.how || '', merge: m0.merge || '', undoable: al.chain.length === 1, chain: al.chain }; }
+          }
+          if (r) { try { r.merges = (((await env.MIND_DB.prepare('SELECT id, from_id, from_row, n_items, at, who, how FROM narrative_merges WHERE into_id=? AND undone_at=0 ORDER BY at DESC LIMIT 20').bind(r.id).all()).results) || []).map(m => { const fr = pjs(m.from_row, {}); return { merge: m.id, from: m.from_id, label: fr.label || fr.auto_label || '', n: Number(m.n_items) || 0, at: m.at, who: m.who, how: m.how }; }); } catch (e) { r.merges = []; } }
           return r ? jsonResp(Object.assign({ ok: true }, r)) : jsonResp({ error: 'unknown_narrative' }, 404);
         }
         if (path === '/narratives/status' && req.method === 'GET') return jsonResp(await narrativesStatus(env));
+        // p69: the merge pass's proposals (stored, dry, the log) and P1's near records - a full key, they show every client's narratives
+        if ((path === '/narratives/merges' || path === '/narratives/near') && req.method === 'GET') {
+          if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'The merge proposals and the near-join log need a full-access key.' }, 403);
+          return jsonResp(path === '/narratives/near' ? await narrNearGet(env, { day: qf('day'), limit: qf('limit') }) : await narrMergesGet(env, { log: qf('log') === '1', modes: qf('modes') === '1', dry: qf('dry') === '1', pairs: qf('pairs'), limit: qf('limit'), id: qf('id') }));
+        }
         if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
         if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Running, editing and merging narratives need a full-access key.' }, 403);
         if (path === '/narratives/run') {
@@ -21387,19 +22281,26 @@ const AXIOM_WORKER = {
         if (path === '/narratives/update') {
           const id = String(nrb.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
           const cur = id ? await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(id).first() : null;
-          if (!cur) return jsonResp({ error: 'unknown_narrative' }, 404);
+          if (!cur) { const al = id ? await narrAlias(env, id) : null; if (al && al.chain.length && al.survivor) return jsonResp({ error: 'merged', into: al.survivor, detail: 'This narrative was merged into ' + al.survivor + '. Edit that one, or undo the merge first.' }, 409); return jsonResp({ error: 'unknown_narrative' }, 404); }
           const known = new Set(CLIENT_ISSUES.map(ci => ci.id));
           const issues = Array.isArray(nrb.issues) ? nrb.issues.map(String).filter(x => known.has(x)).slice(0, 3) : null;
           const textEdit = nrb.label != null || nrb.summary != null || nrb.claim != null || nrb.counter_claim != null || issues;
-          await env.MIND_DB.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, issues=?, ns=?, muted=?, pinned=?, edited=CASE WHEN ? THEN 1 ELSE edited END, updated=? WHERE id=?')
+          // p69: who edited last (person_ts, person_by): an undo never hands a person's text back to the model, and an
+          // apply notes a different editor; the answer is unchanged
+          await env.MIND_DB.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, issues=?, ns=?, muted=?, pinned=?, edited=CASE WHEN ? THEN 1 ELSE edited END, person_ts=?, person_by=?, updated=? WHERE id=?')
             .bind(nrb.label != null ? String(nrb.label).slice(0, 140) : cur.label, nrb.summary != null ? String(nrb.summary).slice(0, 600) : cur.summary, nrb.claim != null ? String(nrb.claim).slice(0, 300) : cur.claim, nrb.counter_claim != null ? String(nrb.counter_claim).slice(0, 300) : cur.counter_claim,
-              issues ? JSON.stringify(issues) : cur.issues, issues && issues.length ? ((CLIENT_ISSUES.find(ci => ci.id === issues[0]) || {}).ns || cur.ns) : cur.ns, nrb.muted == null ? cur.muted : (nrb.muted ? 1 : 0), nrb.pinned == null ? cur.pinned : (nrb.pinned ? 1 : 0), textEdit ? 1 : 0, Date.now(), id).run();
+              issues ? JSON.stringify(issues) : cur.issues, issues && issues.length ? ((CLIENT_ISSUES.find(ci => ci.id === issues[0]) || {}).ns || cur.ns) : cur.ns, nrb.muted == null ? cur.muted : (nrb.muted ? 1 : 0), nrb.pinned == null ? cur.pinned : (nrb.pinned ? 1 : 0), textEdit ? 1 : 0, Date.now(), String(auth.name || '').slice(0, 60), Date.now(), id).run();
           return jsonResp({ ok: true, narrative: narrRow(await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(id).first()) });
         }
         if (path === '/narratives/reset') {
           // {broad:true} (default) dissolves clusters at or past narrMax(env) rows; {all:true, confirm:'reset'} clears every
           // narrative. Rows go back to the unplaced pool and the ticks place them again under the current rules.
           const all = nrb.all === true && nrb.confirm === 'reset';
+          // p69 (P5): inside the placement lease, so a placement in flight never writes rows onto what this deletes; the merge,
+          // keep-apart and mode records are left (an absorbed id then answers merged_then_dissolved)
+          const resetTok = await narrLeaseTake(env, 'place', NARR_LEASE_MS, 10000);
+          if (!resetTok) return jsonResp(Object.assign({}, NARR_BUSY, { status: undefined }), 409);
+          try {
           const ids = all ? null : ((await env.MIND_DB.prepare('SELECT id FROM narratives WHERE n>=?').bind(Math.max(20, parseInt(nrb.min, 10) || narrMax(env))).all()).results || []).map(r => r.id);
           let narratives = 0, items = 0;
           if (all) {
@@ -21416,6 +22317,7 @@ const AXIOM_WORKER = {
           }
           await env.AXIOM_KV.delete('narr_last').catch(() => {});
           return jsonResp({ ok: true, all, narratives, items, note: items + ' rows are unplaced again; the half-hourly ticks place them under the current rules, or run Place and name now.' });
+          } finally { await narrLeaseFree(env, 'place', resetTok); }
         }
         if (path === '/narratives/step') {
           // One step, synchronously, inside the request - the app loops these to finish what the tick
@@ -21427,7 +22329,7 @@ const AXIOM_WORKER = {
           if (what === 'place') {
             // one placement pass, synchronously: embed up to `scan` waiting rows and join or start narratives;
             // recounting follows, naming is left to the name steps so this stays quick and never spends a call
-            const out = await narrativesRun(env, { hours: parseInt(nrb.hours, 10) || NARR_WINDOW_H, scan: Math.min(Math.max(parseInt(nrb.scan, 10) || 100, 1), 200), budgetMs: 20000, skipNaming: true, log });
+            const out = await narrativesRun(env, { hours: parseInt(nrb.hours, 10) || NARR_WINDOW_H, scan: Math.min(Math.max(parseInt(nrb.scan, 10) || 100, 1), 200), budgetMs: 20000, skipNaming: true, leaseWaitMs: 12000, log });   // p69: waits up to 12s for another placement's lease
             const st = await narrativesStatus(env);
             return jsonResp(Object.assign({}, out, { what, remaining: st.backlog || 0, lines }));
           }
@@ -21455,21 +22357,16 @@ const AXIOM_WORKER = {
         if (path === '/narratives/merge') {
           const into = String(nrb.into || '').replace(/[^a-z0-9]/gi, '').slice(0, 24), from = String(nrb.from || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
           if (!into || !from || into === from) return jsonResp({ error: 'missing_ids', detail: 'Give into and from, two different narrative ids.' }, 400);
-          const a = await env.MIND_DB.prepare('SELECT id, terms, centroid, n FROM narratives WHERE id=?').bind(into).first(); const b = await env.MIND_DB.prepare('SELECT id, terms, centroid, n FROM narratives WHERE id=?').bind(from).first();
-          if (!a || !b) return jsonResp({ error: 'unknown_narrative' }, 404);
-          const ta = pjs(a.terms, {}), tb = pjs(b.terms, {}); for (const k in tb) ta[k] = (ta[k] || 0) + tb[k];
-          const va = b64f32(a.centroid), vb = b64f32(b.centroid);
-          const merged = va && vb && va.length === vb.length ? va.map((x, i) => (x * (a.n || 1) + vb[i] * (b.n || 1)) / ((a.n || 1) + (b.n || 1))) : va || vb;
-          await env.MIND_DB.batch([
-            env.MIND_DB.prepare('UPDATE narrative_items SET narrative=? WHERE narrative=?').bind(into, from),
-            // p67: the working title is derived again from the merged rows by the recount below
-            env.MIND_DB.prepare("UPDATE narratives SET terms=?, centroid=?, dim=?, auto_label='', auto_n=0, updated=? WHERE id=?").bind(JSON.stringify(Object.fromEntries(narrTopTerms(ta, 40).map(k => [k, Math.round(ta[k] * 1000) / 1000]))), merged ? f32b64(merged) : '', merged ? merged.length : 0, Date.now(), into),
-            env.MIND_DB.prepare('DELETE FROM narratives WHERE id=?').bind(from),
-            env.MIND_DB.prepare("UPDATE narratives SET counter='' WHERE counter=?").bind(from),
-          ]);
-          await narrRefresh(env, into, Date.now());
-          return jsonResp({ ok: true, into, from, narrative: narrRow(await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(into).first()) });
+          // p69: the same body and answer, now through the logged merge (undoable with POST /narratives/merges {undo}); a
+          // person's merge carries an edited narrative's name to the survivor (the working title is derived again)
+          const tok = await narrLeaseTake(env, 'place', NARR_LEASE_MS, 8000);
+          if (!tok) return jsonResp(Object.assign({}, NARR_BUSY, { status: undefined }), 409);
+          let r; try { r = await narrMergeApply(env, { into, from, how: 'person', who: auth.name }); } finally { await narrLeaseFree(env, 'place', tok); }
+          if (!r.ok) { const st = r.status || 409; delete r.status; return jsonResp(r, st); }
+          return jsonResp({ ok: true, into, from, narrative: narrRow(await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(into).first()), merge: r.merge, notes: r.notes });
         }
+        if (path === '/narratives/merges') { const r = await narrMergesPost(env, nrb, auth.name); const st = r.ok === false ? (r.status || 400) : 200; delete r.status; return jsonResp(r, st); }
+        if (path === '/narratives/near') { const r = await narrNearPost(env, nrb, auth.name); const st = r.ok === false ? (r.status || 400) : 200; delete r.status; return jsonResp(r, st); }
         return jsonResp({ error: 'not_found' }, 404);
       } catch (e) { return jsonResp({ ok: false, error: 'narratives_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
     }
@@ -23884,10 +24781,15 @@ async function handleScheduled(env) {
   // Narratives: the newest rows join or start the stories the conversation is telling; new ones are named and, when they take
   // off on a client issue, reported. Placement embeds with Workers AI (not the model account) and runs every tick; naming
   // spends model calls and waits for the day's window.
-  try { const nr = ai.run ? await narrativesCron(env) : await narrativesRun(env, { budgetMs: 120000, skipNaming: true }); if (nr && nr.placed) console.log('Narratives:', nr.placed, 'rows placed,', nr.started, 'started,', nr.named || 0, 'named', ai.run ? '' : '(naming held)'); } catch (e) { console.log('narratives cron failed', String(e).slice(0, 120)); }
+  // p69: the merge pass runs once a tick either way (no model call); merges are printed with their undo ids, and the pass's
+  // time is its own stage in tick_last
+  let nr = null;
+  try { nr = ai.run ? await narrativesCron(env) : await narrativesRun(env, { budgetMs: 120000, skipNaming: true, merge: true }); if (nr && nr.placed) console.log('Narratives:', nr.placed, 'rows placed,', nr.started, 'started,', nr.named || 0, 'named', ai.run ? '' : '(naming held)');
+    if (nr && nr.merge && nr.merge.applied && nr.merge.applied.length) console.log('Narratives merged:', nr.merge.applied.map(a => '"' + a.fromTitle + '" into "' + a.intoTitle + '" (undo: merge ' + a.merge + ')').join('; ')); } catch (e) { console.log('narratives cron failed', String(e).slice(0, 120)); }
   // p67 (B1): only when the owner has set NARRATIVE_AUTO=tick - at most two naming calls on the capped 'narr_auto' ledger
   if (!ai.run && narrAutoMode(env) === 'tick') { try { const na = await narrAutoTick(env, ai); if (na && na.named) console.log('Narratives named outside the window (NARRATIVE_AUTO=tick):', na.named, 'in', na.calls, 'call(s)'); } catch (e) { console.log('narrative auto-naming failed', String(e).slice(0, 120)); } }
   clk.mark('narratives');
+  if (nr && nr.merge) clk.stages.push(['narr merge', Number(nr.merge.ms) || 0]);
   // Creative Studio jobs: anything queued, or abandoned by a runner that stopped, is claimed and run here.
   try { const sj = await studioCron(env, 120000); if (sj && sj.ran) console.log('Studio jobs:', sj.ran, 'run,', sj.done, 'done,', sj.failed, 'failed'); } catch (e) { console.log('studio cron failed', String(e).slice(0, 120)); }
   clk.mark('studio');

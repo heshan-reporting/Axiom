@@ -148,6 +148,28 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #   NARRATIVE_MAX_ROWS (plain text var, optional: rows at which a cluster is a
 #                      topic rather than a narrative and stops taking rows;
 #                      default 600)
+#   Duplicate narratives (p69, DEN.md s.10.11). The modes live in KV and are set
+#   only by POST /narratives/merges {mode} (logged in narr_mode_log): KV
+#   narr_near_mode and narr_merge_mode override every var below, field by field;
+#   with neither, the defaults merge and join nothing new. No model call.
+#   NARRATIVE_NEAR    (plain text var, optional: off | shadow | on - the near-miss
+#                      join on headline evidence; default shadow: records what
+#                      would join in D1 narrative_near and joins nothing)
+#   NARRATIVE_NEAR_LEX (optional: the headline cover bar, 0.30-0.90, default 0.45)
+#   NARRATIVE_MERGE   (optional: off | propose | auto - the merge pass; default
+#                      propose: proposals in KV narr_merge_last, nothing merges)
+#   NARRATIVE_MERGE_SIM (optional: the centroid bar C_HI, 0.85-0.99, default 0.92)
+#   NARRATIVE_MERGE_FORM (optional: the form clause, s | t | off, default s)
+#   NARRATIVE_MERGE_FORM_C (optional: its centroid bar, 0.79-0.95, default C_HI - 0.06)
+#   NARRATIVE_MERGE_FORM_T (optional: its term cosine bar, 0.30-0.90, default 0.60)
+#   NARRATIVE_MERGE_FORM_S (optional: its word score bar, 0.25-0.70, default 0.45
+#                      with s, 0.35 with t)
+#   NARRATIVE_MERGE_CORR (optional: the centroid clause's word score, 0.15-0.60,
+#                      default 0.25)
+#   NARRATIVE_MERGE_CROSS_NS (optional: off | issue - an automatic merge across
+#                      clients when the absorbed's leading issue is in the
+#                      survivor's top three; default off)
+#   NARRATIVE_MERGE_TICK (optional: automatic merges a tick, 1-10, default 5)
 #   BRIEF_MODEL       (plain text var, optional: the Claude model that writes the
 #                      daily brief; falls back to NARRATIVE_MODEL, SENTIMENT_MODEL,
 #                      then claude-opus-5-5. One call a day from the cron, plus
