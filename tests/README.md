@@ -106,6 +106,20 @@ node --experimental-sqlite tests/narratives-worker.mjs
 node --experimental-sqlite tests/sentiment-worker.mjs
 node --experimental-sqlite tests/social-worker.mjs
 node --experimental-sqlite tests/sources-worker.mjs
+node tests/run.mjs check                                     # also: docs/den*.js parse, every Den asset carries its ?v= (asset-versions)
+node --experimental-sqlite tests/den-worker.mjs              # Anne's Den worker (22): desks, board, checks, the brief, filing (no collection gap in uncited_signals since p67), the section on a pin, uncited flags kept through saves (DK11b)
+node --experimental-sqlite tests/den-release-worker.mjs      # Den release 8 worker (6): no collection talk in the draft's prompt and one CHANNELS line, evidence text/sub on every id, briefs stored before p67, tone counts judged rows only, a hand-started brief can cite, a section rewrite refreshes lines
+node --experimental-sqlite tests/den-autoname-worker.mjs     # working titles (15): a news headline that passes the no-person check or a template, never a comment or a private name, named person|model|auto, the window drain (last 7 days, client issues first, claim before call, bounded), NARRATIVE_AUTO=tick off by default; no Anthropic request
+node --experimental-sqlite tests/den-widen-worker.mjs        # the wider net (11): tick timing and /den/collection tick + pipeline, core rows tagged and archived before the 120 cut, the tag back-fill, the Bluesky host fallback and early stop, desk terms first, X accounts every run, Google News issue queries, seed rows
+node --experimental-sqlite tests/den-browser.mjs             # the Den page (36, Chromium): every tab, axe at 1366/1440/1920 for a full and a read key, filing, the brief, the day picker; gaps on Collection only
+node --experimental-sqlite tests/den-inject-browser.mjs      # the Den with every read and write failing, answering a gateway page, the wrong shape, hanging and dropping (60)
+node --experimental-sqlite tests/den-gaps-browser.mjs        # no gap words outside Collection at three widths and both roles, five checks, neutral counts before and after filing, the tab dot, icons, the working-title tag (12)
+node --experimental-sqlite tests/den-editor-browser.mjs      # the section editor (12): read by default, a sentence click edits, one save per edit, citing at the caret, cards headed in words, filing words only where fileable, read-only, axe in read and edit modes, gap-free filing
+node --experimental-sqlite tests/den-collection-browser.mjs  # Collection (10): the Not delivering panel and its one action, checking / failed / none, a past day, Watch without last_error, routeless channels, pipeline and tick only when sent
+node --experimental-sqlite tests/den-tour-browser.mjs        # the guided tour (11): the welcome, the ring on the real control, all 24 steps by real actions, zero spend and zero requests unless the Den's own Draft is pressed, resume and routing, replay prompts, a read key, an empty desk, reduced motion, the keyboard
+node --experimental-sqlite tests/den-visual-browser.mjs      # the Den's look (14): tokens, columns never clipped, the rail, cards' resting controls, loading ghosts, states, motion only on colour and shadow and none under reduced motion
+node --experimental-sqlite tests/den-release-browser.mjs     # the release reviews' page findings (7): a rating kept through Regenerate, no false conflict after one's own rewrite, a second leave saved, a double press, focus after Esc and in the drawer, tour keys and Back, Enter twice in Add
+node --experimental-sqlite tests/den-shots.mjs               # Den screenshots at 1366 x 768 and 1920 x 1080 into the ignored tests/shots/den/
 node --experimental-sqlite tests/studio-browser.mjs       # the Studio journey in a browser through the in-process worker; SHOT=1 writes screenshots beside it
 node tests/overview-browser.mjs                           # also narratives-, sentiment-, sources-, signals-, scope-, content-browser
 python3 tests/engine-ingest-test.py

@@ -164,7 +164,8 @@ code is built unproven against a real answer. Six of the eight reads under D2 re
 D1 registered public actors named on their own posts only; D2 at most eight live Supermetrics reads (two made, both
 refused by the licence);
 D3 layer 1 worker route built behind configuration; D4 one stated model call per draft, `DEN_DAILY_CALLS` 20, the
-morning draft off; D5 copy as rich text, `.md`, `.html`, Slack summary; D6 read role reads, full role drafts and
+morning draft off (amended 16 November 2026, the owner: narrative naming is automatic within `NARRATIVE_DAILY_CALLS`
+and every narrative has a computed working title; a draft is still one call a person starts, s.10.5); D5 copy as rich text, `.md`, `.html`, Slack summary; D6 read role reads, full role drafts and
 approves; D7 every reach channel built switched off, started only by a person signing in on the Mac; D8 subscriber
 outlets only through the agency's own subscription and only once clearance is recorded on the source; D9 the
 monitoring-export importer built.
@@ -656,7 +657,8 @@ offers a mute, which a person confirms and can remove in Options.
 became emerging, registered accounts and known actors seen for the first time in a fortnight, an issue running well
 above its own baseline, a registered account's post drawing several times its usual, and - first in the list -
 **any channel the desk relies on that delivered nothing in the window, with the reason**. An empty table must never
-be read as a quiet day.
+be read as a quiet day. *(Superseded on the page by s.10.2, 16 November 2026: gaps are said on the Collection tab
+only; the rail has five checks.)*
 
 **Brief** is the report. One button drafts it from the evidence on Today, and says what it costs before it is pressed:
 one model call, counted against twenty a day. The draft comes back checked against the rows it cites:
@@ -760,9 +762,9 @@ prototypes in `design/prototypes/annes-den-concepts/`. What a person now meets:
 | Where | Before | Now |
 |---|---|---|
 | The window | The app's masthead, navigation and scope bar above the Den; the first row 600px down at 1366 x 768 | A focused window (`body.in-den`): a 48px top bar with Back to AXIOM and a 44px rail; the first card is on the first screen |
-| What must not be missed | A list repeated above every tab | Six pills on the rail, gaps first; a pill opens its findings, whether the brief covers each, and its one action. A gap is also said on the Board ("Not a quiet day") |
+| What must not be missed | A list repeated above every tab | Six pills on the rail, gaps first; a pill opens its findings, whether the brief covers each, and its one action. A gap is also said on the Board ("Not a quiet day"). *Superseded by s.10.2: five checks, gaps on Collection only* |
 | The evidence | Five stacked tables on Today | The **Board**: cards by weight in Unsorted, and a column for each section of the desk's report. A card is filed by drag, by the section's number, or by its select |
-| The brief | Nine to eleven textareas in one column, citations as bare ids | One section open between an outline and the evidence filed under it; "As it reads" with citations as outlet chips and each flag at its sentence; a card inserts its citation at the cursor; a sticky foot bar |
+| The brief | Nine to eleven textareas in one column, citations as bare ids | One section open between an outline and the evidence filed under it; "As it reads" with citations as outlet chips and each flag at its sentence; a card inserts its citation at the cursor; a sticky foot bar. *Superseded by s.10.3: one section page, read by default, edited in place; cards headed in words* |
 
 Decisions that bind:
 - **Filing pins.** Filing a row under a section sends `POST /den/pin` as the Pin button does, so a draft must cover
@@ -841,7 +843,7 @@ merged and the owner deployed p66.
   Undo ("Set aside N cards") clears them all (`POST /den/aside {clear: true}` for each). A failure part way says how many
   went before it; the rest stay on the board. The selection is this render's: it empties on a desk or day change, and a
   card that leaves Unsorted leaves it. Narratives and dates, which the worker does not set aside, carry no tick.
-- **A citation chip leads to its card.** Under "As it reads" a chip is now a button (`button.den-cite`) that scrolls
+- **A citation chip leads to its card** *(the pane and chips are redrawn in s.10.3; the chip still leads to its card)*. Under "As it reads" a chip is now a button (`button.den-cite`) that scrolls
   its card in the evidence pane into view, focuses it and lights it for a moment (`li.den-evitem[data-cite].lit`);
   the card's Open link is the next press, so the source is one press away. Every id the open section cites and the
   brief's evidence holds is listed in the pane (filed here, or "Cited here, filed elsewhere"), so there is always a
@@ -889,6 +891,9 @@ desk with weeks of briefs).
 | 6 | p58, r44 | Anne's Den: the page |
 | 6.9 | p61, den.js r48 | The page's first live open overloaded the database: one read on Today, slow counts cached, a busy database said and retried |
 | 6.10 | page only, den.js r49 | The Storyboard: a focused window, the Board of cards and section columns, the three-pane Brief (s.6.10) |
+| 6.11 | p66, den.js r50 | Where a card is filed is the desk's record (`den_marks.section`) |
+| 6.12 | page only, den.js r51 | Bulk set-aside, the chip that leads to its card, the meter, the day picker, compact empty columns |
+| 10 | p67, den.js r52 | The release-ready Den: gaps on Collection only, the section editor, the guided tour, working titles, a wider net (s.10) |
 
 ### 7.2 The three layers, in one table
 
@@ -910,7 +915,9 @@ the agency holds, only a source a person has cleared, never a paywall worked aro
 - **D2 Live Supermetrics reads.** Two of eight made, both refused by the licence (0.5). No client account data read.
 - **D3 Layer 1 from the worker.** Built behind configuration that is absent; `/meta/status?probe=1` says what to set.
 - **D4 Model spend.** A draft or one section written again is one call a person starts; `DEN_DAILY_CALLS` 20; the
-  morning draft is off for every desk. Discovery, the strip, the board and Preview make no model call.
+  morning draft is off for every desk. Discovery, the strip, the board and Preview make no model call. *Amended 16
+  November 2026, the owner: narrative naming is automatic within `NARRATIVE_DAILY_CALLS`, every narrative has a computed
+  working title, and naming on every tick is built behind `NARRATIVE_AUTO=tick`, off (s.10.5).*
 - **D5 Getting the report out.** Copy for the document, `.md`, `.html`, the Slack summary. No write to Google Docs.
 - **D6 Who can use it.** Reading is read role; every write is full. Open access never reads a desk.
 - **D7 Signed-in collection.** Every channel built, none switched on. **Automated reading with a signed-in account is
@@ -1216,3 +1223,238 @@ curl -sS -X POST -H "X-Axiom-Key: $AXIOM_KEY" https://newsaus.heshan-998.workers
 
 `{"ok":true,"made":["arc_items_kind_ts"],"ms":...}` is the answer wanted. `db_busy` means the database was mid-scan:
 wait a minute and ask again.
+
+## 10. Release 8 - the release-ready Den (16 November 2026; build `2026-11-16.studio-p67`, page `den.css?v=r48`, `den.js?v=r52`, five new part files at `?v=r1`)
+
+Branch `claude/den-release`, cut from `main` at c2cff62 (worker p66, page `den.js?v=r51`, `den.css?v=r47`). **Not pushed,
+not merged to `main`, not deployed**: s.10.8 is the owner's. The page is now six files: `docs/den.js` (the shell: shared
+helpers, the rail, the Board, the top bar, `DenApp`), `docs/den-brief.js` and `docs/den-brief.css` (the Brief),
+`docs/den-desk.js` and `docs/den-desk.css` (Watch, Collection, Options), `docs/den-tour.js` and `docs/den-tour.css` (the
+guided tour), with `docs/den.css` still the frame and the tokens. `den-brief.js` and `den-desk.js` are factories that
+`den.js` calls once with its shared names (`window.__DEN_PARTS`); the tour reads the page only through `data-tour` hooks
+and `den:did` events. The versions `r52`, `r48` and `r1` were set when the split began and none was ever served (`main`
+serves `r51` and `r47`), so no second bump was needed.
+
+### 10.1 What the owner asked, and what it reverses
+
+The owner's brief for this release, in its sense: (a) a delivery or collection problem ("Facebook delivered nothing in
+this window", the "Not collected" check) is shown **only on the Collection tab**; (b) a release-ready, professional Den,
+above all a redesigned section editor and evidence pane (his screenshot: a textarea of raw `[S:123]` codes stacked above
+a duplicate "As it reads", and evidence cards headed by raw ids with "not filed" under each); (c) a wider collection net
+and narratives named without anyone asking, nothing left waiting un-analysed; (d) better engines, logic and flows; (e) a
+guided tour from the first step to the last that rings the control to press, waits for the person to really do it, and
+on later visits asks whether they want it again.
+
+| Standing rule | What this release does | Decided by, when |
+|---|---|---|
+| "An empty table must never be read as a quiet day": gaps first on the strip, a gap line on the Board, gaps in every "not covered" count (s.6, s.6.10) | **Reversed outside the Collection tab.** Gaps are said on Collection only, with a neutral dot on its tab (s.10.2). Failed reads are not gaps and still show on every tab | The owner's instruction, 16 November 2026 (item a) |
+| The draft is told to "say so plainly" when a channel was not read (`denSys`, `DEN_KIND_GUIDE.social`) | **Reversed in worker p67.** The draft never writes about collection, collectors, sign-ins or repairs; one built line says which channels were read (s.10.2) | The owner, 16 November 2026 (item a); takes effect on the deploy |
+| The Storyboard editor: a textarea, "As it reads" under it, cards headed by their id (s.6.10) | **Replaced** by one section page, read by default and edited in place, and evidence cards headed in words (s.10.3). What is stored is unchanged | The owner, 16 November 2026 (item b) |
+| D4: automated model work, naming included, runs in one window a day (5 October 2026) | **Amended, not reversed.** Every narrative has a working title at once with no model call; the morning window now drains the whole naming queue within the same cap; naming on every tick is built behind `NARRATIVE_AUTO=tick`, **off** (s.10.5) | The owner's item (c), 16 November 2026; switching every-tick naming on is still his |
+| Filing and the desk's record are a person's act; nothing spends without a button that states its cost | **Kept.** The tour asks the person to press; it never presses, never makes a request and never spends (s.10.4) | Unchanged |
+| Keyword proposals need a person; no signed-in channel, paid source, lexicon term or cron cadence changes without the owner | **Kept.** The wider net uses existing keyless routes only (s.10.6, s.10.9) | Unchanged |
+
+Pointers are left where the older text stands: s.6 ("Nothing critical missed"), the s.6.10 table, s.6.12 (the chip
+that leads to its card) and D4 in s.0.7 and s.7.3.
+
+### 10.2 Collection gaps live on the Collection tab only
+
+Supersedes the page behaviour in s.6 ("first in the list - any channel the desk relies on that delivered nothing") and
+in s.6.10 ("six pills on the rail, gaps first ... A gap is also said on the Board").
+
+| Where | Before | Now |
+|---|---|---|
+| The rail | Six pills, "Not collected N" first, warn-coloured, on every tab | Five checks; a desk with only a gap says "five checks, nothing found". The strip still hands the full list to `DenApp`, so Collection has it |
+| The Board | "<Channel> delivered nothing in this window. Not a quiet day: see why" above Unsorted; a column's "N checks uncovered" in red | No gap line. Before a brief there is no check count at all; with a draft a column says "N checks not in the brief yet" in a neutral chip; after filing, "N acknowledged at filing" |
+| The Brief | "1 check uncovered" counted the gap; Mark as filed listed it | Gaps are dropped before anything is counted. A filing whose only open items are gaps files in one press (the page sends `acknowledge` itself under p66); a gap and a check list only the check |
+| The draft (worker p67) | Told to write which channels were not read, and did ("restoring the collector should be a priority") | `SIGNALS NOT TO MISS` carries no gap; one built line follows the desk: `CHANNELS READ IN THIS WINDOW: News (n rows), X (n rows); not read: Facebook.` The rule: never describe a channel that was not read as quiet or calm, draw nothing from its absence, never write about collection, collectors, sign-ins, feeds or repairs |
+| Filing (worker p67) | Gaps in `409 uncited_signals` and in `acknowledged` | `open` excludes gaps; `acknowledged` holds none; the revision note appends "; not read in this window: <channels>" (see below) |
+| Watch | A collector's `last_error` in red beside each account | The last good read ("3 h ago") or "not read yet", in neutral ink |
+| **Collection** | The channel table only | A first panel, **Not delivering** (`[data-tour="gaps"]`): each gap with the worker's own title, its reason as sentences, secret, permission and script names folded under a closed "Setup details", and one action - Collect now where the channel has a collection route and the key can write, otherwise what is missing (switched off, paused at a verification, no collection job, a full key needed). "Checking what each channel delivered..." while the checks load; a sentence and Try again when they could not be read; "Every channel this desk relies on delivered." when none. On a past day it says "For <day>" and that the channels are as they stand now. A gap's row in the table carries a warn rule; Collect now is disabled with its reason on the three channels that have no collection job |
+| The Collection tab | - | A neutral dot (`data-attn`, CSS only, no number, no warn colour); the tab's text stays exactly "Collection"; `aria-description` "A channel is not delivering" (decision D5 of the plan; deleting the attribute in `DenApp` removes it) |
+
+Still said on every tab, because they are not "a channel delivering nothing": a read that failed, `503 db_busy`, a
+wrong-shape answer (each with Try again); the Board's "X: none." sentences, which say what was **collected**, with the
+link "See what was collected, and why not"; the Watch form's note that no collector reads a platform being typed.
+
+`GET /den/missed` and `/den/board?missed=1` are unchanged (gaps are still computed and still first), so the page reads
+the same under p66 and p67 and a p66 page still works on p67.
+
+**One open conflict for the owner.** The plan asked the worker to keep the unread channels in the filing revision note
+(W1), which appears in History on the Brief tab. The page strips that part from the History table, so item (a) holds on
+the page; the worker still stores it. Whether it should stay in the note, move to a field of its own, or go, is the
+owner's call. Dropping it is two changes: the suffix in `denBriefFile`'s `denRevision` call, and DK12's gap-only note in
+`tests/den-worker.mjs` (expect "filed").
+
+### 10.3 The Brief's editor and evidence pane
+
+Supersedes the Brief row of the s.6.10 table and the citation chip of s.6.12.
+
+| Where | Before (r51) | Now (r52) |
+|---|---|---|
+| The section | A textarea of raw `[S:123]` codes, then "As it reads" under it: the same words twice | One page a section (`.den-sec[data-mode=read|edit]`). It opens **read**: the words with each citation a numbered chip and each flag at its sentence. Clicking a sentence, Edit, or Tab puts the caret at that sentence in the same place; Esc or leaving saves once and returns to reading (focus goes back to Edit). An empty writable section opens as the editor. A filed brief or a read key always reads |
+| Typing | Raw codes only | While editing, a mirror under the text tints each `[K:id]` (the one under the caret ringed, an unknown id red), and a line names the mark under the cursor: its source, what it says, its id |
+| Citing | A card inserted `[M:n]` where the cursor last was; each card a save | A card press keeps focus in the words and inserts at the caret through the browser's own edit, so Undo works and several citations are one save |
+| An evidence card | Headed by its id (`S:2396192`, `T:mining`, `N:...`) with "not filed" under every row | Headed by its source in words with the kind's icon, then what the row says and one line of figures; the id only in its accessible name and tooltip. Filing words only on rows the desk can file (stories, posts, actors, narratives, dates): "Add to this section", "Remove". Tone, alert and memory rows say nothing about filing. A card cited here shows its chip's number; "Cited in N" when elsewhere too |
+| Chips | The outlet name | "pointpost", "pointpost 2" for a repeat, "Narrative: <name>", "Tone: <issue>", "Agency memory", "Date: ..."; the number is drawn by CSS, so the text a test reads is unchanged |
+| The outline | Titles cut at one line, a key cap past nine | Sections numbered 1..n, titles on two lines, a quiet dot and a word for the state, and the count of sources (filed cards and cited ids, each once) |
+| The foot | Text counts | Buttons: "N need(s) a source" opens the first flagged sentence, the checks chip opens the section of the first check not mentioned |
+| Failures and finish | A toast | A failed draft or section rewrite stays as a notice until closed; a filed brief shows a band with "Copy it for the document"; Regenerate saves unsaved words first, and Write it again is disabled with "Save your edits first" while anything is unsaved; History and Compare open in a drawer that takes focus and gives it back |
+
+What binds, unchanged: the section text the worker stores and checks is still plain text with `[K:id]` tokens; only an id
+the brief's evidence holds can be cited; flags sit at their sentence; the working copy, save and conflict rules of s.6
+stand; other sections stay mounted so unsaved words are not lost. `DEN_EDITOR_STACK = false` in `docs/den-brief.js`
+brings back the r51 stacked layout with the new cards (verified to pass `tests/den-browser.mjs`).
+
+The worker side (p67): every evidence id records `text` (at most 160 characters) and `sub` (at most 120) for every
+kind, returned by `GET /den/brief` beside `label` (never the line itself, never a subscriber excerpt); a brief drafted
+before p67 derives them from its stored line. A social row's label is "<platform> post" only, so the Source List prints
+no post words. A brief started by hand fills its evidence from the window at once (no model call), a save that cites a
+row collected since then merges it, and a section rewrite refreshes the lines it holds. A sentence flagged "Needs a
+source" keeps its flag through later saves until it is cited or removed. Tone (`T:`) counts only rows a model judged.
+
+### 10.4 The guided tour
+
+`docs/den-tour.js`: one script with no dependency, mounted as `#den-tour` on `document.body`, opened by the **Guide**
+button beside `?` and by the first row of the Keyboard sheet. Twenty-four steps in six chapters, each finished only by
+the real action (a click, a drag, a key, words typed, read from the page and the Den's `den:did` events):
+
+| Chapter | Steps |
+|---|---|
+| Set up | Choose your desk; Check the day (and the model-call meter beside it); Read the checks |
+| Sort the evidence | Meet a card; Find a card; Pin what must be covered; Set one aside (with Undo and the mute offer); Add it to a section (drag, or the card's menu); Do it with one key |
+| Start the brief | Open the brief; Start the brief (paid: the Den's own Draft, or "Skip: show me with a sample") |
+| Write and cite | Open a section; Edit the words; Cite a card; Save; Follow a citation; Rewrite one section (paid form: only the person presses Write it again) |
+| File and share | Look back; Read the foot before filing; Take it out; Mark it as filed ("Not yet, show me the rest" in the dialog) |
+| Run the desk | See what is watched; See what was read (rings Not delivering when there is a gap); Make the desk yours |
+
+How it behaves: a ring and a cut-out spotlight on the control (the page underneath stays usable), a coach card with
+"Step n of 24", the chapter and a progress bar, Back, Skip this step and "I'll do it later". Each write step says what it
+will write and how to undo it before the press. After 20 seconds it offers "Show me where"; after 45 Skip becomes the
+first button; nothing skips by itself. Where the page is not in the state a step needs it asks for the one press that
+fixes it ("Come back to today", "Go back to the Brief", "Save your words first"). Alt+G moves between the card and the
+control; Escape pauses and returns focus; a Den dialog keeps its own Escape. Under reduced motion the ring is a static
+3px outline with a "here" badge.
+
+What it never does: press a Den control, make a network request (its harness greps for `fetch(`, `XMLHttpRequest`,
+`AXUI` and `.click(`), or spend. A control marked `data-paid="1"` gets a dashed ring and "1 model call, you press it"
+with the day's live count; the sample path makes no call. Collect now is never offered. A read key walks every step as
+"shown, not done"; an empty desk folds the sorting chapter into one card; a filed brief makes editing show-only and
+points filing at Reopen.
+
+Entry: a first open offers a welcome (Start the guide, I'll do it later, Don't ask again); a guide left part-way offers
+"Carry on with the guide?" at its step; after it ends or is declined, each open asks "Want the guide again?" ("Want a
+guided tour of the Den?" for someone who never started) until "Don't ask again". Its memory is this browser's note,
+localStorage `ax_den_tour` `{v, status, step, done[], skipped[], sample, ask, runs, startedAt, updatedAt, completedAt,
+t, w}`, read and written in try/catch. Removing the two `den-tour` tags from `docs/index.html` removes it; the Guide
+button and the sheet row hide themselves.
+
+### 10.5 Naming and analysis without a person (D4 amended)
+
+Three things left a narrative showing "A narrative not yet named": naming was held outside the 07:00 window; the Board
+lists narratives from two rows but a model names from three, so a two-row narrative could never be named; and past the
+120-call cap the rest waited for the next day.
+
+- **A working title, no model call.** Every narrative carries one (`narratives.auto_label`, with `auto_n`,
+  `label_tries`, `label_try_ts`, each added once by `ALTER TABLE`). Only a published **news headline** can be one: the
+  member headline that carries most of the cluster's shared words, cleaned (outlet suffix, "Live:", handles and links
+  out, at most 14 words), and only if a strict check finds no possible person's name in it (any capitalised name in any
+  script, initials, a lone surname, a speaker followed by a speech verb; a short list of institutions, places, days and
+  months is let through). Otherwise a template from the issue, the register's names and words the rows write in plain
+  lower case. Never a comment, never a post's sentence, never an unregistered person. Written at insert, refreshed only
+  when the narrative doubles (so a title a brief cites is stable), back-filled 60 a run, and built lazily on the Board
+  for rows older than p67 ("A narrative on <issue>"). A person's name always wins, then a model's.
+- **Said as what it is.** Board rows carry `named` (`person`, `model`, `auto`); the card shows a quiet "working title"
+  tag; the draft's line reads "working title, not yet reviewed"; an emerging signal reads "Emerging narrative (working
+  title): ...". `/narratives/status` adds `titled`, `awaitingModel` and `budgetAuto`.
+- **The window drains the queue.** The morning window now names the whole global queue of the last seven days, client
+  issues first, within `NARRATIVE_DAILY_CALLS` (120) and a window budget of 20 calls and four minutes, each row claimed
+  before its call; three failed attempts set a narrative aside until the next day.
+- **Every-tick naming, built and off.** `NARRATIVE_AUTO=tick` lets a held tick name client-issue narratives that moved in
+  the last day: two batches (up to four provider calls) a tick at most, on its own ledger scope `narr_auto`, capped by
+  `NARRATIVE_AUTO_DAILY_CALLS` (default 24 a Sydney day), never when `AI_AUTOMATION=off`. The default `window` spends
+  nothing new: `tests/ai-automation-worker.mjs` passes unchanged.
+
+D4 now reads: a draft or one section written again is still one call a person starts; narrative naming is automatic
+within its own cap, and every narrative has a computed working title until a model or a person names it.
+
+### 10.6 The wider net
+
+| What | How it is read | What is kept |
+|---|---|---|
+| The tick, measured | 22 stages timed in `handleScheduled`, written to KV `tick_last` (a partial record after the collectors) | `/den/collection` returns `tick` and `pipeline` (rows waiting to be grouped, the oldest, working titles, names waiting); the Collection tab shows them under **Analysis** only when sent |
+| Core-feed news on the Board | Core feed rows now carry `meta.issues`, `source`, `tier`, `juris`, `outlet` (a Google News outlet moved off the headline) and are archived before the snapshot's 120 cut, 600 a tick, newest first | Media cards under the outlet's name; the News channel's counts include them |
+| A back-fill of tags | 300 news rows of the last seven days a tick, newest first (KV `tagfill`); worker-tagged rows are tagged again after a desk term is approved | `meta.issues` where it was absent, `meta.tagv` on rows the worker tagged |
+| Bluesky search | `api.bsky.app` first, the public host after a 403 (recorded as `social_last.bluesky.host` / `fallback`); every desk-owned term first, then ten others in turn; stops after three failures in a row, five seconds a search, 180 seconds a run | As before |
+| X timelines | Up to 20 registered accounts of the desks every run (`X_DEN_EVERY_RUN`), never more than half the run | As before |
+| Google News by issue | 14 issue OR-queries a lexicon run, the desks' issues every run, the per-term rotation kept as the deep pass | `meta.q` holds the query that found a row |
+| Three seed sources | `v67_lemmy_world_au`, `v67_guardian_energy`, `v67_treasury_ministers`; `wn_aemc` reads its own feed first | Unverified until the owner's sweep |
+
+No lexicon, signed-in route, paid key or cron cadence changed. The legacy `/collect` tail still runs, now timed as
+`legacy`.
+
+### 10.7 Verified here, and not verified
+
+Every harness below ended N passed, 0 failed on the release head, run from the `den-release` worktree:
+`node tests/run.mjs check` (30), `tests/den-worker.mjs` (22), `den-release-worker` (6, new), `den-autoname-worker` (15,
+new), `den-widen-worker` (11, new), `narratives-worker` (18, unchanged), `ai-automation-worker` (4, unchanged),
+`widenet-worker` (12), `social-worker` (16), `collect-hardening-worker` (19), `auth-policy-worker` (20),
+`studio-tokens-test` (6; TK6 holds the tour's inks to AA), `den-browser` (36), `den-inject-browser` (60),
+`den-gaps-browser` (12, new), `den-editor-browser` (12, new), `den-collection-browser` (10, new), `den-tour-browser` (11,
+new), `den-visual-browser` (14, new), `den-release-browser` (7, new). Four release reviews (engine truth, the
+experience, page correctness, rules and accessibility) were read against the code and fixed with tests first. The
+full `node tests/run.mjs all` was not run here; CI on the pushed branch is the full run.
+
+| Not verified | Why | What verifies it |
+|---|---|---|
+| The live worker and real rows: the Board, the rail and Collection on a real desk | The sandbox contacts no live worker | Open the Den after the deploy, Board then Collection |
+| A real draft under the new prompt: no collection talk, the channels line | No paid model call is made here | One draft on the live worker, read against her report |
+| Working titles on real clusters, and that none names a private person | Seen only on invented rows | Narratives, sort by new, a day after the deploy |
+| Naming spend on a real day under the window drain | Not run against the account | `/narratives/status` `budget` and `budgetAuto` the day after |
+| Bluesky from Cloudflare's egress (which host answers) | No egress | `social_last.bluesky.host` and `fallback` after a two-hourly run |
+| Google News tolerance of 14 more requests a run | No egress | `lex_gnews` in Sources a day on: delivering, not refused |
+| The tick's real wall clock and CPU with the new stages | Cannot be timed here | `tick` on the Collection tab after two ticks |
+| The three seed sources | No egress | Sources, filter Untried, Sweep |
+| The tour on a live desk (its writes are real) | Only the fixture's desk | One walk with a full key, then Undo on the Board |
+| The look with the vendored fonts and real data at 1366 | Shots are of the fixture's invented day | The owner's first open |
+| Firefox and WebKit | Not installed here | CI |
+
+### 10.8 The owner's steps for this release
+
+```
+git push origin claude/den-release                                                   # then wait for CI to pass
+tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh                           # the worker, from the Mac, from the branch tip
+git checkout main && git merge --ff-only claude/den-release && git push origin main   # the page; GitHub Pages serves main /docs
+```
+
+1. With `AXIOM_KEY` exported the deploy proves the build: `/engine/status` answers `2026-11-16.studio-p67`. The live page
+   r51 keeps working on p67. Open Anne's Den once with a full key; the four new `narratives` columns are added by
+   `ensureNarratives` the first time the narratives tables are touched (the next tick at the latest).
+2. After the merge, hard refresh once (Cmd+Shift+R); the page loads `den.js?v=r52`. If the page goes out before the
+   worker: gaps are already off the rail, Board and Brief, the editor and the tour work, but a new draft is still told
+   to write about unread channels and narratives still show "A narrative not yet named" until p67 is deployed.
+3. Read `tick` on the Collection tab after two ticks. Raise `SOURCES_PER_TICK` only if the tick total is well under
+   five minutes.
+4. Sources, filter Untried, Sweep (the three new seeds); a day later, filter Failing and Dead.
+5. Off or unchanged on arrival, and the owner's: `NARRATIVE_AUTO=tick` and `NARRATIVE_AUTO_DAILY_CALLS`; a cheaper
+   `NARRATIVE_MODEL`; tone judged more than once a day; the Collection tab's dot (one attribute); the revision-note
+   suffix (s.10.2); whether a published headline with evaluative words may stand as a working title; every Mac
+   `--login`, source clearances, `OPENAUSTRALIA_KEY`, the Meta permissions, the Supermetrics licence and
+   `tools/den-backtest.py ... --save`.
+6. One draft on a live desk, read against her own report for the day: the acceptance test no harness runs.
+
+### 10.9 Asked for and not built, with the reason
+
+- **Auto-approval of proposed keywords.** The proposer counts and does not understand (s.5); approval stays a person's.
+- **Signed-in channels, paid sources, a second cron, Hansard on the Board.** Not asked for by name and each is the
+  owner's decision; the net was widened through existing keyless routes only.
+- **Naming on every tick by default, tone every tick.** Built behind `NARRATIVE_AUTO=tick` (naming) and left off; tone is
+  unchanged. Both are spend the owner switches on.
+- **The legacy `/collect` tail removed.** Nothing could confirm that no reader depends on the keys it writes.
+- **Stable `U:` and `K:` ids.** The page cites an upcoming card by its position; it needs a page change first.
+- **A plain Status column on Collection, Draft disabled on an empty Board, the Upcoming card titled in words.** Each
+  conflicts with an assertion of `tests/den-browser.mjs` that pins today's text; left for a release that rewrites them.
+- **The tour's "Try it: Collect now".** It would start real collection; Collection is explained, not pressed.
+- **`docs/narratives.js` and `docs/overview.js` preferring the working title**, outlet display names, a `[` citation
+  picker, a summary band and chevrons on Options: optional, left out.
+- **A light theme, phone and tablet layouts.** Out of scope by standing rule (dark, desktop first).

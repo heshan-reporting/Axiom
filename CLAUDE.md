@@ -71,7 +71,7 @@ notified -> acked -> drafted. Routes: `/sentinel/alerts|scan|ack|metrics`.
 In-app: the Sentinel view (nav badge counts what is unactioned) with
 Acknowledge (stops the clock) and Draft in Ad Lab (seeds the brief).
 
-## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 7 built, the Storyboard live)
+## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 8 built, the Storyboard live; release 8 on `claude/den-release`, not yet merged or deployed)
 
 The agency's monitoring analyst files daily and weekly activist-activity briefs per client. `DEN.md` holds what her
 reports are made of (counts and public names only: the reports themselves are client material and never enter the
@@ -236,7 +236,10 @@ verifies each, and what was asked for and not built.
     became emerging, first-seen registered accounts and register entities (fourteen days), an issue at 2.5 times its
     baseline, a registered account's post at four times its usual, and **collection gaps** - a channel the desk
     relies on that delivered nothing, with why (not granted, switched off, paused at a verification, no collector).
-    Gaps lead the list: an empty table is never read as a quiet day.
+    The worker still puts gaps first in `signals`, but **since release 8 (the owner's instruction of 16 November 2026)
+    the page says a gap on the Collection tab only**: the rail shows the five other checks, the Board, the Brief and the
+    filing dialog never count a gap, and Collection's first panel, Not delivering, carries each gap with its reason
+    (`DEN.md` s.10.2). A failed read is not a gap and still says so with Try again on every tab.
   - **The brief.** `POST /den/brief {desk, hours, pins, replace}` (full) is **one model call** (a second only when
     the first answer was not JSON; none after a budget or account refusal), answered through `denHeartbeat` (the
     request keeps its connection with a space every fifteen seconds, because a job run after the response would be
@@ -252,8 +255,8 @@ verifies each, and what was asked for and not built.
     `POST /den/brief/save {id|desk, revision, sections, ratings}` (a person's edit: checked the same way, marked
     `edited`; `409 conflict` with theirs; `{desk}` alone starts an empty brief by hand), `/den/brief/section`
     (one call; `409 edited_section` unless `force`), `/den/brief/file {acknowledge | reopen}` (`409
-    uncited_signals` lists what the strip holds and the brief neither cites nor names, once; a filed brief is
-    final until reopened). `GET /den/brief?desk=&day=&prev=1&format=md|html|slack`, `/den/briefs`,
+    uncited_signals` lists what the strip holds and the brief neither cites nor names, once, never a collection gap
+    since p67; a filed brief is final until reopened). `GET /den/brief?desk=&day=&prev=1&format=md|html|slack`, `/den/briefs`,
     `/den/brief/history`. The morning draft (`denBriefCron`) is off unless a desk's `auto_draft` is set, and runs
     inside the `AI_AUTOMATION` window.
   - **Collection.** `GET /den/collection?desk=`: each channel, how it is read, whether the worker reads it itself,
@@ -299,12 +302,12 @@ verifies each, and what was asked for and not built.
     sets `body.in-den` and AXIOM's masthead, navigation, scope bar and the view's note step aside (`#vtitle` and the
     navigation button still say where this is); the Den draws a 48px top bar (Back to AXIOM, the desk, the day and
     window, model calls today, Refresh, `?`) and a 44px rail: the tabs (Today is named **Board**; the id is still
-    `den-tab-today`) and the six checks as pills (`.den-strip`, gaps first, one pill a check with its count; a pill
-    opens its findings, each with whether the brief covers it and its one action). The frame rules are in `den.css`
+    `den-tab-today`) and the checks as pills (`.den-strip`, one pill a check with its count; five since release 8, no
+    collection gap; a pill opens its findings, each with whether the brief covers it and its one action). The frame rules are in `den.css`
     only, on `--dn-*` tokens scoped to `#den-root` (the app tokens the older rules and the job console read are
     re-pointed there); Manrope and DM Sans from `docs/vendor/fonts/`; dark only. **The Board** replaces the five
     tables: every row is a card (`article.den-row[data-kind][data-key]`: media, social, actors, narratives,
-    upcoming) in **Unsorted** (search, a kind filter with counts, Undo, the gap line "Not a quiet day", cards by
+    upcoming) in **Unsorted** (search, a kind filter with counts, Undo, cards by
     weight with pinned first, folded Low weight and Set aside, a line for each kind with no row and why) or under a
     column for each section of the desk (`section.den-col[data-sec]`, from the desk's `sections`; its number key, a
     state chip, the checks it has not covered, Write, an excerpt of its words; the Source List column is built, not a
@@ -324,13 +327,17 @@ verifies each, and what was asked for and not built.
     card's weight (a base for the kind, reach on a log scale, outlets, growth since yesterday, a check that names
     it, recency), shown with its reasons; `covered(signal, brief, texts)` applies the worker's filing rule to the
     words in the editor. **The Brief** shows one section at a time between its outline and the evidence filed under
-    it (the other sections stay mounted, hidden): the textarea, **As it reads** (each citation a chip with the row's
-    outlet or channel from the brief's `evidence` map, each flag at the sentence it concerns, cut the way
-    `denCleanText` cuts sentences), the rating selects in the section they rate (`ratings.items` matched by id; the
-    rest stay in a bar), and a card on the right inserts `[M:n]` where the cursor last was - only an id the brief's
-    evidence holds is offered, since the worker removes any other. "Pull from the rest of the window" files a card
+    it (the other sections stay mounted, hidden). Since release 8 (`docs/den-brief.js`, `DEN.md` s.10.3) a section is
+    one page that opens **read** (each citation a numbered chip with the row's outlet or channel from the brief's
+    `evidence` map, each flag at the sentence it concerns, cut the way `denCleanText` cuts sentences) and is edited in
+    place: a sentence click, Edit or Tab opens the editor at that point, Esc or leaving saves once and reads again; the
+    rating selects sit in the section they rate (`ratings.items` matched by id; the rest stay in a bar); an evidence
+    card, headed by its source in words (the id only in its accessible name), inserts its citation at the caret -
+    only an id the brief's evidence holds is offered, since the worker removes any other. **What is stored is
+    unchanged**: plain text with `[K:id]` tokens. "Pull from the rest of the window" files a card
     under the open section from the Board's own read (lifted into `DenApp`; the Brief tab reads no board and falls
-    back to the brief's evidence map). A foot bar holds the save state, words, flags, checks uncovered, History and
+    back to the brief's evidence map). A foot bar holds the save state, words, flags, checks not yet mentioned (both
+    buttons since release 8, never a collection gap), History and
     Compare (a drawer), Export (the four exports in one menu), Draft again, Save changes, Mark as filed / Reopen. A
     draft shows the time so far and no percentage. Watch's Delete asks in the Den's own dialog; Collection's
     console opens under the row that started the job. **Reads:** the Board still makes one
@@ -362,6 +369,52 @@ verifies each, and what was asked for and not built.
     never kept across opens. **Compact empty columns** (`.den-col.empty`, `--dn-col-w-c`): a section column with no
     card is 160px wide with its key, state, Write and drop zone, and opens to full width when a card is filed under
     it. `tests/den-browser.mjs` (36), `tests/den-inject-browser.mjs` (60), `tests/den-worker.mjs` (21).
+  - **Release 8, the release-ready Den (16 November 2026; build `2026-11-16.studio-p67`, page `den.js?v=r52`,
+    `den.css?v=r48`, `den-brief.js` / `den-brief.css` / `den-desk.js` / `den-desk.css` / `den-tour.js` / `den-tour.css`
+    at `?v=r1`; branch `claude/den-release`; `DEN.md` s.10 is the hand-over).** The page is split along its seams:
+    `docs/den.js` (shell, rail, Board, top bar, `DenApp`) calls the factories `window.__DEN_PARTS.brief(D)` and
+    `.desk(D)` once with its shared names; the tour is a standalone script on `#den-tour`. What binds:
+    - **Collection gaps on the Collection tab only** (the owner, 16 November 2026, reversing "an empty table is never
+      read as a quiet day" outside Collection): five checks on the rail; no gap line on the Board; no gap in any
+      column, foot or filing count (a gap-only filing files in one press); Collection's first panel **Not delivering**
+      (`[data-tour="gaps"]`: the reason in sentences, setup names under a closed "Setup details", one action); a
+      neutral CSS dot on the Collection tab (`data-attn`, `aria-description`, the tab text stays "Collection"); Watch
+      shows the last good read, never a collector's `last_error`. Failed reads still show on every tab. The p67 draft
+      gets no gap and one built line, `CHANNELS READ IN THIS WINDOW: ...; not read: ...`, and is told never to write
+      about collection, collectors, sign-ins or repairs, nor read an unread channel as quiet. Open for the owner: the
+      p67 filing revision note still records "; not read in this window: <channels>", which the Brief's History hides.
+    - **The section editor** (`docs/den-brief.js`): read by default, edited in place, Esc or leaving saves once;
+      evidence cards headed in words, filing words ("Add to this section", "Remove") only on rows the desk can file;
+      citations inserted at the caret as one save; `DEN_EDITOR_STACK = false` restores the stacked layout. Storage is
+      unchanged (`[K:id]` in plain text). Worker p67: every evidence id records `text` (160) and `sub` (120), returned by
+      `GET /den/brief`; an `S:` label is "<platform> post" only; a brief started by hand holds the window's evidence;
+      a save merges ids collected since; an uncited flag survives later saves.
+    - **The guided tour** (`docs/den-tour.js`, 24 steps in six chapters): finishes a step only on the person's real
+      action; never presses a Den control, makes no request (no `fetch(`, `XMLHttpRequest`, `AXUI`, `.click(`), never
+      spends (a `data-paid` control is ringed with its cost and pressed by the person or not at all; a sample path
+      costs nothing); a read key sees every step shown, not done. Memory: localStorage `ax_den_tour`. Entry: a first
+      visit's welcome, "Carry on with the guide?", then "Want the guide again?" on each open until "Don't ask again";
+      the Guide button beside `?` and the Keyboard sheet replay it. Removing its two tags from `index.html` removes it.
+    - **Working titles and naming** (D4 amended, `DEN.md` s.10.5): every narrative has a computed working title
+      (`auto_label`; only a news headline that passes a strict no-person check, else a template from the issue,
+      register names and plain lower-case words; never a comment or a post); `named` = person | model | auto on the
+      Board, tagged "working title"; the morning window drains the queue of the last seven days, client issues first,
+      20 calls and four minutes at most, within `NARRATIVE_DAILY_CALLS`; `NARRATIVE_AUTO=tick` (off) names on held ticks
+      on ledger scope `narr_auto`, `NARRATIVE_AUTO_DAILY_CALLS` (24).
+    - **A wider net** (`DEN.md` s.10.6): the tick timed per stage in KV `tick_last` and shown with `pipeline` on
+      `/den/collection`; core-feed rows tagged and archived before the 120 cut (600 a tick); a back-fill of 300 untagged
+      news rows a tick (KV `tagfill`); Bluesky search on `api.bsky.app` with a 403 fallback, desk terms first, stopped
+      after three failures in a row and at 180 s; registered X accounts every run (20); 14 Google News issue queries a
+      lexicon run; three seed sources, unverified.
+    Harnesses (all N passed, 0 failed on the release head): `node tests/run.mjs check` (30), `tests/den-worker.mjs`
+    (22), `den-release-worker` (6), `den-autoname-worker` (15), `den-widen-worker` (11), `narratives-worker` (18) and
+    `ai-automation-worker` (4) both unchanged, `widenet-worker` (12), `social-worker` (16), `collect-hardening-worker`
+    (19), `auth-policy-worker` (20), `studio-tokens-test` (6), `den-browser` (36), `den-inject-browser` (60),
+    `den-gaps-browser` (12), `den-editor-browser` (12), `den-collection-browser` (10), `den-tour-browser` (11),
+    `den-visual-browser` (14), `den-release-browser` (7). **Not verified:** the live worker and real rows, a real draft
+    under the new prompt, working titles on real clusters, Bluesky from Cloudflare's egress, the tick's real wall
+    clock and CPU, the tour on a live desk, Firefox and WebKit. **Not merged, not deployed** (the owner's steps are
+    `DEN.md` s.10.8).
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
@@ -922,6 +975,15 @@ because it exists. **Every address and every answer shape below is unverified un
   and screens' statements went from 156-187 ms to 1-26 ms and the index built in 0.2 s; **D1 itself was not timed.**
   Still whole-kind by design, and small today: reads with no window (`/signals/status`, held comments by thread).
   Harness: `tests/archive-index-worker.mjs` (4).
+- **Release 8 widened it again (build `2026-11-16.studio-p67`; `DEN.md` s.10.6).** Core-feed rows carry
+  `meta.issues`, `source`, `tier`, `juris`, `outlet`, `tagv` and are archived before the snapshot's 120 cut (600 a tick);
+  `arcTagFill` tags 300 untagged news rows of the week a tick (KV `tagfill`, re-tagging after a desk term is approved);
+  Bluesky search asks `api.bsky.app` first and the public host after a 403 (`social_last.bluesky.host` / `fallback`),
+  desk terms first, stopping after three failures in a row, five seconds a search and 180 s a run; registered X accounts
+  every run (`X_DEN_EVERY_RUN` 20); Google News asks 14 issue OR-queries a lexicon run (`LEX_PER_RUN.issues`); the tick
+  is timed per stage (KV `tick_last`, on `/den/collection` with `pipeline`); three seed sources (`v67_*`), unverified.
+  Read `tick` before raising `SOURCES_PER_TICK`. Harnesses: `tests/den-widen-worker.mjs` (11), `widenet-worker` (12),
+  `social-worker` (16).
 
 ## Collection hardening (build `2026-11-12.studio-p65`, page `sources.js?v=r2`; on `main`, live in the worker since the owner's deploy of 15 November 2026)
 
@@ -1154,6 +1216,14 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   finishes the rest. `jobTail` marks a worker-side job that has written
   nothing for three minutes as `failed` with `worker_stopped`, so the console
   says what happened instead of spinning.
+- **Working titles (release 8, build p67).** Every narrative carries a computed title until a model or a person
+  names it: `narratives.auto_label` (with `auto_n`, `label_tries`, `label_try_ts`), only from a published news
+  headline that passes `narrPersonish` (no possible private name), else `narrTemplate` (issue, register names, words
+  the rows write in plain lower case); written at insert, refreshed when the narrative doubles, back-filled 60 a run,
+  cleared by a merge; `narrRow` and the Den's board carry `named` (person | model | auto). `label` keeps its meaning
+  (a model's or a person's name only). The daily window drains the naming queue (`narrLabelQueue`: the last seven
+  days, client issues first, a claim before each call, three strikes a day, `NARR_WINDOW_CALLS` 20 and four minutes a
+  window). `tests/den-autoname-worker.mjs` (15).
 - **Naming, counters, alerts.** `narrLabel()` sends narratives with >=
   `NARR_LABEL_MIN` = 3 rows that are unnamed or have doubled since their last
   naming to Claude five at a time (`narrLabelBatch`, strict JSON: a label of
@@ -4030,6 +4100,13 @@ placement, and the Creative Studio's jobs (a person's commands, finished by
 the tick when a tab closes), nor any on-demand action (Classify now, Place
 and name now, Run on a topic, Write today's brief, the research agent, chat).
 `/studio/status` reports `aiAutomation {mode, lastDay, today, text}`.
+Release 8 (build p67) adds `NARRATIVE_AUTO`: the default `window` keeps naming
+inside the daily window (which now drains the whole queue within the same
+cap); `tick` lets a held tick make at most two naming batches (up to four
+provider calls) for client-issue narratives that moved in the last day, on its
+own ledger scope `narr_auto` capped by `NARRATIVE_AUTO_DAILY_CALLS` (default
+24 a Sydney day), never when `AI_AUTOMATION=off`. It is off: switching it on is
+the owner's. Every narrative meanwhile has a computed working title (no model).
 Harness: `tests/ai-automation-worker.mjs` (4: the window, the modes, a whole
 held tick on seeded data making no Anthropic call while the same data with
 the gate open does, and the Studio answering on command); the sentiment
