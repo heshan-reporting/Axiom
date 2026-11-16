@@ -10052,6 +10052,7 @@ async function sentimentStatus(env) {
 // ==============================================================================
 let NARR_READY = false;
 const NARR_WINDOW_H = 72;       // rows this old are still placed
+const NARR_SINGLE_KEEP_H = 48;  // a singleton (one row) with nothing newer is pruned; a row this old that joins nothing is set aside, never started (p68)
 const NARR_LIVE_H = 96;         // a narrative with nothing newer is asleep: not matched against
 const NARR_SCAN = 300;          // rows placed per run
 const NARR_SIM = 0.84;          // cosine to join, with a shared leading issue or entity (bge-base: the same story across outlets scores about 0.84-0.93; the anchor, the frozen centroid and the rising bar keep a lower bar from drifting)
@@ -10300,33 +10301,96 @@ async function narrRefresh(env, id, now) {
   return { n: t.n, n24, nprev, velocity, status, side: stand, platforms, spread, sentiment, first_ts: t.first_ts, last_ts: t.last_ts, autoLabel };
 }
 const NARR_SYS = 'You name political narratives for an Australian intelligence platform. A narrative is a claim or story that people keep repeating in different words. For each numbered cluster of texts write: label - at most twelve words, the claim as its proponents would put it, no hashtags, no quotation marks; summary - two plain sentences: what is being said, and in general terms by whom (parties, groups, outlets, ordinary posters - never a private individual\'s name); claim - one sentence, the core assertion; counter - one sentence, the strongest opposing claim as its own proponents would put it, or an empty string when there is none; proponents - a short phrase for who tends to push it (e.g. "Greens and climate groups", "mining industry and Coalition MPs", "Reddit posters"); issues - the ids from the ISSUES list that the cluster is really about, at most three; scope - "client" when it is really about an issue in the ISSUES list, "politics" when it is Australian politics, government, public policy, the economy or finance but not a listed issue, "off" when it is celebrity, sport, entertainment, lifestyle, ordinary crime, weather or foreign news with no Australian political actor, policy or economic stake (a kidnapping, a footballer, a TV host - off, unless a politician or a policy is the point); relevance - 0 to 3, how much an Australian public-affairs agency and its clients should care; why - six words on the scope call. Reply with strict JSON only: {"clusters":[{"n":1,"label":"...","summary":"...","claim":"...","counter":"...","proponents":"...","issues":["ftc"],"scope":"client","relevance":3,"why":"..."}]}.';
-async function narrLabelBatch(env, clusters, log, scope) {
+/* p68: the answer's budget is sized for what is asked of each cluster (a label, a two-sentence summary, the claim, the
+ * counter, proponents, issues, scope, relevance and why). p67 gave five clusters 300 + 5 x 260 = 1600 tokens; on 16 November
+ * 2026 Opus 5.5's answer and its retry at the same limit did not parse and all five failed. */
+const NARR_OUT_BASE = 600, NARR_OUT_PER = 450, NARR_OUT_MAX = 4096;
+function narrOutTokens(n) { return Math.min(NARR_OUT_MAX, NARR_OUT_BASE + NARR_OUT_PER * Math.max(1, n || 1)); }
+/* One batch of up to five clusters. p68: when the answer does not parse the batch is asked again in halves, then the singles
+ * of a half that failed, instead of failing all five; a batch of one is asked once more with the JSON-only nudge (the p67
+ * retry). Every provider call is reserved and settled inside claudeMsg on the same ledger scope, and o.allow(callsSoFar)
+ * says before each one whether the run may make it ('' yes; else 'budget', 'calls' or 'time'), so a split never passes the
+ * day's cap or the run's share. Two singles failing with nothing named in the batch stops the splitting: the model, not a
+ * cluster, is then the likely cause. A provider error is not mended by asking again smaller: the rest of the batch fails.
+ * Returns { named, failed: [{ ids, why, kind }], calls, stopped, unasked: [cluster] }. */
+async function narrLabelBatch(env, clusters, log, scope, o) {
+  o = o || {}; log = log || (async () => {}); const allow = typeof o.allow === 'function' ? o.allow : (() => '');
   const issuesList = CLIENT_ISSUES.map(ci => ci.id + ' = ' + ci.label).join('; ');
-  const user = 'ISSUES: ' + issuesList + '\n\n' + clusters.map((c, i) => '[' + (i + 1) + '] shared terms: ' + c.terms.join(', ') + '; channels: ' + c.chan + '; ' + c.n + ' rows\n' + c.samples.map(s => '- ' + s.replace(/\s+/g, ' ').slice(0, 320)).join('\n')).join('\n\n');
   const model = (await narrBudget(env, scope)).model;
-  let parsed = null;
-  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-    const txt = await claudeMsg(env, NARR_SYS + (attempt ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : ''), user, 300 + clusters.length * 260, 45000, model, { scope: scope || 'narratives', retry: attempt > 0 });
-    parsed = relJson(txt); if (!parsed || !Array.isArray(parsed.clusters)) parsed = null;
-  }
-  if (!parsed) throw new Error('the naming model answered without valid JSON');
   const known = new Set(CLIENT_ISSUES.map(ci => ci.id));
-  const out = [];
-  parsed.clusters.forEach(cl => {
-    const c = clusters[parseInt(cl.n, 10) - 1]; if (!c) return;
-    const issues = (Array.isArray(cl.issues) ? cl.issues : []).map(String).filter(x => known.has(x)).slice(0, 3);
-    let scope = String(cl.scope || '').toLowerCase(); if (['client', 'politics', 'off'].indexOf(scope) < 0) scope = issues.length ? 'client' : 'politics';
-    if (scope === 'client' && !issues.length) scope = 'politics';
-    let relevance = parseInt(cl.relevance, 10); if (!(relevance >= 0 && relevance <= 3)) relevance = scope === 'off' ? 0 : scope === 'client' ? 3 : 2;
-    out.push({ id: c.id, label: String(cl.label || '').replace(/^["']|["']$/g, '').slice(0, 140), summary: String(cl.summary || '').slice(0, 600), claim: String(cl.claim || '').slice(0, 300), counter: String(cl.counter || '').slice(0, 300), proponents: String(cl.proponents || '').slice(0, 120), issues, scope, relevance, why: String(cl.why || '').slice(0, 120), model });
-  });
-  return out;
+  const res = { named: [], failed: [], calls: 0, stopped: '', unasked: [] };
+  const take = (group, parsed) => {
+    const got = new Set();
+    parsed.clusters.forEach(cl => {
+      const c = group[parseInt(cl.n, 10) - 1]; if (!c || got.has(c.id)) return; got.add(c.id);
+      const issues = (Array.isArray(cl.issues) ? cl.issues : []).map(String).filter(x => known.has(x)).slice(0, 3);
+      let scope = String(cl.scope || '').toLowerCase(); if (['client', 'politics', 'off'].indexOf(scope) < 0) scope = issues.length ? 'client' : 'politics';
+      if (scope === 'client' && !issues.length) scope = 'politics';
+      let relevance = parseInt(cl.relevance, 10); if (!(relevance >= 0 && relevance <= 3)) relevance = scope === 'off' ? 0 : scope === 'client' ? 3 : 2;
+      res.named.push({ id: c.id, label: String(cl.label || '').replace(/^["']|["']$/g, '').slice(0, 140), summary: String(cl.summary || '').slice(0, 600), claim: String(cl.claim || '').slice(0, 300), counter: String(cl.counter || '').slice(0, 300), proponents: String(cl.proponents || '').slice(0, 120), issues, scope, relevance, why: String(cl.why || '').slice(0, 120), model });
+    });
+    const left = group.filter(c => !got.has(c.id));
+    if (left.length) res.failed.push({ ids: left.map(c => c.id), why: 'the answer left ' + (left.length === 1 ? 'it' : 'them') + ' out', kind: 'json' });
+  };
+  // one provider call: { parsed } or { bad: 'cut' | 'json', why } - why carries the stop reason and the answer's first words
+  const ask = async (group, prev) => {
+    const user = 'ISSUES: ' + issuesList + '\n\n' + group.map((c, i) => '[' + (i + 1) + '] shared terms: ' + c.terms.join(', ') + '; channels: ' + c.chan + '; ' + c.n + ' rows\n' + c.samples.map(s => '- ' + s.replace(/\s+/g, ' ').slice(0, 320)).join('\n')).join('\n\n');
+    const nudge = prev === 'cut' ? ' Your previous answer was cut off before it ended; keep every field short.' : prev ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : '';
+    const info = {}; const maxTok = narrOutTokens(group.length); let txt;
+    try { txt = await claudeMsg(env, NARR_SYS + nudge, user, maxTok, 45000, model, { scope: scope || 'narratives', retry: !!prev, info }); res.calls++; }
+    catch (e) {
+      const m = String((e && e.message) || e);
+      if (/budget_exhausted/.test(m)) throw e;   // refused at the reservation: nothing was sent
+      res.calls++;
+      // an answer that was given but is no use (declined, or cut off before any text) is mended like one that is not JSON
+      if (/^refusal/.test(m)) return { bad: 'json', why: 'declined: "' + llmExcerpt(m.replace(/^refusal: the model declined this request( - )?/, '')).slice(0, 120) + '"' };
+      if (/^empty_answer/.test(m)) return { bad: 'cut', why: 'cut off at max_tokens ' + maxTok + ' before any text: "(empty answer)"' };
+      throw e;
+    }
+    const parsed = relJson(txt);
+    if (parsed && Array.isArray(parsed.clusters)) return { parsed };
+    const cut = info.stop === 'max_tokens';
+    const obj = parsed && /\{[\s\S]*\}/.test(String(txt || ''));   // relJson reads text with no braces at all as {}
+    return { bad: cut ? 'cut' : 'json', why: (cut ? 'cut off at max_tokens ' + maxTok : obj ? 'JSON without a clusters list' : 'not JSON') + ': "' + llmExcerpt(txt).slice(0, 120) + '"' };
+  };
+  const ids = g => g.map(c => c.id);
+  let queue = [{ group: clusters, prev: '' }]; let anyOk = false, singlesFailed = 0;
+  // level 0 the batch, level 1 its halves (or a batch of one asked once more), level 2 the singles of a half that failed
+  for (let level = 0; level < 3 && queue.length; level++) {
+    const next = [];
+    for (let qi = 0; qi < queue.length; qi++) {
+      const { group, prev } = queue[qi];
+      const stop = allow(res.calls);
+      if (stop) { res.stopped = stop; queue.slice(qi).concat(next).forEach(q => res.unasked.push(...q.group)); queue = []; next.length = 0; break; }
+      if (level > 0 && group.length === 1 && prev && !anyOk && singlesFailed >= 2) { res.failed.push({ ids: ids(group), why: 'not asked alone: every answer in this batch failed, so the model, not the narrative, is the likely cause', kind: 'skipped' }); continue; }
+      let a;
+      try { a = await ask(group, prev); }
+      catch (e) {
+        const m = String((e && e.message) || e).slice(0, 200);
+        if (/budget_exhausted/.test(m)) { res.stopped = 'budget'; res.budgetError = m; queue.slice(qi).concat(next).forEach(q => res.unasked.push(...q.group)); queue = []; next.length = 0; break; }
+        queue.slice(qi).forEach(q => res.failed.push({ ids: ids(q.group), why: m, kind: 'error' })); next.forEach(q => res.failed.push({ ids: ids(q.group), why: m, kind: 'error' }));
+        queue = []; next.length = 0; break;
+      }
+      if (a.parsed) { anyOk = true; take(group, a.parsed); continue; }
+      let then = '';
+      if (group.length > 1 && level < 2) {
+        const parts = level === 0 ? [group.slice(0, Math.ceil(group.length / 2)), group.slice(Math.ceil(group.length / 2))] : group.map(c => [c]);
+        parts.forEach(p => next.push({ group: p, prev: a.bad })); then = '; asking again as ' + parts.map(p => p.length).join(' + ');
+      } else if (group.length === 1 && !prev) { next.push({ group, prev: a.bad }); then = '; asking once more'; }
+      else { res.failed.push({ ids: ids(group), why: a.why, kind: 'json' }); if (group.length === 1) singlesFailed++; }
+      await log('err', 'the answer for ' + group.length + ' narrative' + (group.length === 1 ? '' : 's') + ' was ' + a.why + then);
+    }
+    queue = next;
+  }
+  return res;
 }
 /** Name the narratives that have earned it (three rows, or doubled since
- *  their last naming), five to a call, within the day's budget. */
-async function narrLabel(env, ids, log, left, scope) {   // scope: the ledger ('narratives'; 'narr_auto' for B1)
+ *  their last naming), five to a call, within the day's budget. p68: out.calls counts provider calls (the ledger's own
+ *  unit, a retry and a split included), and maxCalls is the run's share of them. */
+async function narrLabel(env, ids, log, left, scope, maxCalls) {   // scope: the ledger ('narratives'; 'narr_auto' for B1)
   const db = env.MIND_DB; const now = Date.now();
   left = typeof left === 'function' ? left : (() => 1e9);
+  maxCalls = maxCalls > 0 ? maxCalls : 1e9;
   // D1 binds at most 100 variables a statement: read the candidates in slices
   const rows = [];
   for (let i = 0; i < ids.length; i += 90) {
@@ -10348,19 +10412,32 @@ async function narrLabel(env, ids, log, left, scope) {   // scope: the ledger ('
     const chan = pjs(r.channels, []).slice(0, 4).map(c => c.channel).join(', ') || pjs(r.spread, []).map(s => s.platform).join(', ');
     clusters.push({ id: r.id, n: r.n, terms: narrTopTerms(pjs(r.terms, {}), 8), chan, samples: pick });
   }
+  // may the run make another provider call now: the day's cap (as read at the start; aiReserve is the hard guard), the run's
+  // share and the clock - asked before each batch and before each call of a split
+  const allow = inBatch => { const used = out.calls + (inBatch || 0); return used >= budget.left ? 'budget' : used >= maxCalls ? 'calls' : left() < 15000 ? 'time' : ''; };
+  const halt = async (why, waiting, detail) => {
+    out.stopped = why;
+    if (why === 'budget') { out.errors.push(detail || ('naming budget of ' + budget.cap + ' calls reached; ' + waiting + ' narratives stay unnamed until tomorrow')); await log('err', out.errors[out.errors.length - 1]); }
+    else if (why === 'time') { out.deferred = waiting; await log('info', waiting + ' narratives wait for the next cron tick to be named (this run is out of time)'); }
+  };
   for (let i = 0; i < clusters.length; i += 5) {
-    if (out.calls >= budget.left) { out.stopped = 'budget'; out.errors.push('naming budget of ' + budget.cap + ' calls reached; ' + (clusters.length - i) + ' narratives stay unnamed until tomorrow'); await log('err', out.errors[out.errors.length - 1]); break; }
-    if (left() < 15000) { out.stopped = 'time'; out.deferred = clusters.length - i; await log('info', out.deferred + ' narratives wait for the next cron tick to be named (this run is out of time)'); break; }
+    const stop = allow(0); if (stop) { await halt(stop, clusters.length - i); break; }
     const batch = clusters.slice(i, i + 5);
     await log('cmd', 'claude ' + budget.model + ' name ' + batch.length + ' narrative' + (batch.length === 1 ? '' : 's') + ' (' + batch.map(c => c.n + ' rows').join(', ') + ')');
-    let named;
-    try { named = await narrLabelBatch(env, batch, log, scope); out.calls++; }   // reserved and settled per provider call inside claudeMsg
-    catch (e) { const m = String((e && e.message) || e).slice(0, 160); if (/budget_exhausted/.test(m)) { out.stopped = 'budget'; out.errors.push(m); await log('err', m); break; } out.calls++; out.errors.push(m); await log('err', m); continue; }
+    const r = await narrLabelBatch(env, batch, log, scope, { allow });   // reserved and settled per provider call inside claudeMsg
+    out.calls += r.calls;
     // a name clears the namer's strikes and its claim (p67); label_tries / label_try_ts exist once ensureNarratives ran
+    const named = r.named;
     const stmts = named.map(x => { const ns = (CLIENT_ISSUES.find(ci => ci.id === x.issues[0]) || {}).ns || ''; return db.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, proponents=?, issues=CASE WHEN ?<>\'[]\' THEN ? ELSE issues END, ns=CASE WHEN ?<>\'\' THEN ? ELSE ns END, scope=?, relevance=?, scope_why=?, labelled_n=n, model=?, label_tries=0, label_try_ts=0, updated=? WHERE id=?').bind(x.label, x.summary, x.claim, x.counter, x.proponents, JSON.stringify(x.issues), JSON.stringify(x.issues), ns, ns, x.scope, x.relevance, x.why, x.model, now, x.id); });
     if (stmts.length) await db.batch(stmts);
     out.named += named.length;
     named.forEach(x => log('out', '"' + x.label + '"' + (x.issues.length ? ' [' + x.issues.join(', ') + ']' : '') + ' - ' + x.scope + (x.scope === 'off' ? ', hidden' : '') + (x.why ? ' (' + x.why + ')' : '')));
+    // what failed keeps its strike (taken at the claim); each error names the narratives and why, with the answer's first words
+    for (const f of r.failed) {
+      const m = (f.kind === 'json' ? 'the naming model answered without valid JSON for ' + f.ids.join(', ') + ' (' + f.why + ')' : f.kind === 'skipped' ? f.ids.join(', ') + ': ' + f.why : f.why + ' (' + f.ids.join(', ') + ')').slice(0, 300);
+      out.errors.push(m); if (f.kind !== 'json' || /^the answer left/.test(f.why)) await log('err', m);   // an unparsed answer was logged as it came
+    }
+    if (r.stopped) { await halt(r.stopped, r.unasked.length + Math.max(0, clusters.length - i - 5), r.budgetError); break; }
   }
   return out;
 }
@@ -10375,7 +10452,8 @@ const NARR_STRIKES = 3;
 const NARR_QUEUE_DAYS = 7;
 /* The day's window drain is bounded (release review): the window tick also runs the morning drafts, the daily brief and
  * topic research after narratives, all inside the cron's fifteen-minute wall clock that was never measured; naming more
- * than this waits for the next window, or for a person's "Finish all waiting". */
+ * than this waits for the next window, or for a person's "Finish all waiting". p68: provider calls, a retry or a split
+ * included (p67 counted batches, so a batch asked twice counted once). */
 const NARR_WINDOW_CALLS = 20;
 const NARR_WINDOW_MS = 4 * 60000;
 async function narrClaim(env, ids, now) {
@@ -10388,10 +10466,22 @@ async function narrClaim(env, ids, now) {
 async function narrUnclaim(env, ids) {
   for (let i = 0; i < (ids || []).length; i += 90) { const part = ids.slice(i, i + 90); await env.MIND_DB.prepare('UPDATE narratives SET label_try_ts=0, label_tries=MAX(COALESCE(label_tries,0)-1,0) WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).run(); }
 }
+/* p68: what a person can name now - eligible and active in NARR_QUEUE_DAYS, neither in a two-minute claim (a batch that has
+ * just failed, or another drain's) nor set aside after NARR_STRIKES failures today. The name step reports all three. */
+async function narrQueueCounts(env, now) {
+  now = now || Date.now();
+  const r = (await env.MIND_DB.prepare('SELECT SUM(CASE WHEN COALESCE(label_tries,0)>=? AND COALESCE(label_try_ts,0)>? THEN 1 ELSE 0 END) aside, SUM(CASE WHEN NOT (COALESCE(label_tries,0)>=? AND COALESCE(label_try_ts,0)>?) AND COALESCE(label_try_ts,0)>=? THEN 1 ELSE 0 END) claimed, COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE + ' AND last_ts>?')
+    .bind(NARR_STRIKES, now - 86400000, NARR_STRIKES, now - 86400000, now - NARR_CLAIM_MS, NARR_LABEL_MIN, now - NARR_QUEUE_DAYS * 86400000).first()) || {};
+  const setAside = Number(r.aside) || 0, claimed = Number(r.claimed) || 0;
+  return { remaining: Math.max(0, (Number(r.n) || 0) - setAside - claimed), setAside, claimed };
+}
+// p68: a person's name step takes one batch (with its splits) and about two and a half minutes, so tools/daily-brief.py's
+// four-minute request timeout is never reached even when every call of a split runs to its 45 seconds
+const NARR_STEP_MS = 150000;
 async function narrLabelQueue(env, o) {
   o = o || {}; const db = env.MIND_DB; const log = o.log || (async () => {}); const left = typeof o.left === 'function' ? o.left : (() => 1e9);
-  const maxCalls = o.maxCalls > 0 ? o.maxCalls : 1e9;
-  const out = { named: 0, calls: 0, errors: [], deferred: 0, stopped: '', waiting: 0 };
+  const maxCalls = o.maxCalls > 0 ? o.maxCalls : 1e9;   // p68: provider calls (a retry and a split included), not batches
+  const out = { named: 0, calls: 0, errors: [], deferred: 0, stopped: '', waiting: 0 }; let batches = 0;
   // only narratives active in the last seven days (the window /narratives, the Board and the Collection tab's
   // awaiting-model count read): a quiet narrative from months ago never spends the day's cap on history no page shows
   const open = "AND last_ts>? AND NOT (COALESCE(label_tries,0)>=? AND COALESCE(label_try_ts,0)>?) AND COALESCE(label_try_ts,0)<?" + (o.where ? ' AND ' + o.where : '');
@@ -10406,16 +10496,17 @@ async function narrLabelQueue(env, o) {
     cand.forEach(id => tried.add(id));
     const mine = await narrClaim(env, cand, now);
     if (!mine.length) continue;
-    const nm = await narrLabel(env, mine, log, left, o.scope);
+    const nm = await narrLabel(env, mine, log, left, o.scope, maxCalls - out.calls);
     out.named += nm.named; out.calls += nm.calls; out.errors.push(...nm.errors); out.deferred += nm.deferred || 0;
     if (nm.stopped) { await narrUnclaim(env, mine); out.stopped = nm.stopped; break; }
+    if (nm.calls && o.maxBatches > 0 && ++batches >= o.maxBatches) { out.stopped = 'batch'; break; }   // a person's step: one batch a press
   }
   try { const now = Date.now(); out.waiting = Number(((await db.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + NARR_ELIGIBLE + ' ' + open).bind(NARR_LABEL_MIN, recent(), NARR_STRIKES, now - 86400000, now + 1).first()) || {}).n) || 0; } catch (e) {}
-  if (out.waiting && out.stopped !== 'done') await log('info', out.waiting + ' narrative' + (out.waiting === 1 ? '' : 's') + ' still wait for a model name (' + (out.stopped === 'budget' ? 'the day\'s naming cap is reached' : out.stopped === 'time' ? 'this run is out of time' : 'this pass\'s calls are spent') + '); each keeps its working title');
+  if (out.waiting && out.stopped !== 'done' && out.stopped !== 'batch') await log('info', out.waiting + ' narrative' + (out.waiting === 1 ? '' : 's') + ' still wait for a model name (' + (out.stopped === 'budget' ? 'the day\'s naming cap is reached' : out.stopped === 'time' ? 'this run is out of time' : 'this pass\'s calls are spent') + '); each keeps its working title');
   return out;
 }
 /* p67 (B1, OFF unless the owner sets it): NARRATIVE_AUTO=tick lets a tick outside the day's window make at most two naming
- * batches (a batch whose answer is not valid JSON is asked once more, so up to four provider calls; the ledger cap
+ * calls (p68: two provider calls, a retry or a split included - p67 counted batches, so up to four; the ledger cap
  * holds either way; /narratives/status reports this ledger as budgetAuto) for client-issue narratives that moved in the last day, on their own ledger scope 'narr_auto' capped by
  * NARRATIVE_AUTO_DAILY_CALLS (default 24 a Sydney day). The default ('window') keeps the 5 October rule: naming is held
  * outside the window. AI_AUTOMATION=off stops it too. Never from a page read. */
@@ -10488,7 +10579,7 @@ async function narrativesRun(env, opts) {
   const liveRows = (await db.prepare('SELECT id, issues, issue_counts, entities, n, first_ts, last_ts, terms, centroid, dim FROM narratives WHERE last_ts>? AND muted=0 AND n<? AND (n>=2 OR first_ts>?) ORDER BY n DESC, last_ts DESC LIMIT 1500').bind(now - NARR_LIVE_H * 3600000, narrMax(env), now - 24 * 3600000).all()).results || [];
   const live = liveRows.map(r => { let ic = pjs(r.issue_counts, {}); if (!Object.keys(ic).length) { ic = {}; pjs(r.issues, []).forEach(x => { ic[x] = 1; }); } return { id: r.id, ic, top: new Set(narrTopIssues(ic, 3)), ents: new Set(pjs(r.entities, [])), n: r.n || 0, vec: b64f32(r.centroid), tok: pjs(r.terms, {}), first_ts: r.first_ts || 0, last_ts: r.last_ts || 0, fresh: false, touched: false }; });
   const [simA, simS] = narrSims(env);
-  const out = { ok: true, scanned: rows.length, placed: 0, joined: 0, started: 0, skipped: 0, unanchored: 0, live: live.length, named: 0, calls: 0, alerts: 0, mode: env.AI ? 'embeddings' : 'terms', errors: [] };
+  const out = { ok: true, scanned: rows.length, placed: 0, joined: 0, started: 0, skipped: 0, unanchored: 0, aged: 0, live: live.length, named: 0, calls: 0, alerts: 0, mode: env.AI ? 'embeddings' : 'terms', errors: [] };
   const texts = rows.map(narrText);
   const vecs = await narrEmbed(env, texts.map(t => t || ' '));
   if (!vecs && env.AI) { out.mode = 'terms (embedding failed)'; }
@@ -10521,10 +10612,14 @@ async function narrativesRun(env, opts) {
     // party, a client, an opponent. Celebrity, crime and foreign stories without one may join, never seed.
     const tight = CLIENT_ISSUES.some(ci => ci.rx.test(text));
     const canStart = !isComment && (tight || ents.size > 0);
-    if (!best && !canStart) {
+    // p68: a row already older than the singleton prune age seeds nothing: the singleton it started would be pruned by this
+    // same run (under two rows, nothing newer than NARR_SINGLE_KEEP_H), freeing the row to be picked again, oldest first, by
+    // the next - on 16 November 2026 every place step re-placed the same hundred rows. It may still join a live narrative.
+    const aged = (r.ts || now) < now - NARR_SINGLE_KEEP_H * 3600000;
+    if (!best && (!canStart || aged)) {
       // a comment, or a row naming no client issue and no entity, is not the seed of a narrative: it
       // may join one that exists; otherwise it is set aside and not looked at again
-      itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(r.id, '', r.ts || now, platform, channel)); out.unanchored++; return;
+      itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(r.id, '', r.ts || now, platform, channel)); out.unanchored++; if (canStart) out.aged++; return;
     }
     if (best) {
       // the centroid moves only while the narrative is young; after NARR_FREEZE rows it is fixed, so
@@ -10566,7 +10661,7 @@ async function narrativesRun(env, opts) {
   });
   for (let i = 0; i < itemStmts.length; i += 100) await db.batch(itemStmts.slice(i, i + 100));
   for (let i = 0; i < nStmts.length; i += 50) await db.batch(nStmts.slice(i, i + 50));
-  await log('out', out.placed + ' rows placed: ' + out.joined + ' joined a live narrative, ' + out.started + ' started one; ' + out.skipped + ' too short to place' + (out.unanchored ? ', ' + out.unanchored + ' set aside (a lone comment, a row naming no issue or entity, or a story that only brushes an issue without a politician, party or client in it - and near nothing live)' : ''));
+  await log('out', out.placed + ' rows placed: ' + out.joined + ' joined a live narrative, ' + out.started + ' started one; ' + out.skipped + ' too short to place' + (out.unanchored ? ', ' + out.unanchored + ' set aside (a lone comment, a row naming no issue or entity, or a story that only brushes an issue without a politician, party or client in it - and near nothing live' + (out.aged ? '; ' + out.aged + ' of them older than ' + NARR_SINGLE_KEEP_H + 'h, too old to start a narrative' : '') + ')' : ''));
   // a cluster at or past narrMax(env) is a topic from this moment, whether or not it is recounted this run
   try { await db.prepare("UPDATE narratives SET status='broad', updated=? WHERE n>=? AND status<>'broad'").bind(now, narrMax(env)).run(); } catch (e) { out.errors.push('broad: ' + String((e && e.message) || e).slice(0, 80)); }
   // recount what changed, plus narratives that need their pace re-read
@@ -10600,8 +10695,9 @@ async function narrativesRun(env, opts) {
     if (qb) qb.calls += nm.calls || 0; out.named = nm.named; out.calls = nm.calls; out.errors.push(...nm.errors); if (nm.deferred) out.namingDeferred = true; if (opts.queue) { out.namesWaiting = nm.waiting; out.namingStopped = nm.stopped; } } catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 120)); } }
   if (left() > 2500) { try { await narrCounters(env); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 80)); } }
   if (left() > 2500) { try { const al = await narrAlerts(env, log); out.alerts = al.length; } catch (e) { out.errors.push('alerts: ' + String((e && e.message) || e).slice(0, 80)); } }
-  // singletons that never grew are noise: gone after two days (their rows are freed to be placed again)
-  try { const old = ((await db.prepare('SELECT id FROM narratives WHERE n<2 AND last_ts<? LIMIT 4000').bind(now - 48 * 3600000).all()).results || []).map(r => r.id); for (let i = 0; i < old.length; i += 90) { const part = old.slice(i, i + 90); const m = part.map(() => '?').join(','); await db.batch([db.prepare('DELETE FROM narrative_items WHERE narrative IN (' + m + ')').bind(...part), db.prepare('DELETE FROM narratives WHERE id IN (' + m + ')').bind(...part)]); } out.pruned = old.length; } catch (e) {}
+  // singletons that never grew are noise: gone after two days (their rows are freed to be placed again: p68, a freed row
+  // joins a live narrative or is set aside, never starts another singleton for this prune to take)
+  try { const old = ((await db.prepare('SELECT id FROM narratives WHERE n<2 AND last_ts<? LIMIT 4000').bind(now - NARR_SINGLE_KEEP_H * 3600000).all()).results || []).map(r => r.id); for (let i = 0; i < old.length; i += 90) { const part = old.slice(i, i + 90); const m = part.map(() => '?').join(','); await db.batch([db.prepare('DELETE FROM narrative_items WHERE narrative IN (' + m + ')').bind(...part), db.prepare('DELETE FROM narratives WHERE id IN (' + m + ')').bind(...part)]); } out.pruned = old.length; } catch (e) {}
   out.ms = Date.now() - now;
   await log('info', out.named + ' named, ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') + ' raised (' + out.ms + 'ms)');
   out.summary = out.placed + ' rows placed (' + out.joined + ' joined a live narrative, ' + out.started + ' started one)' + (out.unanchored ? ', ' + out.unanchored + ' set aside' : '') + '; ' + recounted + ' recounted' + (out.deferred ? ' (' + out.deferred + ' deferred to the tick)' : '') + '; ' + (out.namingDeferred ? 'naming deferred to the tick' : out.named + ' named') + (out.alerts ? '; ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') : '') + (out.pruned ? '; ' + out.pruned + ' empty singletons pruned' : '') + ' - ' + (out.ms / 1000).toFixed(1) + 's';
@@ -10620,7 +10716,7 @@ async function narrativesCron(env) {
     if (budget < 75000) break;
     // p67 (B0): the window's namer takes the waiting queue (narrLabelQueue), within the same cap, and its bounded share
     const out = await narrativesRun(env, { budgetMs: budget, queue });
-    if (!acc) acc = out; else { ['scanned', 'placed', 'joined', 'started', 'skipped', 'unanchored', 'named', 'calls', 'alerts', 'pruned', 'titled'].forEach(k => { acc[k] = (acc[k] || 0) + (out[k] || 0); }); acc.errors = (acc.errors || []).concat(out.errors || []); acc.passes = i + 1; acc.namesWaiting = out.namesWaiting; acc.namingStopped = out.namingStopped; }
+    if (!acc) acc = out; else { ['scanned', 'placed', 'joined', 'started', 'skipped', 'unanchored', 'aged', 'named', 'calls', 'alerts', 'pruned', 'titled'].forEach(k => { acc[k] = (acc[k] || 0) + (out[k] || 0); }); acc.errors = (acc.errors || []).concat(out.errors || []); acc.passes = i + 1; acc.namesWaiting = out.namesWaiting; acc.namingStopped = out.namingStopped; }
     // another pass while rows wait to be placed, or while names wait and only the clock (not the cap) stopped the namer
     const drainLeft = queue.calls < NARR_WINDOW_CALLS && Date.now() < queue.until - 15000;
     if (!out.ok || (out.scanned < NARR_SCAN && !(out.namesWaiting > 0 && out.namingStopped === 'time' && drainLeft))) break;
@@ -10970,7 +11066,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-16.studio-p67';
+const AXIOM_BUILD = '2026-11-16.studio-p68';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -21286,16 +21382,16 @@ const AXIOM_WORKER = {
             return jsonResp({ ok: true, what, recounted, remaining: rem, lines });
           }
           if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'not_configured', detail: 'Set ANTHROPIC_API_KEY on the worker: the namer is Claude.' }, 501);
-          const eligible = "muted=0 AND edited=0 AND status<>'broad' AND n>=? AND (label='' OR labelled_n*2<=n OR COALESCE(scope,'')='')";
-          const cands = ((await db.prepare('SELECT id FROM narratives WHERE ' + eligible + ' ORDER BY n DESC LIMIT 5').bind(NARR_LABEL_MIN).all()).results || []).map(r => r.id);
-          // p67: claimed first, so a press and the window's drain never send the same narrative twice
-          const mine = await narrClaim(env, cands, now);
-          const nm = mine.length ? await narrLabel(env, mine, log) : { named: 0, calls: 0, errors: [] };
-          if (nm.stopped) await narrUnclaim(env, mine);
+          // p68: the window's queue (narrLabelQueue), one batch a press: claimed first (p67), and never a narrative in another
+          // batch's two-minute claim or set aside after three failures today, only those active in NARR_QUEUE_DAYS - so a batch
+          // that failed no longer blocks the next press (p67 took the five largest eligible every time, claimed or not)
+          const t0 = Date.now();
+          const nm = await narrLabelQueue(env, { maxBatches: 1, left: () => NARR_STEP_MS - (Date.now() - t0), log });
           if (nm.named) { try { await narrCounters(env); } catch (e) {} try { const al = await narrAlerts(env, log); nm.alerts = al.length; } catch (e) {} }
-          const rem = ((await db.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + eligible).bind(NARR_LABEL_MIN).first()) || {}).n || 0;
-          if (!cands.length) await log('info', 'nothing waits for a name');
-          return jsonResp({ ok: true, what, named: nm.named || 0, calls: nm.calls || 0, alerts: nm.alerts || 0, errors: nm.errors || [], remaining: rem, budget: await narrBudget(env), lines });
+          // remaining: what can be named now; setAside: three failures today (tried again tomorrow); claimed: in a claim now
+          const q = await narrQueueCounts(env);
+          if (!nm.calls && !nm.named && !q.remaining) await log('info', 'nothing waits for a name' + (q.setAside || q.claimed ? ' now (' + q.setAside + ' set aside after three failures today, ' + q.claimed + ' in a two-minute claim)' : ''));
+          return jsonResp({ ok: true, what, named: nm.named || 0, calls: nm.calls || 0, alerts: nm.alerts || 0, errors: nm.errors || [], remaining: q.remaining, setAside: q.setAside, claimed: q.claimed, stopped: nm.stopped || '', budget: await narrBudget(env), lines });
         }
         if (path === '/narratives/merge') {
           const into = String(nrb.into || '').replace(/[^a-z0-9]/gi, '').slice(0, 24), from = String(nrb.from || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);

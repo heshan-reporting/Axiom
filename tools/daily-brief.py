@@ -25,6 +25,10 @@ Usage:
 Each step stops on its own when nothing waits, when the day's Claude budget
 is spent (SENTIMENT_DAILY_CALLS / NARRATIVE_DAILY_CALLS on the worker), or
 when the Anthropic account's spend limit answers - the message says which.
+Naming (p68) goes on past a batch that names nothing while names still wait
+and the step made a call (the worker sets a failed batch aside for two minutes
+and takes the next five); it stops after two steps in a row that made no call.
+Placing stops when ten steps in a row leave the backlog no lower.
 Stdlib only. The output folder (default ./briefs) is gitignored: a brief is
 client intelligence and stays out of the repository.
 """
@@ -32,7 +36,7 @@ import argparse, datetime, html, json, os, re, sys, time, urllib.error, urllib.r
 
 WORKER = 'https://newsaus.heshan-998.workers.dev'
 LIMIT_RX = re.compile(r'usage limit|spend limit|regain access|credit balance|billing', re.I)
-BUDGET_RX = re.compile(r'daily budget|budget of \d+', re.I)
+BUDGET_RX = re.compile(r'daily budget|budget of \d+|budget_exhausted', re.I)
 
 
 def call(worker, key, path, body=None, timeout=240):
@@ -126,6 +130,7 @@ def drain_narratives(worker, key, max_steps):
     b = st.get('budget') or {}
     say('  %s rows wait to be placed, %s narratives live; %s of %s naming calls used today on %s' % (st.get('backlog', 0), st.get('live', 0), b.get('used', '?'), b.get('cap', '?'), b.get('model', '?')))
     placed = 0
+    low, flat = None, 0
     for i in range(max_steps):
         d = call(worker, key, '/narratives/step', {'what': 'place', 'scan': 100})
         if d.get('error') and not d.get('placed'):
@@ -134,6 +139,15 @@ def drain_narratives(worker, key, max_steps):
         say('  place %d: %s scanned, %s placed (%s joined, %s started, %s set aside), %s left' % (i + 1, d.get('scanned', 0), d.get('placed', 0), d.get('joined', 0), d.get('started', 0), d.get('unanchored', 0), d.get('remaining', 0)))
         if not d.get('remaining') or not d.get('scanned'):
             break
+        # p68: on 16 November 2026 p67 re-placed the same hundred rows for 400 steps; a backlog that does not fall is
+        # left to the half-hourly tick rather than spending more embeddings on it
+        rem = d.get('remaining', 0)
+        if low is None or rem < low:
+            low, flat = rem, 0
+        else:
+            flat += 1
+            if flat >= 10:
+                say('  stopped: the backlog is not falling (%s left after ten more steps); the tick places the rest' % rem); break
     say('  %d rows placed in this run' % placed)
     for i in range(20):
         d = call(worker, key, '/narratives/step', {'what': 'recount'})
@@ -143,6 +157,7 @@ def drain_narratives(worker, key, max_steps):
         if not d.get('remaining') or not d.get('recounted'):
             break
     named = 0
+    nocall = 0
     for i in range(max_steps):
         d = call(worker, key, '/narratives/step', {'what': 'name'})
         if d.get('error') and not d.get('named'):
@@ -154,13 +169,21 @@ def drain_narratives(worker, key, max_steps):
         lines_of(d)
         named += d.get('named', 0)
         reason = stop_reason(d.get('errors'))
+        if not reason and d.get('stopped') == 'budget':
+            reason = "the worker's daily Claude budget is spent (NARRATIVE_DAILY_CALLS raises it)"
+        held = ''
+        if d.get('setAside') or d.get('claimed'):
+            held = ' (%s set aside after three failures today, %s in a two-minute claim)' % (d.get('setAside', 0), d.get('claimed', 0))
+        say('  name %d: %s named, %s alerts, %s can be named now%s' % (i + 1, d.get('named', 0), d.get('alerts', 0), d.get('remaining', 0), held))
         if reason:
             say('  stopped: ' + reason); return False
-        say('  name %d: %s named, %s alerts, %s still wait' % (i + 1, d.get('named', 0), d.get('alerts', 0), d.get('remaining', 0)))
         if not d.get('remaining'):
             break
-        if not d.get('named') and not d.get('calls'):
-            say('  nothing was named this step; stopping'); break
+        # p68: a batch that named nothing is set aside for two minutes and the next step takes the next five, so only
+        # steps that made no call at all (nothing could be claimed) end the drain - two in a row
+        nocall = nocall + 1 if not d.get('calls') else 0
+        if nocall >= 2:
+            say('  no call in two steps in a row (nothing could be claimed); stopping'); break
     say('  %d narratives named in this run' % named)
     return True
 

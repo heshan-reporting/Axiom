@@ -20,7 +20,8 @@
  *   AN9  the drain names every waiting narrative, not only those that moved this tick, client-issue narratives first,
  *        and stops at the cap
  *   AN10 claim before the call: two drains started together never send the same narrative twice
- *   AN11 three strikes: a cluster the model cannot name is set aside for a day, then tried again
+ *   AN11 three strikes: a cluster the model cannot name is set aside for a day, then tried again (p68: each strike reports
+ *        its two provider calls, the answer and its retry, as the ledger counts them; p67 reported one)
  *   AN12 the window's cron names a narrative that did not move in that tick
  *   AN14 the drain names only narratives active in the last seven days, and one window tick keeps to its share of calls
  * Run: node --experimental-sqlite tests/den-autoname-worker.mjs */
@@ -258,7 +259,8 @@ await S.t('AN11 three strikes: a cluster the model cannot name is set aside for 
   const w = await mk(); const G = w.mod.__test; w.poison = /Queue quebec/;
   w.raw('nqquebec', { titles: ['Queue quebec story one on fuel tax', 'Queue quebec story two on fuel tax'] });
   for (let i = 1; i <= 3; i++) {
-    const o = await G.narrLabelQueue(w.env, {}); eq(o.named, 0); eq(o.calls, 1, 'strike ' + i + ' spends its call'); ok(o.errors.some(e => /valid JSON/.test(e)), JSON.stringify(o.errors));
+    // p68: calls counts provider calls, as the ledger does - the answer and its one JSON-only retry are two (p67 reported 1)
+    const sent = w.anth.length; const o = await G.narrLabelQueue(w.env, {}); eq(o.named, 0); eq(o.calls, 2, 'strike ' + i + ' spends its call and its one retry'); eq(w.anth.length - sent, 2); ok(o.errors.some(e => /valid JSON/.test(e)), JSON.stringify(o.errors));
     eq(w.nOf('nqquebec').label_tries, i);
     w.db.prepare('UPDATE narratives SET label_try_ts=? WHERE id=?').run(Date.now() - 5 * 60000, 'nqquebec');   // the claim has lapsed
   }
