@@ -8428,7 +8428,7 @@ async function deskList(env) {
   return { ok: true, desks, levels: DEN_LEVELS, trends: DEN_TRENDS, sectionKinds: DEN_SECTION_KINDS, regions: SOURCE_JURIS, budget: await denBudget(env) };
 }
 async function denBudget(env) { try { const u = await aiUsage(env, 'den'); const cap = AI_SCOPES.den.cap(env); return { used: Number(u.reserved) || 0, cap, left: Math.max(0, cap - (Number(u.reserved) || 0)) }; } catch (e) { return { used: 0, cap: AI_SCOPES.den.cap(env), left: AI_SCOPES.den.cap(env) }; } }
-/** Create or change a desk. Compare-and-swap on revision. patch: name, region, cadence, window_h, sections, ratings, options, auto_draft. */
+/** Create or change a desk. Compare-and-swap on revision. patch: name, region, cadence, window_h, sections, ratings, options (hidden, minEng, fold, density, weekday), auto_draft. */
 async function deskUpdate(env, b, who) {
   b = b || {}; if (!(await ensureDesks(env))) return { ok: false, status: 501, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
   const p = (b.patch && typeof b.patch === 'object') ? b.patch : {}; const now = Date.now();
@@ -8441,6 +8441,9 @@ async function deskUpdate(env, b, who) {
     if (v.minEng && typeof v.minEng === 'object') { o.minEng = {}; Object.keys(v.minEng).slice(0, 12).forEach(k => { const n = Math.max(0, Math.min(100000, Math.round(Number(v.minEng[k]) || 0))); if (n && DEN_PLATFORMS.indexOf(k) >= 0) o.minEng[k] = n; }); }
     if (v.fold != null) o.fold = !!v.fold;
     if (v.density != null) o.density = ['compact', 'regular', 'roomy'].indexOf(String(v.density)) >= 0 ? String(v.density) : 'regular';
+    // p70: a weekly desk's report day, the Sydney weekday its morning draft is written on (0 Sunday to 6 Saturday; Monday
+    // when unset): a whole number 0-6, or that one digit as a select sends it; anything else is dropped and the saved day stands
+    if (v.weekday != null && /^[0-6]$/.test(String(v.weekday))) o.weekday = Number(v.weekday);
     return o; };
   if (!b.id) {   // a new desk: a client, a name, and the format of a desk like it
     const ns = String(b.ns || '').toLowerCase(); const name = str(b.name, 60);
@@ -9053,11 +9056,17 @@ async function denBacktestSave(env, b, who) {
   await kvPut(env.AXIOM_KV, 'den_backtest_' + desk.id, jsonFit(rec, 20000), 400 * 86400);
   return { ok: true, backtest: rec };
 }
-/** The morning draft, for a desk that asked for it (off by default), inside the day's one window for automated model work. */
+/** A weekly desk's report day (p70): options.weekday when it is a whole number 0-6 (0 is Sunday), else Monday. */
+const DEN_REPORT_DAY = 1;
+function denReportDay(desk) { const n = desk && desk.options ? desk.options.weekday : null; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : DEN_REPORT_DAY; }
+/** The morning draft, for a desk that asked for it (off by default), inside the day's one window for automated model work.
+ *  p70: a daily desk is drafted every morning, as before; a weekly desk only on its report day, read on the Sydney calendar
+ *  (the day of its window's end). `waiting` names each weekly desk left for its day, with the day. */
 async function denBriefCron(env) {
   if (!env.MIND_DB || !env.ANTHROPIC_API_KEY || !(await ensureDesks(env))) return { ok: false };
-  const desks = ((await env.MIND_DB.prepare('SELECT id FROM den_desks WHERE auto_draft=1 LIMIT 20').all()).results) || []; const out = { ok: true, drafted: [], held: [] };
+  const desks = ((await env.MIND_DB.prepare('SELECT id FROM den_desks WHERE auto_draft=1 LIMIT 20').all()).results) || []; const out = { ok: true, drafted: [], held: [], waiting: [] };
   for (const d of desks) { const desk = await deskGet(env, d.id); const day = denWindow(desk, {}, Date.now()).day;
+    if (desk.cadence === 'weekly') { const rd = denReportDay(desk); if (new Date(day + 'T00:00:00Z').getUTCDay() !== rd) { out.waiting.push(desk.id + ': ' + DEN_DAYS[rd]); continue; } }
     if (await env.MIND_DB.prepare('SELECT 1 x FROM den_briefs WHERE desk=? AND day=?').bind(desk.id, day).first()) continue;
     const r = await denBriefDraft(env, { desk: desk.id }, 'morning draft'); if (r.ok) out.drafted.push(desk.id); else { out.held.push(desk.id + ': ' + r.error); if (r.error === 'budget_exhausted') break; } }
   return out;
@@ -12179,7 +12188,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-16.studio-p69';
+const AXIOM_BUILD = '2026-11-17.studio-p70';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';

@@ -416,6 +416,9 @@ verifies each, and what was asked for and not built.
     clock and CPU, the tour on a live desk, Firefox and WebKit. Merged to `main` (93bf0fd) and live on GitHub Pages on
     16 November 2026; the owner deployed the worker the same day (06:08 UTC, deploy token `aa4787ea59c482f4`;
     `DEN.md` s.10.8).
+  - **Weekly desks (build p70, not deployed; `DEN.md` s.10.12).** The morning draft drafts a daily desk every morning
+    as before and a weekly desk only on its report day, `options.weekday` (0 Sunday to 6 Saturday, on the Sydney calendar,
+    Monday unless set; saved by `POST /den/desk/update`, any other value dropped). `tests/den-weekly-worker.mjs` (3).
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -

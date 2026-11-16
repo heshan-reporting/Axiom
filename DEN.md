@@ -1771,3 +1771,26 @@ owner's instruction, the merge mode was set to `auto` (`POST /narratives/merges 
 undos in a day; near mode stays `shadow`. `{mode: {merge: 'propose'}}` goes back. No pair qualified at the switch, so the
 first automatic merges come from new duplicates. The readers' notes and the plan are client-confidential and kept out of
 the repository. Not verified yet: the automatic merges themselves, and near mode's reach from its shadow log.
+
+### 10.12 Weekly desks and their morning draft (build p70)
+
+Branch `claude/den-weekly-desk`, cut from `main` at 26d3753 (the live p69). The owner asked on 16 November 2026 that the
+analyst can keep daily reports as well as the weekly ones. A desk's cadence (Options, Daily or Weekly) changed one word
+of the draft's prompt and the page's label, nothing else: `denBriefCron` drafted every desk with `auto_draft` set every
+morning, so a weekly desk was drafted seven times a week, like a daily one. Now a daily desk is drafted every morning
+exactly as before, and a weekly desk only on its report day: the Sydney weekday in `options.weekday` (0 Sunday to 6
+Saturday), Monday when it has none, read from the Sydney day of the window's end, so 8am on a Wednesday in Sydney is
+Wednesday while UTC still says Tuesday; the cron's answer names each weekly desk it left in `waiting`
+(`mca_au: Monday`). `POST /den/desk/update {id, patch: {options: {weekday: 3}}}` (full key) saves the day as a whole
+number 0-6 (the one digit as text, as a select sends it, is read the same); any other value is dropped and the saved day
+stands, and the Options editor's own save keeps it. The cadence does not set the window: a weekly desk wants a reporting
+window of 168 hours. A report day the morning window misses (automated model work off that day, the day's Den calls
+spent) is not made up later in the week; that week's brief is drafted by hand from the Brief tab. No page change:
+Options has no report-day control yet, so a day other than Monday is set through the route, and its wording still says
+one model call a morning. Tests first: `tests/den-weekly-worker.mjs` (3: DW1 to DW3, on a clock set to named Sydney
+mornings), all three failing on 26d3753; `tests/den-worker.mjs` (22), `den-release-worker` (6) and
+`ai-automation-worker` (4) pass unchanged, as does `node tests/run.mjs check` (30). The owner's steps: deploy p70
+(`tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh`; no page change), confirm `/engine/status` answers
+`2026-11-17.studio-p70`, then on each weekly desk set Cadence Weekly, Reporting window 168 and Draft each morning Yes in
+Options, and post the report day if it is not Monday. Not verified: the live cron on a real desk; the first report-day
+morning of a weekly desk after the deploy shows it.
