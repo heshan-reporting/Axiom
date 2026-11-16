@@ -7,9 +7,10 @@
  *   the keyboard, and a static read of the file for the four things it must never contain.
  * Run: node --experimental-sqlite tests/den-tour-browser.mjs   (binds a local port: run it with the sandbox off) */
 import fs from 'node:fs';
-import { world, open, t, ok, eq, txt, tab, finish, CARD } from './den-fixture.mjs';
+import { world, open, t as test, ok, eq, txt, finish } from './den-fixture.mjs';
 
 console.log('den-tour-browser harness');
+const t = (name, fn) => (!process.env.ONLY || name.indexOf(process.env.ONLY) >= 0 ? test(name, fn) : Promise.resolve());   // ONLY=<part of a name> runs that case alone
 const SRC = fs.readFileSync(new URL('../docs/den-tour.js', import.meta.url), 'utf8');
 const CSS = fs.readFileSync(new URL('../docs/den-tour.css', import.meta.url), 'utf8');
 const AXE = fs.readFileSync(new URL('../node_modules/axe-core/axe.min.js', import.meta.url), 'utf8');
@@ -18,6 +19,7 @@ const S = p => p.evaluate(() => (window.DenTour ? window.DenTour.state() : null)
 // the tour is on step `id` (and its phase, when given), with no "Done" flash in progress
 const at = (p, id, phase) => p.waitForFunction(([id, ph]) => { const s = window.DenTour && window.DenTour.state(); return !!(s && s.status === 'active' && s.step === id && s.view && !s.view.flash && (!ph || s.view.phase === ph)); }, [id, phase || ''], { timeout: 15000 })
   .catch(async () => { throw new Error('not at ' + id + (phase ? '/' + phase : '') + ': ' + JSON.stringify(await S(p)).slice(0, 500)); });
+const until = (p, fn, what) => p.waitForFunction(fn, null, { timeout: 15000 }).catch(async () => { throw new Error('waited for ' + what + ': ' + JSON.stringify(await S(p)).slice(0, 600)); });
 const B = (p, name) => p.locator('#den-tour').getByRole('button', { name, exact: true });
 const rings = p => p.$$eval('#den-tour .dt-ring', r => r.filter(x => getComputedStyle(x).display !== 'none').map(x => { const b = x.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; }));
 // press what is under the middle of ring i: the control a person is shown
@@ -33,7 +35,7 @@ const clear = (p, sel) => p.evaluate(sel => {
   const g = document.querySelector('#den-tour .dt-ring'); if (!g) return 'no ring'; const q = g.getBoundingClientRect();
   if (!(q.x <= b.x + 1 && q.y <= b.y + 1 && q.right >= b.right - 1 && q.bottom >= b.bottom - 1)) return 'the ring is not around ' + sel; return ''; }, sel);
 const denPosts = p => p.served.filter(s => /^POST \/den\//.test(s));
-const axe = async (p, where) => { if (!(await p.evaluate(() => !!window.axe))) await p.addScriptTag({ content: AXE });
+const axe = async (p, where) => { await p.waitForTimeout(400); if (!(await p.evaluate(() => !!window.axe))) await p.addScriptTag({ content: AXE });
   const v = await p.evaluate(async () => { const r = await window.axe.run(document.querySelector('#den-tour'), { resultTypes: ['violations'] }); return r.violations.filter(x => x.impact === 'serious' || x.impact === 'critical').map(x => x.id + ' x' + x.nodes.length + ' ' + x.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')); });
   const over = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   return v.map(x => where + ': ' + x).concat(over ? [where + ': the page scrolls sideways'] : []); };
@@ -71,12 +73,12 @@ await t('the ringed control is the one to press, nothing covers it, and the card
 await t('from step 1 to step 24 each step advances only on the real action, and only the Den\'s own Draft spends', async () => {
   const w = await world(); const p = await open(w, 'full-key', { tour: true }); await B(p, 'Start the guide').click();
   const still = async id => { await p.waitForTimeout(350); eq((await S(p)).step, id, 'a press elsewhere does not advance ' + id); };
-  await at(p, 'desk'); await p.click('.den-where'); await still('desk'); await B(p, 'Keep AEP national').click();
+  await at(p, 'desk'); await p.dispatchEvent('.den-brand', 'click'); await still('desk'); await B(p, 'Keep AEP national').click();
   await at(p, 'day'); await B(p, 'Got it').click();
   await at(p, 'checks'); await press(p); await at(p, 'checks', 'close'); await p.keyboard.press('Escape');
   await at(p, 'card'); await press(p);
   await at(p, 'find'); await p.fill('#den-root [data-tour="search"]', 'ha'); await at(p, 'find', 'reset'); await p.fill('#den-root [data-tour="search"]', '');
-  await at(p, 'pin'); eq(denPosts(p), [], 'nothing was posted before the person\'s first write'); await p.click('#den-root [data-tour="filter"] [data-kind="all"]'); await still('pin');
+  await at(p, 'pin'); eq(denPosts(p), [], 'nothing was posted before the person\'s first write'); await p.dispatchEvent('#den-root [data-tour="filter"] [data-kind="all"]', 'click'); await still('pin');
   const pinKey = await under(p, 0, '[data-tour="card"]'); await press(p);
   await at(p, 'aside'); ok(denPosts(p).some(s => /^POST \/den\/pin/.test(s)), 'the pin was the person\'s press'); await p.waitForSelector('[data-tour="card"][data-key="' + pinKey + '"][data-pinned="1"]');
   await press(p); await at(p, 'aside', 'form'); await p.click('#den-root [data-tour="aside-form"] [data-tour="aside-cancel"]');
@@ -93,7 +95,9 @@ await t('from step 1 to step 24 each step advances only on the real action, and 
   await p.locator('#den-root [data-tour="editor"]:visible').click(); await p.keyboard.press('End'); await p.keyboard.type(' The guide was here.');
   await at(p, 'cite'); await press(p);
   await at(p, 'jump'); await press(p);
-  await at(p, 'save'); const saves = denPosts(p).filter(s => /brief\/save/.test(s)).length; await press(p);
+  // leaving the text to press the chip saved it; new words make the save step one the person does
+  await at(p, 'save'); if ((await S(p)).view.mode === 'show') { await p.locator('#den-root [data-tour="editor"]:visible').click(); await p.keyboard.press('End'); await p.keyboard.type(' Saved by hand.'); await p.waitForFunction(() => window.DenTour.state().view.mode === 'do'); }
+  const saves = denPosts(p).filter(s => /brief\/save/.test(s)).length; await press(p);
   await at(p, 'regen'); ok(denPosts(p).filter(s => /brief\/save/.test(s)).length > saves, 'saved by the person\'s press'); await press(p); await at(p, 'regen', 'form'); await p.click('#den-root [data-tour="regen-cancel"]');
   await at(p, 'history'); await press(p); await at(p, 'history', 'close'); await press(p);
   await at(p, 'foot'); await B(p, 'Got it').click();
@@ -125,17 +129,17 @@ await t('a reload resumes at the same step; a wrong tab, a past day and unsaved 
   const w = await world(); const p = await open(w, 'full-key', { tour: true }); await B(p, 'Start the guide').click(); await at(p, 'desk');
   await startAt(p, 'drag'); await at(p, 'drag'); await p.evaluate(() => localStorage.setItem('ax_den_tab', '"brief"')); await reopen(p);
   await p.waitForSelector('#den-tour .dt-prompt', { timeout: 15000 }); const pr = await txt(p, '#den-tour .dt-prompt'); ok(/Carry on with the guide\?/.test(pr) && /step 8 of 24: Add it to a section/.test(pr), pr);
-  await B(p, 'Carry on').click(); await p.waitForFunction(() => { const s = window.DenTour.state(); return s.step === 'drag' && s.view && s.view.mode === 'route'; });
+  await B(p, 'Carry on').click(); await until(p, () => { const s = window.DenTour.state(); return s.step === 'drag' && s.view && s.view.mode === 'route'; }, 'the Board route');
   ok(/Go back to the Board/.test(await txt(p, '#den-tour .dt-card')), 'on another tab, the first press asked is the Board'); eq(await clear(p, '#den-tab-today'), '', 'the Board tab is ringed');
-  await press(p); await at(p, 'drag'); eq((await S(p)).view.mode, 'do');
+  await press(p); await until(p, () => { const s = window.DenTour.state(); return s.step === 'drag' && s.view.mode === 'do' && !s.view.flash; }, 'drag as a do-step on the Board');
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() - 2 * 86400000));
   await p.fill('#den-root [data-tour="day"]', day); await p.waitForSelector('#den-root [data-tour="today"]');
-  await p.waitForFunction(() => { const s = window.DenTour.state(); return s.step === 'drag' && s.view.mode === 'route' && s.view.route === 'today'; }); eq(await clear(p, '[data-tour="today"]'), '', 'Today is ringed');
-  await press(p); await at(p, 'drag'); eq((await S(p)).view.mode, 'do', 'back on today, the step carries on');
+  await until(p, () => { const s = window.DenTour.state(); return s.step === 'drag' && s.view.mode === 'route' && s.view.route === 'today'; }, 'the Today route'); eq(await clear(p, '[data-tour="today"]'), '', 'Today is ringed');
+  await press(p); await until(p, () => { const s = window.DenTour.state(); return s.step === 'drag' && s.view.mode === 'do'; }, 'back on today, the step carries on');
   await startAt(p, 'start'); await at(p, 'start'); if ((await S(p)).view.mode === 'route') { await press(p); await at(p, 'start'); } await p.click('#den-root [data-tour="by-hand"]'); await at(p, 'outline');
   await p.locator('#den-root [data-tour="editor"]:visible').first().click().catch(() => {}); if (!(await p.locator('#den-root [data-tour="editor"]:visible').count())) await p.locator('#den-root [data-tour="reads"]:visible').first().click();
   await p.keyboard.type('Words not yet saved.'); await startAt(p, 'regen');
-  await p.waitForFunction(() => { const s = window.DenTour.state(); return s.step === 'regen' && s.view.mode === 'route' && s.view.route === 'saved'; }); await press(p); await at(p, 'regen');
+  await until(p, () => { const s = window.DenTour.state(); return s.step === 'regen' && s.view.mode === 'route' && s.view.route === 'saved'; }, 'the save route'); await press(p); await at(p, 'regen');
   eq(w.calls.length, 0); eq(p.errors, []); await p.context().close();
 });
 
