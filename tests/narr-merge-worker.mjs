@@ -15,17 +15,23 @@
  * split's two angles at 0.80 with neutral rows at 0.89. Narratives written straight into the table carry explicit centroids,
  * so a pair's c is what the case sets.
  *
- * Cases marked (F) failed on 5fd5573 (live p68); the tests commit records the full list.
- *   Prevention   P1a-P1j near-miss join on headline evidence (shadow by default, on by KV, recorded, undoable), P2a-P2c a late
- *                singleton's two clocks and the window-edge set-aside, P3a-P3b entities kept while unjudged, P4a acronym
- *                aliases take no plural, P5a-P5d the placement lease, a lease left behind, the alias sweep, the orphan repair
- *   Merge pass   M1-M14 proposals, the hard-negative shapes, an automatic merge, guards, caps, complete link across ticks,
- *                per-component decisions, the frozen centroid, the noise split, clause variants, strict, a change between
- *                scan and apply, timing over 600 narratives, look-alikes of the census shapes
- *   Undo         U1-U10 column-for-column restore, rows that joined since, a person's later edit, double undo, chains,
- *                alerts, two merges in either order, a model rename, keep-apart, the undo breaker
- *   Routes       R1-R11 dry, pairs, apply, undo and log, the old merge route, aliases on /one and /update, reset, modes,
- *                the near log, Studio's narrative source, person_ts
+ * Cases marked (F) failed on 5fd5573 (live p68); the tests commit records the full list. Cases marked (F, review), and the
+ * review's additions to P1h, M13 and A3, failed on 90078e3 (the first p69 build) for the defect each names.
+ *   Prevention   P1a-P1k near-miss join on headline evidence (shadow by default, on by KV, recorded, undoable; a row past a
+ *                cap waits unplaced; the evidence takes recent titles and the label), P2a-P2e a late singleton's two
+ *                clocks, the window-edge set-aside, no candidacy for a would-join's singleton, one alert a story, P3a-P3b
+ *                entities kept while unjudged, P4a acronym aliases take no plural, P5a-P5d the placement lease, a lease
+ *                left behind, the alias sweep, the orphan repair
+ *   Merge pass   M1-M19 proposals, the hard-negative shapes (and the live-blog pair at fewer rows, one MP's two press
+ *                releases), an automatic merge, guards, caps, complete link across ticks, per-component decisions, the
+ *                frozen centroid, the noise split, clause variants, strict, a change between scan and apply, the pairs cap
+ *                over 600 narratives, look-alikes of the census shapes, a chain through an unnamed narrative, the counter
+ *                pair in the compare-and-set, keep-aparts past 2,000, the stored list's true count, the list's order
+ *   Undo         U1-U10, U7b, U7c column-for-column restore, rows that joined since, a person's later edit, double undo,
+ *                chains, alerts, two merges in either order (a later carry of a name or pin, a survivor past 20 rows), a
+ *                model rename, keep-apart, the undo breaker
+ *   Routes       R1-R13 dry, pairs, apply, undo and log, the old merge route, aliases on /one and /update, reset, modes,
+ *                the near log, Studio's narrative source, person_ts, a stale near undo, the day undo in chunks
  *   Den          D1-D3 a person's merge covers at filing, an automatic one is named for the person, /den/board aliases
  *   Automation   A1-A5 mode off, the default, a held tick (no model call), a busy lease, the cron path
  * Run: node --experimental-sqlite tests/narr-merge-worker.mjs */
@@ -273,16 +279,35 @@ await S.t('P1h near mode on: three near joins into one narrative a run; member h
   const rows = [0, 1, 2, 3, 4].map(i => w.put('Fenwick swimming pool reopens after repairs, council says ' + ['', 'today', 'again', 'at last', 'finally'][i], '', 3 - i * 0.1));
   const r = await w.place(200);
   eq(r.near.joined, 3, 'three near joins'); eq(rows.filter(x => w.of(x) === F).length, 3, 'three rows joined F, the rest did not');
+  // (F, review) the fourth and fifth qualify but F's three a run are spent: they wait unplaced (no narrative of their own, not set
+  // aside), recorded 'capped', and the next run near-joins them
+  const rest = rows.filter(x => w.of(x) !== F);
+  eq(rest.map(x => w.of(x)), [undefined, undefined], 'the fourth and fifth wait in the backlog, never a new narrative or set aside');
+  eq(rest.map(x => (w.db.prepare('SELECT mode FROM narrative_near WHERE item=?').get(x) || {}).mode), ['capped', 'capped'], 'recorded capped'); eq(r.near.spent, 2, 'counted apart from the read cap');
   // a row whose headline matches only a row near-joined in the same run (not F's stored headlines) is a miss
   const G = townCand(w, 6, { heads: ['Glenrock swimming pool reopens after repairs', 'Repairs finished at the Glenrock swimming pool'] }); await w.recount();
   const g1 = w.put('Glenrock swimming pool reopens after repairs, council says', '', 3);
   const g2 = w.put('Glenrock lifeguards strike over rosters and overtime', '', 2.9);
   await w.place(200); eq(w.of(g1), G, 'the first joins'); ok(w.of(g2) !== G, 'the next is read against the headlines F had when the run began, not the rows it took');
+  ok(rest.every(x => w.of(x) === F), 'the two that waited near-join F on the next run: ' + JSON.stringify(rest.map(x => w.of(x))));
   // thirteen candidates, each with one near row: twelve read, the thirteenth capped
   const x = await mk(); x.bg(); x.near('on');
   const C = TOWNS.slice(0, 13).map((t, k) => townCand(x, k, { n: 2 })); await x.recount();
   const r13 = TOWNS.slice(0, 13).map((t, k) => x.put(t + ' swimming pool reopens after repairs, council says', '', 3 - k * 0.1));
   const rr = await x.place(200); eq(rr.near.capped, 1, 'the thirteenth candidate is capped'); eq(rr.near.joined, 12); ok(x.of(r13[12]) !== C[12], 'no near join past the cap');
+  eq(x.of(r13[12]), undefined, '(F, review) the thirteenth waits unplaced'); await x.place(200); eq(x.of(r13[12]), C[12], 'and near-joins on the next run');
+});
+
+await S.t('P1k (F, review) near mode on: the member evidence is the candidate\'s recent titles and its label, not only its six most-engaged headlines', async () => {
+  const w = await mk(); w.bg(); w.near('on');
+  const pool = ['Harwood swimming pool reopens after repairs', 'Repairs finished at the Harwood swimming pool'], lib = ['Harwood library extension opens its doors to readers', 'Readers return as the Harwood library extension opens'];
+  // K: the six most-engaged rows are the pool story, the other fourteen the library story; L: short titles, a model label
+  const K = w.mkN({ id: 'nharwood', vec: V({ 47: 1 }), rows: Array.from({ length: 20 }, (_, i) => [i < 6 ? pool[i % 2] : lib[i % 2], '', 6 + i * 0.1, 'news', 'valleypost', { comments: i < 6 ? 50 - i : 0 }]) }).id;
+  const L = w.mkN({ id: 'nkelso', vec: V({ 50: 1 }), label: 'Kelso council approves the new skate park after a long campaign', rows: Array.from({ length: 6 }, (_, i) => ['Kelso skate park', '', 6 + i * 0.1]) }).id;
+  await w.recount();
+  const r1 = w.put('Harwood library extension opens to readers, council says', '', 2), r2 = w.put('Kelso council approves new skate park after campaign', '', 2);
+  await w.place(200);
+  eq([w.of(r1), w.of(r2)], [K, L], 'both near-join on their member evidence: ' + JSON.stringify(w.db.prepare('SELECT item, narrative, mode, lex, shared FROM narrative_near').all()));
 });
 
 await S.t('P1i a new narrative stores born_near, born_sim and born_bar; the pass reports nearBorn', async () => {
@@ -328,6 +353,40 @@ await S.t('P2c (F) a singleton placed when its row was 47h old: at the prune its
   const w = await mk(); w.bg(); await w.recount();
   const s = w.mkN({ id: 'nedge', rows: [[LEDES[3][0], LEDES[3][1], 71.7]], created: Date.now() - 24.7 * H });
   const r = await w.place(200); eq(w.nOf('nedge'), undefined, 'pruned'); eq(w.of(s.items[0]), '', 'set aside, not back in the backlog'); eq(r.prunedAside, 1);
+});
+
+await S.t('P2d (F, review) defaults: late headline rows of W, one a run, never grow a duplicate of A; each is a recorded would-join', async () => {
+  const w = await mk(); w.bg(); await w.recount(); const A = await worldA(w);
+  const rows = []; for (let k = 0; k < 6; k++) { rows.push(w.put(GEN[k], '', 30)); await w.place(200); }
+  const owners = Array.from(new Set(rows.map(x => w.of(x)))).filter(id => id && id !== A);
+  eq(owners.filter(id => w.nOf(id) && w.nOf(id).n >= 2), [], 'no near-born duplicate grew across runs: ' + JSON.stringify(owners.map(id => w.nOf(id) && [w.nOf(id).n, w.nOf(id).born_near === A])));
+  eq(w.db.prepare("SELECT COUNT(*) n FROM narrative_near WHERE mode='shadow' AND narrative=?").get(A).n, 6, 'each a recorded would-join of A');
+  // a late row of a story no live narrative tells still finds the late singleton (P2)
+  const a = w.put('Tom Ashby backs the quarry expansion at the council hearing', 'Water Minister Tom Ashby told the council hearing he backs the quarry expansion in regional Victoria.', 30);
+  await w.place(200); const X = w.of(a); ok(X && X !== A && w.nOf(X).n === 1, 'a singleton');
+  const b = w.put('Quarry expansion hearing hears from Tom Ashby', 'The council hearing on the quarry expansion in regional Victoria heard from Tom Ashby on Tuesday.', 2);
+  await w.place(200); eq(w.of(b), X, 'a late singleton that no live narrative would take is still a candidate');
+});
+
+await S.t('P2e (F, review) a duplicate born of a would-join of an alerted narrative raises no second alert; status counts the standing near-born', async () => {
+  const build = async alertedA => {
+    const w = await mk(); w.bg(); await w.recount(); const A = await worldA(w);
+    const rows = [1, 2, 3, 4, 5, 6, 7].map(i => w.put(GEN[1] + ' - wire ' + i, '', 30 - i * 0.01, { src: 'wire' + i }));   // a syndicated batch in one run
+    await w.place(200); const B = w.of(rows[0]);
+    named(w, A, 'Corvale Water overcharged households through a faulty meter upgrade', 'Corvale Water overcharged households through faulty meters.', 'The authority is refunding every customer.');
+    if (alertedA) w.db.prepare('UPDATE narratives SET alerted=1, alert_ts=? WHERE id=?').run(Date.now() - H, A);
+    return { w, A, B }; };
+  const { w, A, B } = await build(true); const b0 = w.nOf(B);
+  ok(B && B !== A && b0.n === 7 && b0.status === 'emerging' && b0.born_near === A, JSON.stringify(b0 && { n: b0.n, status: b0.status, born: [b0.born_near, b0.born_sim, b0.born_bar] }));
+  eq((w.db.prepare('SELECT mode, narrative FROM narrative_near WHERE item=?').get(b0.first_item) || {}).narrative, A, 'its first row is a recorded would-join of A');
+  const st = (await w.call('GET', '/narratives/status', null, 'read-key')).body.merge;
+  ok(st.nearBorn && st.nearBorn.standing >= 1 && st.nearBorn.wouldJoin >= 1 && st.nearBorn.sample.some(x => x.id === B && x.bornNear === A), JSON.stringify(st.nearBorn));
+  // the namer has named B (as the day's window would); the next run's alert pass
+  named(w, B, 'Faulty water meters overcharged households in regional Victoria', 'A water authority overcharged households through faulty meters.', '');
+  const r = await w.place(200); eq([r.alerts, w.nOf(B).alerted], [0, 0], 'A alerted for the story: B raises none');
+  const x = await build(false); named(x.w, x.B, 'Faulty water meters overcharged households in regional Victoria', 'A water authority overcharged households through faulty meters.', '');
+  const r2 = await x.w.place(200);
+  eq([r2.alerts, x.w.nOf(x.A).alerted > 0, x.w.nOf(x.B).alerted], [1, true, 0], 'one alert for the story when neither had alerted: A\'s');
 });
 
 await S.t('P3a (F) a narrative born from a row naming a register entity keeps it after the recount; the next run\'s row sharing only it joins at 0.84', async () => {
@@ -422,6 +481,33 @@ await S.t('M2 none of the hard-negative shapes is automatic under any default cl
   const opp = d.pairs[1]; ok(opp.features.opposite.fires && opp.holds.indexOf('opposite') >= 0, 'the opposite claims veto: ' + JSON.stringify(opp));
   const lb = d.pairs[3]; ok(lb.features.sAuto < lb.features.s, 'one syndicated live-blog row cannot carry an automatic decision: ' + JSON.stringify(lb.features));
   const r = await w.pass(); eq((r.applied || []).length, 0); eq(w.merges().length, 0);
+});
+
+await S.t('M2b (F, review) the live-blog pair with fewer rows of its own, and two press releases from one MP in one namespace, are never automatic', async () => {
+  const live = 'Live: Thornbury pledges new clinics as Ashdown promises school buses';
+  const own1 = [['Thornbury pledges three new clinics for the outer suburbs', '', 9], ['New clinics pledge: Thornbury promises shorter waits', '', 8.5], ['Thornbury clinics pledge costed at $120 million', '', 8]];
+  const own2 = [['Ashdown promises free school buses for country students', '', 9], ['Free school buses pledge: Ashdown targets country families', '', 8.5]];
+  for (const [k1, k2] of [[2, 1], [2, 2], [3, 2]]) {   // n 3/2, 3/3, 4/3: the one shared live-blog row weighs more the smaller they are
+    const w = await mk(); w.bg();
+    const q1 = w.mkN({ id: 'npledge1', issues: ['vicelection'], ns: 'vicnats', vec: V({ 55: Math.sqrt(0.12), 57: Math.sqrt(0.76), 11: Math.sqrt(0.12) }), rows: [[live, '', 9.5, 'news', 'valleypost', { comments: 90 }]].concat(own1.slice(0, k1)) }).id;
+    const q2 = w.mkN({ id: 'npledge2', issues: ['vicelection'], ns: 'vicnats', vec: V({ 56: Math.sqrt(0.12), 57: Math.sqrt(0.76), 11: Math.sqrt(0.12) }), rows: [[live, '', 9.4, 'news', 'northernstar', { comments: 80 }]].concat(own2.slice(0, k2)) }).id;
+    await w.recount(); w.mode('auto');
+    const p = (await w.dry('&pairs=' + q1 + ':' + q2)).pairs[0];
+    eq(p.auto, false, 'n ' + (k1 + 1) + '/' + (k2 + 1) + ': ' + JSON.stringify(p.features)); ok(!(p.autoIf.centroid || p.autoIf.formS) || p.holds.length, 'no default clause passes: ' + JSON.stringify(p.features));
+    eq((await w.pass()).applied.length, 0);
+  }
+  // the same MP's two press releases, two copies each, one namespace, centroid cosine 0.87: they share the MP's and the party's
+  // names and nothing of what happened
+  const w = await mk(); w.bg();
+  for (const e of [{ id: 'brandt', kind: 'person', name: 'Ilse Brandt', aliases: ['Ilse Brandt', 'Ms Brandt', 'Brandt'] }, { id: 'harbourparty', kind: 'party', name: 'Harbour Party', aliases: ['Harbour Party'] }])
+    await w.call('POST', '/entities/add', Object.assign({ side: 'neutral' }, e), 'full-key');
+  const r1 = 'Ilse Brandt MP - Harbour Party to fund new Tarrow aged care beds', r2 = 'Ilse Brandt MP - Harbour Party backs Tarrow fishers with jetty repairs';
+  const P1 = w.mkN({ id: 'nrelease1', issues: ['gov'], ns: 'cmm', vec: V({ 58: 1 }), rows: [[r1, '', 6], [r1, '', 5.9, 'news', 'northernstar']] }).id;
+  const P2 = w.mkN({ id: 'nrelease2', issues: ['gov'], ns: 'cmm', vec: V({ 58: 0.87, 59: Math.sqrt(1 - 0.87 * 0.87) }), rows: [[r2, '', 5], [r2, '', 4.9, 'news', 'northernstar']] }).id;
+  await w.recount(); w.mode('auto');
+  const p = (await w.dry('&pairs=' + P1 + ':' + P2)).pairs[0];
+  ok(p.found && p.prefilter.anchor, JSON.stringify(p)); eq(p.auto, false, 'names alone carry no automatic merge: ' + JSON.stringify(p.features));
+  ok(!(p.autoIf.centroid || p.autoIf.formS), 'no clause passes on the names: ' + JSON.stringify(p.features)); eq((await w.pass()).applied.length, 0);
 });
 
 await S.t('M3 (F) mode auto: B merges into A by itself, recorded and complete', async () => {
@@ -543,17 +629,27 @@ await S.t('M12 a change between the scan and the apply is caught: skipped with i
   const r = await w.pass(); delete w.env.__narrMergeHook; eq(r.applied.length, 0); ok((r.skipped || []).some(s => s.from === B && /person|edited/.test(s.why)), JSON.stringify(r.skipped)); ok(w.nOf(B));
 });
 
-await S.t('M13 timing: the scan over 600 narratives with 768-d centroids finishes inside its budget', async () => {
-  const w = await mk(); const now = Date.now(); let rnd = 12345; const R = () => { rnd = (Math.imul(rnd, 1103515245) + 12345) >>> 0; return rnd / 4294967296; };
-  const words = Array.from({ length: 900 }, (_, i) => 'w' + i.toString(36) + 'x'); const issues = ['regional', 'housing', 'gov', 'energy', 'col', 'econ', 'construction', 'pharmacy', 'firearms', 'activism'];
-  const ins = w.db.prepare("INSERT INTO narratives(id,label,summary,claim,counter_claim,proponents,issues,issue_counts,entities,ns,side,n,n24,nprev,velocity,first_ts,first_item,first_platform,first_channel,last_ts,platforms,channels,spread,amplifiers,sentiment,counter,status,alerted,alert_ts,muted,pinned,edited,terms,centroid,dim,labelled_n,model,created,updated,scope) VALUES(?,?,'',?,?,'',?,?,'[]','cmm','unknown',?,0,0,0,?,0,'news','x',?,'{}','[]','[]',?,'{}','','steady',0,0,0,0,0,?,?,768,0,'',?,?,'')");
-  // the 300 largest are the 300 least recent, so the recency read (400) and the size read (300) together take all 600
-  for (let i = 0; i < 600; i++) { const v = Array.from({ length: 768 }, () => R() - 0.5); const iss = [issues[Math.floor(R() * 10)]]; const pick = k => Array.from({ length: k }, () => words[Math.floor(R() * words.length)]); const terms = {}; pick(40).forEach((x, j) => { terms[x] = Math.round((2 - j * 0.03) * 1000) / 1000; });
-    const big = i < 300; const amps = Array.from({ length: 6 }, () => ({ title: pick(8).join(' '), channel: 'x', platform: 'news' }));
-    ins.run('nsyn' + i, pick(6).join(' '), pick(10).join(' '), pick(10).join(' '), JSON.stringify(iss), JSON.stringify({ [iss[0]]: 3 }), big ? 30 + (i % 25) : 2 + Math.floor(R() * 20), now - (60 + R() * 60) * H, big ? now - (24 + R() * 20) * H : now - R() * 20 * H, JSON.stringify(amps), JSON.stringify(terms), b64(v), now, now); }
-  const t0 = Date.now(); const sc = await w.G.narrMergeScan(w.env, { now, left: () => 1e9, budgetMs: 8000 }); const ms = Date.now() - t0;
-  console.log('       M13: scan of ' + sc.considered + ' narratives, ' + sc.scored + ' pairs scored in ' + ms + ' ms');
-  eq(sc.considered, 600); eq(sc.partial, false, 'inside the budget'); ok(ms < 3000, 'wall ms ' + ms);
+await S.t('M13 (F, review) the scan is bounded by pairs scored, not a clock (a Worker\'s clock stands still in a loop): on one issue the tick stops at its cap, recorded; the dry route scores every pair', async () => {
+  const build = async oneIssue => {
+    const w = await mk(); const now = Date.now(); let rnd = 12345; const R = () => { rnd = (Math.imul(rnd, 1103515245) + 12345) >>> 0; return rnd / 4294967296; };
+    const words = Array.from({ length: 900 }, (_, i) => 'w' + i.toString(36) + 'x'); const issues = ['regional', 'housing', 'gov', 'energy', 'col', 'econ', 'construction', 'pharmacy', 'firearms', 'activism'];
+    const ins = w.db.prepare("INSERT INTO narratives(id,label,summary,claim,counter_claim,proponents,issues,issue_counts,entities,ns,side,n,n24,nprev,velocity,first_ts,first_item,first_platform,first_channel,last_ts,platforms,channels,spread,amplifiers,sentiment,counter,status,alerted,alert_ts,muted,pinned,edited,terms,centroid,dim,labelled_n,model,created,updated,scope) VALUES(?,?,'',?,?,'',?,?,'[]','cmm','unknown',?,0,0,0,?,0,'news','x',?,'{}','[]','[]',?,'{}','','steady',0,0,0,0,0,?,?,768,0,'',?,?,'')");
+    // the 300 largest are the 300 least recent, so the recency read (400) and the size read (300) together take all 600
+    for (let i = 0; i < 600; i++) { const v = Array.from({ length: 768 }, () => R() - 0.5); const iss = [oneIssue ? 'regional' : issues[Math.floor(R() * 10)]]; const pick = k => Array.from({ length: k }, () => words[Math.floor(R() * words.length)]); const terms = {}; pick(40).forEach((x, j) => { terms[x] = Math.round((2 - j * 0.03) * 1000) / 1000; });
+      const big = i < 300; const amps = Array.from({ length: 6 }, () => ({ title: pick(8).join(' '), channel: 'x', platform: 'news' }));
+      ins.run('nsyn' + i, pick(6).join(' '), pick(10).join(' '), pick(10).join(' '), JSON.stringify(iss), JSON.stringify({ [iss[0]]: 3 }), big ? 30 + (i % 25) : 2 + Math.floor(R() * 20), now - (60 + R() * 60) * H, big ? now - (24 + R() * 20) * H : now - R() * 20 * H, JSON.stringify(amps), JSON.stringify(terms), b64(v), now, now); }
+    return { w, now };
+  };
+  const { w, now } = await build(false);
+  const t0 = Date.now(); const sc = await w.G.narrMergeScan(w.env, { now, left: () => 1e9 }); const ms = Date.now() - t0;
+  console.log('       M13: ten issues: ' + sc.considered + ' narratives, ' + sc.scored + ' pairs scored in ' + ms + ' ms (this machine, no cap reached)');
+  eq(sc.considered, 600); eq(sc.partial, false, 'the tick scores every eligible pair of ten issues'); ok(sc.scored < 80000, 'scored ' + sc.scored);
+  const x = (await build(true)).w; const t1 = Date.now(); const r = await x.pass(); const ms1 = Date.now() - t1; const last = x.kvj('narr_merge_last');
+  console.log('       M13: one issue: the tick scored ' + r.scored + ' of 179700 pairs (cap ' + r.pairCap + ') in ' + ms1 + ' ms');
+  eq([r.partial, r.scored, r.pairCap], [true, 80000, 80000], 'the tick stops at its cap'); eq([last.partial, last.scored, last.pairCap], [true, 80000, 80000], 'recorded in narr_merge_last');
+  const st = (await x.call('GET', '/narratives/status', null, 'read-key')).body.merge; eq([st.partial, st.scored, st.pairCap], [true, 80000, 80000], 'and in status');
+  const d = await x.dry(); eq([d.partial, d.scored], [false, 179700], 'the dry route scores every pair');
+  x.env.NARRATIVE_MERGE_PAIRS = '20000'; eq((await x.pass()).scored, 20000, 'NARRATIVE_MERGE_PAIRS moves the cap');
 });
 
 await S.t('M14 look-alikes of the census shapes: the default clause\'s outcome, pinned', async () => {
@@ -570,6 +666,64 @@ await S.t('M14 look-alikes of the census shapes: the default clause\'s outcome, 
   ok(!g(Fo) || g(Fo).auto === false, 'the forum cluster of politics scope is never automatic (a person\'s call)');
   ok(g(X) && g(X).auto === false && g(X).hold.indexOf('clients') >= 0, 'the cross-client copy is held (Q1 unanswered)');
   const r = await w.pass(); eq(r.applied.map(x => x.from).sort(), [G, N].sort());
+});
+
+await S.t('M15 (F, review) a chain never puts a narrative where its direct pair could not go: a client story an unnamed one absorbed stays out of a politics narrative', async () => {
+  const w = await mk(); w.bg(); const t = twinTitles(2, 6, 0); const rows = (n, base, age) => Array.from({ length: n }, (_, i) => [t[(i + base) % 6], '', age - i * 0.3]);
+  const T = w.mkN({ id: 'nchainT', vec: V({ 42: 1 }), label: 'Ardmore level crossing smash, as politics tells it', scope: 'politics', rows: rows(12, 0, 12) }).id;
+  const S1 = w.mkN({ id: 'nchainS', vec: V({ 42: 0.97, 25: Math.sqrt(1 - 0.9409) }), rows: rows(5, 2, 10) }).id;
+  const X = w.mkN({ id: 'nchainX', vec: V({ 42: 0.97, 26: Math.sqrt(1 - 0.9409) }), label: 'Ardmore level crossing smash, as the client tells it', scope: 'client', rows: rows(3, 4, 9) }).id;
+  await w.recount(); const xItems = w.items(X); w.mode('auto');
+  ok(w.pairOf(await w.dry(), T, X).hold.indexOf('scope') >= 0, 'the direct pair is held on scope');
+  w.db.prepare('UPDATE narratives SET label_try_ts=? WHERE id=?').run(Date.now(), T);   // a naming claim holds T this tick
+  const r1 = await w.pass(); eq(r1.applied.map(a => a.from + '>' + a.into), [X + '>' + S1], 'X joins the unnamed S');
+  w.db.prepare('UPDATE narratives SET label_try_ts=0 WHERE id=?').run(T);
+  const r2 = await w.pass(); eq(r2.applied.length, 0, 'S, holding X\'s client rows, does not join the politics T: ' + JSON.stringify(r2.applied));
+  const p = w.pairOf(await w.dry(), T, S1); ok(p && p.hold.indexOf('member') >= 0 && /scope/.test(p.memberWhy || ''), JSON.stringify(p && { hold: p.hold, why: p.memberWhy }));
+  ok(xItems.every(i => w.of(i) !== T), 'no client row in the politics narrative');
+});
+
+await S.t('M16 (F, review) a counter pair written between the apply\'s read and its batch stops the merge', async () => {
+  const w = await mk(); w.bg(); const [A, B] = w.twins(0); await w.recount(); w.mode('auto');
+  const db = w.env.MIND_DB; const real = db.batch.bind(db); let fired = false;
+  db.batch = async stmts => { if (!fired && stmts[0] && /^INSERT INTO narrative_merges/.test(stmts[0].sql)) { fired = true; w.db.prepare('UPDATE narratives SET counter=? WHERE id=?').run(B, A); w.db.prepare('UPDATE narratives SET counter=? WHERE id=?').run(A, B); } return real(stmts); };
+  const r = await w.pass(); db.batch = real;
+  ok(fired, 'the interleaving happened'); eq(r.applied.length, 0, JSON.stringify(r.applied)); eq(w.merges().length, 0); eq([w.nOf(A).counter, w.nOf(B).counter], [B, A], 'the pointers stand');
+});
+
+await S.t('M17 (F, review) a keep-apart is never dropped by a cap: past 2,000 newer keep rows the oldest still holds; keeps on narratives gone for good are retired', async () => {
+  const w = await mk(); w.bg(); const [A, B] = w.twins(0); await w.recount();
+  w.db.prepare("INSERT INTO narrative_keep(id,a,b,why,merge,who,note,at) VALUES('koldest',?,?,'person','','Anne','two stories',?)").run(A, B, Date.now() - 30 * 86400000);
+  const ins = w.db.prepare("INSERT INTO narrative_keep(id,a,b,why,merge,who,note,at) VALUES(?,?,?,'person','','Anne','',?)");
+  for (let i = 0; i < 2000; i++) ins.run('kdead' + i, 'ngone' + i, 'ngone' + i + 'x', Date.now() - 86400000 + i);
+  w.mode('auto'); const p = w.pairOf(await w.dry(), A, B); ok(p && p.hold.indexOf('kept') >= 0, JSON.stringify(p && p.hold));
+  eq((await w.pass()).applied.length, 0, 'not merged'); eq(w.merges().length, 0);
+  await w.place(200); eq(w.db.prepare('SELECT COUNT(*) n FROM narrative_keep WHERE undone_at=0').get().n, 1, 'the 2,000 on narratives that are gone for good are retired; the live one stays');
+  eq(w.db.prepare("SELECT undone_by FROM narrative_keep WHERE id='kdead7'").get().undone_by, 'retired');
+});
+
+await S.t('M18 (F, review) narr_merge_last keeps the true count and a slim list that fits, never the 30-item fallback; holds are counted by kind', async () => {
+  const w = await mk(); w.bg();
+  // fourteen narratives on one twin story: every pair is proposed by the centroid rule (91 pairs)
+  for (let i = 0; i < 14; i++) w.mkN({ id: 'nfam' + String(i).padStart(2, '0'), vec: V({ 40: 0.97, [60 + i]: Math.sqrt(1 - 0.9409) }), rows: twinTitles(0, 3, i).map((t, j) => [t, '', 10 - j * 0.3 - i * 0.01]) });
+  await w.recount(); const r = await w.pass(); const last = w.kvj('narr_merge_last');
+  ok(r.proposals >= 80, 'proposals ' + r.proposals); eq(last.proposalsN, r.proposals, 'the true count');
+  ok(!last._truncated && last.proposals.length >= Math.min(r.proposals, 80), 'a slim list that fits: ' + last.proposals.length + ' kept, ' + JSON.stringify(last).length + ' chars');
+  const q = last.proposals[0]; ok(q.into.id && q.from.id && typeof q.c === 'number' && 'h2' in q && q.rule && Array.isArray(q.hold), JSON.stringify(q));
+  eq((await w.call('GET', '/narratives/status', null, 'read-key')).body.merge.proposals, r.proposals, 'status says the true count');
+  ok(last.held && typeof last.held === 'object', 'holds by kind: ' + JSON.stringify(last.held));
+});
+
+await S.t('M19 (F, review) the owner\'s list puts a words-only proposal that one shared row carries (H2 under 0.1) after the rest', async () => {
+  const w = await mk(); w.bg();
+  const live = 'Live: Thornbury pledges new clinics as Ashdown promises school buses';
+  w.mkN({ id: 'nrank1', issues: ['vicelection'], ns: 'vicnats', vec: V({ 57: Math.sqrt(0.8), 55: Math.sqrt(0.2) }), rows: [[live, '', 9.5, 'news', 'valleypost', { comments: 90 }], ['Thornbury pledges three new clinics for the outer suburbs', '', 9], ['New clinics pledge: Thornbury promises shorter waits', '', 8.5], ['Thornbury clinics pledge costed at $120 million', '', 8]] });
+  w.mkN({ id: 'nrank2', issues: ['vicelection'], ns: 'vicnats', vec: V({ 57: Math.sqrt(0.8), 56: Math.sqrt(0.2) }), rows: [[live, '', 9.4, 'news', 'northernstar', { comments: 80 }], ['Ashdown promises free school buses for country students', '', 9], ['Free school buses pledge: Ashdown targets country families', '', 8.5]] });
+  const [A, B] = w.twins(3, { cb: 0.7 }); await w.recount();
+  const d = await w.dry(); const ix = (a, b) => d.proposals.findIndex(p => [p.into.id, p.from.id].sort().join() === [a, b].sort().join());
+  const weak = d.proposals[ix('nrank1', 'nrank2')], strong = d.proposals[ix(A, B)];
+  ok(weak && strong && weak.rule === 'words' && strong.rule === 'words' && weak.parts.h2 < 0.1 && strong.parts.h2 >= 0.1 && weak.c > strong.c, JSON.stringify([weak, strong].map(p => p && { rule: p.rule, c: p.c, s: p.s, h2: p.parts.h2 })));
+  ok(ix(A, B) < ix('nrank1', 'nrank2'), 'the twins (c ' + strong.c + ') are listed before the live-blog pair (c ' + weak.c + ')');
 });
 
 // ================================================================ Undo
@@ -639,11 +793,52 @@ await S.t('U7 two merges into one young survivor undone in either order', async 
     const a0 = w.nOf(A), rows0 = w.items(A);
     const m1 = (await w.post({ apply: [{ into: A, from: B }] })).body.results[0].merge; const m2 = (await w.post({ apply: [{ into: A, from: C }] })).body.results[0].merge;
     if (order === 'latest') { await w.post({ undo: m2 }); await w.post({ undo: m1 }); }
-    else { eq((await w.post({ undo: m1 })).status, 200); const r2 = w.db.prepare('SELECT into_after FROM narrative_merges WHERE id=?').get(m2); const ia = JSON.parse(r2.into_after); ok(!('terms' in ia) && !('centroid' in ia), 'the later record is rebased'); if (cAlert) eq(w.nOf(A).alerted, 1, 'C\'s alert survives the earlier undo'); eq((await w.post({ undo: m2 })).status, 200); }
+    else { eq((await w.post({ undo: m1 })).status, 200); const r2 = w.db.prepare('SELECT into_after FROM narrative_merges WHERE id=?').get(m2); const ia = JSON.parse(r2.into_after); ok(!('terms' in ia) && (!('centroid' in ia) || ia.centroid === w.nOf(A).centroid), 'the later record is rebased (review: a centroid rebuilt from the weights is the survivor\'s own now)'); if (cAlert) eq(w.nOf(A).alerted, 1, 'C\'s alert survives the earlier undo'); eq((await w.post({ undo: m2 })).status, 200); }
     const a1 = w.nOf(A); eq(w.items(A), rows0); for (const k of ['n', 'issue_counts', 'alerted', 'alert_ts', 'first_item', 'first_platform', 'first_channel', 'label', 'edited', 'pinned']) eq(a1[k], a0[k], order + ' ' + k);
     ok(cosv(unb64(a1.centroid), unb64(a0.centroid)) >= 0.9999, 'centroid'); const top = x => Object.keys(JSON.parse(x)).slice(0, 10).sort();
     if (order === 'latest') eq(a1.terms, a0.terms, 'terms exact'); else eq(top(a1.terms), top(a0.terms), 'terms agree on the top 10'); };
   await run('latest'); await run('earliest'); await run('earliest', true);
+});
+
+await S.t('U7b (F, review) two person merges into one survivor that carry a name and a pin, undone earliest first: each undo replays the later carry, both leave it as it was', async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  for (const variant of ['name, then pin', 'pin, then name']) {
+    const w = await mk(); w.bg(); const t = twinTitles(0, 6, 0);
+    const A = w.mkN({ id: 'nucA', vec: V({ 40: 1 }), label: 'The model named A', scope: 'client', rows: [[t[0], '', 10], [t[1], '', 9.5], [t[2], '', 9]] }).id;
+    const B = w.mkN({ id: 'nucB', vec: V({ 40: 0.96, 23: 0.28 }), rows: [[t[3], '', 8], [t[4], '', 7.5]] }).id;
+    const C = w.mkN({ id: 'nucC', vec: V({ 40: 0.95, 24: 0.31 }), rows: [[t[5], '', 7], [t[0], '', 6.5]] }).id;
+    await w.recount();
+    const nameB = variant === 'name, then pin';
+    await w.call('POST', '/narratives/update', Object.assign({ id: nameB ? B : C }, { label: 'A person named it', summary: 'A person wrote this.', claim: 'A person claim.' }), 'kai-full-key');
+    await w.call('POST', '/narratives/update', { id: nameB ? C : B, pinned: true }, 'kai-full-key');
+    const a0 = w.nOf(A); const ks = ['label', 'summary', 'claim', 'counter_claim', 'proponents', 'edited', 'pinned', 'person_ts', 'person_by', 'issues', 'ns', 'scope', 'labelled_n', 'model'];
+    const m1 = (await w.post({ apply: [{ into: A, from: B }] })).body.results[0].merge; await sleep(3);
+    const m2 = (await w.post({ apply: [{ into: A, from: C }] })).body.results[0].merge;
+    const mid0 = w.nOf(A); eq([mid0.label, mid0.edited, mid0.pinned], ['A person named it', 1, 1], variant + ': both carried');
+    const u1 = await w.post({ undo: m1 }); eq(u1.status, 200, u1.text); ok(!/a person edited/.test(u1.body.note), 'no person edited A: ' + u1.body.note);
+    const mid = w.nOf(A);
+    if (nameB) eq([mid.label, mid.edited, mid.pinned], [a0.label, 0, 1], 'B\'s name goes back with B; C\'s pin stays');
+    else eq([mid.label, mid.edited, mid.pinned], ['A person named it', 1, 0], 'B\'s pin goes back with B; C\'s name stays');
+    eq(w.nOf(B).label, nameB ? 'A person named it' : '', 'B is restored as it was');
+    eq((await w.post({ undo: m2 })).status, 200); const a1 = w.nOf(A);
+    for (const k of ks) eq(a1[k], a0[k], variant + ' ' + k);
+  }
+});
+
+await S.t('U7c (F, review) two merges that take a young survivor past 20 rows, undone earliest first: rebuilt exactly from the logged weights; when a row moved it between them, both undos leave it and say so', async () => {
+  const run = async moved => {
+    const w = await mk(); w.bg(); const t = twinTitles(1, 6, 0); const rows = (n, base) => Array.from({ length: n }, (_, i) => [t[(i + base) % 6], '', 10 - i * 0.2]);
+    const A = w.mkN({ id: 'nfzA', vec: V({ 41: 1 }), rows: rows(10, 0) }).id; const B = w.mkN({ id: 'nfzB', vec: V({ 41: 0, 23: 1 }), rows: rows(5, 2) }).id; const C = w.mkN({ id: 'nfzC', vec: V({ 41: 0, 24: 1 }), rows: rows(8, 4) }).id;
+    await w.recount(); const a0 = unb64(w.nOf(A).centroid);
+    const m1 = (await w.post({ apply: [{ into: A, from: B }] })).body.results[0].merge;
+    if (moved) { const c = unb64(w.nOf(A).centroid).map((x, i) => x + (i === 30 ? 0.05 : 0)); w.db.prepare('UPDATE narratives SET centroid=?, updated=? WHERE id=?').run(b64(c), Date.now(), A); }   // as a placed row moves it
+    const m2 = (await w.post({ apply: [{ into: A, from: C }] })).body.results[0].merge;
+    const mixed = unb64(w.nOf(A).centroid); eq(w.items(A).length, 23);
+    const u1 = await w.post({ undo: m1 }); eq(u1.status, 200, u1.text); const u2 = await w.post({ undo: m2 }); eq(u2.status, 200, u2.text); eq(w.items(A).length, 10);
+    return { u1: u1.body.note, u2: u2.body.note, final: unb64(w.nOf(A).centroid), a0, mixed }; };
+  const x = await run(false); ok(/rebuilt from the logged weights/.test(x.u1), x.u1); ok(cosv(x.final, x.a0) > 0.9999, 'exact: back to its own centroid (' + cosv(x.final, x.a0) + ')');
+  const y = await run(true); ok(/centroid left/.test(y.u1), y.u1);
+  ok(/centroid left/.test(y.u2) && !/un-mixed/.test(y.u2), 'never un-mixed by counts after a step that left it: ' + y.u2); ok(cosv(y.final, y.mixed) > 0.99999, 'left as it stood');
 });
 
 await S.t('U8 (F) merge, a model rename of the survivor (doubling), undo: the name is back to its pre-merge values', async () => {
@@ -769,6 +964,40 @@ await S.t('R11 /narratives/update writes person_ts and person_by', async () => {
   await w.call('POST', '/narratives/update', { id: A, label: 'Kai wrote this' }, 'kai-full-key'); const a = w.nOf(A); ok(a.person_ts >= t0); eq(a.person_by, 'Kai');
 });
 
+await S.t('R12 (F, review) a near undo moves a row only while it is still that near join; a reset retires P1\'s records', async () => {
+  const w = await mk(); w.bg(); const t = twinTitles(0, 6, 0);
+  // what P1 leaves after a near join in mode on: row R joined nnB (the columns narrativesRun writes)
+  w.mkN({ id: 'nnB', vec: V({ 40: 1 }), rows: [[t[0], '', 69], [t[1], '', 69.5]] });
+  const R = w.put(t[2], '', 70); w.db.prepare("INSERT INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,'nnB',?,'news','valleypost',0.81)").run(R, Date.now() - 70 * H);
+  const rec = w.db.prepare("INSERT INTO narrative_near(item,narrative,mode,sim,lex,shared,lean,at,undone_at,undone_by) VALUES(?,?,'on',0.81,0.6,'glenmore ferry',0,?,0,'')");
+  rec.run(R, 'nnB', Date.now() - 60 * H);
+  eq((await w.call('POST', '/narratives/reset', { all: true, confirm: 'reset' }, 'full-key')).status, 200);
+  eq(w.db.prepare('SELECT mode, undone_at FROM narrative_near WHERE item=?').get(R), { mode: 'reset', undone_at: 0 }, 'retired by the reset (and the row stays open to a near join)');
+  // the row is placed again by the bar into Q; a near undo of R now has nothing in force
+  const Q = w.mkN({ id: 'nnQ', vec: V({ 40: 1 }), rows: [[t[3], '', 68], [t[4], '', 68.5]] }).id; w.db.prepare("INSERT INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,'news','valleypost',0.9)").run(R, Q, Date.now() - 70 * H);
+  const q0 = w.nOf(Q).terms; eq((await w.call('POST', '/narratives/near', { undo: R }, 'full-key')).status, 404, 'no near join of R in force');
+  // a record still in force whose row a merge or another run moved elsewhere: the undo marks it and leaves the row
+  const R2 = w.put(t[5], '', 5); w.db.prepare("INSERT INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,'news','valleypost',0.9)").run(R2, Q, Date.now() - 5 * H); rec.run(R2, 'nnGone', Date.now() - 4 * H);
+  const u = await w.call('POST', '/narratives/near', { undo: R2 }, 'full-key'); eq(u.status, 200, u.text);
+  eq([u.body.undone, u.body.stale, w.of(R2), w.nOf(Q).terms], [0, 1, Q, q0], 'the row stays where it is and Q keeps its words');
+  ok(w.db.prepare('SELECT undone_at FROM narrative_near WHERE item=?').get(R2).undone_at > 0, 'the record is closed');
+});
+
+await S.t('R13 (F, review) {undo: day} takes at most 100 near joins a call, each chunk in one batch with its words, and says how many remain', async () => {
+  const w = await mk(); w.bg(); const N = w.mkN({ id: 'nnear', vec: V({ 40: 1 }), rows: twinTitles(0, 4, 0).map((s, i) => [s, '', 8 - i]) }).id; await w.recount();
+  const rec = w.db.prepare("INSERT INTO narrative_near(item,narrative,mode,sim,lex,shared,lean,at,undone_at,undone_by) VALUES(?,?,'on',0.81,0.6,'',0,?,0,'')");
+  const ins = w.db.prepare("INSERT INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,'news','valleypost',0.81)");
+  const joined = Array.from({ length: 150 }, (_, i) => { const it = w.put('Glenmore ferry terminal fire report number ' + i + ' from the wharf', '', 3); ins.run(it, N, Date.now() - 3 * H); rec.run(it, N, Date.now() - 1000); return it; });   // recorded this Sydney day
+  // the terms as the 150 near joins left them: each row's words at 1/sqrt(7) (glenmore ferry terminal fire report number wharf)
+  const tv = 150 / Math.sqrt(7); w.db.prepare('UPDATE narratives SET terms=? WHERE id=?').run(JSON.stringify(Object.assign(JSON.parse(w.nOf(N).terms), { wharf: tv, report: tv, number: tv })), N);
+  const day = (await w.call('GET', '/narratives/near', null, 'full-key')).body.day;
+  const u1 = await w.call('POST', '/narratives/near', { undo: 'day', day }, 'full-key'); eq(u1.status, 200, u1.text); eq([u1.body.undone, u1.body.more], [100, true]);
+  const t1 = JSON.parse(w.nOf(N).terms); ok(Math.abs(t1.wharf - 50 / Math.sqrt(7)) < 0.01, 'the chunk\'s words left with its rows: ' + t1.wharf);
+  const u2 = await w.call('POST', '/narratives/near', { undo: 'day', day }, 'full-key'); eq([u2.body.undone, u2.body.more], [50, false]);
+  ok(!('wharf' in JSON.parse(w.nOf(N).terms)), 'and the rest with theirs');
+  eq(joined.filter(x => w.of(x) !== undefined).length, 0, 'all 150 back in the backlog'); eq(w.items(N).length, 4);
+});
+
 // ================================================================ Den
 async function denWorld(w) {
   const t = ['Export tax on gas debate returns to the Senate', 'Senate debate on a gas export tax resumes', 'Crossbench pushes gas export tax again', 'Gas export tax push returns, crossbench says', 'Senators revive gas export tax debate', 'Gas export tax: Senate to vote next week'];
@@ -821,6 +1050,7 @@ await S.t('A3 (F) a held tick with merge auto and near on makes no model call an
   const before = w.anth; let waited = null; await w.mod.default.scheduled({}, w.env, { waitUntil: p => { waited = p; } }); await waited;
   eq(w.anth - before, 0, 'no model call in a held tick'); const m = w.merges(); eq(m.map(x => [x.into_id, x.from_id, x.how]), [[A, B, 'auto']]);
   const tick = w.kvj('tick_last'); ok(tick && tick.stages.some(s => s[0] === 'narr merge'), JSON.stringify(tick && tick.stages));
+  const sg = tick.stages.find(s => s[0] === 'narr merge'); ok(sg[2] && typeof sg[2].scored === 'number' && sg[2].cap === 80000 && sg[2].partial === false, '(review) the stage says the work done, not only the clock: ' + JSON.stringify(sg));
 });
 
 await S.t('A4 with the lease held by another holder the pass applies nothing and records busy', async () => {

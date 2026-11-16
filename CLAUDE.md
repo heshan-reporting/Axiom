@@ -1243,15 +1243,22 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   that made calls and named nothing; it stops placing after ten steps that leave the backlog no lower.
   `tests/narr-drain-worker.mjs` (23), `tests/daily-brief-test.py` (11).
 - **Duplicates (build p69; `DEN.md` s.10.11).** Near-miss join on headline evidence (near mode off|shadow|on, default
-  shadow; every would-join and join in D1 `narrative_near`, undone with `POST /narratives/near`); a late singleton is a
-  candidate 24h from placement; the recount keeps entities until rows are judged; acronym aliases take no plural; a D1
-  lease (`narr_lease`) around placement, prune, merge, undo and reset. Merge pass (merge mode off|propose|auto, default
-  propose; KV `narr_merge_last`): centroid cosine, IDF term cosine and the census word score; guards (never edited,
-  pinned, muted, broad, counter or opposite claims; auto never across ns or a hidden scope; complete link across ticks;
+  shadow; the evidence is the candidate's stored titles, 40 recent titles and label; every would-join and join in D1
+  `narrative_near`; a row past the three-a-run or twelve-reads cap waits unplaced; undone with `POST /narratives/near`,
+  100 a call); a late singleton is a candidate 24h from placement unless its first row is a would-join (it stands alone,
+  as in p68); a near-born duplicate raises no second alert for its story; the recount keeps entities until rows are
+  judged; acronym aliases take no plural; a D1 lease (`narr_lease`) around placement, prune, merge, undo and reset.
+  Merge pass (merge mode off|propose|auto, default propose; KV `narr_merge_last`, the true count and a slim list):
+  centroid cosine, IDF term cosine and the census word score, the automatic clause reading S_auto (no person or party
+  words, the best headline pair's own words out of U and X as well as H); bounded by pairs scored (80,000 a tick,
+  `NARRATIVE_MERGE_PAIRS`), never by a clock; guards (never edited, pinned, muted, broad, counter or opposite claims;
+  auto never across ns or a hidden scope; complete link across ticks, the absorbed side's own members included;
   per component; caps 5 a tick, 40 a day, 3 a survivor; a pause after three undos); every merge logged in
-  `narrative_merges` and undoable, an undone pair kept apart (`narrative_keep`); an absorbed id resolves to its survivor.
-  Modes and the automatic clause in KV, set only by `POST /narratives/merges {mode}` (logged in `narr_mode_log`). Routes
-  `GET/POST /narratives/merges`, `GET/POST /narratives/near`, full key. No model call. `tests/narr-merge-worker.mjs` (63).
+  `narrative_merges` and undoable in either order (a later carry of a name or pin replayed, the centroid rebuilt from
+  the logged weights or left), an undone pair kept apart (`narrative_keep`, every active row read); an absorbed id
+  resolves to its survivor. Modes and the automatic clause in KV, set only by `POST /narratives/merges {mode}` (logged
+  in `narr_mode_log`). Routes `GET/POST /narratives/merges`, `GET/POST /narratives/near`, full key. No model call.
+  `tests/narr-merge-worker.mjs` (76).
 - **Naming, counters, alerts.** `narrLabel()` sends narratives with >=
   `NARR_LABEL_MIN` = 3 rows that are unnamed or have doubled since their last
   naming to Claude five at a time (`narrLabelBatch`, strict JSON: a label of

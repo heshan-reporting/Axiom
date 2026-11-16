@@ -170,6 +170,9 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #                      clients when the absorbed's leading issue is in the
 #                      survivor's top three; default off)
 #   NARRATIVE_MERGE_TICK (optional: automatic merges a tick, 1-10, default 5)
+#   NARRATIVE_MERGE_PAIRS (optional: pairs the merge scan scores a tick,
+#                      10000-400000, default 80000; past it the scan is partial.
+#                      A work bound: a Worker's clock stands still in a loop)
 #   BRIEF_MODEL       (plain text var, optional: the Claude model that writes the
 #                      daily brief; falls back to NARRATIVE_MODEL, SENTIMENT_MODEL,
 #                      then claude-opus-5-5. One call a day from the cron, plus

@@ -1568,19 +1568,30 @@ placements at once placed the same rows twice and left a ghost narrative countin
 
 **What changed (no model call anywhere; no page change).**
 - **P1, the near-miss join (near mode, default `shadow`).** A row within 0.05 of its bar that joins nothing may join the
-  closest such candidate when the candidate's member headlines (its stored amplifier titles, as the narrative stood when
-  the run began) cover the row's headline: IDF over the run's candidates' term maps, register names and issue words
-  dropped, possessives stripped, at least 0.45 on two or more shared words; the row must not lean to the candidate's
-  model counter-claim, the anchor must hold and the candidate must have had a row within 48h. At most three near joins
-  into one narrative and twelve candidates' headlines read a run. Every near miss looked at is recorded in D1
-  `narrative_near` (`on` joined, `shadow` would have joined, `miss` did not qualify, with sim, the cover, the shared
-  words and the lean; kept 14 days); `POST /narratives/near {undo: item | 'day', day}` puts near-joined rows back in the
-  backlog (or sets aside those outside the 72h window), takes their words off the narrative's terms and recounts it; an
-  undone row is never near-joined again. Every new narrative stores `born_near`, `born_sim` and `born_bar` (the closest
-  live narrative and the bar it missed), and the merge pass counts how many proposals were born within 0.05 of their
-  survivor (`nearBorn`): P1's reach.
-- **P2.** A singleton is a candidate for 24h after it was placed as well as after its row; the prune waits for both clocks,
-  and a pruned singleton's row about to leave the 72h window is set aside instead of freed (`prunedAside`).
+  closest such candidate when the candidate's member evidence (as the narrative stood when the run began: its stored
+  amplifier titles, its 40 most recent story titles and its label, each of four or more words) covers the row's
+  headline: IDF over the run's candidates' term maps, register names and issue words dropped, possessives stripped, at
+  least 0.45 on two or more shared words; the row must not lean to the candidate's model counter-claim, the anchor must
+  hold and the candidate must have had a row within 48h. At most three near joins into one narrative and twelve
+  candidates' evidence read a run; in mode `on` a row past either cap waits unplaced for the next run (recorded `capped`
+  when it qualified; never a narrative of its own, never set aside). Every near miss looked at is recorded in D1
+  `narrative_near` (`on` joined, `shadow` would have joined, `miss` did not qualify, `capped` waiting, with sim, the
+  cover, the shared words and the lean; kept 14 days; a reset retires the records of what it dissolves as `reset`);
+  `POST /narratives/near {undo: item | 'day', day}` puts near-joined rows back in the backlog (or sets aside those
+  outside the 72h window), takes their words off the narrative's terms and recounts it, at most 100 a call in one batch
+  (`more: true` until the day is done); a row no longer on that near join (a reset, a merge, a later run moved it) is
+  left where it is and its record closed as stale; an undone row is never near-joined again. Every new narrative stores
+  `born_near`, `born_sim` and `born_bar` (the closest live narrative and the bar it missed), and the merge pass counts
+  how many proposals were born within 0.05 of their survivor (`nearBorn`): P1's reach.
+- **P2.** A singleton is a candidate for 24h after it was placed as well as after its row, except one whose first row is a
+  recorded would-join (`shadow`) of a live narrative: that row is a late near miss of a story that has its narrative,
+  and as a candidate it grew a duplicate across runs that nothing consolidates at the defaults (review); it stands alone
+  as in p68. The prune waits for both clocks, and a pruned singleton's row about to leave the 72h window is set aside
+  instead of freed (`prunedAside`).
+- **One alert a story.** A narrative whose first row is a recorded would-join of another live narrative is read after the
+  others by the alert pass and raises no alert once that narrative (or its survivor) has alerted, unless a person kept
+  the two apart (`alertsHeld` in the run). `/narratives/status.merge.nearBorn` counts the standing near-born narratives
+  (`standing`) and those that began with a would-join (`wouldJoin`), with ten named.
 - **P3.** The recount keeps the entities placement wrote while no row has a sentiment verdict.
 - **P4.** An all-capitals alias takes no plural.
 - **P5.** A D1 lease (`narr_lease`, three minutes, freed in a `finally`) around placement, the prune, every merge, undo,
@@ -1591,28 +1602,45 @@ placements at once placed the same rows twice and left a ghost narrative countin
   model-free: up to 600 candidates (the 400 most recent and the 300 largest of the last week, two or more rows, not
   muted or broad); for every pair the centroid cosine `c`, an IDF term cosine `T` over the 40-term maps (names, issue
   words and filler dropped) and the census word score `S` (the JS port of the census scorer: U .45, H .25, X .15, E .05,
-  Tm .10), with `S_auto` (the best amplifier-headline pair replaced by the best disjoint one, so one syndicated live-blog
-  row cannot carry an automatic decision) and a model-free opposite-claim veto from stored claims and counters. A pair is
+  Tm .10), with `S_auto`, the score the automatic clause reads: the same weights over bags without the register's
+  person and party words (a name links a story and its same-actor siblings alike; organisations and topics stay), with
+  the best headline pair replaced by the best disjoint one in H and the words only that pair brings left out of U and X
+  (review: the first build took the shared row out of H alone, and one live-blog row still carried U and X), plus a
+  model-free opposite-claim veto from stored claims and counters. The scan is bounded by the pairs it scores (80,000 a
+  tick, `NARRATIVE_MERGE_PAIRS` 10,000-400,000; the dry route 400,000), not by a clock. A pair is
   proposed by the first rule that fires (`centroid` c >= C_HI; `strict` no anchor and c >= 0.91; `form` c >= 0.79 and
   T >= FORM_T; `centroid+words` C_LO <= c < C_HI and S >= 0.25; `words` S >= 0.45; `terms` no centroid and T >= FORM_T)
   and listed with its holds: `opposite`, `undone` or `kept` (keep-apart), `person` (edited or pinned), `clients` (another
   namespace), `scope` (exactly one side `off`, or a politics survivor absorbing a client narrative), `naming` (in a naming
-  claim), `size`, `member`, `cap`, `paused`. A pair is automatic only with no hold, a shared leading issue or entity,
+  claim), `size`, `member`, `cap`, `paused`, `keeps` (the keep-apart list was too long to read whole: nothing merges by
+  itself). A pair is automatic only with no hold, a shared leading issue or entity,
   spans within 24h, the member check (complete link: the clause holds against the survivor's pre-merge state and every
-  narrative it absorbed automatically in 96h or earlier in the tick, so drift never snowballs a survivor) and the clause
+  narrative it absorbed automatically in 96h or earlier in the tick, so drift never snowballs a survivor; and, review,
+  every narrative the absorbed one took automatically in 96h passes the clause and holds no opposite, keep-apart,
+  clients or scope hold against the survivor, so a chain never puts a narrative where its direct pair could not go) and the clause
   in force: the centroid clause c >= C_HI and S_auto >= S_CORR, or the form clause (`s`: c >= C_FORM and S_auto >= FORM_S;
   `t`: also T >= FORM_T). Decisions are taken per connected component with the component's largest narrative as the
   survivor, under caps of 5 a tick, 40 a Sydney day and 3 a survivor a day; three automatic merges undone within 24h
-  pause the automatic pass until a person posts the mode again. Each apply re-reads both rows and re-scores the pair
-  under the lease. KV `narr_merge_last` holds the tick's proposals (7 days).
+  pause the automatic pass until a person posts the mode again. Each apply re-reads both rows, the pair's own
+  keep-aparts and re-scores the pair under the lease; the counter pointers are part of its compare-and-set. KV
+  `narr_merge_last` (7 days) holds the true count (`proposalsN`), the first 100 proposals in a slim form that fits
+  (ids, titles, c, T, S, S_auto, H2, the rule, the holds), the holds counted by kind (`held`), `scored` and `pairCap`.
+  The owner's list leads with automatic pairs, then the rest, a words-only pair whose second headline pair is weak
+  (H2 under 0.1: one shared row carries it) after the others, kept-apart pairs last.
 - **Every merge is logged and undoable.** `narrative_merges` keeps the absorbed row whole, the survivor's row before and
   its compared fields after, the moved rows (`narrative_merge_items`) and the counters that pointed at it. Undo restores
   the absorbed row column for column, moves back exactly its rows (rows that joined since stay and are counted), restores
-  the survivor's terms, counts, centroid, entities, first row, working title and alert (an inherited alert goes back, one
-  sent after the merge stays), and its naming state as a whole only when no person has touched it since; later merges'
-  records are rebased, so merges into one survivor undo in either order. Every undo writes a keep-apart, as does a
+  the survivor's terms, counts, entities, first row, working title and alert (an inherited alert goes back, one sent
+  after the merge stays), its centroid (verbatim while nothing moved it; rebuilt exactly from the logged weights while
+  every later merge moved it in turn with nothing between; un-mixed by counts while the survivor is young; else left
+  as it is, and once an undo left it, every later undo leaves it too and says so), and its naming state as a whole only
+  when no person has edited it since: a later person merge's carry of a name or a pin is no edit and is replayed on the
+  pre-merge state (review: the first build read it as an edit, so undoing the earlier merge first left another
+  narrative's person label on the survivor). Later merges' records are rebased, so merges into one survivor undo in
+  either order. Every undo writes a keep-apart, as does a
   person's `POST /narratives/merges {keep}`: the pair is listed last and never merged by the pass until a person lifts it
-  (`unkeep`). A person's merge carries an edited narrative's name, issues and namespace to the survivor; the pass never
+  (`unkeep`); every active keep is read (no cap drops one), and an hourly sweep retires a keep whose narrative is gone
+  for good (`undone_by` `retired`). A person's merge carries an edited narrative's name, issues and namespace to the survivor; the pass never
   touches an edited, pinned or muted narrative. An absorbed id keeps resolving (`/narratives/one` answers the survivor
   with `mergedFrom`; `/update` and `/merge` answer 409 `merged`; Studio's narrative source and `/den/board`'s additive
   `aliases` follow it); at filing, a brief's cite of an absorbed narrative covers the survivor's signal only when every
@@ -1622,25 +1650,40 @@ placements at once placed the same rows twice and left a ghost narrative countin
   `&modes=1` (`narr_mode_log`); `POST /narratives/merges {apply}|{undo}|{keep}|{unkeep}|{mode}`; `GET/POST
   /narratives/near`. `POST /narratives/merge {into, from}` keeps its body and answer and now logs. `POST /narratives/update`
   records `person_ts` and `person_by`. `/narratives/status.merge` gives the modes and their source, the clause, a pause,
-  the last tick's proposals and the last day's automatic merges with their undo ids; the run summary names merges with
-  their undo id, the tick prints them and records the pass's time as the `narr merge` stage.
+  the last tick's proposal count, holds by kind, pairs scored against the cap, the standing near-born narratives and the
+  last day's automatic merges with their undo ids; the run summary names merges with their undo id, the tick prints
+  them and records the pass as the `narr merge` stage with its wall time and `{scored, cap, partial}` (a Worker's clock
+  stands still in a loop without I/O, so the milliseconds leave the scoring out).
 
 **Defaults and the modes.** `narr_near_mode` and `narr_merge_mode` live in KV, are written only by `POST
 /narratives/merges {mode}` with a full key, and every change is logged in `narr_mode_log` with its before and after (it
 is undone by posting the previous mode); they override the vars `NARRATIVE_NEAR`, `NARRATIVE_NEAR_LEX`, `NARRATIVE_MERGE`,
 `NARRATIVE_MERGE_SIM`, `_FORM`, `_FORM_C`, `_FORM_T`, `_FORM_S`, `_CORR`, `_CROSS_NS`, `_TICK` (documented in
 `wrangler.toml`). Without either, nothing new joins or merges: the near mode records and the pass proposes, because no
-live centroid or 40-term map has been read and the automatic bars must be set from them.
+live centroid or 40-term map has been read and the automatic bars must be set from them. What the defaults still leave
+(review): a syndicated batch of one story's headlines placed in one run starts its own narrative beside the story's
+(as p68 did; it raises no second alert and the pass proposes it); a late row P1 would have joined stands alone and is
+set aside after a day (as p68); a late, weakly worded near miss that P1's evidence does not cover still grows its own
+narrative under P2 (the pass proposes it when its words carry it). Near mode `on` takes the first two into the story's
+narrative; merge mode `auto` takes what its clause passes.
 
 **Calibration (offline, read-only).** On the 223 labelled pairs of the census the worker's own scorer reproduces the
 census scorer's S exactly (largest difference under 0.0001). Over all 44,818 non-borderline pairs of the 300 (truth: the
 34 groups; 112 within-group pairs, 96 grouped narratives): S >= 0.25 precision 0.29, pair recall 0.61, member recall 0.82;
 S >= 0.35 0.71 / 0.37 / 0.61; S >= 0.45 0.81 / 0.19 / 0.32 (5 false). With every non-score guard of an automatic merge
-and c and T assumed to pass (the best case): S_auto >= 0.45 11 true, 0 false, no labelled hard negative; >= 0.42 16 true,
-0 false; >= 0.40 17 true, 1 false; >= 0.35 26 true, 6 false, two hard negatives; >= 0.25 39 true, 58 false, three hard
-negatives. So the form clause keeps 0.45, at least 0.03 above the highest false pair (live IDF runs over up to 600
-candidates, not 300, and moves the scores), the words rule stays at 0.45, the centroid clause's 0.25 is corroboration
-only and that clause rests on C_HI. The opposite veto fires on 0 of 46 same pairs that carry claims and a counter, 1 of
+and c and T assumed to pass (the best case), the first build's S_auto: >= 0.45 11 true, 0 false; >= 0.40 17 true, 1
+false; >= 0.35 26 true, 6 false; >= 0.25 39 true, 58 false. That "0 false" held only after the holds: two labelled
+different pairs cleared 0.45 with an anchor within 24h, one stopped only by the opposite veto, the other (two press
+releases from one MP) only by the clients hold. The review's S_auto (person and party words out, the best pair's own
+words out of U and X; the snapshot scored with the default register, so live names drop more): >= 0.45 10 true, 0 false;
+>= 0.40 11 true, 0 false; >= 0.35 15 true, 1 false; >= 0.25 34 true, 29 false. With every hold ignored (anchor, 24h, under
+60 rows only) >= 0.45 still takes 10 true and no false pair; the highest false pairs sit at 0.44 (held on scope) and
+0.439 (held by the opposite veto), the highest with no hold at 0.38. So the form clause keeps 0.45 (0.01 above the
+highest false pair with its holds ignored, 0.07 with them; live IDF over up to 600 candidates moves the scores), the
+words rule stays at 0.45, the centroid clause's 0.25 is corroboration only and that clause rests on C_HI. On invented
+fixtures the live-blog pair (one shared row naming two stories) scores S_auto 0.21-0.24 at three to five rows a side
+(0.41-0.47 before, automatic at 3/2 rows) and the sibling sweep's false automatic merge at sibling cosine 0.86-0.87 is
+gone. The opposite veto fires on 0 of 46 same pairs that carry claims and a counter, 1 of
 43 hard negatives, 1 of 8 borderline. The centroid bars cannot be measured on a snapshot without centroids and come from placement's own: C_HI =
 0.92 sits just above `NARR_SIM_STRICT` 0.91, the cosine at which placement joins a row with no shared anchor at all; C_LO
 = C_FORM = C_HI - 0.06 = 0.86 sits above `NARR_SIM` 0.84 (centroid cosines run above row cosines: two halves at row
@@ -1650,26 +1693,52 @@ is P1's near-miss band under 0.84. Every bar is a ranged setting the deploy-day 
 **Deploy day (this session's work, the owner's yeses).** The owner deploys (`tools/deploy-worker.sh --dry-run &&
 tools/deploy-worker.sh`; no page change); `/engine/status` answers `2026-11-16.studio-p69` and `/narratives/status.merge`
 shows `propose` and `shadow` from source `default`. After the first tick the session reads the stored and dry proposals
-and the labelled pairs through `?dry=1&pairs=` (read-only), chooses on a grid the clause with the most automatic same
-pairs and no automatic hard negative, reads every automatic pair from its rows, and shows the owner two lists: the
-merges to apply (each undoable) and the clause with its numbers. On his yes the session posts the apply list and the
-mode. P1 stays in shadow until at least 50 would-joins read 95% the same story with no opposite-claim, live-blog or
-forum-boilerplate join.
+and the labelled pairs through `?dry=1&pairs=` (read-only), reads the live centroid cosine of every census member whose
+outcome depends on it (45 of the 62: 26 proposed only at c >= 0.86, 11 at c >= 0.92, 8 at c >= 0.91 with no anchor)
+before anything else, chooses on a grid the clause with the most automatic same pairs and no automatic hard negative,
+reads every automatic pair from its rows, and shows the owner two lists: the merges to apply (each undoable) and the
+clause with its numbers. On his yes the session posts the apply list and the mode. P1 is not counted as the prevention
+for cause 1: on the census's labelled pairs its evidence of the first build (six stored titles) would have let back
+about one split-off row in seven, one starter in seven (16 of 107; 20 of 107 with the label), under the one-in-five bar
+P1 must clear to stay; the merge pass is what consolidates cause 1. The 40 recent titles the review added cannot be
+measured on a snapshot that holds six titles a narrative, so P1 is judged live: it stays in shadow until at least 50
+would-joins read 95% the same story with no opposite-claim, live-blog or forum-boilerplate join, and its reach is read
+from the shadow log (would-joins and `status.merge.nearBorn.wouldJoin`) against the near-born narratives (`standing`,
+`nearBorn` in the pass) - under one in five, P1 is dropped in a later build.
 
-**Tests first.** `tests/narr-merge-worker.mjs` (63 cases: P1a-P1j, P2a-P2c, P3a-P3b, P4a, P5a-P5d, M1-M14, U1-U10,
-R1-R11, D1-D3, A1-A5), every row invented on neutral stories. On 5fd5573, 59 of the 63 failed, all 28 marked (F) among
-them; P1d, P1e, P1f and P3b are guards that already held. The four named harnesses pass unchanged (narratives-worker 18,
-den-autoname-worker 15, narr-drain-worker 23, ai-automation-worker 4), as do den-worker 22 and den-release-worker 6; no
-assertion moved.
+**Tests first.** `tests/narr-merge-worker.mjs` (63 cases at first: P1a-P1j, P2a-P2c, P3a-P3b, P4a, P5a-P5d, M1-M14,
+U1-U10, R1-R11, D1-D3, A1-A5), every row invented on neutral stories. On 5fd5573, 59 of the 63 failed, all 28 marked (F)
+among them; P1d, P1e, P1f and P3b are guards that already held. The review added thirteen cases and extended three (76
+in all: P1k, P2d, P2e, M2b, M15-M19, U7b, U7c, R12, R13; P1h, M13 and A3 extended); on 90078e3, the first build, all 16
+failed, each for the defect the review found. One assertion of the first build moved: U7 required a later merge's
+rebased record to carry no centroid; it may now carry the one rebuilt from the weights, which is the survivor's own.
+The four named harnesses pass unchanged (narratives-worker 18, den-autoname-worker 15, narr-drain-worker 23,
+ai-automation-worker 4), as do den-worker 22 and den-release-worker 6.
 
 **Not verified.** Live cosines and term maps (the clause defaults rest on the snapshot's word score and invented rows);
-P1's headline evidence on invented text only; the opposite veto needs a model claim on both sides; the scan's CPU on
-synthetic data only (600 narratives with 768-d centroids, about 18,000 pairs scored in 0.3 s in Node; the tick's
-budget is 1.5 s and `tick_last` records it live); D1's JSON functions inside a batch (`json_group_array`, `json_patch`,
-`json_remove`, `json_each`), checked in SQLite only - the first live merge confirms them. Two places differ from the
-written design: an alert is captured by a compare-and-set on the alert values instead of a subquery (an alert between the
-read and the batch makes the batch a no-op and the merge reads again), and P1 records the near misses that did not
-qualify as well (`miss`), so the calibration sees both sides.
+P1's evidence on invented text only (the 40 recent titles on none); the opposite veto needs a model claim on both sides;
+the scan's cost on synthetic data only (in Node, 600 narratives with 768-d centroids: about 18,000 pairs on ten issues
+in 0.3 s; on one issue the tick's 80,000-pair cap in 0.5 s with random centroids, 1.3 s of CPU when every pair is close
+enough to need its headline scores, under the emulated Worker clock as under the real one; on the 16 November snapshot
+about 23% of pairs share a leading issue or entity within 96h, so about 41,000 at 600 candidates). There is no time budget inside the scan: a
+Worker's clock does not move in a loop without I/O, so the bound is the pairs cap and `tick_last` records the pairs
+scored, not the loop's CPU. D1's JSON functions inside a batch (`json_group_array`, `json_patch`, `json_remove`,
+`json_each`) and the recursive keep-apart read are checked in SQLite only - the first live merge confirms them. Places that
+differ from the written design: an alert is captured by a compare-and-set on the alert values instead of a subquery (an
+alert between the read and the batch makes the batch a no-op and the merge reads again); P1 records the near misses
+that did not qualify as well (`miss`), so the calibration sees both sides; a pair the pre-filter of the scan skips (S
+could not reach any bar even with H = 1) is not scored for the automatic clause either, which only ever withholds an
+automatic merge.
+
+**Review (16 November 2026, same build `2026-11-16.studio-p69`, not deployed).** Three reviews (data safety, matching,
+cost) of the first build found five data-safety defects, six matching ones and four of cost; each is fixed above or
+listed here. Left, with the reason: development chains (three days of one story at c 0.85) are still not proposed,
+because widening the proposal net at 0.84 lists as many sibling pairs as true ones on invented fixtures; the bar moves
+with `NARRATIVE_MERGE_SIM` (C_LO = C_HI - 0.06) once live cosines are read. At the defaults all 62 census duplicates stay
+split by design; the default rules list 16 of them whatever the live centroids are, and under the first build's score
+the automatic clause could reach 8 to 26 depending on them (the review's S_auto passes one same pair fewer at 0.45 on
+the snapshot). The member-held and cap-held pairs are counted apart in `narr_merge_last.held`, so the cost of complete
+link and the day caps is visible.
 
 **Asked for and not built.** The page: a proposals panel with Apply, Keep apart and Undo, "merged from" in the drawer, the
 near log, and the Brief pane reading `aliases`. Open for the owner: automatic merges across clients (`crossNs`, built,
