@@ -1467,3 +1467,49 @@ git checkout main && git merge --ff-only claude/den-release && git push origin m
 - **`docs/narratives.js` and `docs/overview.js` preferring the working title**, outlet display names, a `[` citation
   picker, a summary band and chevrons on Options: optional, left out.
 - **A light theme, phone and tablet layouts.** Out of scope by standing rule (dark, desktop first).
+
+### 10.10 Draining the queues on 16 November 2026: two bugs found and fixed (build p68)
+
+Branch `claude/narr-drain-fix`, cut from `main` at b242482 (the live p67). The owner asked for all pending AI analysis to
+be finished. `tools/daily-brief.py --only sentiment` drained cleanly (731 rows in 37 steps). `--only narratives` did not,
+in either of two runs (the second started sixteen minutes after the first, which was still going): 400 place steps each
+reported "100 scanned, 100 placed (0 joined, 100 started)" while "remaining" stayed at about 130, and the one naming batch
+failed with "the naming model answered without valid JSON", after which the drain stopped with 642 narratives waiting.
+Both causes were confirmed by reading the code, the first also by a harness, before anything changed.
+
+1. **Placement looped (older than p67).** A run takes the oldest unplaced rows of the last 72 hours and, at its end,
+   prunes every singleton with nothing newer than 48 hours, freeing its rows "to be placed again". A row 48 to 72 hours
+   old that joined nothing started a singleton whose newest row was itself, the same run pruned it, and the next run took
+   the row again, first in line: reproduced on p67 as "5 scanned, 5 placed, 5 started, 5 pruned, remaining 5" on every
+   step. The tick (300 a pass) got past them but spent those slots and their embeddings every pass. Now one constant,
+   `NARR_SINGLE_KEEP_H` = 48, sets both the prune and a new rule: a row older than that which finds no live narrative is
+   set aside (narrative `''`, counted in `unanchored` and in the new `aged`), never started. It still joins a live
+   narrative it matches; a younger row still starts one; the prune of singletons that never grew is unchanged.
+2. **One long batch failed, then blocked the queue.** `narrLabelBatch` gave five clusters 300 + 5 x 260 = 1,600 output
+   tokens for a label, a two-sentence summary, claim, counter, proponents, issues, scope, relevance and why each, and its
+   retry used the same limit. The ledger shows two answered calls and one retry, so both answers came back and neither
+   parsed; whether they were cut off or prose is not in the logs, because `claudeMsg` reports `stop_reason` through
+   `acct.info` and `narrLabelBatch` never asked for it. The name step then took the five largest eligible narratives with
+   no regard to claims or strikes; the failed five were claimed for two minutes, so the next step claimed nothing, made no
+   call, and the tool stopped. Now: the budget is 600 + 450 a cluster (2,850 for five, at most 4,096); an answer that
+   does not parse is asked again in halves, then the singles of a half that failed, and a batch of one once more with
+   the JSON-only nudge, so one unnameable cluster takes its own strike and the others are named; a declined answer is
+   split the same way, a provider error is not; two singles failing with nothing named stops the splitting. Each
+   provider call is reserved and settled on the same ledger scope (`narratives`, or `narr_auto`) and checked against the
+   day's cap and the run's share before it is sent. Errors name the narratives and say why, with the answer's first 120
+   characters ("cut off at max_tokens 2850: ...", "not JSON: ..."). `calls` now counts provider calls, the ledger's own
+   unit; p67 counted a batch and its retry as one, which made `NARRATIVE_AUTO=tick`'s two a tick up to four and the
+   window's 20 up to 40. The name step uses the window's own queue (`narrLabelQueue`, one batch a press, no call started after
+   135 of its 150 seconds), so it skips narratives in a claim or set aside after three failures today and names only those
+   active in seven days, and it answers `remaining` (what can be named now), `setAside`, `claimed` and `stopped`.
+   `tools/daily-brief.py` goes on past a step that named nothing but made a call, stops on the budget, an account limit
+   or two steps in a row with no call, and stops placing when ten steps in a row leave the backlog no lower.
+
+Tests first, each failing on p67: `tests/narr-drain-worker.mjs` (14: A1 to A6, B1 to B6, C1, C2) and
+`tests/daily-brief-test.py` (9, six failing on p67's tool). One assertion changed: `tests/den-autoname-worker.mjs` AN11
+pinned p67's count of one call per strike where two provider calls were sent and settled; it now expects two.
+Not verified: the live answers themselves. If the `ai_usage` row for scope `narratives` and day `20261116` held about
+3,200 output tokens over its first two settled calls, they were cut off. The owner's steps: deploy p68
+(`tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh`; no page change, `docs/narratives.js` reads the same
+fields), confirm `/engine/status` answers `2026-11-16.studio-p68`, then run `tools/daily-brief.py --only narratives` once.
+The rows that looped are set aside or joined by the first tick after the deploy.

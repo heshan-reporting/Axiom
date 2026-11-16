@@ -1225,6 +1225,15 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   (a model's or a person's name only). The daily window drains the naming queue (`narrLabelQueue`: the last seven
   days, client issues first, a claim before each call, three strikes a day, `NARR_WINDOW_CALLS` 20 and four minutes a
   window). `tests/den-autoname-worker.mjs` (15).
+- **Draining (build p68, 16 November 2026; `DEN.md` s.10.10).** A row older than `NARR_SINGLE_KEEP_H` = 48h that joins
+  no live narrative is set aside (`unanchored`, `aged`), never started: p67's prune took such singletons the same run
+  and the next run re-placed the row forever. Naming gives `narrOutTokens(n)` = 600 + 450 a cluster (at most 4,096);
+  an answer that does not parse (or is declined) is asked again in halves, then singles, each call reserved on the same
+  ledger and checked against the cap and the run's share; errors carry the reason and the answer's first 120
+  characters; `calls` counts provider calls. `POST /narratives/step {what:'name'}` runs `narrLabelQueue` for one batch
+  (claims, three strikes, seven days honoured) and answers `remaining` (nameable now), `setAside`, `claimed`, `stopped`;
+  `tools/daily-brief.py` stops only on the budget, an account limit or two steps with no call.
+  `tests/narr-drain-worker.mjs` (14), `tests/daily-brief-test.py` (9).
 - **Naming, counters, alerts.** `narrLabel()` sends narratives with >=
   `NARR_LABEL_MIN` = 3 rows that are unnamed or have doubled since their last
   naming to Claude five at a time (`narrLabelBatch`, strict JSON: a label of
