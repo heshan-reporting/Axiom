@@ -443,9 +443,10 @@ const FEED_TIMEOUT = 5000;  // per-feed abort; repeat offenders get circuit-brok
  * stale-while-revalidate background refresh, and the cron pre-warm.
  * Returns the JSON string (and writes it to KV unless debug).
  */
-async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, onHealth = null, onCore = null } = {}) {
+function allNewsKey(q, max, hours, ns) { return `allnews2_${q || 'all'}_${max}_${hours}` + (ns ? '_' + ns : ''); }
+async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, onHealth = null, onCore = null, ns = '' } = {}) {
   const qw  = q.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
-  const cacheKey = `allnews2_${q || 'all'}_${max}_${hours}`;
+  const cacheKey = allNewsKey(q, max, hours, ns);
   const now  = Date.now();
   // core feeds the operator switched off in the Sources view stay off here too
   const off  = env.MIND_DB ? await sourcesCoreOff(env) : new Set();
@@ -537,6 +538,32 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, 
     seenTitle.add(k); return true;
   });
 
+  // The Newsroom by client (Kai, 16 November 2026: an OzBargain vacuum deal and a Matildas squad story on Minerals Council's
+  // Newsroom). A story is the client's when its headline or summary - the words the Newsroom shows, never tags stored from
+  // a page's text - carries one of the client's issues (issueTag: the wide matchers and the desks' approved terms) or names
+  // an entry of the client's own register (its people and organisations, opponents included). Each kept story says why.
+  let client = null;
+  if (ns) {
+    const own = CLIENT_ISSUES.filter(ci => ci.ns === ns);
+    const label = {}; own.forEach(ci => { label[ci.id] = ci.label; });
+    let em = null;
+    if (env.MIND_DB) {
+      try { await deskLexiconLoad(env); } catch (e) {}
+      try { await ensureSentiment(env); em = await entityMatcher(env); } catch (e) { em = null; }
+    }
+    const considered = items.length;
+    items = items.filter(it => {
+      const hay = String(it.title || '') + ' ' + String(it.desc || '');
+      const issues = issueTag(hay).filter(id => label[id]).map(id => label[id]);
+      // people, parties and organisations only: the register's topics restate the client's issues
+      const names = em ? em.match(hay).map(id => em.byId[id]).filter(e => e && e.ns === ns && e.kind !== 'topic').map(e => e.name) : [];
+      if (!issues.length && !names.length) return false;
+      it.why = { issues, names };
+      return true;
+    });
+    client = { ns, name: own.length ? own[0].client : ns, considered, matched: items.length, kept: 0, register: !!em };
+  }
+
   // Newest first (undated last), cap, enrich with parties + tone.
   items.sort((a, b) => b._t - a._t);
   items = items.slice(0, max);
@@ -544,6 +571,7 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, 
 
   const sources = health.filter(h => h.ok).map(h => ({ src: h.src, count: h.count || 0 }));
   const payload = { items, sources, feeds: keys.length, registry, generated: new Date(now).toISOString(), window_hours: hours };
+  if (client) { client.kept = items.length; payload.client = client; }
   if (debug) payload.health = health.sort((a, b) => (b.ok ? 1 : 0) - (a.ok ? 1 : 0) || (b.count || 0) - (a.count || 0));
   const out = JSON.stringify(payload);
   if (!debug) await kvPut(env.AXIOM_KV, cacheKey, out, 240);
@@ -9713,7 +9741,7 @@ async function entityMatcher(env) {
     const parts = e.aliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+').replace(/'/g, "['\\u2019]")).filter(Boolean);
     if (!parts.length) return null;
     let rx = null; try { rx = new RegExp('(?<![A-Za-z0-9])(?:' + parts.join('|') + ')(?:s|es)?(?![A-Za-z0-9])', 'i'); } catch (e) { rx = null; }
-    return rx ? { id: e.id, kind: e.kind, name: e.name, role: e.role, party: e.party, side: e.side, rx } : null;
+    return rx ? { id: e.id, kind: e.kind, name: e.name, role: e.role, party: e.party, side: e.side, ns: e.ns, rx } : null;
   }).filter(Boolean);
   const m = {
     entities: list,
@@ -19379,25 +19407,29 @@ const AXIOM_WORKER = {
       const max   = Math.min(parseInt(reqUrl.searchParams.get('max') || '60', 10) || 60, 120);
       const hours = Math.min(parseInt(reqUrl.searchParams.get('hours') || '72', 10) || 72, 720);
       const debug = reqUrl.searchParams.get('debug') === '1';
-      const opts  = { q, max, hours, debug };
+      // ns: one client's stories only (the Newsroom's client scope); the unfiltered answer is the one archived
+      const ns    = (reqUrl.searchParams.get('ns') || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
+      if (ns && !CLIENT_ISSUES.some(ci => ci.ns === ns)) return jsonResp({ ok: false, error: 'unknown_client', detail: 'AXIOM holds no issues for the client "' + ns + '", so it cannot tell which stories are theirs. Leave the client out to read every story.' }, 400);
+      const opts  = { q, max, hours, debug, ns };
+      const snap  = s => (ns ? Promise.resolve() : arcNewsSnap(env, s));
 
       // Lazy time-series accumulation (self-throttled to ~hourly in KV) -
       // history builds up even on deployments with no cron trigger.
       if (ctx && !debug) ctx.waitUntil(snapshotPulse(env).catch(() => {}));
 
       if (!debug) {
-        const cached = await kvGet(env.AXIOM_KV, `allnews2_${q || 'all'}_${max}_${hours}`);
+        const cached = await kvGet(env.AXIOM_KV, allNewsKey(q, max, hours, ns));
         if (cached) {
           // Serve instantly; refresh in the background once older than 2 min.
           try {
             const gen = Date.parse(JSON.parse(cached).generated || 0) || 0;
-            if (ctx && Date.now() - gen > 120000) ctx.waitUntil(buildAllNews(env, opts).then(s => arcNewsSnap(env, s)).catch(() => {}));
+            if (ctx && Date.now() - gen > 120000) ctx.waitUntil(buildAllNews(env, opts).then(snap).catch(() => {}));
           } catch (e) {}
           return new Response(cached, { headers: CORS });
         }
       }
       const out = await buildAllNews(env, opts);
-      if (ctx) ctx.waitUntil(arcNewsSnap(env, out).catch(() => {}));
+      if (ctx) ctx.waitUntil(snap(out).catch(() => {}));
       return new Response(out, { headers: CORS });
     }
 

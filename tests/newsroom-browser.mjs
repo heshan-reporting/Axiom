@@ -5,6 +5,15 @@
  *      only), the paragraphs that mention the search words first and marked, and says which route carried it.
  *   C. A subscriber-only article says so, offers the archives (a second /fulltext without light) and the original.
  *   D. Clearing the box and searching again brings the general feed back.
+ * From Kai's ticket "Newsroom Irrelevant Result" (16 November 2026): an OzBargain vacuum deal on Minerals Council's
+ * Newsroom, because the Newsroom did not read the client scope at all.
+ *   E. With a client chosen in the scope bar the Newsroom asks the worker for that client's stories only, says so in a line
+ *      naming the client, and each row says why it is there.
+ *   F. "Show all news" brings back every story; the line then offers the client's stories again.
+ *   G. The five-minute refresh keeps the client's view and asks for the client's stories again.
+ *   H. A search with a client chosen searches every source and says the client filter is for the feed, not a search.
+ *   I. A worker that cannot filter by client yet (an answer with no `client`) shows every story and says so.
+ *   J. Clearing the client in the scope bar shows every story with no client line.
  * Run: node tests/newsroom-browser.mjs */
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';
@@ -15,6 +24,11 @@ const NOW = Date.now(), H = 3600e3, iso = t => new Date(t).toISOString();
 const general = [
   { title: 'Housing approvals fall for a third month', link: 'https://abc.test/housing', src: 'abc', date: iso(NOW - H), desc: 'Approvals fell again.' },
   { title: 'Chalmers on the surplus', link: 'https://afr.test/surplus', src: 'afr', date: iso(NOW - 2 * H), desc: '' },
+  { title: 'Roborock F25 ACE Pro Wet & Dry Vacuum. $389 @Bing Lee', link: 'https://www.ozbargain.test/node/1', src: 'ozbargain', date: iso(NOW - 3 * H), desc: 'Ticket price was $1,299 now $389.' },
+];
+const mcaStories = [
+  { title: 'Iron ore slides as Chinese steel output cools', link: 'https://smh.test/iron-ore', src: 'smh', date: iso(NOW - H), desc: 'The price fell for a third day.', why: { issues: ['Mining and resources'], names: [] } },
+  { title: 'Tania Constable says the week in Canberra was a mixed one', link: 'https://abc.test/constable', src: 'abc', date: iso(NOW - 2 * H), desc: 'The chief executive spoke on breakfast radio.', why: { issues: [], names: ['Tania Constable'] } },
 ];
 const coal = [
   { title: 'Coal exports slow as China demand eases', link: 'https://theaustralian.test/coal', src: 'the australian', date: iso(NOW - H), desc: 'Thermal coal shipments fell in September.' },
@@ -29,7 +43,8 @@ const ARTICLE = ['Australia\'s resources sector had a mixed September, according
 const stub = (url) => {
   const u = new URL(url); const p = u.pathname; const q = Object.fromEntries(u.searchParams.entries());
   calls.push({ p, q });
-  if (p === '/allnews') return { ok: true, items: q.q ? coal.slice(0, 1) : general, feeds: 40, sources: [{}, {}], generated: iso(NOW) };
+  if (p === '/allnews' && q.ns === 'mca' && !q.q) return { ok: true, items: mcaStories, feeds: 40, sources: [{}, {}], generated: iso(NOW), client: { ns: 'mca', name: 'Minerals Council of Australia', considered: 420, matched: 2, kept: 2, register: true } };
+  if (p === '/allnews') return { ok: true, items: q.q ? coal.slice(0, 1) : general, feeds: 40, sources: [{}, {}], generated: iso(NOW) };   // an older worker ignores ns (case I asks it for aep)
   if (p === '/newsq') return { ok: true, items: coal.slice(1).map(it => Object.assign({}, it, { outlet: it.src })) };
   if (p === '/fulltext') {
     if (/hunter/.test(q.url)) return { ok: false, url: q.url, text: '', paywall: true, method: '', attempts: [{ method: 'direct', ok: false }], detail: 'paywalled' };
@@ -98,6 +113,57 @@ await t('D. clearing the box and searching again brings the general feed back, a
   ok(!/"/.test(await page.textContent('#news-count')));
   await page.evaluate(() => loadCore()); await page.waitForTimeout(300);
   ok((await titles()).some(x => /Housing approvals/.test(x)));
+});
+const scopeLine = () => page.evaluate(() => { const e = document.getElementById('news-scope'); return e && !e.hidden ? e.textContent.replace(/\s+/g, ' ').trim() : ''; });
+const nsCalls = ns => calls.filter(c => c.p === '/allnews' && c.q.ns === ns && !c.q.q).length;
+await t('E. with Minerals Council chosen, the Newsroom shows only its stories, says so, and each row says why it is there', async () => {
+  await page.evaluate(() => AXUI.setScope({ ns: 'mca' }));
+  await page.waitForSelector('#news-list .wi:has-text("Iron ore slides")');
+  const tt = await titles();
+  ok(!tt.some(x => /Roborock|Housing approvals/.test(x)), 'only the client\'s stories: ' + JSON.stringify(tt));
+  ok(nsCalls('mca') >= 1, 'the worker was asked for MCA\'s stories');
+  const line = await scopeLine();
+  ok(/Minerals Council of Australia/.test(line) && /2 of 420/.test(line) && /Show all news/.test(line), 'the line names the client and the counts: ' + line);
+  const iron = await page.textContent('#news-list .wi:has-text("Iron ore slides") .wi-why');
+  ok(/Mining and resources/.test(iron), 'the iron ore row names the issue: ' + iron);
+  const tc = await page.textContent('#news-list .wi:has-text("Tania Constable") .wi-why');
+  ok(/Tania Constable/.test(tc), 'the Constable row names her: ' + tc);
+  ok(/MINERALS COUNCIL/i.test(await page.textContent('#news-count')), 'the count says whose stories: ' + await page.textContent('#news-count'));
+});
+await t('F. Show all news brings back every story, and the line offers the client\'s stories again', async () => {
+  await page.click('#news-scope button:has-text("Show all news")');
+  await page.waitForSelector('#news-list .wi:has-text("Roborock")');
+  const line = await scopeLine();
+  ok(/All news/.test(line) && /Only Minerals Council of Australia stories/.test(line), line);
+  ok(!(await page.$('#news-list .wi-why')), 'no why line on the unfiltered feed');
+  await page.click('#news-scope button:has-text("Only Minerals Council of Australia stories")');
+  await page.waitForSelector('#news-list .wi:has-text("Iron ore slides")');
+  ok(!(await titles()).some(x => /Roborock/.test(x)), 'filtered again');
+});
+await t('G. the five-minute refresh keeps the client\'s view and asks for its stories again', async () => {
+  const before = nsCalls('mca');
+  await page.evaluate(() => loadCore()); await page.waitForTimeout(500);
+  ok(nsCalls('mca') > before, 'asked again for MCA\'s stories');
+  const tt = await titles();
+  ok(tt.some(x => /Iron ore/.test(x)) && !tt.some(x => /Roborock/.test(x)), JSON.stringify(tt));
+});
+await t('H. a search with a client chosen searches every source and says so; clearing it brings the client\'s stories back', async () => {
+  await page.fill('#news-q', 'coal'); await page.press('#news-q', 'Enter');
+  await page.waitForSelector('#news-list .wi:has-text("Coal exports slow")');
+  ok(/every source/.test(await scopeLine()), await scopeLine());
+  await page.fill('#news-q', ''); await page.press('#news-q', 'Enter');
+  await page.waitForSelector('#news-list .wi:has-text("Iron ore slides")');
+});
+await t('I. a worker that cannot filter by client yet shows every story and says so', async () => {
+  await page.evaluate(() => AXUI.setScope({ ns: 'aep' }));
+  await page.waitForFunction(() => /filter/.test((document.getElementById('news-scope') || {}).textContent || '') && !!document.querySelector('#news-list .wi'));
+  ok((await titles()).some(x => /Roborock/.test(x)), 'every story');
+  ok(/cannot filter by client yet/.test(await scopeLine()), await scopeLine());
+});
+await t('J. clearing the client shows every story with no client line', async () => {
+  await page.evaluate(() => AXUI.setScope({ ns: '' }));
+  await page.waitForFunction(() => { const e = document.getElementById('news-scope'); return !e || e.hidden; });
+  ok((await titles()).some(x => /Roborock/.test(x)) && (await titles()).some(x => /Housing approvals/.test(x)));
 });
 await t('no page errors', async () => { ok(!errors.length, errors.join(' | ')); });
 await browser.close(); server.kill();

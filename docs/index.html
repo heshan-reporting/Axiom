@@ -52,7 +52,7 @@
 <script src="sentiment.js?v=r1" defer></script>
 <script src="narratives.js?v=r1" defer></script>
 <script src="overview.js?v=r1" defer></script>
-<script src="scope.js?v=r1" defer></script>
+<script src="scope.js?v=r2" defer></script>
 <!-- Tailwind (additive utility layer, token-configured; nothing critical depends on it) -->
 <script src="https://cdn.tailwindcss.com" onerror="void 0"></script>
 <script>try{if(window.tailwind)tailwind.config={theme:{extend:{colors:{
@@ -433,6 +433,10 @@ html.gsap .view.on>*{animation:none}
 .wi-body{flex:1;min-width:0}
 .wi-t{font-size:13px;font-weight:500;color:var(--t0);line-height:1.45;display:block}
 .wi-d{font-size:11px;color:var(--t2);margin-top:3px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wi-why{display:block;font-size:11px;color:var(--t3);margin-top:4px;line-height:1.45}
+.wi-why b{font-weight:500;color:var(--t1)}
+.news-scope{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:12px;color:var(--t2);line-height:1.5;margin:0 0 10px}
+.news-scope b{font-weight:600;color:var(--t0)}
 .wi-time{font-family:var(--fm);font-size:9.5px;color:var(--t3);flex-shrink:0;padding-top:3px;white-space:nowrap}
 .wi-sig{display:flex;align-items:center;gap:4px;flex-shrink:0;padding-top:5px}
 .wi-read{font-family:var(--fm);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ac);border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:2px 7px;flex-shrink:0;align-self:flex-start;cursor:pointer}
@@ -2307,6 +2311,7 @@ select option,select optgroup{background-color:var(--x-bg2);color:var(--t1)}
             <input class="inp" id="news-q" placeholder="Search everything — registry feeds + the full Google News AU index…" onkeydown="if(event.key==='Enter')loadNews()">
             <button class="btn" style="padding:10px 18px" onclick="loadNews()">Search</button>
           </div>
+          <div class="news-scope" id="news-scope" role="status" aria-live="polite" hidden></div>
           <div class="chips" id="news-time" style="margin-bottom:8px">
             <button class="chip" onclick="setNewsWindow(6,this)">6h</button>
             <button class="chip" onclick="setNewsWindow(24,this)">24h</button>
@@ -3981,7 +3986,7 @@ async function loadCore(){
     state.feedsTotal=d.feeds||state.feedsTotal||0;
     state.feedsLive=(d.sources||[]).length||state.feedsLive||0;
     clientEnrich();
-    renderKpiStories();renderNarrative();renderParties();renderWire();if(NEWS_SEARCH)loadNews(true);else renderNews();renderTicker();renderClusters();
+    renderKpiStories();renderNarrative();renderParties();renderWire();if(NEWS_SEARCH)loadNews(true);else{NEWS_NS_SEEN=newsNs();renderNews();if(newsClientOn())loadNewsClient();}renderTicker();renderClusters();
     if(!state.analysis||state.analysis._local)renderAnalysisLocal();
     computeFlags();
     updateCtxBadge();renderStatus(d.generated);
@@ -5028,23 +5033,96 @@ function rowSignal(it){
     .map(p=>'<i style="background:'+p.color+'" title="'+p.name+'"></i>').join('');
   return '<span class="wi-sig"><b style="background:'+tcol+'" title="headline tone"></b>'+pd+'</span>';
 }
+/* The Newsroom by client (Kai's ticket "Newsroom Irrelevant Result", 16 November 2026: an OzBargain vacuum deal on
+   Minerals Council's Newsroom, because the Newsroom read every source and ignored the client in the scope bar). With a
+   client chosen, the feed is that client's stories only: the worker keeps a story whose headline or summary carries one
+   of the client's issues or names someone in its register (/allnews?ns=) and says why. "Show all news" holds for that
+   client until the client changes; a search always reads every source. state.news stays the whole feed, which the front
+   page's wire, narrative and party panels read. A worker older than this answers without `client`: every story, said. */
+let NEWS_CLIENT=null,NEWS_ALL_NS='',NEWS_NS_SEEN=null;
+function newsNs(){try{return window.AXUI&&AXUI.scope?String(AXUI.scope().ns||''):'';}catch(e){return '';}}
+function newsClientOn(){const ns=newsNs();return !!ns&&NEWS_ALL_NS!==ns;}
+function newsClientName(ns){
+  if(NEWS_CLIENT&&NEWS_CLIENT.ns===ns&&NEWS_CLIENT.client&&NEWS_CLIENT.client.name)return NEWS_CLIENT.client.name;
+  const i=(typeof AX_ISSUES!=='undefined'?AX_ISSUES:[]).find(x=>x.ns===ns);return i&&i.client?i.client:ns;
+}
+function newsClientItems(){const ns=newsNs();return newsClientOn()&&NEWS_CLIENT&&NEWS_CLIENT.ns===ns&&NEWS_CLIENT.items?NEWS_CLIENT.items:null;}
+function newsBase(){return NEWS_SEARCH?NEWS_SEARCH.items:(newsClientItems()||state.news);}
+async function loadNewsClient(){
+  const ns=newsNs();
+  if(!ns||NEWS_ALL_NS===ns){renderNews();return;}
+  if(!NEWS_CLIENT||NEWS_CLIENT.ns!==ns){NEWS_CLIENT={ns,loading:true};renderNews();}
+  let next;
+  try{
+    const d=await api('/allnews?max=110&ns='+encodeURIComponent(ns));
+    next=d&&d.client?{ns,client:d.client,items:d.items||[]}:{ns,old:true};
+  }catch(e){next={ns,error:e&&e.message||String(e)};}
+  if(newsNs()!==ns)return;   // the client changed while this was being read
+  NEWS_CLIENT=next;renderNews();
+}
+function newsShowAll(all){
+  const ns=newsNs();if(!ns)return;
+  NEWS_ALL_NS=all?ns:'';
+  if(all)renderNews();else loadNewsClient();
+}
+function newsScopeChanged(){
+  const ns=newsNs();if(ns===NEWS_NS_SEEN)return;
+  NEWS_NS_SEEN=ns;NEWS_ALL_NS='';
+  if(NEWS_CLIENT&&NEWS_CLIENT.ns!==ns)NEWS_CLIENT=null;
+  if(ns)loadNewsClient();else renderNews();
+}
+window.addEventListener('ax:scope',newsScopeChanged);
+function renderNewsScope(){
+  const el=$('news-scope');if(!el)return;
+  const ns=newsNs();
+  if(!ns){el.hidden=true;el.innerHTML='';return;}
+  const name=esc(newsClientName(ns)),c=NEWS_CLIENT&&NEWS_CLIENT.ns===ns?NEWS_CLIENT:null;
+  const btn=(label,fn)=>'<button class="btn sm ghost" onclick="'+fn+'">'+label+'</button>';
+  let h;
+  if(NEWS_SEARCH)h='<span>Search results from every source. The '+name+' filter applies to the feed, not to a search.</span>';
+  else if(NEWS_ALL_NS===ns)h='<span><b>All news</b> from every source.</span>'+btn('Only '+name+' stories','newsShowAll(false)');
+  else if(!c||c.loading)h='<span>Reading '+name+'\'s stories…</span>';
+  else if(c.old)h='<span>The worker in use cannot filter by client yet, so every story is shown. The filter arrives with the next worker deploy.</span>';
+  else if(c.error)h='<span>Could not read '+name+'\'s stories ('+esc(c.error)+'), so every story is shown.</span>'+btn('Try again','loadNewsClient()');
+  else{
+    const k=c.client,m=k.matched!=null?k.matched:k.kept;
+    h='<span><b>'+name+'</b> stories only: '+m+' of '+(k.considered||0)+' stories read in the last 72 hours mention one of its issues'+(k.register===false?'':' or someone in its register')+' in the headline or summary'+(m>k.kept?' (the newest '+k.kept+' shown)':'')+'.</span>'+btn('Show all news','newsShowAll(true)');
+  }
+  el.innerHTML=h;el.hidden=false;
+}
+function newsWhy(it){
+  const w=it.why;if(!w||!newsClientItems())return '';
+  const parts=[];
+  if(w.issues&&w.issues.length)parts.push('on <b>'+w.issues.map(esc).join('</b>, <b>')+'</b>');
+  if(w.names&&w.names.length)parts.push('names <b>'+w.names.map(esc).join('</b>, <b>')+'</b>');
+  return parts.length?'<span class="wi-why">Why it\'s here: '+parts.join(' · ')+'</span>':'';
+}
 function renderNews(list){
-  const base=NEWS_SEARCH?NEWS_SEARCH.items:state.news;
+  renderNewsScope();
+  const ns=newsNs();
+  if(!NEWS_SEARCH&&newsClientOn()&&(!NEWS_CLIENT||NEWS_CLIENT.ns!==ns||NEWS_CLIENT.loading)){
+    NEWS_LAST=[];$('news-chips').innerHTML='';
+    $('news-count').textContent=newsClientName(ns).toUpperCase()+' · LOADING…';
+    $('news-list').innerHTML='<div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px"></div>';
+    return;
+  }
+  const base=newsBase(),clientView=!NEWS_SEARCH&&!!newsClientItems();
   const items=newsWindowFilter(list||base);
   NEWS_LAST=items;
   const srcs={};base.forEach(n=>{srcs[n.src]=(srcs[n.src]||0)+1;});
-  $('news-count').textContent=(NEWS_SEARCH?'"'+NEWS_SEARCH.q.toUpperCase()+'" · ':'')+Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
+  $('news-count').textContent=(NEWS_SEARCH?'"'+NEWS_SEARCH.q.toUpperCase()+'" · ':clientView?newsClientName(ns).toUpperCase()+' · ':'')+Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
   $('news-chips').innerHTML='<button class="chip on" onclick="filterSrc(null,this)">All</button>'+
     Object.entries(srcs).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([s,n])=>
       '<button class="chip" onclick="filterSrc(\''+jsAttr(s)+'\',this)">'+esc(s)+' · '+n+'</button>').join('');
   $('news-list').innerHTML=items.length?items.slice(0,60).map((it,i)=>
-    '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span>'+issueChip(it.title)+(it.desc?'<span class="wi-d">'+esc(it.desc)+'</span>':'')+'</span>'+rowSignal(it)+'<span class="wi-time">'+ago(it.date)+'</span>'+(it.link?'<span class="wi-read" role="button" tabindex="0" title="Read the article here, where the publisher makes the text public" onclick="newsRead(event,'+i+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \')newsRead(event,'+i+')">Read</span>':'')+'</a>').join('')
+    '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span>'+issueChip(it.title)+(it.desc?'<span class="wi-d">'+esc(it.desc)+'</span>':'')+newsWhy(it)+'</span>'+rowSignal(it)+'<span class="wi-time">'+ago(it.date)+'</span>'+(it.link?'<span class="wi-read" role="button" tabindex="0" title="Read the article here, where the publisher makes the text public" onclick="newsRead(event,'+i+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \')newsRead(event,'+i+')">Read</span>':'')+'</a>').join('')
+    :clientView?'<div class="empty">No story in the last '+NEWS_WINDOW+' hours mentions '+esc(newsClientName(ns))+'\'s issues or anyone in its register. Widen the window, or show all news.</div>'
     :'<div class="empty">Nothing in the last '+NEWS_WINDOW+' hours matched. Widen the window or search the full Google index above.</div>';
 }
 function filterSrc(src,btn){
   document.querySelectorAll('#news-chips .chip').forEach(b=>b.classList.remove('on'));
   if(btn)btn.classList.add('on');
-  renderNews(src?(NEWS_SEARCH?NEWS_SEARCH.items:state.news).filter(n=>n.src===src):null);
+  renderNews(src?newsBase().filter(n=>n.src===src):null);
 }
 function exportNewsCSV(){
   const rows=[['date','source','title','tone','parties','link']].concat(NEWS_LAST.map(it=>{
@@ -5086,6 +5164,7 @@ async function loadNews(quiet){
       state.feedsTotal=d.feeds||state.feedsTotal||0;
       state.feedsLive=(d.sources||[]).length||state.feedsLive||0;
       renderNews();renderNarrative();renderParties();renderWire();renderKpiStories();
+      if(newsClientOn())loadNewsClient();
     }
   }catch(e){if(!quiet)$('news-list').innerHTML='<div class="err">'+esc(e.message)+'</div>';}
 }

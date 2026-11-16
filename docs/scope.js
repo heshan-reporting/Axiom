@@ -1,7 +1,8 @@
 /* AXIOM - the scope bar. One row under the navigation that narrows every
  * view at once: client, client issue, party or person, channel, window and
  * region. The islands read it through AXUI.useScope; the bar only sets it.
- * Legacy views (Newsroom, Pulse, Radar, Audience) keep their own controls. */
+ * The Newsroom follows the client only (its stories by issue and register, /allnews?ns=); the other legacy views
+ * (Pulse, Radar, Audience) keep their own controls. */
 (function () {
   'use strict';
   if (!window.AXUI) return;
@@ -35,7 +36,7 @@
       <select class=${s.platform ? 'on' : ''} value=${s.platform} onChange=${e => set('platform', e.target.value)} aria-label="Channel"><option value="">Every channel</option>${PLATFORMS.map(p => html`<option key=${p[0]} value=${p[0]}>${p[1]}</option>`)}</select>
       <select class=${s.days ? 'on' : ''} value=${String(s.days || 0)} onChange=${e => set('days', +e.target.value)} aria-label="Window"><option value="0">Each view's window</option>${WINDOWS.map(w => html`<option key=${w[0]} value=${String(w[0])}>${w[1]}</option>`)}</select>
       <select class=${s.region ? 'on' : ''} value=${s.region} onChange=${e => set('region', e.target.value)} aria-label="Region"><option value="">Every region</option>${REGIONS.map(r => html`<option key=${r[0]} value=${r[0]}>${r[1]}</option>`)}</select>
-      ${n ? html`<button class="scope-clear" onClick=${() => setScope(Object.assign({}, SCOPE_DEF))}>Clear ${n} filter${n === 1 ? '' : 's'}</button>` : html`<span class="scope-hint">Narrows Sentiment, Narratives, Signals, Sources and the front page together</span>`}
+      ${n ? html`<button class="scope-clear" onClick=${() => setScope(Object.assign({}, SCOPE_DEF))}>Clear ${n} filter${n === 1 ? '' : 's'}</button>` : html`<span class="scope-hint">Narrows Sentiment, Narratives, Signals, Sources and the front page together; the Newsroom follows the client</span>`}
     </div>`;
   }
   let mounted = false;

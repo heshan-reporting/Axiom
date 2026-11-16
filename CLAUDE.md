@@ -1391,8 +1391,29 @@ the view holding it) - answered in tables, not cards.
   that is one of its tabs; Sources adopts issue and region; the front page
   narrows its alerts, narratives, issues and rows to the client and issue
   and follows the window. The bar only sets; each island keeps its own
-  finer controls. Legacy views (Newsroom, Pulse, Radar, Audience, Briefing)
-  keep their own controls and do not read the scope yet.
+  finer controls. The Newsroom follows the client only (below); the other
+  legacy views (Pulse, Radar, Audience, Briefing) keep their own controls and
+  do not read the scope yet.
+- **The Newsroom by client** (Kai's ClickUp ticket "Newsroom Irrelevant Result",
+  16 November 2026: an OzBargain vacuum deal and a Matildas squad story on
+  Minerals Council's Newsroom, because `/allnews` returned every core feed and
+  registry row and the Newsroom ignored the scope). `GET /allnews?ns=<client>`
+  keeps a story only when its **headline or summary** - never tags stored from
+  a page's text - carries one of the client's issues (`issueTag`, wide matchers
+  plus the desks' approved terms) or names an entry of that client's register
+  (`entityMatcher` now carries `ns`; its people and organisations, opponents
+  included); each kept story carries `why {issues, names}` and the answer
+  `client {ns, name, considered, matched, kept, register}`; cached apart
+  (`allNewsKey`), never archived (the unfiltered answer is); an unknown client
+  is `400 unknown_client`. In the page `state.news` stays the whole feed (the
+  front page's panels read it); the Newsroom asks `/allnews?ns=` when a client
+  is in the scope, says so in `#news-scope` with "Show all news" (held until
+  the client changes), shows "Why it's here" on each row, and a search always
+  reads every source. A worker that answers without `client` (older than this)
+  shows every story and says so. The OzBargain core feed (`AU_FEEDS.ozbargain`)
+  is still in the code; switching it off is the Sources view's switch.
+  Harnesses: `tests/newsroom-client-worker.mjs` (5), cases E-J of
+  `tests/newsroom-browser.mjs` (11).
 - **Sources** opens on the delivering sources, most productive first
   (`status: 'ok'`, sort `items`); failing, dead, stale, untried and off are
   one quiet figure with a breakdown that filters to them, and the dead line
