@@ -45,6 +45,7 @@ window.__DEN_PARTS.brief = function (D) {
   const NAMELESS = /^A narrative not yet named$/i;
   const cut = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n).trim() + '\u2026' : s; };
   const MARK = /\[[A-Z]:[A-Za-z0-9_.-]{1,40}\]/g;
+  const markSays = e => { if (!e) return ''; if (e.text) return String(e.text); const l = String(e.label || ''); return e.k === 'media' ? l.split(' - ').slice(1).join(' - ') : e.k === 'social' || e.k === 'actor' ? '' : l; };
   const FS = !!(window.CSS && CSS.supports && CSS.supports('field-sizing', 'content'));   // a textarea that grows with its text by itself
 
   /* ---- Brief ---- */
@@ -114,7 +115,10 @@ window.__DEN_PARTS.brief = function (D) {
     const [mode, setMode] = useState('read'); const root = useRef(null); const ta = useRef(null); const gone = useRef(true); const blur = useRef(onBlur); blur.current = onBlur;
     const has = !!String(text || '').trim(); const editing = !readOnly && (mode === 'edit' || !has);   // an empty section is its own invitation to write
     const ix = useMemo(() => citeIndex(text, evidence), [text, evidence]);
-    const caret = e => { carets.current[s.id] = e.target.selectionStart; };
+    const [cur, setCur] = useState(-1);
+    const caret = e => { const p = e.target.selectionStart; carets.current[s.id] = p; if (DEN_EDITOR_STACK && p !== cur) setCur(p); };
+    // the citation the cursor is in or beside, named under the page so nobody has to decode a mark
+    const markAt = useMemo(() => { if (!editing || cur < 0) return ''; const rx = new RegExp(MARK.source, 'g'); let m; while ((m = rx.exec(text))) { if (cur >= m.index && cur <= m.index + m[0].length) return m[0].slice(1, -1); if (m.index > cur) break; } return ''; }, [editing, cur, text]);   // eslint-disable-line
     // focus that stays with the words: the textarea itself, this page's bar and rewrite form, or a card in the evidence pane
     const keeps = a => !!a && a !== document.body && (a === ta.current || (!!root.current && root.current.contains(a) && !!a.closest('.den-docbar, .den-regen')) || !!a.closest('.den-evpane'));
     const finish = () => { if (gone.current) return; gone.current = true; blur.current(); setMode('read'); };
@@ -151,12 +155,16 @@ window.__DEN_PARTS.brief = function (D) {
           <span class="den-words">${plural(wc(text), 'word')}</span><span class="den-spacer"></span>${regenBtn}</div>
         ${regenForm}
         <div class="den-docbody">
+          ${editing ? html`<div class="den-ta-mirror" aria-hidden="true">${String(text || '').replace(/\r\n?/g, '\n').split(/(\[[A-Z]:[A-Za-z0-9_.-]{1,40}\])/).map((p, i) => (/^\[[A-Z]:/.test(p) ? html`<span key=${i} class=${'den-code' + (evidence[p.slice(1, -1)] ? '' : ' bad') + (markAt === p.slice(1, -1) ? ' on' : '')}>${p}</span>` : p))}${'\u200b'}</div>` : null}
           <${Reads} stack=${true} text=${text} F=${sec && !dirty ? sec : null} evidence=${evidence} onJump=${onJump} onEdit=${readOnly ? null : edit} ix=${ix} />
           <textarea class="den-ta" ref=${ta} data-tour="editor" aria-label=${s.title} readOnly=${readOnly} tabIndex=${readOnly ? -1 : 0} value=${text} placeholder=${readOnly ? 'Nothing written yet.' : 'Write this section. Click a card on the right to cite it.'}
             onFocus=${() => { if (!readOnly) { gone.current = false; setMode('edit'); } }} onInput=${onIn} onSelect=${caret} onKeyUp=${caret} onClick=${caret}
             onKeyDown=${e => { if (e.key === 'Escape') { e.preventDefault(); e.target.blur(); } }} onBlur=${e => { caret(e); if (!keeps(e.relatedTarget)) finish(); }}></textarea>
         </div>
-        ${readOnly ? null : html`<div class="den-dochint">${editing ? html`${Ic('info')}<span>Click a card on the right to cite it at the cursor. Esc, or a click outside the text, saves and returns to reading.</span>` : html`${Ic('pen')}<span>Click any sentence to edit it in place.</span>`}</div>`}
+        ${readOnly ? null : html`<div class=${'den-dochint' + (markAt ? ' on' : '')} aria-live="polite">${!editing ? html`${Ic('pen')}<span>Click any sentence to edit it in place.</span>`
+          : markAt && evidence[markAt] ? html`${Ic(KIND[evidence[markAt].k] || 'info')}<span><b>${ix.names[markAt] || citeLabel(markAt, evidence[markAt])}</b>${markSays(evidence[markAt]) ? ' \u00b7 ' + cut(markSays(evidence[markAt]), 90) : ''}</span><span class="den-evcode">${markAt}</span>`
+          : markAt ? html`${Ic('alert')}<span><b>Unknown source.</b> This citation matches nothing in the brief's evidence; saving removes it.</span>`
+          : html`${Ic('info')}<span>Click a card on the right to cite it at the cursor. Esc, or a click outside the text, saves and returns to reading.</span>`}</div>`}
       </div>
       ${rate || null}
     </div>`;
@@ -289,7 +297,7 @@ window.__DEN_PARTS.brief = function (D) {
           aria-label=${(cid ? 'Cite ' + cid + ': ' : 'Cannot be cited in this brief: ') + title.slice(0, 100)} title=${cid ? (ro ? cid + ': ' + title.slice(0, 140) : 'Cite this where the cursor is in ' + openS.title + ' (' + cid + ')') : 'This brief\'s evidence does not hold this row: it was collected after the draft, or the brief was started by hand. Draft again to cite it.'}
           onMouseDown=${x => x.preventDefault()} onClick=${() => cite(cid)}>
           <span class="den-evtop">${num ? html`<span class="den-evnum" title=${'Citation ' + num + ' in this section'}>${num}</span>` : null}<span class="den-evsrc">${Ic(kind || 'info')}<span>${srcOf(c, e)}</span></span>
-            ${auto(c, e) ? html`<span class="den-tag" title="A working title the Den gave this narrative from its own rows; nobody has named it yet">working title</span>` : null}${n ? html`<span class="den-chip pos" title=${'Cited in ' + plural(n, 'section') + ' of this brief'}>Cited</span>` : null}${!ro && cid ? html`<span class="den-evhint" aria-hidden="true">${Ic('plus')}Cite here</span>` : null}</span>
+            ${auto(c, e) ? html`<span class="den-tag" title="A working title the Den gave this narrative from its own rows; nobody has named it yet">working title</span>` : null}${!n ? null : num && n === 1 ? html`<span class="den-sr">Cited</span>` : html`<span class="den-chip pos" title=${'Cited in ' + plural(n, 'section') + ' of this brief'}>${num ? 'Cited in ' + n : 'Cited'}</span>`}${!ro && cid ? html`<span class="den-evhint" aria-hidden="true">${Ic('plus')}Cite here</span>` : null}</span>
           <span class=${'den-t' + (sd.quiet ? ' quiet' : '')}>${title}</span>${meta ? html`<span class="den-sub">${meta}</span>` : null}</button>
         <div class="den-evact">${web(url) ? html`<a class="den-link" href=${web(url)} target="_blank" rel="noopener" aria-label=${'Open the source: ' + title.slice(0, 80)}>${Ic('open')}Open</a>` : null}${o.extra || null}${cid ? html`<span class="den-evcode" title="The id the brief cites this row by">${cid}</span>` : null}</div></li>`; };
     const here = onSrc ? [] : filedHere(openS.id); const hereIds = new Set(here.map(k => { const c = cardBy[k]; return c ? citeOf(c, ev) : k; }));

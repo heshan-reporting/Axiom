@@ -161,3 +161,15 @@
 .den-briefwrap .den-foot{gap:var(--dn-sp-2) var(--dn-sp-4);min-height:56px}
 .den-briefwrap .den-foot .den-chip-q{background:var(--dn-neutral-dim);color:var(--dn-ink-1)}
 .den-briefwrap .den-foot-act .den-mini.primary .den-ic{width:15px;height:15px}
+
+/* ------------------------------------------------------------------------------------------ while editing */
+/* the marks are tinted from a copy of the text laid exactly under the textarea (same font, padding and wrapping, its own
+   text transparent); the caret line under the page names the mark the cursor is in */
+.den-docbody>.den-ta-mirror{grid-area:1/1;min-width:0;margin:0;padding:var(--dn-sp-5) var(--dn-sp-6) var(--dn-sp-6);border:0;font:400 var(--dn-fs-lg)/var(--dn-lh-read,1.75) var(--dn-text);letter-spacing:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;color:transparent;pointer-events:none;user-select:none}
+.den-sec[data-mode="edit"] .den-docbody>.den-ta{position:relative;z-index:1}
+.den-ta-mirror .den-code{border-radius:var(--dn-r-xs);background:var(--dn-accent-dim);box-shadow:0 0 0 2px var(--dn-accent-dim)}
+.den-ta-mirror .den-code.on{box-shadow:0 0 0 2px var(--dn-accent-dim),0 0 0 3px var(--dn-accent)}
+.den-ta-mirror .den-code.bad{background:var(--dn-neg-dim);box-shadow:0 0 0 2px var(--dn-neg-dim)}
+.den-dochint.on{color:var(--dn-ink-1)}
+.den-dochint.on b{color:var(--dn-ink-0);font-weight:600}
+.den-dochint>span:not(.den-evcode){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
