@@ -68,7 +68,7 @@ window.__DEN_PARTS.desk = function (D) {
             ${rows.map(r => { const t = kind === 'term' ? term(r.id) : {}; return html`<tr key=${r.id} class="den-row"><td><span class="den-t">${kind === 'hashtag' ? '#' : ''}${r.value}</span>${r.name ? html`<span class="den-sub">${r.name}${r.actor_kind ? ' - a public actor (' + r.actor_kind + '), named on its own posts' : ''}</span>` : null}${t.note ? html`<span class="den-sub">${t.note}</span>` : null}</td>
               <td>${kind !== 'term' ? (CH[r.platform] || r.platform) : canWrite ? html`<select class="den-in" value=${r.issue || ''} disabled=${!!busy} aria-label=${'The issue "' + r.value + '" files under'} onChange=${e => setIssue(r.id, e.target.value)}><option value="">no issue (searched for only)</option>${desk.issues.map(i => html`<option key=${i.id} value=${i.id}>${i.label}</option>`)}</select>` : ((desk.issues.find(i => i.id === r.issue) || {}).label || html`<span class="den-chip warn">no issue</span>`)}</td>
               <td><span class=${'den-chip ' + (r.status === 'active' ? 'pos' : '')}>${r.status === 'active' ? 'active' : 'off'}</span>${t.review ? html` <span class="den-chip warn" title="Approved a month ago or more and matched nothing since: keep it or switch it off">review</span>` : null}${t.generic ? html` <span class="den-chip" title="It does not name Australia: what it finds outside the watched places must say something Australian to be kept">generic</span>` : null}</td>
-              <td class="den-mono">${r.last_ok ? since(r.last_ok) + (r.last_layer ? ', layer ' + r.last_layer : '') : kind === 'term' || kind === 'source' ? '-' : 'not yet'}${r.last_error ? html`<span class="den-sub den-neg">${r.last_error}</span>` : null}</td>
+              <td class="den-mono den-lastread">${r.last_ok ? since(r.last_ok) : kind === 'term' || kind === 'source' ? '-' : 'not read yet'}</td>
               <td class="act">${canWrite ? html`<button class="den-mini" disabled=${!!busy} onClick=${() => decide(r.id, r.status === 'active' ? 'off' : 'on')}>${r.status === 'active' ? 'Switch off' : 'Switch on'}</button> <button class="den-mini danger" disabled=${!!busy} aria-label=${'Delete ' + r.value} onClick=${() => setDel(r)}>Delete</button>` : null}</td></tr>`; })}</tbody></table>`
             : html`<${Empty}>This desk's register holds no ${KINDS.find(k => k[0] === kind)[1].toLowerCase()} yet.${kind === 'account' ? ' A registered account is read on its own posts; mark it as a public actor only if it is an organisation, an official or a media outlet.' : ''}<//>`}
         <//>`}
@@ -85,25 +85,87 @@ window.__DEN_PARTS.desk = function (D) {
     </div>`;
   }
 
-  /* ---- Collection ---- */
+  /* ---- Collection: the one home of delivery problems (owner's item (a), 16 November 2026) ----
+     A channel that delivered nothing is said here, with why and the one action, and on no other tab. The gaps come from
+     the checks DenApp already read (no request of its own): undefined while they load, null if they could not be read
+     (the page says so instead of guessing), [] when every channel delivered. */
+  const SECRET = /\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|tools\/|\.py\b|--[a-z]{3,}/;
+  const SETUPISH = /\b(Access|permission|token|secret|scope|key)\b/i;
+  /* A gap's detail as plain sentences, with the names only a person setting up the route needs (secrets, permissions,
+     scripts) taken out and folded under "Setup details". */
+  function whyOf(detail) {
+    const plain = []; const setup = [];
+    String(detail || '').split(/(?<=[.!?])\s+(?=[A-Z])/).forEach(s => {
+      if (!s.trim()) return; if (SECRET.test(s)) { setup.push(s.trim()); return; }
+      plain.push(s.replace(/\s*\(([^()]*)\)/g, (m, x) => { if (SECRET.test(x) || SETUPISH.test(x)) { setup.push(x.trim()); return ''; } return m; }).trim());
+    });
+    return { plain, setup };
+  }
+  const routeWords = c => { const r = []; if (c.worker) r.push('the worker'); if (c.collector) r.push('the Mac'); return r.length ? 'By ' + r.join(' and ') : 'Not set up'; };
+  const NO_ROUTE = 'No collection job exists for this channel: it is read on its own schedule.';
+
+  function Gaps({ gaps, to, chOf, canWrite, busy, job, collect, accounts }) {
+    const note = to ? 'For ' + fmtDay.format(new Date(+to)) : 'In this desk\'s window';
+    const action = g => { const c = chOf(g.channel); if (!c) return null;
+      if (c.collector && c.collector.off) return html`<span class="den-gapact">Switched off under Signed-in collection.</span>`;
+      if (c.collector && c.collector.challenge) return html`<span class="den-gapact">Paused at a verification: a person signs in again on the Mac. Nothing is retried.</span>`;
+      if (!c.collect) return html`<span class="den-gapact">${NO_ROUTE}</span>`;
+      if (!canWrite) return html`<span class="den-gapact">A full key can start a collection.</span>`;
+      return html`<button class="den-mini" data-tour="gap-collect" aria-label=${'Collect now: ' + c.label} disabled=${busy === c.id} title="Starts one collection job. No model call." onClick=${() => collect(c, 'gaps')}>${busy === c.id ? 'Starting...' : 'Collect now'}</button>`; };
+    const acc = Array.isArray(accounts) ? accounts.filter(a => a && a.last_error) : [];
+    return html`<${Panel} title="Not delivering" tour="gaps" note=${note} flush=${true}>
+      ${gaps === undefined ? html`<${Empty}>Checking what each channel delivered...<//>`
+        : gaps === null ? html`<${Empty}>The checks could not be read, so which channel delivered nothing is not known here. The table below still says what each one delivered.<//>`
+        : !gaps.length ? html`<${Empty}><span class="den-allgood">Every channel this desk relies on delivered.</span><//>`
+        : html`<ul class="den-gaps">${gaps.map(g => { const w = whyOf(g.detail); const c = chOf(g.channel);
+            return html`<li key=${g.key} data-channel=${g.channel || null}><span class="den-gapdot" aria-hidden="true"></span>
+              <div class="den-gapmain"><span class="den-t">${g.title}</span><span class="den-why">${w.plain.map((s, i) => html`<span key=${i}>${s} </span>`)}</span>
+                ${w.setup.length ? html`<details class="den-setup"><summary>Setup details</summary><ul>${w.setup.map((s, i) => html`<li key=${i}>${s}</li>`)}</ul></details>` : null}</div>
+              <div class="den-gapside">${action(g)}</div>
+              ${job && job.from === 'gaps' && c && job.ch === c.id ? html`<div class="den-gapjob"><${Console} job=${job} title=${job.title} canWrite=${canWrite} /></div>` : null}</li>`; })}</ul>`}
+      ${acc.length ? html`<div class="den-gapacc"><h4>Accounts that could not be read</h4><ul>${acc.slice(0, 40).map((a, i) => html`<li key=${i}><span class="den-t">${a.name || a.value}</span> on ${CH[a.platform] || a.platform}<span class="den-sub">${a.last_ok ? 'last read ' + since(a.last_ok) : 'never read'}; the last try said: ${String(a.last_error).slice(0, 160)}</span></li>`)}</ul></div>` : null}
+      ${to ? html`<p class="den-gapnow">The channels below are as they stand now, not as they stood that day.</p>` : null}
+    <//>`;
+  }
+
+  /* The analysis behind the Board, drawn only when the worker sends it (p67: /den/collection `pipeline` and `tick`). */
+  function Pipeline({ pipeline, last }) {
+    const pl = pipeline && typeof pipeline === 'object' ? pipeline : null; const tk = last && typeof last === 'object' && +last.total > 0 ? last : null;
+    if (!pl && !tk) return null; const n = v => (Number.isFinite(+v) ? +v : 0);
+    const slow = tk && Array.isArray(tk.stages) ? tk.stages.filter(s => Array.isArray(s) && +s[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 3) : [];
+    return html`<${Panel} title="Analysis" tour="pipeline" note="What waits to be grouped and named, and how long the last collection run took">
+      <ul class="den-pipe">
+        ${pl ? html`<li>${n(pl.unplaced) ? plural(n(pl.unplaced), 'item') + ' waiting to be grouped' + (n(pl.oldestUnplacedMin) ? ' (oldest ' + n(pl.oldestUnplacedMin) + ' min)' : '') + '.' : 'Nothing is waiting to be grouped.'}</li>
+          <li>${plural(n(pl.titled), 'narrative') + (n(pl.titled) === 1 ? ' carries' : ' carry') + ' a working title'}${n(pl.awaitingModel) ? '; ' + n(pl.awaitingModel) + (n(pl.awaitingModel) === 1 ? ' waits' : ' wait') + ' for a model name in the daily window' : ''}.</li>` : null}
+        ${tk ? html`<li>The last tick took ${Math.round(n(tk.total) / 1000)} s, ${since(+tk.at)}${tk.ai ? ', inside the daily window for automated model work' : ''}.${slow.length ? html` <span class="den-sub">Slowest: ${slow.map(s => String(s[0]) + ' ' + Math.round(s[1] / 1000) + ' s').join(', ')}.</span>` : null}</li>` : null}
+      </ul>
+    <//>`;
+  }
+
   function CollectionPanel({ desk, tick, bump, canWrite, gaps, to, setTab }) {
     const C = useLoad(() => get('/den/collection?' + q({ desk: desk.id }), 'channels'), [desk.id, tick], desk.id); const [job, setJob] = useState(null); const [busy, setBusy] = useState('');
-    const collect = async ch => { setBusy(ch.id); try { const d = await call('/den/collect', { desk: desk.id, channel: ch.collect }); setJob({ ch: ch.id, id: d.id, status: d.where === 'desktop' ? 'queued' : 'running', lines: [], title: ch.label + (d.where === 'desktop' ? ' (waiting for the Mac collector)' : '') }); tailJob(d.id, j => setJob(o => Object.assign({}, o, j)), () => { C.reload(); bump('collected'); }); } catch (e) { toastMsg(say(e), true); } setBusy(''); };
+    const collect = async (ch, from) => { setBusy(ch.id); try { const d = await call('/den/collect', { desk: desk.id, channel: ch.collect }); setJob({ ch: ch.id, from: from || 'table', id: d.id, status: d.where === 'desktop' ? 'queued' : 'running', lines: [], title: ch.label + (d.where === 'desktop' ? ' (waiting for the Mac collector)' : '') }); tailJob(d.id, j => setJob(o => Object.assign({}, o, j)), () => { C.reload(); bump('collected'); }); } catch (e) { toastMsg(say(e), true); } setBusy(''); };
     const toggle = async src => { const off = (C.data.reach.off || []).slice(); const i = off.indexOf(src); if (i >= 0) off.splice(i, 1); else off.push(src); setBusy('sw'); try { await call('/den/reach', { off }); C.reload(); } catch (e) { toastMsg(say(e), true); } setBusy(''); };
-    if (C.loading && !C.data) return html`<${Loading} what="collection" />`;
-    if (C.err && !C.data) return html`<${Failed} what="Collection" err=${C.err} onRetry=${C.reload} />`;
+    const chs = C.data && Array.isArray(C.data.channels) ? C.data.channels : []; const chOf = id => chs.find(c => c && c.id === id) || null;
+    const gapIds = Array.isArray(gaps) ? gaps.map(g => g.channel) : [];
+    const head = html`<${Gaps} gaps=${gaps} to=${to} chOf=${chOf} canWrite=${canWrite} busy=${busy} job=${job} collect=${collect} accounts=${C.data && C.data.accounts} />`;
+    if (C.loading && !C.data) return html`<div>${head}<${Loading} what="collection" /></div>`;
+    if (C.err && !C.data) return html`<div>${head}<${Failed} what="Collection" err=${C.err} onRetry=${C.reload} /></div>`;
     const d = C.data; const live = (d.reach.agents || []).filter(a => a.live); const bt = d.backtest;
-    const state = c => { const k = c.collector; if (!k) return html`<span class="den-chip pos">from the worker</span>`; if (k.off) return html`<span class="den-chip warn">switched off</span>`; if (k.challenge) return html`<span class="den-chip neg" title=${'Stopped at a verification ' + since(k.challenge.at) + '. Nothing is retried: a person signs in again on the Mac.'}>paused: verification</span>`; if (k.offered) return html`<span class="den-chip pos">a collector is connected</span>`;
+    const state = c => { const k = c.collector; if (!k) return c.worker ? html`<span class="den-chip pos">from the worker</span>` : html`<span class="den-chip" title="Neither the worker nor a Mac collector reads this channel yet: see How it is read.">not set up</span>`; if (k.off) return html`<span class="den-chip warn">switched off</span>`; if (k.challenge) return html`<span class="den-chip neg" title=${'Stopped at a verification ' + since(k.challenge.at) + '. Nothing is retried: a person signs in again on the Mac.'}>paused: verification</span>`; if (k.offered) return html`<span class="den-chip pos">a collector is connected</span>`;
       return c.worker ? html`<span class="den-chip" title="The worker's own read of this channel runs. Its signed-in read waits: no Mac collector offers it (the Mac is off, the agent is not running, or nobody has signed in to it there).">from the worker only</span>` : html`<span class="den-chip warn" title="Nothing reads this channel now: no Mac collector offers it (the Mac is off, the agent is not running, or nobody has signed in to it there), and the worker has no route of its own.">no collector</span>`; };
     return html`<div>
+      ${head}
       <div class="den-notice ${live.length ? 'good' : ''}" data-tour="collectors" role="status">${live.length ? live.length + ' collector' + (live.length === 1 ? ' is' : 's are') + ' connected (' + live.map(a => a.agent).join(', ') + ').' : 'No Mac collector is connected. Channels read from the worker still run; signed-in reads wait.'} ${canWrite ? '' : 'Your key is read-only: collecting and the switches need a full key.'}</div>
-      <${Panel} title="Channels" tour="channels" note=${'What each delivered for ' + desk.name} flush=${true}>
-        <table class="den-table"><thead><tr><th>Channel</th><th>How it is read</th><th>Now</th><th class="num">Last day</th><th class="num">7 days</th><th>Last delivered</th><th></th></tr></thead><tbody>
-        ${d.channels.map(c => html`<${React.Fragment} key=${c.id}><tr class="den-row"><td><span class="den-t">${c.label}</span>${c.accounts != null ? html`<span class="den-sub">${c.accounts} registered account${c.accounts === 1 ? '' : 's'}</span>` : null}</td><td>${c.how}${c.cannot ? html`<span class="den-sub">Cannot reach: ${c.cannot}</span>` : null}</td><td>${state(c)}</td>
-          <td class="num">${c.delivered.d1 || html`<span class="den-chip warn" title="Nothing for this desk in the last day. That is a collection fact, not a quiet day.">0</span>`}</td><td class="num">${fmtN(c.delivered.d7)}</td><td class="den-mono">${c.delivered.last ? since(c.delivered.last) : 'never'}${c.delivered.layers.length ? ' (L' + c.delivered.layers.join(', L') + ')' : ''}</td>
-          <td class="act">${canWrite ? html`<button class="den-mini" data-tour="collect-now" disabled=${busy === c.id || (c.collector && c.collector.off)} title=${c.collector && c.collector.off ? 'Switched off below' : 'Starts one collection job. No model call.'} onClick=${() => collect(c)}>${busy === c.id ? 'Starting...' : 'Collect now'}</button>` : null}</td></tr>
-          ${job && job.ch === c.id ? html`<tr class="den-jobrow"><td colSpan="7"><${Console} job=${job} title=${job.title} canWrite=${canWrite} /></td></tr>` : null}<//>`)}</tbody></table>
+      <${Panel} title="Channels" tour="channels" note=${'What each delivered for ' + desk.name + ', as it stands now'} flush=${true}>
+        <table class="den-table den-chtable"><thead><tr><th>Channel</th><th>How it is read</th><th>Now</th><th class="num">Last day</th><th class="num">7 days</th><th>Last delivered</th><th></th></tr></thead><tbody>
+        ${d.channels.map(c => html`<${React.Fragment} key=${c.id}><tr class="den-row" data-gap=${gapIds.indexOf(c.id) >= 0 ? '1' : null}><td><span class="den-t">${c.label}</span>${c.accounts != null ? html`<span class="den-sub">${c.accounts} registered account${c.accounts === 1 ? '' : 's'}</span>` : null}</td>
+          <td><details class="den-how"><summary>${routeWords(c)}</summary><span class="den-howtext">${c.how}</span>${c.cannot ? html`<span class="den-sub">Cannot reach: ${c.cannot}</span>` : null}</details></td><td>${state(c)}</td>
+          <td class="num">${c.delivered.d1 || (gapIds.indexOf(c.id) >= 0 ? html`<span class="den-chip warn" title="Nothing for this desk in the last day, on a channel this desk relies on. That is a collection fact, not a quiet day.">0</span>` : html`<span class="den-zero" title="Nothing for this desk in the last day.">0</span>`)}</td><td class="num">${fmtN(c.delivered.d7)}</td><td class="den-mono" title=${c.delivered.layers.length ? 'Read through layer ' + c.delivered.layers.join(', ') : null}>${c.delivered.last ? since(c.delivered.last) : 'never'}</td>
+          <td class="act">${canWrite ? html`<button class="den-mini" data-tour="collect-now" disabled=${busy === c.id || !c.collect || (c.collector && c.collector.off)} title=${!c.collect ? NO_ROUTE : c.collector && c.collector.off ? 'Switched off below' : 'Starts one collection job. No model call.'} onClick=${() => collect(c, 'table')}>${busy === c.id ? 'Starting...' : 'Collect now'}</button>` : null}</td></tr>
+          ${job && job.from !== 'gaps' && job.ch === c.id ? html`<tr class="den-jobrow"><td colSpan="7"><${Console} job=${job} title=${job.title} canWrite=${canWrite} /></td></tr>` : null}<//>`)}</tbody></table>
       <//>
+      <${Pipeline} pipeline=${d.pipeline} last=${d.tick} />
       <div class="den-grid2">
         <${Panel} title="Signed-in collection" note="Off stops every collector at once" flush=${true}>
           <table class="den-table"><thead><tr><th>Platform</th><th>State</th><th></th></tr></thead><tbody>${['x', 'facebook', 'instagram', 'ytsearch', 'reddit', 'gated'].map(src => { const off = (d.reach.off || []).indexOf(src) >= 0; const chal = (d.reach.challenges || {})[src]; return html`<tr key=${src}><td>${{ ytsearch: 'YouTube search', gated: 'Subscriber news' }[src] || CH[src]}</td><td>${off ? html`<span class="den-chip warn">off</span>` : html`<span class="den-chip pos">allowed</span>`}${chal ? html` <span class="den-chip neg">verification ${since(chal.at)}</span>` : null}</td>
@@ -120,9 +182,10 @@ window.__DEN_PARTS.desk = function (D) {
         ${bt ? html`<div><p><b class="den-t">${bt.share}%</b> - ${fmtN(bt.held)} of ${fmtN(bt.links)} links in ${bt.reports} reports${bt.period ? ' (' + bt.period + ')' : ''}; measured ${since(bt.at)} by ${bt.by}.</p>
             <table class="den-table"><thead><tr><th>Channel</th><th class="num">Links</th><th class="num">Held</th><th class="num">Share</th></tr></thead><tbody>${Object.keys(bt.byChannel).map(k => html`<tr key=${k}><td>${CH[k] || k}</td><td class="num">${bt.byChannel[k].links}</td><td class="num">${bt.byChannel[k].held}</td><td class="num">${bt.byChannel[k].links ? Math.round(bt.byChannel[k].held / bt.byChannel[k].links * 100) + '%' : '-'}</td></tr>`)}</tbody></table>
             ${bt.misses.length ? html`<details><summary class="den-link">${bt.misses.length} of the links it did not hold</summary><ul class="den-ev">${bt.misses.map((m, i) => html`<li key=${i}>${CH[m.channel] || m.channel}: ${m.url}</li>`)}</ul></details>` : null}</div>`
-          : html`<${Empty}><b>Not measured yet.</b> This is the number that says whether collection is good enough. It is measured on the Mac, against a folder of exported reports kept outside the repository: <code>python3 tools/den-backtest.py ~/Documents/briefs --desk ${desk.id} --key $AXIOM_KEY --save</code><//>`}
+          : html`<${Empty}><b>Not measured yet.</b> This is the number that says whether collection is good enough. It is measured on the Mac, against a folder of exported reports kept outside the repository.
+              <details class="den-setup"><summary>Setup details</summary><code>python3 tools/den-backtest.py ~/Documents/briefs --desk ${desk.id} --key $AXIOM_KEY --save</code></details><//>`}
       <//>
-      <p class="den-mono">${(d.notBuilt || []).join(' ')}</p>
+      ${(d.notBuilt || []).length ? html`<details class="den-setup den-notbuilt"><summary>Setup details: what is not collected, and why</summary><p class="den-mono">${d.notBuilt.join(' ')}</p></details>` : null}
     </div>`;
   }
 
@@ -176,8 +239,11 @@ window.__DEN_PARTS.desk = function (D) {
       minEng: Object.assign({}, desk.options.minEng), fold: desk.options.fold !== false, density: desk.options.density || 'regular' });
     const [f, setF] = useState(init); const [busy, setBusy] = useState(false); const [msg, setMsg] = useState(null); const [nd, setNd] = useState({ name: '', region: 'au' });
     const create = async () => { setBusy(true); setMsg(null); try { const d = await call('/den/desk/update', { ns: desk.ns, name: nd.name, region: nd.region, like: desk.id }); setNd({ name: '', region: 'au' }); onCreated(d.desk); } catch (e) { setMsg({ ok: false, text: say(e) }); } setBusy(false); };
-    useEffect(() => { setF(init()); setMsg(null); }, [desk.id, desk.revision]);   // eslint-disable-line
-    const set = (k, v) => setF(o => Object.assign({}, o, { [k]: v })); const dirty = JSON.stringify(f) !== JSON.stringify(init());
+    // a desk that comes back with a new revision after this panel's own save keeps "Saved."; another desk, or a change
+    // made since, clears it (a conflict note is cleared by the revision it asked to load)
+    const lastId = useRef(desk.id);
+    useEffect(() => { setF(init()); const same = lastId.current === desk.id; lastId.current = desk.id; setMsg(m => (same && m && m.ok ? m : null)); }, [desk.id, desk.revision]);   // eslint-disable-line
+    const set = (k, v) => { setF(o => Object.assign({}, o, { [k]: v })); setMsg(m => (m && m.ok ? null : m)); }; const dirty = JSON.stringify(f) !== JSON.stringify(init());
     const move = (i, d) => { const s = f.sections.slice(); const j = i + d; if (j < 0 || j >= s.length) return; const t = s[i]; s[i] = s[j]; s[j] = t; set('sections', s); };
     const save = async () => { setBusy(true); setMsg(null); try { const list = v => v.split(',').map(x => x.trim()).filter(Boolean);
         const d = await call('/den/desk/update', { id: desk.id, revision: desk.revision, patch: { name: f.name, region: f.region, cadence: f.cadence, window_h: f.window_h, auto_draft: f.auto_draft, sections: f.sections, ratings: { levels: list(f.levels), trends: list(f.trends), items: desk.ratings.items }, options: { hidden: f.hidden, minEng: f.minEng, fold: f.fold, density: f.density } } });
