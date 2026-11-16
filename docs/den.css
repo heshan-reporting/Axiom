@@ -17,8 +17,11 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
   /* ground and surfaces: opaque slate, no glass */
   --dn-bg-0:#0c1016; --dn-bg-1:#11161d; --dn-s1:#151b24; --dn-s2:#1c2430; --dn-s3:#253040;
   --dn-line:#28323f; --dn-line-2:#3a4656;
-  /* ink */
-  --dn-ink-0:#f1f4f8; --dn-ink-1:#c9d1db; --dn-ink-2:#a9b4c1; --dn-ink-3:#97a3b1;
+  /* a field's boundary: 3.4:1 on bg-1, 3.2:1 on s1 (WCAG 1.4.11; line-2 is 1.6 to 1.8) */
+  --dn-line-3:#5d6c81;
+  /* ink: 0 titles and the words being written, 1 body, 2 meta, 3 placeholders and quiet tags; 4 timestamps, counts, ids and
+     hints, only on the fixed dark grounds (6.2 on bg-0, 5.1 on s2; never on s3 or neutral-dim, where it is 4.3) */
+  --dn-ink-0:#f1f4f8; --dn-ink-1:#c9d1db; --dn-ink-2:#a9b4c1; --dn-ink-3:#97a3b1; --dn-ink-4:#8894a3;
   /* accent */
   --dn-accent:#8ea0ff; --dn-accent-hi:#a7b5ff; --dn-accent-ink:#0b1033; --dn-accent-dim:#1f2750; --dn-accent-text:#b4c0ff;
   /* status: the solid, its dim tint as a ground, the ink that reads on the tint */
@@ -35,19 +38,24 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
   --dn-e1:0 1px 0 rgba(255,255,255,.03) inset,0 1px 2px rgba(0,0,0,.4);
   --dn-e2:0 1px 0 rgba(255,255,255,.05) inset,0 2px 4px rgba(0,0,0,.34),0 6px 14px rgba(0,0,0,.26);
   --dn-e3:0 1px 0 rgba(255,255,255,.06) inset,0 6px 12px rgba(0,0,0,.36),0 16px 32px rgba(0,0,0,.34);
-  /* type */
+  /* rings: the selected or lit thing, drawn outside its border (a shadow, so nothing moves) */
+  --dn-ring:0 0 0 3px var(--dn-accent-dim); --dn-ring-warn:0 0 0 3px var(--dn-warn-dim);
+  /* type: 400 text, 500 controls, 600 emphasis and titles, 700 display only; uppercase labels are 600 xs with the one tracking */
   --dn-display:'Manrope','DM Sans',system-ui,sans-serif; --dn-text:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
   --dn-mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
   --dn-fs-xs:11px; --dn-fs-sm:12px; --dn-fs-md:13px; --dn-fs-base:14px; --dn-fs-lg:16px; --dn-fs-xl:20px; --dn-fs-2xl:26px;
+  --dn-lh-tight:1.25; --dn-lh-body:1.5; --dn-lh-read:1.75; --dn-track-caps:.06em;
   /* space */
   --dn-sp-1:4px; --dn-sp-2:8px; --dn-sp-3:12px; --dn-sp-4:16px; --dn-sp-5:20px; --dn-sp-6:24px; --dn-sp-7:32px;
-  /* radius */
-  --dn-r-xs:4px; --dn-r-sm:6px; --dn-r-md:10px; --dn-r-lg:14px; --dn-r-pill:999px;
-  /* motion */
-  --dn-dur-1:120ms; --dn-dur-2:200ms; --dn-ease:cubic-bezier(.2,.7,.2,1);
+  /* radius: a card (md) sits 4px inside a column (lg), so the corners nest */
+  --dn-r-xs:4px; --dn-r-sm:6px; --dn-r-md:8px; --dn-r-lg:12px; --dn-r-pill:999px;
+  /* motion: three durations; entrances are opacity plus a few pixels of travel, never a size */
+  --dn-dur-1:120ms; --dn-dur-2:200ms; --dn-dur-3:320ms; --dn-ease:cubic-bezier(.2,.7,.2,1); --dn-ease-out:cubic-bezier(.16,1,.3,1);
+  /* layers: bar, drawer, menu, popover, dialog, the guided tour */
+  --dn-z-bar:5; --dn-z-drawer:20; --dn-z-menu:30; --dn-z-pop:40; --dn-z-dialog:60; --dn-z-tour:80;
   /* sizes */
-  --dn-hit:32px; --dn-top-h:48px; --dn-rail-h:44px; --dn-col-w:272px; --dn-col-w-c:160px; --dn-uns-w:344px; --dn-outline-w:244px; --dn-ev-w:344px; --dn-measure:760px;
-  --den-pad:9px; --den-gap:14px; --den-r:var(--dn-r-md); --den-r-pill:var(--dn-r-pill);
+  --dn-hit:32px; --dn-icon:16px; --dn-top-h:48px; --dn-rail-h:44px; --dn-col-w:272px; --dn-col-w-c:176px; --dn-uns-w:344px; --dn-outline-w:228px; --dn-ev-w:372px; --dn-measure:760px;
+  --den-pad:8px; --den-gap:16px; --den-r:var(--dn-r-md); --den-r-pill:var(--dn-r-pill);
   /* the app tokens the Den's older rules and the shared job console read, on the same palette */
   --t0:var(--dn-ink-0); --t1:var(--dn-ink-1); --t2:var(--dn-ink-2); --t3:var(--dn-ink-3);
   --bg:var(--dn-bg-0); --bg1:var(--dn-bg-1); --x-bg1:var(--dn-bg-1); --x-bg2:var(--dn-s2); --sur:var(--dn-s1); --sur2:var(--dn-s2); --sur3:var(--dn-s3); --x-sur3:var(--dn-s3);
@@ -58,8 +66,8 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 }
 @media (min-width:1600px){#den-root{--dn-col-w:300px;--dn-uns-w:400px;--dn-outline-w:280px;--dn-ev-w:440px}}
 @media (min-width:1900px){#den-root{--dn-col-w:316px;--dn-uns-w:440px;--dn-ev-w:500px;--dn-measure:800px}}
-#den-app[data-density="compact"]{--den-pad:5px}
-#den-app[data-density="roomy"]{--den-pad:13px}
+#den-app[data-density="compact"]{--den-pad:4px}
+#den-app[data-density="roomy"]{--den-pad:12px}
 #den-root [hidden]{display:none!important}
 #den-root *{box-sizing:border-box}
 #den-root .sp0{--spine:var(--dn-sec-0)} #den-root .sp1{--spine:var(--dn-sec-1)} #den-root .sp2{--spine:var(--dn-sec-2)} #den-root .sp3{--spine:var(--dn-sec-3)}
@@ -70,13 +78,14 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 #den-app{display:grid;grid-template-rows:var(--dn-top-h) var(--dn-rail-h) minmax(0,1fr);height:100%;min-width:0}
 #den-shell{display:flex;flex-direction:column;height:100%}
 .den-top{display:flex;align-items:center;gap:var(--dn-sp-3);padding:0 var(--dn-sp-4);min-width:0;background:var(--dn-bg-1);border-bottom:1px solid var(--dn-line);height:var(--dn-top-h);flex-shrink:0}
-.den-back{display:inline-flex;align-items:center;gap:6px;height:var(--dn-hit);padding:0 10px 0 8px;border:0;border-radius:var(--dn-r-sm);background:none;color:var(--dn-ink-1);font:500 var(--dn-fs-md)/1 var(--dn-text);cursor:pointer;white-space:nowrap}
+.den-back{display:inline-flex;align-items:center;gap:6px;height:var(--dn-hit);padding:0 12px 0 8px;border:0;border-radius:var(--dn-r-sm);background:none;color:var(--dn-ink-2);font:500 var(--dn-fs-md)/1 var(--dn-text);cursor:pointer;white-space:nowrap;transition:background var(--dn-dur-1) var(--dn-ease),color var(--dn-dur-1) var(--dn-ease)}
 .den-back:hover{background:var(--dn-s2);color:var(--dn-ink-0)}
 .den-brand{font:700 var(--dn-fs-lg)/1 var(--dn-display);color:var(--dn-ink-0);letter-spacing:-.01em;white-space:nowrap;padding-left:var(--dn-sp-3);border-left:1px solid var(--dn-line)}
-.den-desk select{height:var(--dn-hit);max-width:220px;padding:0 28px 0 12px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-sm);background-color:var(--dn-s2);color:var(--dn-ink-0);font:600 var(--dn-fs-md)/1 var(--dn-text)}
+.den-desk select{height:var(--dn-hit);max-width:220px;padding:0 28px 0 12px;border:1px solid var(--dn-line-3);border-radius:var(--dn-r-sm);background-color:var(--dn-bg-1);color:var(--dn-ink-0);font:600 var(--dn-fs-md)/1 var(--dn-text);cursor:pointer;transition:border-color var(--dn-dur-1) var(--dn-ease)}
+.den-desk select:hover,.den-daypick input:hover{border-color:var(--dn-ink-3)}
 .den-where{display:flex;align-items:baseline;gap:8px;min-width:0;overflow:hidden;white-space:nowrap}
 .den-day{font:600 var(--dn-fs-sm)/1 var(--dn-text);color:var(--dn-ink-0)}
-.den-win{font-size:var(--dn-fs-sm);color:var(--dn-ink-2);overflow:hidden;text-overflow:ellipsis}
+.den-win{font-size:var(--dn-fs-sm);color:var(--dn-ink-4);overflow:hidden;text-overflow:ellipsis}
 .den-budget{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:var(--dn-fs-sm);line-height:1.1;color:var(--dn-ink-2);white-space:nowrap}
 .den-budget b{color:var(--dn-ink-0);font-weight:600;font-variant-numeric:tabular-nums}
 /* the meter under the count: used of the cap, accent until three quarters, then warn, then neg when the cap is reached */
@@ -84,17 +93,28 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-meter i{display:block;height:100%;border-radius:inherit;background:var(--dn-accent);transition:width var(--dn-dur-2) var(--dn-ease)}
 .den-meter i.near{background:var(--dn-warn)} .den-meter i.full{background:var(--dn-neg)}
 /* the day picker: today unless another day is picked; the chip beside it says so while it is */
-.den-daypick input{height:var(--dn-hit);padding:0 8px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-sm);background-color:var(--dn-s2);color:var(--dn-ink-0);font:500 var(--dn-fs-sm)/1 var(--dn-text);color-scheme:dark}
+.den-daypick input{height:var(--dn-hit);padding:0 8px;border:1px solid var(--dn-line-3);border-radius:var(--dn-r-sm);background-color:var(--dn-bg-1);color:var(--dn-ink-0);font:500 var(--dn-fs-sm)/1 var(--dn-text);color-scheme:dark}
 .den-otherday{flex-shrink:0}
 .den-keys{min-width:var(--dn-hit);font-weight:700}
+/* the way into the guided tour (contract C3): a quiet button that reads as an invitation, never as an alarm */
+.den-head .den-mini.den-guide{color:var(--dn-accent-text)}
+.den-head .den-mini.den-guide:hover:not(:disabled){color:var(--dn-ink-0)}
+/* an icon beside a word (contract C3; SHELL's Ic helper). Never instead of the word: buttons are found by name */
+#den-root .den-ic{width:var(--dn-icon);height:var(--dn-icon);flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px}
+#den-root .den-mini .den-ic,#den-root .den-back .den-ic{margin-left:-2px}
+#den-root .den-check .den-ic{width:14px;height:14px;margin-left:-2px}
+#den-root .den-chip .den-ic,#den-root .den-cite .den-ic,#den-root .den-seg .den-ic{width:12px;height:12px;stroke-width:2}
 .den-spacer{flex:1}
 .den-rail{display:flex;align-items:stretch;gap:var(--dn-sp-4);padding:0 var(--dn-sp-4);min-width:0;background:var(--dn-bg-1);border-bottom:1px solid var(--dn-line)}
 .den-tabs{display:flex;gap:2px;flex-shrink:0}
-.den-tab{position:relative;height:100%;padding:0 12px;border:0;background:none;color:var(--dn-ink-2);font:500 var(--dn-fs-base)/1 var(--dn-text);cursor:pointer;white-space:nowrap}
+.den-tab{position:relative;height:100%;padding:0 12px;border:0;background:none;color:var(--dn-ink-2);font:500 var(--dn-fs-base)/1 var(--dn-text);cursor:pointer;white-space:nowrap;transition:color var(--dn-dur-1) var(--dn-ease)}
 .den-tab:hover{color:var(--dn-ink-0)}
-.den-tab[aria-selected="true"]{color:var(--dn-ink-0);font-weight:600}
-.den-tab[aria-selected="true"]::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:var(--dn-r-xs);background:var(--dn-accent)}
-.den-tab .n{font-family:var(--dn-mono);font-size:10.5px;color:var(--dn-ink-2);margin-left:6px;font-variant-numeric:tabular-nums}
+/* the selected tab: a 2px accent rule under the word, drawn as a background so the ::after stays free for the dot below */
+.den-tab[aria-selected="true"]{color:var(--dn-ink-0);font-weight:600;background:linear-gradient(var(--dn-accent),var(--dn-accent)) no-repeat center bottom/calc(100% - 20px) 2px}
+/* something on that tab wants a look (D5: a channel not delivering, on Collection): a neutral dot, no number, no warn colour,
+   no text, so the tab still reads exactly its name */
+.den-tab[data-attn]::after{content:"";position:absolute;top:calc(50% - 10px);right:4px;width:6px;height:6px;border-radius:var(--dn-r-pill);background:var(--dn-ink-3)}
+.den-tab .n{font-family:var(--dn-text);font-size:var(--dn-fs-xs);font-weight:600;color:var(--dn-ink-3);margin-left:6px;font-variant-numeric:tabular-nums}
 #den-tabpanel{min-height:0;min-width:0;overflow:auto;background:var(--dn-bg-0)}
 #den-tabpanel.tab-today,#den-tabpanel.tab-brief{overflow:hidden}
 #den-tabpanel>.den-state,#den-shell>.den-state{margin:var(--dn-sp-5)}
@@ -105,38 +125,48 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-page .den-tab{height:var(--dn-hit);padding:0 12px;border-radius:var(--dn-r-pill);font-size:var(--dn-fs-md)}
 .den-page .den-tab[aria-selected="true"]{background:var(--dn-s3)}
 .den-page .den-tab[aria-selected="true"]::after{display:none}
+.den-page .den-tab[data-attn]::after{display:none}
 
 /* ------------------------------------------------------------------------------------------ the checks rail */
 .den-strip{position:relative;display:flex;align-items:center;gap:var(--dn-sp-2);flex:1 1 auto;min-width:0;justify-content:flex-end}
-.den-strip-h{display:flex;flex-direction:column;align-items:flex-end;gap:1px;font:600 10.5px/1.15 var(--dn-text);letter-spacing:.08em;text-transform:uppercase;color:var(--dn-ink-2);white-space:nowrap}
-.den-strip-h span{letter-spacing:.02em;text-transform:none;font-weight:500}
+/* the heading is one line at the size of the pills: the number that matters most is no longer the smallest text on the page */
+.den-strip-h{display:flex;align-items:baseline;gap:6px;font:500 var(--dn-fs-sm)/1.2 var(--dn-text);color:var(--dn-ink-2);white-space:nowrap}
+.den-strip-h span{font-weight:500}
+.den-strip-h span::before{content:"\00b7";margin-right:6px;color:var(--dn-ink-4)}
 .den-strip-h .un{color:var(--dn-warn-ink)} .den-strip-h .ok{color:var(--dn-pos-ink)}
 .den-strip>ul{display:flex;gap:6px;list-style:none;margin:0;padding:0;min-width:0}
 .den-strip>ul>li{min-width:0}
-.den-check{display:inline-flex;align-items:center;gap:6px;height:28px;max-width:100%;padding:0 9px 0 11px;border:1px solid transparent;border-radius:var(--dn-r-pill);background:var(--dn-neutral-dim);color:var(--dn-ink-1);font:600 var(--dn-fs-sm)/1 var(--dn-text);cursor:pointer;white-space:nowrap}
+/* a pill is neutral chrome: it says what it found by its count and its dot, in the kind's colour; only the open pill is tinted */
+.den-check{display:inline-flex;align-items:center;gap:6px;height:28px;max-width:100%;padding:0 10px 0 12px;border:1px solid transparent;border-radius:var(--dn-r-pill);background:var(--dn-neutral-dim);color:var(--dn-ink-1);font:500 var(--dn-fs-sm)/1 var(--dn-text);cursor:pointer;white-space:nowrap;transition:background var(--dn-dur-1) var(--dn-ease),border-color var(--dn-dur-1) var(--dn-ease),color var(--dn-dur-1) var(--dn-ease)}
 .den-check-l{overflow:hidden;text-overflow:ellipsis}
-.den-check b{font-variant-numeric:tabular-nums}
-.den-check i{flex:0 0 9px;width:9px;height:9px;border-radius:var(--dn-r-pill);border:1.5px solid currentColor;opacity:.75}
+.den-check b{font-weight:700;font-variant-numeric:tabular-nums}
+.den-check i{flex:0 0 8px;width:8px;height:8px;border-radius:var(--dn-r-pill);border:1.5px solid currentColor;opacity:.8}
 .den-check i.ok{border-color:var(--dn-ink-3);opacity:.6}
 .den-check i.cov{background:var(--dn-pos);border-color:var(--dn-pos);opacity:1}
-.den-check.clear{background:none;border-color:var(--dn-line);color:var(--dn-ink-2);font-weight:500}
-.den-check.has.gap{background:var(--dn-neg-dim);color:var(--dn-neg-ink);border-color:var(--dn-neg)}
-.den-check.has.spike{background:var(--dn-neg-dim);color:var(--dn-neg-ink)}
-.den-check.has.emerging,.den-check.has.burst{background:var(--dn-warn-dim);color:var(--dn-warn-ink)}
-.den-check.has.outlier{background:var(--dn-accent-dim);color:var(--dn-accent-text)}
-.den-check.has.first_seen{background:var(--dn-info-dim);color:var(--dn-info-ink)}
-.den-check:hover,.den-check.open{border-color:currentColor}
-.den-pop{position:absolute;top:calc(100% + 2px);right:0;z-index:40;width:min(440px,calc(100vw - 32px));max-height:min(70vh,560px);overflow:auto;background:var(--dn-s2);border:1px solid var(--dn-line-2);border-radius:var(--dn-r-md);box-shadow:var(--dn-e3)}
-.den-pop>header{display:flex;align-items:center;gap:var(--dn-sp-2);padding:10px 12px;border-bottom:1px solid var(--dn-line)}
+.den-check.clear{background:none;border-color:var(--dn-line);color:var(--dn-ink-3)}
+.den-check.has{background:var(--dn-neutral-dim);color:var(--dn-ink-0)}
+.den-check.has.spike b,.den-check.has.gap b{color:var(--dn-neg-ink)} .den-check.has.spike i.un,.den-check.has.gap i.un{border-color:var(--dn-neg)}
+.den-check.has.emerging b,.den-check.has.burst b{color:var(--dn-warn-ink)} .den-check.has.emerging i.un,.den-check.has.burst i.un{border-color:var(--dn-warn)}
+.den-check.has.outlier b{color:var(--dn-accent-text)} .den-check.has.outlier i.un{border-color:var(--dn-accent)}
+.den-check.has.first_seen b{color:var(--dn-info-ink)} .den-check.has.first_seen i.un{border-color:var(--dn-info)}
+.den-check:hover{border-color:var(--dn-line-3);color:var(--dn-ink-0)}
+.den-check.open{border-color:currentColor}
+.den-check.has.spike.open,.den-check.has.gap.open{background:var(--dn-neg-dim);color:var(--dn-neg-ink)}
+.den-check.has.emerging.open,.den-check.has.burst.open{background:var(--dn-warn-dim);color:var(--dn-warn-ink)}
+.den-check.has.outlier.open{background:var(--dn-accent-dim);color:var(--dn-accent-text)}
+.den-check.has.first_seen.open{background:var(--dn-info-dim);color:var(--dn-info-ink)}
+.den-pop{position:absolute;top:calc(100% + 4px);right:0;z-index:var(--dn-z-pop);width:min(440px,calc(100vw - 32px));max-height:min(70vh,560px);overflow:auto;background:var(--dn-s2);border:1px solid var(--dn-line-2);border-radius:var(--dn-r-lg);box-shadow:var(--dn-e3);animation:den-in var(--dn-dur-2) var(--dn-ease-out)}
+.den-pop>header{display:flex;align-items:center;gap:var(--dn-sp-2);padding:8px 8px 8px 12px;border-bottom:1px solid var(--dn-line)}
 .den-pop ul{list-style:none;margin:0;padding:0}
-.den-pop li{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-bottom:1px solid var(--dn-line)}
+.den-pop li{display:flex;flex-direction:column;gap:4px;padding:12px;border-bottom:1px solid var(--dn-line)}
 .den-pop li:last-child{border-bottom:0}
 .den-pop .d{color:var(--dn-ink-2);font-size:var(--dn-fs-sm)}
 .den-pop-act{display:flex;align-items:center;gap:var(--dn-sp-3);margin-top:4px}
-.den-pop-none{margin:0;padding:14px 12px;color:var(--dn-ink-2)}
+.den-pop-none{margin:0;padding:16px 12px;color:var(--dn-ink-2)}
 .den-strip .den-state{display:flex;align-items:center;gap:var(--dn-sp-2);min-width:0;padding:0;border:0;background:none;font-size:var(--dn-fs-sm);white-space:nowrap}
 .den-strip .den-state .den-skel{display:none}
 .den-strip .den-errtext{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.den-strip .den-state.err{border:0;background:none;max-width:none;margin:0;color:var(--dn-neg-ink)}
 
 /* ------------------------------------------------------------------------------------------ type, chips, buttons, fields */
 .den-t{color:var(--dn-ink-0)}
@@ -153,10 +183,12 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-chip.warn{background:var(--dn-warn-dim);color:var(--dn-warn-ink)}
 .den-chip.acc{background:var(--dn-accent-dim);color:var(--dn-accent-text)}
 .den-chip.info{background:var(--dn-info-dim);color:var(--dn-info-ink)}
+.den-col-meta .den-chip:not(.pos):not(.neg):not(.warn):not(.acc):not(.info),.den-src .den-chip:not(.pos):not(.neg):not(.warn):not(.acc):not(.info){background:none;padding-inline:0;color:var(--dn-ink-3);font-weight:500}
+.den-src .den-chip:not(.pos):not(.neg):not(.warn):not(.acc):not(.info){padding-inline:2px;box-shadow:inset 0 0 0 1px var(--dn-line-2);border-radius:var(--dn-r-xs)}
 .den-link{color:var(--dn-accent-text);text-decoration:underline;text-underline-offset:2px;background:none;border:0;padding:0;font:inherit;cursor:pointer}
 .den-link:hover{color:var(--dn-ink-0)}
 /* buttons: secondary is the base; primary carries the one action of a surface; quiet recedes; danger warns; row sits in a card or a table row */
-.den-mini{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:var(--dn-hit);padding:0 12px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-sm);background:var(--dn-s2);color:var(--dn-ink-0);font:600 var(--dn-fs-sm)/1.2 var(--dn-text);cursor:pointer;white-space:nowrap;transition:background var(--dn-dur-1) var(--dn-ease),border-color var(--dn-dur-1) var(--dn-ease)}
+.den-mini{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:var(--dn-hit);padding:0 12px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-sm);background:var(--dn-s2);color:var(--dn-ink-0);font:600 var(--dn-fs-sm)/1.2 var(--dn-text);cursor:pointer;white-space:nowrap;transition:background var(--dn-dur-1) var(--dn-ease),border-color var(--dn-dur-1) var(--dn-ease),color var(--dn-dur-1) var(--dn-ease)}
 .den-mini:hover:not(:disabled){background:var(--dn-s3);border-color:var(--dn-ink-3)}
 .den-mini:disabled{opacity:.5;cursor:not-allowed}
 .den-mini.primary{background:var(--dn-accent);border-color:var(--dn-accent);color:var(--dn-accent-ink);font-weight:700}
@@ -166,147 +198,218 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-mini.danger{background:var(--dn-neg-dim);border-color:var(--dn-neg);color:var(--dn-neg-ink)}
 .den-mini.row{padding:0 10px;background:var(--dn-s1);font-weight:500}
 .den-mini.on{background:var(--dn-accent-dim);border-color:var(--dn-accent);color:var(--dn-accent-text)}
-.den-lab{display:flex;flex-direction:column;gap:4px;font:600 10.5px/1.2 var(--dn-text);letter-spacing:.06em;text-transform:uppercase;color:var(--dn-ink-2)}
-.den-lab select,.den-lab input,.den-lab textarea,.den-in{font:400 var(--dn-fs-md)/1.3 var(--dn-text);letter-spacing:0;text-transform:none;color:var(--dn-ink-0);background-color:var(--dn-bg-1);border:1px solid var(--dn-line-2);border-radius:var(--dn-r-sm);padding:6px 9px;min-height:var(--dn-hit)}
+.den-mini:active:not(:disabled){transform:translateY(1px)}
+.den-lab{display:flex;flex-direction:column;gap:4px;font:600 var(--dn-fs-xs)/1.2 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-ink-2)}
+.den-lab select,.den-lab input,.den-lab textarea,.den-in{font:400 var(--dn-fs-md)/1.3 var(--dn-text);letter-spacing:0;text-transform:none;color:var(--dn-ink-0);background-color:var(--dn-bg-1);border:1px solid var(--dn-line-3);border-radius:var(--dn-r-sm);padding:6px 8px;min-height:var(--dn-hit);transition:border-color var(--dn-dur-1) var(--dn-ease)}
+.den-lab select:hover:not(:disabled),.den-lab input:hover:not(:disabled),.den-lab textarea:hover:not(:disabled),.den-in:hover:not(:disabled){border-color:var(--dn-ink-3)}
 .den-lab input:disabled,.den-lab select:disabled,.den-in:disabled{opacity:.6}
 #den-root ::placeholder{color:var(--dn-ink-3);opacity:1}
 #den-root input[type="checkbox"]{width:16px;height:16px;accent-color:var(--dn-accent)}
 #den-root :focus-visible{outline:2px solid var(--dn-focus);outline-offset:2px}
 .den-form{display:flex;flex-wrap:wrap;gap:var(--dn-sp-2) var(--dn-sp-3);align-items:flex-end}
-.den-grow{flex:1 1 240px} .den-grow2{flex:2 1 220px} .den-full{flex:1 1 100%} .den-mt{margin-top:var(--dn-sp-2)} .den-padform{padding:10px 12px}
+.den-grow{flex:1 1 240px} .den-grow2{flex:2 1 220px} .den-full{flex:1 1 100%} .den-mt{margin-top:var(--dn-sp-2)} .den-padform{padding:12px}
 .den-save{font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
 .den-save.dirty{color:var(--dn-warn-ink)} .den-save.bad{color:var(--dn-neg-ink)} .den-save.ok{color:var(--dn-pos-ink)}
 
 /* ------------------------------------------------------------------------------------------ panels, tables, states */
-.den-panel{border:1px solid var(--dn-line);border-radius:var(--dn-r-lg);background:var(--dn-s1);margin:0 0 var(--den-gap);box-shadow:var(--dn-e1);min-width:0}
-.den-panel>header{display:flex;flex-wrap:wrap;gap:var(--dn-sp-2) var(--dn-sp-3);align-items:center;padding:12px 16px;border-bottom:1px solid var(--dn-line)}
-.den-panel>header h3{font:650 var(--dn-fs-lg)/1.2 var(--dn-display);letter-spacing:-.005em;color:var(--dn-ink-0);margin:0}
+/* a panel is a ground: a line and no shadow. Objects (cards, the popover, menus, dialogs) carry the shadows */
+.den-panel{border:1px solid var(--dn-line);border-radius:var(--dn-r-lg);background:var(--dn-s1);margin:0 0 var(--den-gap);box-shadow:none;min-width:0;animation:den-fade var(--dn-dur-2) var(--dn-ease)}
+.den-panel>header{display:flex;flex-wrap:wrap;gap:var(--dn-sp-2) var(--dn-sp-3);align-items:center;min-height:52px;padding:8px 16px;border-bottom:1px solid var(--dn-line)}
+.den-panel>header h3{font:700 var(--dn-fs-lg)/1.2 var(--dn-display);letter-spacing:-.005em;color:var(--dn-ink-0);margin:0}
 .den-panel>header .den-note{font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
-.den-panel>.den-body{padding:14px 16px}
+.den-panel>.den-body{padding:16px}
 .den-panel>.den-body.flush{padding:0;overflow-x:auto}
 .den-table{width:100%;border-collapse:collapse;font-size:var(--dn-fs-md)}
-.den-table th{text-align:left;font:600 10.5px/1.2 var(--dn-text);letter-spacing:.07em;text-transform:uppercase;color:var(--dn-ink-2);padding:9px 14px;border-bottom:1px solid var(--dn-line);white-space:nowrap}
-.den-table td{padding:var(--den-pad) 14px;border-bottom:1px solid var(--dn-line);vertical-align:top;color:var(--dn-ink-1)}
+.den-table th{text-align:left;font:600 var(--dn-fs-xs)/1.2 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-ink-2);padding:8px 16px;border-bottom:1px solid var(--dn-line);white-space:nowrap}
+.den-table td{padding:var(--den-pad) 16px;border-bottom:1px solid var(--dn-line);vertical-align:top;color:var(--dn-ink-1)}
 .den-table tr:last-child td{border-bottom:0}
 .den-table td.num,.den-table th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .den-table td.act{white-space:nowrap;text-align:right}
 .den-table td.act .den-mini{margin-left:6px}
+/* a row's own buttons recede until the row is pointed at or holds the focus; the panel's primary action stays filled */
+.den-table td.act .den-mini:not(.primary):not(.danger):not(.on){background:none;border-color:var(--dn-line-2)}
+.den-table tr:hover td.act .den-mini:not(.primary):not(.danger):not(.on):not(:disabled),.den-table tr:focus-within td.act .den-mini:not(.primary):not(.danger):not(.on):not(:disabled){background:var(--dn-s3);border-color:var(--dn-line-3)}
+.den-table tbody tr:hover td{background:var(--dn-bg-1)}
 .den-table tr.den-row:hover td{background:var(--dn-s2)}
-.den-jobrow td{background:var(--dn-bg-1);padding:10px 14px}
-.den-state{padding:18px 16px;color:var(--dn-ink-2);font-size:var(--dn-fs-md);line-height:1.6}
+.den-jobrow td{background:var(--dn-bg-1);padding:12px 16px}
+.den-state{padding:16px;color:var(--dn-ink-2);font-size:var(--dn-fs-md);line-height:1.6}
 .den-state b{color:var(--dn-ink-0);font-weight:600}
 .den-state code,.den-mono code{font-family:var(--dn-mono);font-size:var(--dn-fs-xs);color:var(--dn-ink-1);background:var(--dn-bg-1);border-radius:var(--dn-r-xs);padding:1px 5px;overflow-wrap:anywhere}
-.den-state.err{color:var(--dn-ink-1);background:var(--dn-neg-dim);border:1px solid var(--dn-neg);border-radius:var(--dn-r-md)}
+/* a failed read is a notice, not a slab: a neutral ground, a red left rule, the detail on its own line, the one way to retry */
+.den-state.err{color:var(--dn-ink-1);background:var(--dn-s1);border:1px solid var(--dn-line-2);border-left:3px solid var(--dn-neg);border-radius:var(--dn-r-md)}
+.den-state.err .den-errtext{color:var(--dn-ink-2)}
+.den-state.err .den-errtext b{display:block;margin-bottom:2px;color:var(--dn-ink-0)}
+#den-tabpanel>.den-state.err{max-width:640px;margin:var(--dn-sp-7) auto;padding:16px 20px;animation:den-in var(--dn-dur-2) var(--dn-ease-out)}
+#den-tabpanel>.den-state.err .den-errtext{display:block}
+#den-tabpanel>.den-state.err .den-mini{margin:12px 0 0}
 .den-state .den-mini{margin-left:8px}
-.den-loading{display:flex;flex-direction:column;gap:10px}
-.den-loading.board{margin:var(--dn-sp-5)}
+.den-loading{display:flex;flex-direction:column;gap:12px}
+/* the Board loading: the columns that are about to arrive, as ghosts, so the layout does not jump (contract C3). One wide
+   ghost for Unsorted, then narrow ones; the words sit above them */
+.den-loading.board{position:relative;flex-direction:row;align-items:stretch;gap:var(--dn-sp-3);height:calc(100% - 2 * var(--dn-sp-3));margin:var(--dn-sp-3) var(--dn-sp-4);padding:28px 0 0;overflow:hidden}
+.den-loading.board .den-loadtxt{position:absolute;top:4px;left:2px;font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
+.den-loading.board .den-skel{flex:0 0 var(--dn-col-w-c);width:auto;height:auto;min-height:240px;border:1px solid var(--dn-line);border-radius:var(--dn-r-lg)}
+.den-loading.board .den-skel:first-child,.den-loading.board .den-loadtxt+.den-skel{flex-basis:var(--dn-uns-w)}
 .den-skel{display:block;height:12px;width:62%;border-radius:var(--dn-r-xs);background:linear-gradient(90deg,var(--dn-s2) 0,var(--dn-s3) 40%,var(--dn-s2) 80%);background-size:200% 100%;animation:den-shimmer 1.4s linear infinite}
 .den-skel.s2{width:44%} .den-skel.s3{width:53%}
 @keyframes den-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
-.den-notice{border:1px solid var(--dn-line-2);border-left:3px solid var(--dn-warn);border-radius:var(--dn-r-md);padding:10px 14px;margin:0 0 var(--den-gap);font-size:var(--dn-fs-md);color:var(--dn-ink-1);background:var(--dn-s1)}
+/* entrances: opacity and a few pixels of travel, never a size; all of it stops under prefers-reduced-motion (end of file) */
+@keyframes den-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes den-in-x{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+@keyframes den-fade{from{opacity:0}to{opacity:1}}
+@keyframes den-settle{from{box-shadow:0 0 0 3px var(--dn-accent),var(--dn-e1)}to{box-shadow:var(--dn-e1)}}
+.den-notice{border:1px solid var(--dn-line-2);border-left:3px solid var(--dn-warn);border-radius:var(--dn-r-md);padding:12px 16px;margin:0 0 var(--den-gap);font-size:var(--dn-fs-md);color:var(--dn-ink-1);background:var(--dn-s1);animation:den-in var(--dn-dur-2) var(--dn-ease-out)}
 .den-notice.bad{border-left-color:var(--dn-neg)} .den-notice.good{border-left-color:var(--dn-pos)}
 .den-notice .den-mini{margin:8px 8px 0 0}
 .den-ev{margin:6px 0 0;padding:0 0 0 16px;font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
 .den-ev li{margin:3px 0}
 .den-grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--den-gap)}
 .den-bar{display:flex;flex-wrap:wrap;gap:var(--dn-sp-2) var(--dn-sp-3);align-items:center}
-.den-optbar{position:sticky;bottom:0;z-index:5;margin:0 calc(-1 * var(--dn-sp-6)) calc(-1 * var(--dn-sp-7));padding:12px var(--dn-sp-6);background:var(--dn-bg-1);border-top:1px solid var(--dn-line)}
-.den-dialog{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--dn-scrim);z-index:60}
-.den-dialog>div{background:var(--dn-s2);border:1px solid var(--dn-line-2);border-radius:var(--dn-r-lg);box-shadow:var(--dn-e3);padding:20px 22px;max-width:560px;width:calc(100% - 32px);max-height:80vh;overflow:auto}
+/* the Options save bar: docked under the panels and aligned with them, raised while the page scrolls under it */
+.den-optbar{position:sticky;bottom:var(--dn-sp-3);z-index:var(--dn-z-bar);margin:var(--dn-sp-4) 0 0;padding:12px 16px;background:var(--dn-s2);border:1px solid var(--dn-line-2);border-radius:var(--dn-r-lg);box-shadow:var(--dn-e2)}
+.den-dialog{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--dn-scrim);z-index:var(--dn-z-dialog);animation:den-fade var(--dn-dur-1) linear}
+.den-dialog>div{background:var(--dn-s2);border:1px solid var(--dn-line-2);border-radius:var(--dn-r-lg);box-shadow:var(--dn-e3);padding:20px 24px;max-width:560px;width:calc(100% - 32px);max-height:80vh;overflow:auto;animation:den-in var(--dn-dur-2) var(--dn-ease-out)}
 .den-dialog h3{margin:0 0 12px;font:700 var(--dn-fs-xl)/1.2 var(--dn-display);color:var(--dn-ink-0)}
 .den-dialog .den-form{margin-top:var(--dn-sp-4);justify-content:flex-end}
 .den-diff ins{background:var(--dn-pos-dim);color:var(--dn-pos-ink);text-decoration:none}
 .den-diff del{color:var(--dn-neg-ink)}
 .den-cmp{padding:12px 0;border-top:1px solid var(--dn-line)}
 .den-cmp:first-child{border-top:0;padding-top:0}
-.den-cmp h4{margin:0 0 6px;font:650 var(--dn-fs-base)/1.2 var(--dn-display);color:var(--dn-ink-0)}
+.den-cmp h4{margin:0 0 6px;font:700 var(--dn-fs-base)/1.2 var(--dn-display);color:var(--dn-ink-0)}
 
 /* ------------------------------------------------------------------------------------------ the Board */
 .den-boardwrap{display:flex;flex-direction:column;height:100%;min-height:0}
 .den-boardwrap>.den-notice{margin:var(--dn-sp-3) var(--dn-sp-4) 0}
 .den-board{flex:1;min-height:0;display:flex;align-items:stretch;gap:var(--dn-sp-3);padding:var(--dn-sp-3) var(--dn-sp-4);overflow-x:auto;overflow-y:hidden}
-.den-col{--spine:var(--dn-line-2);flex:0 0 var(--dn-col-w);display:flex;flex-direction:column;min-height:0;background:var(--dn-s1);border:1px solid var(--dn-line);border-top:2px solid var(--spine);border-radius:var(--dn-r-lg);box-shadow:var(--dn-e1)}
+/* a column is a ground (bg-1, a line, no shadow); the cards on it are the objects. Its spine is the section's colour */
+.den-col{--spine:var(--dn-line-2);flex:0 0 var(--dn-col-w);display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--dn-bg-1);border:1px solid var(--dn-line);border-top:2px solid var(--spine);border-radius:var(--dn-r-lg);box-shadow:none;transition:background-color var(--dn-dur-1) var(--dn-ease),border-color var(--dn-dur-1) var(--dn-ease),box-shadow var(--dn-dur-2) var(--dn-ease)}
 .den-col.den-unsorted{flex-basis:var(--dn-uns-w);--spine:var(--dn-ink-3)}
-.den-col.over{border-color:var(--dn-accent);background:var(--dn-s2)}
-/* a column with no card is compact: the same column (its key, its state, Write, the drop zone), narrower, its title on two
-   lines. The width changes at once, not over a transition: Chromium starts no drag while the columns under the pointer
-   are still moving (seen 15 November 2026, a drag begun within 300 ms of a filing) */
-.den-col.empty{flex-basis:var(--dn-col-w-c)}
-.den-col.empty .den-col-h h3{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:var(--dn-fs-md);line-height:1.25}
-.den-col.empty .den-col-meta{flex-wrap:wrap;gap:4px 6px;min-height:0;padding-top:6px}
+.den-col.over{border-color:var(--dn-accent);background:var(--dn-accent-dim);box-shadow:var(--dn-ring)}
+/* a column with no card is compact: the same column (its key, its state, Write, the drop zone), narrower, its title on its own
+   row under the key cap and the count, so no title is cut. The width changes at once, not over a transition: Chromium starts
+   no drag while the columns under the pointer are still moving (seen 15 November 2026, a drag begun within 300 ms of a
+   filing). Never animate a column's width or a card's size */
+/* the app's global .empty (index.html: padding, centred 12.5px text) must not reach a Den column that happens to be empty */
+.den-col.empty{flex-basis:var(--dn-col-w-c);padding:0;text-align:left;font-size:inherit;line-height:inherit;color:inherit}
+.den-col.empty .den-col-h{gap:6px var(--dn-sp-2)}
+.den-col.empty .den-col-h h3{flex:1 1 100%;order:3;white-space:normal;overflow:visible;font-size:var(--dn-fs-md);line-height:var(--dn-lh-tight)}
+.den-col.empty .den-col-h .den-count{margin-left:auto}
+.den-col.empty .den-col-meta{flex-wrap:wrap;gap:4px 6px;min-height:0;padding-top:8px}
 .den-col.empty .den-col-meta .den-mini{padding:0 8px;min-height:28px}
-.den-col.empty .den-drop{padding:14px 8px;line-height:1.5}
+.den-col.empty .den-drop{padding:16px 8px;line-height:1.5}
 .den-col.empty .den-excerpt p{-webkit-line-clamp:4}
-.den-col-h{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-2);padding:10px 12px 0}
-.den-col-h h3{flex:1;min-width:0;margin:0;font:650 var(--dn-fs-base)/1.25 var(--dn-display);color:var(--dn-ink-0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.den-unsorted .den-col-h h3{flex:0 1 auto;font-size:var(--dn-fs-xl);font-weight:700}
-.den-colsub{flex:1 1 100%;margin:0;font-size:var(--dn-fs-sm);line-height:1.4;color:var(--dn-ink-2)}
+.den-col-h{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-2);padding:12px 12px 0}
+.den-col-h h3{flex:1;min-width:0;margin:0;font:700 var(--dn-fs-base)/1.25 var(--dn-display);color:var(--dn-ink-0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.den-col-h .den-count{background:none;color:var(--dn-ink-4);padding:0 2px;min-width:0}
+/* Unsorted's head on a diet: a 16px title, the instruction on one line (all of it on hover or focus; the words stay in the
+   page), the kind filter on one row, no disabled Undo */
+.den-unsorted .den-col-h h3{flex:0 1 auto;font-size:var(--dn-fs-lg);font-weight:700}
+.den-colsub{flex:1 1 100%;margin:0;font-size:var(--dn-fs-sm);line-height:1.4;color:var(--dn-ink-3);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.den-col-h:hover .den-colsub,.den-col-h:focus-within .den-colsub{white-space:normal;overflow:visible}
 .den-col-meta{display:flex;align-items:center;gap:6px;padding:8px 12px 0;min-height:40px}
 .den-col-tools{display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:8px 12px 0}
-.den-gapline{display:block;width:100%;text-align:left;padding:8px 12px;border:1px solid var(--dn-neg);border-radius:var(--dn-r-sm);background:var(--dn-neg-dim);color:var(--dn-neg-ink);font:400 var(--dn-fs-sm)/1.35 var(--dn-text);cursor:pointer}
-.den-gapline b{font-weight:700}
+.den-gapline{display:block;width:100%;text-align:left;padding:8px 12px;border:1px solid var(--dn-line-2);border-left:3px solid var(--dn-warn);border-radius:var(--dn-r-sm);background:var(--dn-s1);color:var(--dn-ink-1);font:400 var(--dn-fs-sm)/1.35 var(--dn-text);cursor:pointer}
+.den-gapline b{font-weight:600}
 .den-gapline span{text-decoration:underline;text-underline-offset:2px}
 .den-search{display:block}
 .den-search input{width:100%}
-.den-filter{display:flex;flex-wrap:wrap;gap:2px;padding:3px;border:1px solid var(--dn-line);border-radius:var(--dn-r-sm);background:var(--dn-bg-1)}
-.den-seg{min-height:28px;padding:0 8px;border:0;border-radius:var(--dn-r-xs);background:none;color:var(--dn-ink-2);font:500 var(--dn-fs-sm)/1 var(--dn-text);cursor:pointer;white-space:nowrap}
+/* the kind filter: one row where the column is wide enough (1600 and up), two at most; never a kind scrolled out of sight */
+.den-filter{display:flex;flex-wrap:wrap;gap:2px;padding:3px;border:1px solid var(--dn-line);border-radius:var(--dn-r-sm);background:var(--dn-bg-0)}
+.den-seg{flex:none;min-height:28px;padding:0 6px;border:0;border-radius:var(--dn-r-xs);background:none;color:var(--dn-ink-2);font:500 var(--dn-fs-sm)/1 var(--dn-text);cursor:pointer;white-space:nowrap;transition:background var(--dn-dur-1) var(--dn-ease),color var(--dn-dur-1) var(--dn-ease)}
 .den-seg .n{font-variant-numeric:tabular-nums;color:var(--dn-ink-3);margin-left:2px}
 .den-seg:hover{color:var(--dn-ink-0)}
 .den-seg[aria-pressed="true"]{background:var(--dn-s3);color:var(--dn-ink-0);font-weight:600}
-.den-undo{align-self:flex-start;max-width:100%;min-height:28px}
-.den-undo-t{font-weight:400;overflow:hidden;text-overflow:ellipsis;max-width:230px}
+/* Undo sits in Unsorted's title row, out of the flow: it appears after a pin, a set-aside or a filing and leaves when there is
+   nothing to undo, and the cards under it never move (a drag may start the moment after a filing) */
+.den-col.den-unsorted{position:relative}
+.den-undo{align-self:flex-start;max-width:100%;min-height:28px;animation:den-fade var(--dn-dur-2) var(--dn-ease)}
+.den-unsorted .den-undo{position:absolute;top:8px;right:8px;max-width:calc(100% - 150px);margin:0;overflow:hidden;color:var(--dn-accent-text)}
+.den-undo:disabled{display:none}
+.den-undo-t{min-width:0;font-weight:400;overflow:hidden;text-overflow:ellipsis;max-width:230px;color:var(--dn-ink-1)}
 /* several cards selected: the bar that sets them aside with one reason */
-.den-bulk{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--dn-accent);border-radius:var(--dn-r-sm);background:var(--dn-accent-dim);color:var(--dn-ink-0);font-size:var(--dn-fs-sm)}
+.den-bulk{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px;border:1px solid var(--dn-accent);border-radius:var(--dn-r-sm);background:var(--dn-accent-dim);color:var(--dn-ink-0);font-size:var(--dn-fs-sm);animation:den-in var(--dn-dur-2) var(--dn-ease-out)}
 .den-bulk b{font-weight:600;margin-right:2px}
 .den-bulk .den-in{min-height:28px;padding:2px 6px;font-size:var(--dn-fs-sm)}
 .den-bulk .den-mini{min-height:28px}
 .den-pick{flex-shrink:0;margin:0;cursor:pointer}
 .den-card.picked{border-color:var(--dn-accent-hi);background:var(--dn-s3)}
-.den-col-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:10px 8px 10px}
+.den-col-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:12px 8px}
 .den-col-body>.den-state{padding:12px 8px}
-.den-drop{margin:0;padding:18px 12px;border:1px dashed var(--dn-line-2);border-radius:var(--dn-r-md);text-align:center;color:var(--dn-ink-2);font-size:var(--dn-fs-sm)}
-.den-excerpt{margin:0 8px 8px;padding:8px 10px;border:1px solid var(--dn-line);border-left:2px solid var(--spine);border-radius:var(--dn-r-sm);background:var(--dn-bg-1)}
+.den-drop{margin:0;padding:20px 12px;border:1px dashed var(--dn-line-2);border-radius:var(--dn-r-md);text-align:center;color:var(--dn-ink-3);font-size:var(--dn-fs-sm);transition:background-color var(--dn-dur-1) var(--dn-ease),border-color var(--dn-dur-1) var(--dn-ease),color var(--dn-dur-1) var(--dn-ease)}
+/* while a card is dragged every drop zone lights (contract C3; also what the tour's drag step points at) */
+.den-board.dragging .den-drop{border-color:var(--dn-accent);border-style:dashed;color:var(--dn-accent-text);background:var(--dn-accent-dim)}
+.den-board.dragging .den-col[data-sec]:not(.den-built){border-color:var(--dn-line-3)}
+.den-board.dragging .den-col.over{border-color:var(--dn-accent)}
+/* the section's own words at the foot of its column: a labelled excerpt, so it reads as the section and not as a stray card */
+.den-excerpt{margin:0 8px 8px;padding:8px 12px;border:0;border-left:2px solid var(--spine);border-radius:var(--dn-r-xs);background:var(--dn-s1)}
+.den-excerpt>.den-mono{display:block;font-size:var(--dn-fs-xs);font-weight:600;letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-ink-4)}
 .den-excerpt p{margin:4px 0 0;font-size:var(--dn-fs-sm);line-height:1.45;color:var(--dn-ink-1);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.den-card{display:flex;flex-direction:column;gap:5px;flex-shrink:0;padding:10px 12px;border:1px solid var(--dn-line);border-radius:var(--dn-r-md);background:var(--dn-s2);box-shadow:var(--dn-e1);cursor:default;transition:border-color var(--dn-dur-1) var(--dn-ease),box-shadow var(--dn-dur-2) var(--dn-ease)}
+/* a card is an object: s2, a shadow, raised on hover or while dragged */
+.den-card{display:flex;flex-direction:column;gap:6px;flex-shrink:0;padding:12px;border:1px solid var(--dn-line);border-radius:var(--dn-r-md);background:var(--dn-s2);box-shadow:var(--dn-e1);cursor:default;transition:border-color var(--dn-dur-1) var(--dn-ease),box-shadow var(--dn-dur-2) var(--dn-ease),background-color var(--dn-dur-1) var(--dn-ease)}
 .den-card[draggable="true"]{cursor:grab}
-.den-card:hover{border-color:var(--dn-line-2);box-shadow:var(--dn-e2)}
+.den-card[draggable="true"]:active{cursor:grabbing}
+.den-card:hover,.den-card:focus-within{border-color:var(--dn-line-2);box-shadow:var(--dn-e2)}
 .den-col[data-sec] .den-card{border-left:2px solid var(--spine)}
-.den-card.pinned{border-color:var(--dn-accent)}
+/* a card just filed settles with a ring that fades (a shadow only: nothing moves). SHELL marks it .settle or data-settle */
+.den-card.settle,.den-card[data-settle]{animation:den-settle var(--dn-dur-3) var(--dn-ease-out)}
+/* pinned is one signal: an accent left edge (the icon and its words are in the title) */
+.den-card.pinned{border-color:var(--dn-line-2);border-left:3px solid var(--dn-accent)}
 .den-card-top{display:flex;align-items:center;gap:var(--dn-sp-2);min-width:0;font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
-.den-w{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:26px;height:20px;padding:0 5px;border-radius:var(--dn-r-xs);background:var(--dn-neutral-dim);color:var(--dn-ink-1);font:700 var(--dn-fs-xs)/1 var(--dn-mono);font-variant-numeric:tabular-nums}
-.den-card.w2 .den-w{background:var(--dn-accent-dim);color:var(--dn-accent-text)}
-.den-card.w3 .den-w{background:var(--dn-ink-0);color:var(--dn-bg-0)}
+/* the weight: a quiet figure, louder only as it rises; the reason is in its title */
+.den-w{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:26px;height:20px;padding:0 6px;border-radius:var(--dn-r-xs);background:none;color:var(--dn-ink-3);font:600 var(--dn-fs-xs)/1 var(--dn-text);font-variant-numeric:tabular-nums;box-shadow:inset 0 0 0 1px var(--dn-line-2)}
+.den-card.w2 .den-w{background:var(--dn-neutral-dim);color:var(--dn-ink-1);box-shadow:none}
+.den-card.w3 .den-w{background:var(--dn-s3);color:var(--dn-ink-0);font-weight:700;box-shadow:inset 0 0 0 1px var(--dn-line-3)}
 .den-src{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .den-src b{color:var(--dn-ink-1);font-weight:600}
 .den-src .den-chip{margin-left:4px;min-height:16px;padding:1px 6px}
-.den-when{flex-shrink:0;font-size:var(--dn-fs-xs);white-space:nowrap}
-.den-card-title{font:600 var(--dn-fs-base)/1.35 var(--dn-text);overflow-wrap:anywhere}
+.den-when{flex-shrink:0;font-size:var(--dn-fs-xs);white-space:nowrap;color:var(--dn-ink-3)}
+.den-card-title{font:600 var(--dn-fs-base)/1.35 var(--dn-text);color:var(--dn-ink-0);overflow-wrap:anywhere}
 .den-card-title.body{font-weight:400;color:var(--dn-ink-1)}
 .den-who{font:600 var(--dn-fs-base)/1.3 var(--dn-text)}
 .den-role{font-weight:400;font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
-.den-pinmark{display:inline-block;margin-right:6px;padding:1px 6px;border-radius:var(--dn-r-xs);background:var(--dn-accent-dim);color:var(--dn-accent-text);font:700 10px/1.5 var(--dn-text);letter-spacing:.05em;text-transform:uppercase;vertical-align:1px}
-.den-card-meta{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:var(--dn-fs-sm);color:var(--dn-ink-2);font-variant-numeric:tabular-nums}
+.den-pinmark{display:inline-flex;align-items:center;gap:4px;margin-right:6px;padding:1px 6px;border-radius:var(--dn-r-xs);background:var(--dn-accent-dim);color:var(--dn-accent-text);font:600 var(--dn-fs-xs)/1.5 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;vertical-align:1px}
+.den-card-title>.den-ic{color:var(--dn-accent-text);margin-right:4px}
+.den-card-meta{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:var(--dn-fs-sm);color:var(--dn-ink-2);font-variant-numeric:tabular-nums}
 .den-chips{display:flex;flex-wrap:wrap;gap:4px}
 .den-chips:empty{display:none}
-.den-card-act{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px}
-.den-acts{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px}
+/* the action row on a diet: ghost controls at 28px, quieter at rest, full on hover or focus. Never hidden (no display,
+   visibility or pointer-events): a person, a keyboard and Playwright all press Pin without hovering first */
+.den-card-act{display:flex;flex-wrap:wrap;align-items:center;gap:2px;margin:2px -6px -4px;transition:opacity var(--dn-dur-1) var(--dn-ease)}
+.den-card:not(:hover):not(:focus-within):not(.picked) .den-card-act{opacity:.7}
+.den-card-act .den-mini,.den-card-act .den-mini.row{min-height:28px;padding:0 8px;background:none;border-color:transparent;color:var(--dn-ink-1);font-weight:500}
+.den-card-act .den-mini:hover:not(:disabled),.den-card-act .den-mini:focus-visible{background:var(--dn-s3);border-color:transparent;color:var(--dn-ink-0)}
+.den-card-act .den-mini.on{background:var(--dn-accent-dim);color:var(--dn-accent-text)}
+.den-card-act a.den-link,.den-card-act button.den-link{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 8px;border-radius:var(--dn-r-sm);color:var(--dn-ink-1);font-size:var(--dn-fs-sm);font-weight:500;text-decoration:none;transition:background var(--dn-dur-1) var(--dn-ease),color var(--dn-dur-1) var(--dn-ease)}
+.den-card-act a.den-link:hover,.den-card-act button.den-link:hover{background:var(--dn-s3);color:var(--dn-ink-0)}
+.den-card-act .den-asideform .den-mini{border-color:var(--dn-line-2)}
+.den-acts{display:inline-flex;flex-wrap:wrap;align-items:center;gap:2px}
 .den-asideform{gap:6px;align-items:center}
 .den-file{margin-left:auto;max-width:132px;min-height:var(--dn-hit);padding:4px 6px;font-size:var(--dn-fs-sm);color:var(--dn-ink-1)}
+.den-card-act .den-file{min-height:28px;border-color:transparent;background-color:transparent;color:var(--dn-ink-1);cursor:pointer}
+.den-card-act .den-file:hover,.den-card-act .den-file:focus-visible{border-color:var(--dn-line-3);background-color:var(--dn-bg-1);color:var(--dn-ink-0)}
 .den-group{display:flex;flex-direction:column;gap:var(--dn-sp-2)}
 .den-fold{display:flex;align-items:center;gap:var(--dn-sp-2);width:100%;min-height:var(--dn-hit);padding:0 8px;border:0;border-radius:var(--dn-r-sm);background:none;color:var(--dn-ink-1);font:600 var(--dn-fs-sm)/1 var(--dn-text);cursor:pointer;text-align:left}
 .den-fold:hover{background:var(--dn-s2);color:var(--dn-ink-0)}
 .den-fold::before{content:"";flex-shrink:0;border:4px solid transparent;border-left-color:currentColor;margin-right:-2px}
 .den-fold[aria-expanded="true"]::before{border-left-color:transparent;border-top-color:currentColor;margin-top:4px}
 .den-none{display:flex;flex-direction:column;border-top:1px solid var(--dn-line);margin-top:var(--dn-sp-2)}
-.den-none .den-state{padding:10px 8px;font-size:var(--dn-fs-sm);border-bottom:1px solid var(--dn-line)}
+.den-none .den-state{padding:12px 8px;font-size:var(--dn-fs-sm);border-bottom:1px solid var(--dn-line)}
 .den-hidden-n{margin:var(--dn-sp-2) 8px 0;line-height:1.6}
 .den-asidelist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
-.den-aside-row{display:flex;flex-direction:column;gap:4px;align-items:flex-start;padding:8px 10px;border:1px dashed var(--dn-line-2);border-radius:var(--dn-r-sm);font-size:var(--dn-fs-sm)}
+.den-aside-row{display:flex;flex-direction:column;gap:4px;align-items:flex-start;padding:8px 12px;border:1px dashed var(--dn-line-2);border-radius:var(--dn-r-sm);font-size:var(--dn-fs-sm)}
 
 /* ------------------------------------------------------------------------------------------ the Brief */
 .den-briefwrap{position:relative;display:flex;flex-direction:column;height:100%;min-height:0}
 .den-briefwrap>.den-notice{margin:var(--dn-sp-3) var(--dn-sp-4) 0}
 .den-briefwrap.den-page{height:auto}
+/* no brief yet: the one panel sits where the eye is, its primary action across the width and the cost under it */
+.den-briefwrap.den-page>.den-panel,.den-briefwrap.den-page>.den-notice{max-width:640px;margin-left:auto;margin-right:auto}
+.den-briefwrap.den-page>.den-panel{margin-top:12vh;box-shadow:var(--dn-e1)}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state{padding:8px 4px;line-height:var(--dn-lh-body)}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state>.den-mt{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-2);margin-top:var(--dn-sp-4)}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state>.den-mt>.den-mini{margin:0;min-height:40px}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state>.den-mt>.den-mini.primary{flex:1 1 auto}
+.den-briefwrap.den-page>.den-panel>.den-body>.den-state>.den-mt>.den-sub{flex:1 1 100%;margin:0;color:var(--dn-ink-3)}
 .den-brief{flex:1;min-height:0;display:flex;flex-direction:column;margin:0;border:0;border-radius:0;background:var(--dn-bg-0);box-shadow:none}
 .den-brief>header{padding:8px var(--dn-sp-4);background:var(--dn-bg-1)}
 .den-brief>header h3{font-size:var(--dn-fs-base)}
@@ -322,12 +425,12 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-out .den-kbd{border-color:var(--spine)}
 .den-out-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .den-out-t b{font:600 var(--dn-fs-md)/1.25 var(--dn-text);color:var(--dn-ink-0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.den-out .den-chip{flex-shrink:0;font-size:10px;padding:2px 6px}
+.den-out .den-chip{flex-shrink:0;font-size:var(--dn-fs-xs);padding:2px 6px}
 .den-dot{flex:0 0 8px;width:8px;height:8px;border-radius:var(--dn-r-pill);background:var(--dn-neg)}
 .den-write{min-height:0;overflow-y:auto;padding:var(--dn-sp-6) var(--dn-sp-6) var(--dn-sp-7)}
 .den-measure{max-width:var(--dn-measure);margin:0 auto}
-.den-sec{display:flex;flex-direction:column;gap:var(--dn-sp-3)}
-.den-eyebrow{display:flex;align-items:center;gap:var(--dn-sp-2);font:600 var(--dn-fs-xs)/1 var(--dn-text);letter-spacing:.08em;text-transform:uppercase;color:var(--dn-ink-2)}
+.den-sec{display:flex;flex-direction:column;gap:var(--dn-sp-3);animation:den-fade var(--dn-dur-2) var(--dn-ease)}
+.den-eyebrow{display:flex;align-items:center;gap:var(--dn-sp-2);font:600 var(--dn-fs-xs)/1 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-ink-2)}
 .den-eyebrow .den-chip{letter-spacing:0;text-transform:none}
 .den-eyebrow .den-mini{letter-spacing:0;text-transform:none}
 .den-sec h4{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-2) var(--dn-sp-3);margin:0;font:700 var(--dn-fs-2xl)/1.2 var(--dn-display);letter-spacing:-.015em;color:var(--dn-ink-0)}
@@ -336,7 +439,7 @@ body.in-den #v-den>.note, body.in-den #v-den>.note-toggle{display:none!important
 .den-regen{padding:12px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-s1)}
 .den-rate{padding:10px 12px;border:1px solid var(--dn-line);border-radius:var(--dn-r-md);background:var(--dn-s1)}
 .den-write-h,.den-reads-h{font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
-.den-write-h b,.den-reads-h b{font:600 var(--dn-fs-xs)/1 var(--dn-text);letter-spacing:.08em;text-transform:uppercase;color:var(--dn-ink-1);margin-right:8px}
+.den-write-h b,.den-reads-h b{font:600 var(--dn-fs-xs)/1 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-ink-1);margin-right:8px}
 .den-ta{width:100%;min-height:190px;resize:vertical;font:400 var(--dn-fs-lg)/1.7 var(--dn-text);color:var(--dn-ink-0);background:var(--dn-s2);border:1px solid var(--dn-line-2);border-radius:var(--dn-r-md);padding:14px 16px}
 .den-ta[readonly]{color:var(--dn-ink-1);background:var(--dn-s1)}
 .den-reads{display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:14px 16px;border:1px solid var(--dn-line);border-radius:var(--dn-r-md);background:var(--dn-s1)}
@@ -356,16 +459,16 @@ button.den-cite{cursor:pointer}
 .den-panel>.den-body>.den-progress{margin:var(--dn-sp-3) 0 0}
 .den-spin{flex:0 0 16px;width:16px;height:16px;border-radius:var(--dn-r-pill);border:2px solid var(--dn-accent-text);border-right-color:transparent;animation:den-spin .8s linear infinite}
 @keyframes den-spin{to{transform:rotate(360deg)}}
-.den-evpane{min-height:0;overflow-y:auto;padding:var(--dn-sp-4) var(--dn-sp-3);background:var(--dn-bg-1);border-left:1px solid var(--dn-line);border-top:2px solid var(--dn-accent)}
+.den-evpane{min-height:0;overflow-y:auto;padding:var(--dn-sp-4) var(--dn-sp-3);background:var(--dn-bg-1);border-left:1px solid var(--dn-line)}
 .den-evhead{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-2);padding:0 4px 10px}
 .den-evhead b{flex:1;font:700 var(--dn-fs-lg)/1.2 var(--dn-display);color:var(--dn-ink-0)}
 .den-evhead p{flex:1 1 100%;margin:0;font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
-.den-evsub{margin:var(--dn-sp-4) 4px var(--dn-sp-2);font:600 var(--dn-fs-xs)/1 var(--dn-text);letter-spacing:.08em;text-transform:uppercase;color:var(--dn-ink-2)}
+.den-evsub{margin:var(--dn-sp-4) 4px var(--dn-sp-2);font:600 var(--dn-fs-xs)/1 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-ink-2)}
 .den-evsub.warn{color:var(--dn-warn-ink)}
 .den-evlist,.den-pulllist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--dn-sp-2)}
 .den-evitem{display:flex;flex-direction:column;gap:4px;border-radius:var(--dn-r-md)}
 /* the card a citation chip led to, for a moment */
-.den-evitem.lit .den-evcard{border-color:var(--dn-accent);box-shadow:0 0 0 3px var(--dn-accent-dim)}
+.den-evitem.lit .den-evcard{border-color:var(--dn-accent);box-shadow:var(--dn-ring)}
 .den-evcard{display:flex;flex-direction:column;gap:4px;width:100%;padding:10px 12px;border:1px solid var(--dn-line);border-left:2px solid var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-s2);color:var(--dn-ink-1);font:inherit;text-align:left;cursor:pointer;box-shadow:var(--dn-e1)}
 .den-evcard:hover:not(:disabled){border-color:var(--dn-accent)}
 .den-evcard:disabled{cursor:default;opacity:.85}
@@ -382,10 +485,10 @@ button.den-cite{cursor:pointer}
 .den-foot>.den-bar{flex:1 1 300px;min-width:0}
 .den-foot-act{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-2)}
 .den-menu{position:relative;display:inline-flex}
-.den-menu-list{position:absolute;right:0;bottom:calc(100% + 6px);z-index:30;display:flex;flex-direction:column;align-items:stretch;gap:2px;min-width:240px;padding:8px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-s2);box-shadow:var(--dn-e3)}
+.den-menu-list{position:absolute;right:0;bottom:calc(100% + 6px);z-index:var(--dn-z-menu);animation:den-in var(--dn-dur-2) var(--dn-ease-out);display:flex;flex-direction:column;align-items:stretch;gap:2px;min-width:240px;padding:8px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-s2);box-shadow:var(--dn-e3)}
 .den-menu-list .den-mono{padding:4px 8px 6px;white-space:normal}
 .den-menu-list .den-mini{justify-content:flex-start}
-.den-drawer{position:absolute;top:0;right:0;bottom:0;z-index:20;width:min(620px,70%);overflow-y:auto;padding:var(--dn-sp-4);background:var(--dn-bg-1);border-left:1px solid var(--dn-line-2);box-shadow:var(--dn-e3)}
+.den-drawer{position:absolute;top:0;right:0;bottom:0;z-index:var(--dn-z-drawer);animation:den-in-x var(--dn-dur-2) var(--dn-ease-out);width:min(620px,70%);overflow-y:auto;padding:var(--dn-sp-4);background:var(--dn-bg-1);border-left:1px solid var(--dn-line-2);box-shadow:var(--dn-e3)}
 
 @media (max-width:1100px){.den-grid2{grid-template-columns:1fr}.den-panes{grid-template-columns:200px minmax(0,1fr) 280px}.den-where{display:none}}
 @media (prefers-reduced-motion:reduce){#den-root *,#den-root *::before,#den-root *::after{animation:none!important;transition:none!important}}
