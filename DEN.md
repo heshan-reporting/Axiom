@@ -1540,6 +1540,14 @@ Not verified: the live answers themselves. If the `ai_usage` row for scope `narr
 fields), confirm `/engine/status` answers `2026-11-16.studio-p68`, then run `tools/daily-brief.py --only narratives` once.
 The rows that looped are set aside or joined by the first tick after the deploy.
 
+**Deployed and drained (16 November 2026).** The owner deployed p68 at 09:40 UTC (revision 5fd5573, deploy token
+`a38a7d54ef16b8d4`) and `/engine/status` answered `2026-11-16.studio-p68`; the drain was run once more, guarded on that
+build. Placement set aside the 126 looping rows in two steps and the backlog read 0. Naming made 34 calls (36 of 120 that
+day, counting the two failed calls before the deploy) and named 166 narratives, leaving none that could be named; every
+one of the 34 answers parsed at the larger output budget, which fits the cut-off reading without proving it. Nine
+emerging narratives raised their Slack alert as they were named. Tone verdicts the same day: 731 rows in 48 calls before
+the deploy and 260 more in 15 calls after it (63 of 300), queue at 0. No name was a private person's (all 166 read).
+
 ### 10.11 One story, one narrative: duplicates prevented, proposed and merged with an undo (build p69)
 
 Branch `claude/narr-merge`, cut from `main` at 5fd5573 (the live p68). After the p68 drain the narratives list showed one
@@ -1744,3 +1752,22 @@ link and the day caps is visible.
 near log, and the Brief pane reading `aliases`. Open for the owner: automatic merges across clients (`crossNs`, built,
 off), claim-level merges over separate events (a later build), where the labelled pairs are kept, merge-row retention
 (kept for good: about 20 KB a merge), case-sensitive acronyms.
+
+**Deployed, the first live run, and automatic merging (16 November 2026).** The owner deployed p69 at 15:45 UTC
+(revision 6bf6b1b, deploy token `72a3e4b627773fa6`); `/engine/status` answered `2026-11-16.studio-p69` after three reads
+while Cloudflare switched versions. The first dry run (`GET /narratives/merges?dry=1`) considered 379 narratives, scored
+17,956 pairs in 2.3 s and proposed 74 (words 31, centroid and words 28, form 8, centroid 7; holds: clients 17, scope 6,
+opposite 1), 5 of them automatic. Three independent readers (an editor, a sceptic and a client view) judged every pair
+from its rows: 47 the same story, 26 different, 1 split. The wrong proposals came mostly from large, diffuse narratives
+whose centroids sit near everything (centroid 0.92 to 0.93 with word scores of 0.13 to 0.18); none of them was
+automatic, and all 5 automatic pairs were judged the same story by all three readers. On the owner's yes, at 16:15 UTC:
+42 merges (37 within a client; 5 moving unassigned or general rows onto the client board the story belongs to) and 25
+keep-aparts (the pairs all three readers judged different); one cross-client move and the split pair were held back.
+Narratives went from 3,101 to 3,059; every merge is logged and undoable, an absorbed id answers with its survivor
+(checked), and D1's JSON functions inside a batch ran in all 42 merges without an error. A fresh dry run listed 26
+proposals: the 22 kept pairs last, and 4 open, one of them new because a merged centroid moved. At 17:15 UTC, on the
+owner's instruction, the merge mode was set to `auto` (`POST /narratives/merges {mode: {merge: 'auto'}}`, KV, logged in
+`narr_mode_log`): the automatic clause at its defaults, never across clients, 5 a tick and 40 a day, paused after three
+undos in a day; near mode stays `shadow`. `{mode: {merge: 'propose'}}` goes back. No pair qualified at the switch, so the
+first automatic merges come from new duplicates. The readers' notes and the plan are client-confidential and kept out of
+the repository. Not verified yet: the automatic merges themselves, and near mode's reach from its shadow log.

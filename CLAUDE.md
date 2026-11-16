@@ -71,7 +71,7 @@ notified -> acked -> drafted. Routes: `/sentinel/alerts|scan|ack|metrics`.
 In-app: the Sentinel view (nav badge counts what is unactioned) with
 Acknowledge (stops the clock) and Draft in Ad Lab (seeds the brief).
 
-## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 8 built and live; release 8 live since 16 November 2026, worker p67, page `den.js?v=r52`)
+## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 8 built and live; release 8 live since 16 November 2026, page `den.js?v=r52`; worker p69 since the same day)
 
 The agency's monitoring analyst files daily and weekly activist-activity briefs per client. `DEN.md` holds what her
 reports are made of (counts and public names only: the reports themselves are client material and never enter the
@@ -1226,7 +1226,7 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   (a model's or a person's name only). The daily window drains the naming queue (`narrLabelQueue`: the last seven
   days, client issues first, a claim before each call, three strikes a day, `NARR_WINDOW_CALLS` 20 and four minutes a
   window). `tests/den-autoname-worker.mjs` (15).
-- **Draining (build p68, 16 November 2026; `DEN.md` s.10.10).** When a run writes, a cluster it started that is still
+- **Draining (build p68, deployed 16 November 2026 09:40 UTC; `DEN.md` s.10.10).** When a run writes, a cluster it started that is still
   one row older than `NARR_SINGLE_KEEP_H` = 48h is not written; its row is set aside (`unanchored`, `aged`): p67's prune
   took such singletons the same run and the next run re-placed the row forever. Rows of the same run may still join an
   old row's cluster, so old rows still form narratives together (after a reset, Dissolve broad clusters or a backlog).
@@ -1242,7 +1242,8 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   stops naming at `remaining` 0, on the budget, an account limit, two steps in a row with no call, or three in a row
   that made calls and named nothing; it stops placing after ten steps that leave the backlog no lower.
   `tests/narr-drain-worker.mjs` (23), `tests/daily-brief-test.py` (11).
-- **Duplicates (build p69; `DEN.md` s.10.11).** Near-miss join on headline evidence (near mode off|shadow|on, default
+- **Duplicates (build p69, deployed 16 November 2026 15:45 UTC; `DEN.md` s.10.11; merge mode `auto` since 17:15 UTC that
+  day on the owner's instruction, near mode `shadow`; the first live run merged 42 and kept 25 apart on the owner's yes).** Near-miss join on headline evidence (near mode off|shadow|on, default
   shadow; the evidence is the candidate's stored titles, 40 recent titles and label; every would-join and join in D1
   `narrative_near`; a row past the three-a-run or twelve-reads cap waits unplaced; undone with `POST /narratives/near`,
   100 a call); a late singleton is a candidate 24h from placement unless its first row is a would-join (it stands alone,
