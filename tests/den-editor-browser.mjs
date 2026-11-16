@@ -173,6 +173,15 @@ await t('a filing with a gap and a check lists the check only; the gap is never 
   eq(p.errors, []); await p.context().close();
 });
 
+await t('a brief started by hand says plainly whether its cards can be cited, and offers no paid redraft as the only way on', async () => {
+  const wh = await world(); const p = await open(wh); await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state'); await p.getByRole('button', { name: 'Write it by hand' }).click();
+  await p.waitForSelector(S + ' textarea', { state: 'attached' }); eq(wh.calls.length, 0, 'nothing was spent');
+  eq(await mode(p), 'edit', 'an empty section opens as the editor: the placeholder is the invitation'); ok(/Click a card on the right to cite it/.test(await p.getAttribute(S + ' textarea', 'placeholder')));
+  const live = await p.locator('.den-evpane .den-evcard:not([disabled])').count();
+  if (!live) ok(/started by hand/.test(await txt(p, '.den-evhead')), 'with nothing citable the pane says why: ' + await txt(p, '.den-evhead'));
+  eq(p.errors, []); await p.context().close();
+});
+
 await t('the page holds the kill switch and its stylesheet holds to the tokens', async () => {
   const js = fs.readFileSync(new URL('../docs/den-brief.js', import.meta.url), 'utf8'); ok(/const DEN_EDITOR_STACK = (true|false);/.test(js), 'DEN_EDITOR_STACK is one constant');
   const css = fs.readFileSync(new URL('../docs/den-brief.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
