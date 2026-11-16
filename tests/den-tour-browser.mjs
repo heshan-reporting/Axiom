@@ -63,7 +63,9 @@ await t('the ringed control is the one to press, nothing covers it, and the card
   await startAt(p, 'pin'); await at(p, 'pin'); const key = await under(p, 0, '[data-tour="card"]'); ok(key, 'the pin ring sits on a card');
   eq(await clear(p, '[data-tour="card"][data-key="' + key + '"] [data-tour="card-pin"]'), '', 'step 6 rings that card\'s Pin');
   ok(/Everyone on this desk sees the pin/.test(await txt(p, '#den-tour .dt-card')), 'a step that writes says who sees it and how to undo it');
-  const bad = await axe(p, 'a do-step');
+  const bad = await axe(p, 'a do-step at 1440');
+  for (const wd of [1366, 1920]) { await p.setViewportSize({ width: wd, height: wd === 1366 ? 768 : 1080 }); bad.push(...await axe(p, 'a do-step at ' + wd)); eq(await clear(p, '[data-tour="card"][data-key="' + key + '"] [data-tour="card-pin"]'), '', 'at ' + wd + ' the ring still sits clear'); }
+  await p.setViewportSize({ width: 1440, height: 900 });
   await startAt(p, 'drag'); await at(p, 'drag'); const r = await rings(p); eq(r.length, 2, 'two holes on the drag step');
   const src = await under(p, 0, '[data-tour="card"]'), dst = await under(p, 1, '[data-tour="col"]'); ok(src && dst, 'from a card to a column: ' + src + ' -> ' + dst);
   ok(await B(p, 'Can\'t drag? Use the card\'s menu').isVisible(), 'a drag always has a way without dragging');

@@ -96,7 +96,8 @@
       done: m => !!m.changed },
     { id: 'day', ch: 0, title: 'Check the day',
       view(m, c) { if (c.past) { m.wasPast = true; return { mode: 'do', phase: 'today', body: 'The Den is showing another day. Nothing drafts for a past day. Press Today to come back.', line: 'Press Today', targets: [hook('today')] }; }
-        const d = hook('day'); return show({ body: 'The Den reads one day at a time. It is showing ' + (d && d.value ? dayWords(d.value) : 'today') + ', the desk\'s window up to now. Looking at another day spends nothing.', targets: d ? [d] : [] }); },
+        const d = hook('day'), b = hook('budget'); const meter = c.budget ? ' The meter beside it counts today\'s model calls: ' + (c.budget.cap - c.budget.left) + ' of ' + c.budget.cap + ' used. Only a button that says \'1 model call\' spends, and this guide never presses one.' : '';
+        return show({ body: 'The Den reads one day at a time. It is showing ' + (d && d.value ? dayWords(d.value) : 'today') + ', the desk\'s window up to now. Looking at another day spends nothing.' + meter, targets: [d, b].filter(Boolean) }); },
       done: (m, c) => !!m.wasPast && !c.past },
     { id: 'checks', ch: 0, title: 'Read the checks',
       view(m) { const pills = all(H('check')); const pop = hook('check-pop');
@@ -373,11 +374,12 @@
       '<h2 tabindex="-1">' + esc(v.title || st.title) + '</h2><p class="dt-body">' + esc(v.body || '') + '</p>' + sampleHtml +
       (v.cost ? '<p class="dt-cost">' + esc(v.cost) + '</p>' : '') +
       (v.line && !v.flash ? '<p class="dt-act"><span class="dt-glyph">' + esc(glyph) + '</span>' + esc(v.line) + '</p>' : '') +
-      '<p class="dt-status" role="status">' + status + '</p>' +
+      '<p class="dt-status"></p>' +
       (alts ? '<div class="dt-alts">' + alts + '</div>' : '') + '<div class="dt-nav">' + nav + '</div>' +
       (cur.target && !v.flash ? '<div class="dt-foot">' + btn('Go to the highlighted control (Alt+G)', toTarget, 'dt-link') + '</div>' : '') + '</section>';
     layer.setAttribute('data-ui', 'step'); layer.className = (v.mode === 'show' || v.missing ? 'dt-show' : 'dt-do') + (reduced() ? ' dt-reduced' : '') + (v.suspended ? ' dt-suspended' : '');
     paint(html, cur.focus ? 'h2' : null); cur.focus = false;
+    const sl = slot().querySelector('.dt-status'); if (sl && sl.innerHTML !== status) sl.innerHTML = status;   // the status line changes in place: the card is not redrawn for a second's tick
     const hs = holes(targets); shade(hs);
     // a control that starts a model call (data-paid="1") is only ever pointed at: its ring says the cost, and nothing here presses it
     const lab = i => (targets[i] && targets[i].matches(PAID) ? '1 model call: your press' : (v.badges && v.badges[i]) || (v.mode === 'show' ? 'Look here' : i > 0 ? 'And here' : glyph === 'Type' ? 'Type here' : glyph === 'Drag' ? 'Drag from here' : glyph === 'Choose' ? 'Choose here' : /^Press [0-9]$/.test(glyph) ? 'Click here' : 'Press here'));
