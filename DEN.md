@@ -1937,6 +1937,15 @@ matcher table against the live `den_tagsince`.
 5. After the first sweeps, read Collection for the five new sources; a source that fails its address is the owner's to
    correct or remove. When `p71_region` (Region Canberra's own feed) delivers, `region_au` can be switched off.
 
+**Deployed.** Merged to `main` as 5f8ceee (one commit: the working branch `claude/den-p71` stays local, as its history
+holds strings copied from client data) and pushed; the owner deployed it on 17 November 2026 at 19:11 UTC (18 November,
+06:11 in Sydney; deploy token `b57b52bbbe82758e`), and `/engine/status` answered `2026-11-17.studio-p71`, revision
+5f8ceee. Bindings, secrets and crons unchanged. GitHub Pages serves the page from `main` (den.js r58, den-brief.js r6,
+overview.js r2). Still the owner's: restarting the Mac agent so its renders file through `/sources/listing`, and
+switching on Draft each morning for AEP National and AEP Victoria (Options; `auto_draft` sits at the top of the desk
+patch, not under `options`). Not yet verified on the live worker: the first morning cron under p71 and its make-up ticks,
+the five new sources' first sweeps, and a real draft under the new rules.
+
 **Asked for and not built, with the reason (each the owner's decision).** Reading X, Facebook, Instagram and YouTube and
 registering her voices; subscriber outlets (D8); the note on client positions; the evidence pane's line words (s.10.3);
 flagging sentences with no source (DK7); printing narrative and tone sources; register fixes (who leads the Opposition,

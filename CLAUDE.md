@@ -71,7 +71,7 @@ notified -> acked -> drafted. Routes: `/sentinel/alerts|scan|ack|metrics`.
 In-app: the Sentinel view (nav badge counts what is unactioned) with
 Acknowledge (stops the clock) and Draft in Ad Lab (seeds the brief).
 
-## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 8 built and live; release 8 live since 16 November 2026, page `den.js?v=r52`; worker p70 since 17 November 2026)
+## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 8 built and live; release 8 live since 16 November 2026, page `den.js?v=r52`; worker p71 since 18 November 2026 (Sydney))
 
 The agency's monitoring analyst files daily and weekly activist-activity briefs per client. `DEN.md` holds what her
 reports are made of (counts and public names only: the reports themselves are client material and never enter the
@@ -419,7 +419,7 @@ verifies each, and what was asked for and not built.
   - **Weekly desks (build p70, deployed 17 November 2026; `DEN.md` s.10.12).** The morning draft drafts a daily desk every morning
     as before and a weekly desk only on its report day, `options.weekday` (0 Sunday to 6 Saturday, on the Sydney calendar,
     Monday unless set; saved by `POST /den/desk/update`, any other value dropped). `tests/den-weekly-worker.mjs` (3).
-  - **The real-data fixes (build p71, built 17 November 2026, not yet deployed; `DEN.md` s.10.13).** Every fix the real-data
+  - **The real-data fixes (build p71, deployed 17 November 2026 19:11 UTC, token `b57b52bbbe82758e`; `DEN.md` s.10.13).** Every fix the real-data
     check of 17 November called for that needs no decision of the owner: what the draft is told (the reader, platforms,
     continuity, positions and names rules; her guides and lengths; `options.title`, `options.channels`), which evidence
     reaches it (relevance first; a check's or pin's row always sent; folds, outlet names, clean links, engagement as read;
