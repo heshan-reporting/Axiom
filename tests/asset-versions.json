@@ -112,16 +112,16 @@
   "sha": "c9311c6b76833f84"
  },
  "den-brief.js": {
-  "v": "r1",
-  "sha": "7dafa5702c53776a"
+  "v": "r6",
+  "sha": "45c451ae70e2722f"
  },
  "den-desk.js": {
   "v": "r1",
   "sha": "386db094186c3751"
  },
  "den.js": {
-  "v": "r52",
-  "sha": "758f336c80c95ed2"
+  "v": "r58",
+  "sha": "62151435b42f1b57"
  },
  "den-tour.js": {
   "v": "r1",
@@ -136,8 +136,8 @@
   "sha": "ad2977781ea0f27f"
  },
  "overview.js": {
-  "v": "r1",
-  "sha": "5dda64a9307ede00"
+  "v": "r2",
+  "sha": "5f5e1ca30d908aea"
  },
  "scope.js": {
   "v": "r1",

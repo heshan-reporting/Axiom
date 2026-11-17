@@ -4,12 +4,20 @@
  *   the day's journey: open a desk, read the strip, pin and set aside, mute, collect now with the console, draft, edit,
  *   regenerate a section, see the uncited warning, a conflict with another person, mark as filed, copy and download;
  *   then the keyboard, the Watch tab, Options, a read-only key, the empty and error states, a paused platform, a dropped
- *   connection mid-draft, and a reload with unsaved edits.
+ *   connection mid-draft, and a reload with unsaved edits. p71 review (C4, C7, C8): a draft that came second to a brief
+ *   written meanwhile shows that brief and says so; each town's vigil is a card of its own; an address-dated story's day.
+ *   p71 review (G1-G3): a post read in part, the comments read under a post (their count and their tone) and a stale story
+ *   say on their cards (the Board's, and the Brief's for the story) what their evidence lines say. p71 fx5 (R1, R2): a
+ *   tone of the comments under a post says how many carry one and is not said on fewer than three; an address day is
+ *   written as its line writes it ("17 nov"), with its year when that is not the window's ("4 mar 2019").
  * Run: node --experimental-sqlite tests/den-browser.mjs   (SHOT=1 saves screenshots to tests/shots/den/) */
 import fs from 'node:fs';
 import { world, open, browser, t, ok, eq, txt, all, tab, toast, shot, panel, finish, H, D, NOW, CARD, cards, checks, sec, exportItem } from './den-fixture.mjs';
 
 console.log('den-browser harness');
+// p71 fx5 (R2): a story's address day as its evidence line writes it (the worker's DEN_MON3), and a Sydney day's key
+const M3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const sydKey = ms => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 const w = await world(); let page = await open(w);
 
 await t('the Den opens from the navigation on a desk, in Australian Eastern time, with nothing spent', async () => {
@@ -41,7 +49,7 @@ await t('the strip says what should not be missed, never a collection gap, and o
 await t('the Board holds the window as cards: folded copies, the subscriber mark, reach, actors apart, a dated action, a column for each section', async () => {
   // the five tables are cards now (one .den-row[data-kind] each); what each row says is asserted as before
   await page.waitForSelector(CARD('media'));
-  const media = await all(page, CARD('media')); ok(media.some(r => /pointpost ?regional.*Harbour levy divides the Senate ?also in The Tribune.*362 on Facebook ?2 outlets/.test(r)), media.join(' // '));
+  const media = await all(page, CARD('media')); ok(media.some(r => /The Point Post ?regional.*Harbour levy divides the Senate ?also in The Tribune.*362 on Facebook ?2 outlets/.test(r)), media.join(' // '));
   ok(media.some(r => /Producers answer the windfall tax push.*subscriber/.test(r)), 'the subscriber mark: ' + media.join(' // ')); ok(/8 stories, 7 after folding copies/.test(await txt(page, '.den-unsorted')));
   const soc = await all(page, CARD('social')); eq(soc.length, 1); ok(/X.*55 interactions/.test(soc[0]) && !/\bL2\b/.test(soc[0]), soc[0]);
   const act = await all(page, CARD('actors')); ok(act.length === 1 && /X.*Harbour Watch ?organisation ?Our position on the gas export tax, in full\..*90 interactions/.test(act[0]), act[0]);
@@ -87,15 +95,17 @@ await t('a draft states its cost first, is one call, and comes back checked agai
   await page.getByRole('button', { name: 'Draft the brief (1 model call)' }).click(); await page.waitForSelector('.den-sec[data-section="summary"] textarea'); eq(w.calls.length, 1);
   ok(/^Coverage of the gas taxation debate/.test(await page.inputValue('.den-sec[data-section="summary"] textarea'))); ok(/drafted/.test(await txt(page, '.den-sec[data-section="summary"] h4')));
   eq(await txt(page, '.den-sec[data-section="summary"] .den-flag'), 'Needs a source: A campaigner named Sam Private is behind it.', 'the sentence that rested on an invented row is marked, at the sentence'); ok(/1 needs a source/.test(await txt(page, '.den-bar[role="status"]')));
-  eq(await all(page, '.den-sec[data-section="summary"] .den-cites button.den-cite'), ['pointpost', 'X post'], 'a citation reads as the outlet or the channel, not a bare id');
+  eq(await all(page, '.den-sec[data-section="summary"] .den-cites button.den-cite'), ['The Point Post', 'X post'], 'a citation reads as the outlet or the channel, not a bare id');
   ok((await page.inputValue('.den-sec[data-section="summary"] textarea')).indexOf('M:999999') < 0, 'and the invented citation is gone');
   // a chip jumps to its card in the evidence pane: the card is brought into view and focused, and its source is one press away
-  const chip = page.locator('.den-sec[data-section="summary"] .den-cites button.den-cite', { hasText: 'pointpost' }); const cid = (/^\[?([A-Z]:\d+)/.exec(await chip.getAttribute('title')) || [])[1]; ok(cid, 'the chip says which row it cites: ' + await chip.getAttribute('title'));
+  const chip = page.locator('.den-sec[data-section="summary"] .den-cites button.den-cite', { hasText: 'The Point Post' }); const cid = (/^\[?([A-Z]:\d+)/.exec(await chip.getAttribute('title')) || [])[1]; ok(cid, 'the chip says which row it cites: ' + await chip.getAttribute('title'));
   await chip.click(); await page.waitForFunction(id => { const li = document.activeElement && document.activeElement.closest('.den-evpane li[data-cite]'); return !!li && li.dataset.cite === id; }, cid);
   const lit = page.locator('.den-evpane li[data-cite="' + cid + '"]'); ok(await lit.evaluate(e => { const r = e.getBoundingClientRect(); const p = e.closest('.den-evpane').getBoundingClientRect(); return r.top >= p.top - 1 && r.bottom <= p.bottom + 1; }), 'the card is in view');
   ok(/^https:/.test(await lit.locator('a.den-link', { hasText: 'Open' }).getAttribute('href')), 'the source link is on the card the chip led to'); ok(/Harbour levy/.test(await lit.textContent()));
   const mo = await sec(page, 'momentum'); eq(await mo.locator('.den-bar select').first().inputValue(), 'Moderate', 'the rating sits in the section it rates'); eq(await page.inputValue('#den-tabpanel .den-bar select[aria-label="Momentum trend"]'), 'Stable'); await sec(page, 'summary'); ok(/Draft/.test(await txt(page, 'section.den-panel header .den-chip.warn')) && /revision 1/.test(await txt(page, 'section.den-panel header')));
-  ok(/Traditional media.*pointpost - Harbour levy divides the Senate/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')) && /built from the citations/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')));
+  ok(/Traditional media.*The Point Post - Harbour levy divides the Senate/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')) && /built from the citations/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')));
+  // p71 (AEP B3): the page's Source List carries the document's numbers, written as text, in a list that does not number by itself
+  ok(/Traditional media\s*\[1\] The Point Post - Harbour levy divides the Senate/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')) && /Social media\s*\[2\] X post/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')) && !(await page.$('.den-srcdoc ol')), await txt(page, '.den-sec:has(h4:has-text("Source List"))'));
   await page.waitForFunction(() => /model calls today: 1 of 20/.test(document.querySelector('.den-head').textContent)); eq(await page.getAttribute('.den-budget [role="meter"]', 'aria-valuenow'), '1', 'the meter moved with the call'); await shot(page, '03-brief-draft');
 });
 await t('an edit is kept on this computer at once, saved on leaving the field, and marked as a person\'s', async () => {
@@ -137,12 +147,19 @@ await t('someone else saved first: nothing is overwritten, and the choice is Kee
   await page.waitForSelector('.den-notice.bad[role="alert"]'); await page.getByRole('button', { name: 'Take theirs' }).click(); await page.waitForFunction(() => document.querySelector('.den-sec[data-section="posture"] textarea').value === 'Kai again.'); eq(await page.inputValue('.den-sec[data-section="media"] textarea'), 'Typed and not yet saved.', 'theirs is what they last saved');
 });
 await t('copy and download: the document, Markdown, HTML and the Slack summary', async () => {
-  const [dl] = await Promise.all([page.waitForEvent('download'), (await exportItem(page, 'Download .md')).click()]); ok(/^aep_au-\d{4}-\d\d-\d\d-draft\.md$/.test(dl.suggestedFilename()), dl.suggestedFilename()); const md = fs.readFileSync(await dl.path(), 'utf8'); ok(/^# .* - AEP national/.test(md) && /## Executive Summary/.test(md) && /## Source List/.test(md) && /DRAFT/.test(md));
+  // p71 (AEP M10): her header, the report's name, the client and the date line; the Source List's numbers written as text (AEP B3)
+  const [dl] = await Promise.all([page.waitForEvent('download'), (await exportItem(page, 'Download .md')).click()]); ok(/^aep_au-\d{4}-\d\d-\d\d-draft\.md$/.test(dl.suggestedFilename()), dl.suggestedFilename()); const md = fs.readFileSync(await dl.path(), 'utf8'); ok(/^# Daily Activist Activity Brief\n\nAustralian Energy Producers\n\nDate: /.test(md) && /## Executive Summary/.test(md) && /## Source List/.test(md) && /\n\nDRAFT\n\n/.test(md) && /^\[1\] /m.test(md), md.slice(0, 200));
   const [dh] = await Promise.all([page.waitForEvent('download'), (await exportItem(page, 'Download .html')).click()]); ok(/-draft\.html$/.test(dh.suggestedFilename()) && /<h2>Executive Summary<\/h2>/.test(fs.readFileSync(await dh.path(), 'utf8')));
   const until = async (fn, what) => { for (let i = 0; i < 50; i++) { const v = await fn(); if (v) return v; await page.waitForTimeout(100); } throw new Error('never happened: ' + what); };
   await (await exportItem(page, 'Copy the Slack summary')).click(); const slack = await until(async () => { const s = await page.evaluate(() => navigator.clipboard.readText().catch(() => '')); return /Bottom line/.test(s) ? s : ''; }, 'the Slack summary on the clipboard'); ok(/\(draft\)/.test(slack) && !/\[M:/.test(slack));
   await (await exportItem(page, 'Copy for the document')).click();
   const rich = await until(() => page.evaluate(async () => { try { const it = await navigator.clipboard.read(); const h = it.find(i => i.types.indexOf('text/html') >= 0); return h ? (await (await h.getType('text/html')).text()) : ''; } catch (e) { return ''; } }), 'formatted text on the clipboard'); ok(/<h2>Executive Summary<\/h2>/.test(rich) && /<a href="https:\/\/pointpost\.example\.com\.au\/a">/.test(rich), 'headings and links travel with it');
+  // p71 (AEP m9): a browser that cannot copy formatted text gets the body as plain text, never the title, the stylesheet or an entity
+  await page.evaluate(() => { window.__CI = window.ClipboardItem; window.ClipboardItem = undefined; return navigator.clipboard.writeText(''); });
+  await (await exportItem(page, 'Copy for the document')).click();
+  const plain = await until(async () => { const s = await page.evaluate(() => navigator.clipboard.readText().catch(() => '')); return /Executive Summary/.test(s) ? s : ''; }, 'the plain text on the clipboard');
+  const said = await toast(page); await page.evaluate(() => { window.ClipboardItem = window.__CI; }); ok(/Copied as plain text/.test(said), 'the fallback was the one taken: ' + said);
+  ok(/^Daily Activist Activity Brief\n\nAustralian Energy Producers\n\nDate: /.test(plain) && /\n\nExecutive Summary\n\n/.test(plain) && !/<|&amp;|&lt;|font:15px|max-width/.test(plain) && /\n\n\[1\] /.test(plain), 'the body only, a blank line after each block: ' + JSON.stringify(plain.slice(0, 200)));
 });
 await t('filing: what the strip holds and the brief does not is listed once; filed is read-only until reopened', async () => {
   await page.getByRole('button', { name: 'Mark as filed' }).click(); await page.waitForSelector('[role="dialog"][aria-label="Before it is filed"]'); const d = await txt(page, '[role="dialog"]'); ok(/not in this brief/.test(d) && /Sentinel spike: Gas taxation/.test(d), d.slice(0, 300)); const gapInDialog = /Facebook delivered nothing/.test(d);   // said at the end of the case, so a red one never leaves the dialog over the shared page
@@ -287,6 +304,84 @@ await t('the connection drops mid-draft: the page says so, and the draft the wor
   await p.waitForSelector('.den-notice.bad[role="alert"]'); ok(/The connection dropped while the worker was writing\. The worker may still finish and save it: nothing here was lost/.test(await txt(p, '.den-notice.bad')));
   await p.getByRole('button', { name: 'Check for the draft' }).click(); await p.waitForSelector('.den-sec[data-section="summary"] textarea'); ok(/^Coverage of the gas taxation debate/.test(await p.inputValue('.den-sec[data-section="summary"] textarea'))); eq(w2.calls.length, 1, 'and it was not drafted twice');
   await p.context().close();
+});
+// p71 review C4: the worker refuses to save a draft over a brief that appeared while it was written (409 brief_changed, ST2)
+await t('the brief changed while a draft was written: the page shows the brief that is there, at once, and says what happened', async () => {
+  const w4 = await world(); let raced = false;
+  // the model answers only once Kai has started the day's brief by hand and written in it, as a second person would
+  w4.answer(/api\.anthropic\.com/, async (u, init) => { const b = JSON.parse(init.body); w4.calls.push(b);
+    if (!raced) { raced = true; const s = (await w4.F('POST', '/den/brief/save', { desk: 'aep_au' }, 'other-key')).body.brief; await w4.F('POST', '/den/brief/save', { id: s.id, revision: s.revision, sections: { summary: 'Kai wrote this while the draft ran.' } }, 'other-key'); }
+    const m = (String(b.messages[0].content).match(/\[M:\d+\]/) || ['[M:0]'])[0];
+    return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify({ sections: { summary: 'A draft that came second ' + m + '.' }, ratings: {} }) }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 } }), { status: 200, headers: { 'Content-Type': 'application/json' } }); });
+  const p = await open(w4); await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state'); const reads = () => p.served.filter(x => /^GET \/den\/brief\?/.test(x)).length; const r0 = reads();
+  await p.getByRole('button', { name: 'Draft the brief (1 model call)' }).click(); await p.waitForSelector('.den-notice.den-fail[role="alert"]'); const note = await txt(p, '.den-notice.den-fail');
+  ok(/^The brief changed while this draft was written\. While this draft was being written, the brief for \d{4}-\d\d-\d\d was saved /.test(note) && /The brief that is there is shown now\./.test(note), 'what happened: ' + note);
+  ok(!/No draft was written|Nothing that was already here changed/.test(note), 'never "No draft was written" nor "Nothing that was already here changed" (3b71160 said both): ' + note);
+  await p.waitForSelector('.den-sec[data-section="summary"] textarea'); eq(await p.inputValue('.den-sec[data-section="summary"] textarea'), 'Kai wrote this while the draft ran.', 'the brief that is there is shown, without a reload (3b71160 kept the empty view)');
+  eq([w4.calls.length, reads() - r0], [1, 0], 'one model call, and the brief the worker sent back is the one shown (no second read)');
+  await p.getByRole('button', { name: 'Close this note' }).click(); await p.waitForSelector('.den-notice.den-fail', { state: 'detached' }); eq(p.errors, []); await p.context().close();
+});
+// p71 review C7 (CK3's page part) and C8
+await t('each town\'s standing vigil is a card of its own and files alone; a story dated by its address shows its day, never a time', async () => {
+  const w6 = await world(); const towns = ['Pointville', 'Seaview', 'Harbourton', 'Ferrybank', 'Gullhaven', 'Reefside', 'Saltmarsh', 'Eastcliff'];
+  await w6.push('news', towns.map((tn, i) => ({ src: 'pointpost', title: tn + ' residents hold a vigil every Tuesday and Friday over the gas export tax', body: 'The vigil at the ' + tn + ' foreshore goes on, its organisers said.', url: 'https://pointpost.example.com.au/vigil-' + i, ts: NOW - (3 * H + i * 60000), meta: { issues: ['gastax'], source: 'pointpost', tier: 'regional', juris: 'au', reg: 1 } })));
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(NOW - H));
+  await w6.push('news', [{ src: 'tribune', title: 'An undated story on the harbour levy', body: 'The Senate will debate a gas export tax this week, campaigners said.', url: 'https://tribune.example.com.au/' + day.split('-').join('/') + '/harbour-levy-undated/', ts: NOW - H, meta: { issues: ['gastax'], source: 'tribune', tier: 'regional', juris: 'au', reg: 1, urldate: 1 } }]);
+  const p = await open(w6); await p.waitForSelector(CARD('upcoming')); const vig = cards(p, 'upcoming').filter({ hasText: 'vigil' });
+  const keys = await vig.evaluateAll(els => els.map(e => e.getAttribute('data-key'))); eq([keys.length, new Set(keys).size], [8, 8], 'eight towns, eight cards, each its own key (3b71160 gave the eight one key): ' + keys.join(' '));
+  await vig.first().focus(); await p.keyboard.press('1'); await p.waitForSelector('.den-col[data-sec="summary"] .den-row[data-kind="upcoming"]');
+  eq([await p.locator('.den-col[data-sec="summary"] .den-row[data-kind="upcoming"]').count(), await vig.count()], [1, 7], 'filing one vigil files that one (3b71160 filed all eight)');
+  const when = (await cards(p, 'media').filter({ hasText: 'An undated story' }).locator('.den-when').textContent()).trim();
+  // p71 fx5 (R2): the line's words exactly, its month as the line writes it ("17 nov"; ecb2292 wrote "17 Nov")
+  eq(when, +day.slice(8, 10) + ' ' + M3[+day.slice(5, 7) - 1] + ' (the date in its address)', 'its day, in the evidence line\'s words, and no time (3b71160 printed a clock time): ' + when);
+  ok(/\d:\d\d/.test(await cards(p, 'media').filter({ hasText: 'Harbour levy divides' }).first().locator('.den-when').textContent()), 'a story with a time of its own keeps it');
+  eq(p.errors, []); await p.context().close();
+});
+// p71 review G1-G3 (the third round, the page lane): a card says what its evidence line says
+await t('a post read in part, the comments read under a post and a stale story say on their cards what their evidence lines say', async () => {
+  const w7 = await world(); const old = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(NOW - 6 * D));
+  await w7.push('sig_thread', [{ src: 'instagram', title: 'instagram post', body: 'The harbour towns of Australia ask where the gas export tax money will go', url: 'https://www.instagram.com/p/P71g1web01/', ts: NOW - H, meta: { platform: 'instagram', issues: ['gastax'], id: 'g1web1', term: 'gas export tax', eng: { comments: 0 } } },
+    { src: 'bluesky', title: 'bluesky post', body: 'The gas export tax will empty the harbour towns, the fishers say', url: 'https://bsky.app/profile/harbourforum.example.com.au/post/3kg2w', ts: NOW - H, meta: { platform: 'bluesky', issues: ['gastax'], id: 'g2web1', term: 'gas export tax', eng: { likes: 4, replies: 3 } } }]);
+  await w7.push('sig_comment', [-0.5, -0.3, -0.1].map((tn, i) => ({ src: 'bluesky', body: 'A reply from the pier ' + i, url: 'x:p71g2web:' + i, ts: NOW - H, tone: tn, meta: { thread: 'g2web1' } })));
+  await w7.push('news', [{ src: 'tribune', title: 'A feed sends the old harbour levy story again', body: 'The Senate debated a gas export tax last week, campaigners said.', url: 'https://tribune.example.com.au/' + old.split('-').join('/') + '/harbour-levy-again/', ts: NOW - H, meta: { issues: ['gastax'], source: 'tribune', tier: 'regional', juris: 'au', reg: 1 } }]);
+  await w7.F('POST', '/den/brief/save', { desk: 'aep_au' });   // a brief started by hand, so the Brief tab shows the window's cards
+  const p = await open(w7); await p.waitForSelector(CARD('media'));
+  const eng = cards(p, 'social').filter({ hasText: 'where the gas export tax money' }).locator('.den-card-meta span').first();
+  eq([(await eng.textContent()).trim(), await eng.getAttribute('title')], ['0 comments, likes not recorded', 'Its likes were not recorded, and every count read is zero'], 'a hidden like count beside no comments, as its line says it (2ca1637: "no interactions")');
+  const held = (await cards(p, 'social').filter({ hasText: 'empty the harbour towns' }).locator('.den-card-meta').textContent()).replace(/\s+/g, ' ');
+  ok(/3 comments read/.test(held) && !/\bheld\b/.test(held), 'the comments under a post, counted in its line\'s words (2ca1637: "3 comments held"): ' + held);
+  const tone = await cards(p, 'social').filter({ hasText: 'empty the harbour towns' }).locator('.den-chips .den-chip').allTextContents();
+  ok(tone.indexOf('mostly negative') >= 0 && tone.indexOf('hostile') < 0, 'and their tone in its line\'s words, a mean of -0.3 (2ca1637: "hostile"): ' + tone.join(', '));
+  const st = cards(p, 'media').filter({ hasText: 'old harbour levy story' }); const when = (await st.locator('.den-when').textContent()).trim(); const wt = await st.locator('.den-w').getAttribute('title');
+  eq(when, +old.slice(8, 10) + ' ' + M3[+old.slice(5, 7) - 1] + (old.slice(0, 4) !== sydKey(NOW).slice(0, 4) ? ' ' + old.slice(0, 4) : '') + ' (the date in its address, before this window)', 'a stale story its feed gave a time shows the day its line prints, in its words (2ca1637: the feed\'s time; ecb2292: "Nov"): ' + when);
+  ok(!/six hours/.test(wt), 'and its weight does not call it recent: ' + wt);
+  await tab(p, 'brief'); await p.waitForSelector('.den-evpane'); await p.locator('.den-pull .den-fold').click(); await p.waitForSelector('.den-pulllist li');
+  const sub = (await p.locator('.den-pulllist li', { hasText: 'old harbour levy story' }).locator('.den-sub').textContent()).trim();
+  ok(sub.indexOf(when) >= 0 && !/\bago\b/.test(sub), 'the Brief\'s card for it says the same day, never hours ago (2ca1637: "1 h ago"): ' + sub);
+  eq(p.errors, []); await p.context().close();
+});
+// p71 fx5 (R1, R2, the page lane): what a comment tone rests on, and an address day from another year, as the lines say them
+await t('a tone of the comments under a post says how many carry one, none rests on one comment, and an old address day gives its year', async () => {
+  const w8 = await world(); const post = (id, body) => ({ src: 'bluesky', title: 'bluesky post', body, url: 'https://bsky.app/profile/harbourforum.example.com.au/post/3kr5' + id, ts: NOW - H, meta: { platform: 'bluesky', issues: ['gastax'], id: 'r5' + id, term: 'gas export tax', eng: { likes: 4, replies: 10 } } });
+  await w8.push('sig_thread', [post('a', 'Ten replies argue over the gas export tax at the harbour wall'), post('b', 'A fisher asks the council to explain the gas export tax at the pier')]);
+  const cm = (th, tones) => Array.from({ length: 10 }, (_, i) => Object.assign({ src: 'bluesky', body: 'A reply ' + th + ' ' + i, url: 'x:p71r5web:' + th + i, ts: NOW - H, meta: { thread: th } }, i < tones.length ? { tone: tones[i] } : {}));
+  await w8.push('sig_comment', cm('r5a', [-0.5, -0.3, -0.1, -0.4, -0.2, -0.3]).concat(cm('r5b', [-0.6])));
+  await w8.push('news', [{ src: 'tribune', title: 'A feed sends the 2019 harbour levy story again', body: 'The Senate debated a gas export tax in 2019, campaigners said.', url: 'https://tribune.example.com.au/2019/03/04/harbour-levy-2019/', ts: NOW - H, meta: { issues: ['gastax'], source: 'tribune', tier: 'regional', juris: 'au', reg: 1 } }]);
+  await w8.F('POST', '/den/brief/save', { desk: 'aep_au' });   // a brief started by hand, so the Brief tab shows the window's cards
+  const p = await open(w8); await p.waitForSelector(CARD('social'));
+  const a = cards(p, 'social').filter({ hasText: 'Ten replies argue' }), b = cards(p, 'social').filter({ hasText: 'A fisher asks the council' });
+  const meta = async c => (await c.locator('.den-card-meta').textContent()).replace(/\s+/g, ' '); const TONES = /^(strongly|mostly) (negative|positive)$|^mixed$/;
+  const chipA = a.locator('.den-chips .den-chip').filter({ hasText: TONES });
+  ok(/10 comments read \(6 with a tone reading\)/.test(await meta(a)), 'six of ten carry a tone: the count says so, as the line does (ecb2292: "10 comments read"): ' + await meta(a));
+  eq([(await chipA.textContent()).trim(), await chipA.getAttribute('title')], ['mostly negative', 'The tone of the 6 of the 10 comments read under it that have a tone reading'], 'its tone, and whose it is (ecb2292: "The tone of the 10 comments read under it")');
+  ok(/10 comments read/.test(await meta(b)) && !/tone reading/.test(await meta(b)), 'one of ten carries a tone: ' + await meta(b));
+  eq(await b.locator('.den-chips .den-chip').filter({ hasText: TONES }).count(), 0, 'and no tone is said on one comment of ten (ecb2292: "strongly negative")');
+  const yr = sydKey(NOW).slice(0, 4), when = (await cards(p, 'media').filter({ hasText: '2019 harbour levy story' }).locator('.den-when').textContent()).trim();
+  eq(when, '4 mar 2019 (the date in its address, before this window)', 'an address day from another year gives its year (ecb2292: "4 Mar (the date in its address, before this window)"), the window\'s being ' + yr);
+  await tab(p, 'brief'); await p.waitForSelector('.den-evpane'); await p.locator('.den-pull .den-fold').click(); await p.waitForSelector('.den-pulllist li');
+  const sub = (await p.locator('.den-pulllist li', { hasText: '2019 harbour levy story' }).locator('.den-sub').textContent()).trim();
+  ok(sub.indexOf(when) >= 0, 'the Brief\'s card for it says the same words: ' + sub);
+  eq(p.errors, []); await p.context().close();
 });
 await t('a slow draft says it is working and locks its own buttons, not the page', async () => {
   const w3 = await world(); w3.slow = 900; const p = await open(w3); await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state'); await p.getByRole('button', { name: 'Draft the brief (1 model call)' }).click();

@@ -131,7 +131,7 @@ await t('a Bluesky sweep keeps the Australian posts, drops the Texan one, and fi
   ok(j.lines.some(l => /3 hits, 2 Australian kept/.test(l.text)));
   const th = rows("SELECT url, meta, author FROM arc_items WHERE kind='sig_thread' AND json_extract(meta,'$.platform')='bluesky' ORDER BY id");
   eq(th.length, 2); ok(th.every(x => x.author === ''), 'no author names');
-  const m = JSON.parse(th[0].meta); eq(m.eng, { likes: 12, reposts: 3, replies: 4, quotes: 0, views: 0 }); ok(m.issues.indexOf('ftc') >= 0); eq(m.uri, AU1); ok(/bsky\.app\/profile\/did:plc:aaa\/post\/3kaaa/.test(th[0].url), 'permalink by DID, not handle');
+  const m = JSON.parse(th[0].meta); eq(m.eng, { likes: 12, reposts: 3, replies: 4, quotes: 0 }); ok(m.issues.indexOf('ftc') >= 0); eq(m.uri, AU1); ok(/bsky\.app\/profile\/did:plc:aaa\/post\/3kaaa/.test(th[0].url), 'permalink by DID, not handle');
   const cm = rows("SELECT body, tone, meta FROM arc_items WHERE kind='sig_comment' AND json_extract(meta,'$.platform')='bluesky' ORDER BY id");
   eq(cm.length, 2); eq(cm[0].tone, -1, 'the hostile reply reads hostile'); eq(JSON.parse(cm[1].meta).depth, 2); eq(JSON.parse(cm[0].meta).thread, m.id);
 });

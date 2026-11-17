@@ -56,12 +56,13 @@ await S.t('DR2 the view carries text and sub for an evidence card', async () => 
   eq(s.label, 'x post', 'a social row is labelled by its channel only: the label is printed in the Source List (release review)');
   const md = (await F(w, 'GET', '/den/brief?id=' + br.id + '&format=md', null, 'read-key')).text;
   const htm = (await F(w, 'GET', '/den/brief?id=' + br.id + '&format=html', null, 'read-key')).text;
-  ok(/x post/.test(md) && !/windfall tax on gas is overdue|sign the petition/.test(md), 'the Markdown Source List never prints a post\'s words: ' + md.slice(md.indexOf('Social'), md.indexOf('Social') + 160));
+  // p71: the channel by its own name ("X post"), as the page's chips say it; still never a post's words
+  ok(/\] X post, |\] X post - /.test(md) && !/windfall tax on gas is overdue|sign the petition/.test(md), 'the Markdown Source List never prints a post\'s words: ' + md.slice(md.indexOf('Social'), md.indexOf('Social') + 160));
   ok(!/windfall tax on gas is overdue|sign the petition/.test(htm), 'nor does the HTML document');
   ok(!view.sourceList.some(g => g.items.some(i => /overdue|petition/.test(i.label || ''))), 'nor the Source List the page shows');
   ok(!/Jo Citizen/.test(JSON.stringify(view)), 'never an author'); ok(!('line' in s), 'the line stays on the worker');
   const gid = Object.keys(view.evidence).find(k => /^M:/.test(k) && view.evidence[k].gated); const g = view.evidence[gid];
-  ok(g && /Producers answer the windfall tax push/.test(g.text) && /afr|pointpost/.test(g.sub), 'a subscriber story is its headline and its outlet: ' + JSON.stringify(g));
+  ok(g && /Producers answer the windfall tax push/.test(g.text) && /^Australian Financial Review, /.test(g.sub), 'a subscriber story is its headline and its outlet, by name (p71), never the feed key: ' + JSON.stringify(g));
   ok(!/SUBSCRIBER|Behind the paywall/.test(JSON.stringify(view.evidence)), 'a subscriber excerpt never leaves the worker');
   const t = view.evidence['T:gastax']; ok(t && /rows? judged/.test(t.sub), 'a tone row says how many were judged: ' + JSON.stringify(t));
   const mid = Object.keys(view.evidence).find(k => /^M:/.test(k) && !view.evidence[k].gated); ok(/Harbour levy divides the Senate/.test(view.evidence[mid].text) && /pointpost/.test(view.evidence[mid].sub));
@@ -87,7 +88,8 @@ await S.t('DR4 the tone line counts only judged rows', async () => {
   const a = itemBy(w, 'https://pointpost.example.com.au/a'), b = itemBy(w, 'https://pointpost.example.com.au/b'), x = itemBy(w, 'https://x.com/i/web/status/190000000000000001');
   judge(w, a, -1, 'claude'); judge(w, b, 1, 'claude'); [x, a + 1000, a + 1001].forEach(i => judge(w, i, null, 'none'));
   await F(w, 'POST', '/den/brief', { desk: 'aep_au' }); const line = (calls[0].messages[0].content.match(/^\[T:gastax\][^\n]*/m) || [''])[0];
-  ok(/: 2 rows judged, mean tone 0, 1 negative, 1 positive$/.test(line), 'the rows marked as mentioning nothing are not judged rows: ' + line);
+  // p71: the line is one judgement per story, in words, with no score; the two judged stories are all it counts
+  ok(/: mixed, across 2 stories with a tone reading [^:]*: 1 negative, 1 positive, 0 neutral\b/.test(line) && !/\bposts?\b with a tone|mean tone|judged/.test(line), 'the rows marked as mentioning nothing are not judged rows: ' + line);
   const w2 = await mk(); await seedDay(w2); const c2 = model(w2); judge(w2, itemBy(w2, 'https://x.com/i/web/status/190000000000000001'), null, 'none');
   await F(w2, 'POST', '/den/brief', { desk: 'aep_au' }); ok(!/\[T:gastax\]/.test(c2[0].messages[0].content) && !/^TONE/m.test(c2[0].messages[0].content), 'markers alone make no tone line');
 });

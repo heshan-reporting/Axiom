@@ -17,7 +17,7 @@ window.__DEN_PARTS.brief = function (D) {
     fmtDay, aest, since, ls, say, web, q, BUSY_WAITS, get, getText, useLoad, Loading, Failed, Empty, Boundary, Panel,
     Dialog, engText, tell, openEvidence, KINDS_ROW, fbTotal, sydDay, sydOffset, dayEnd, dayWords, BUDGET_T, wc, plural,
     toCards, sigsFor, weigh, LOW, deck, byWeight, covered, secOfKind, KIND_SEC, sigSec, secState, secKey, citeOf,
-    STRIP_PENDING, CHECKS, Strip, RowActions, layerTitle, Card, Board
+    STRIP_PENDING, CHECKS, Strip, RowActions, layerTitle, Card, Board, addrDated, addrDay
   } = D;
   const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
@@ -31,7 +31,7 @@ window.__DEN_PARTS.brief = function (D) {
   const GLYPH = {
     media: 'M5 5h11v14H6a1 1 0 0 1-1-1V5zM16 9h3v8a2 2 0 0 1-2 2M8 9h5M8 12.5h5M8 16h3', social: 'M5 5h14v10H10l-4 4v-4H5z',
     actor: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20c.8-3.6 3.8-6 7.5-6s6.7 2.4 7.5 6', narrative: 'M3 9c3-3 6 3 9 0s6 3 9 0M3 15c3-3 6 3 9 0s6 3 9 0',
-    upcoming: 'M5 6h14v14H5zM5 10h14M9 3.5V7M15 3.5V7', tone: 'M5 20V10M12 20V4M19 20v-7', alert: 'M12 4l9 16H3L12 4zM12 10v4M12 17.2v.3',
+    upcoming: 'M5 6h14v14H5zM5 10h14M9 3.5V7M15 3.5V7', tone: 'M5 20V10M12 20V4M19 20v-7', measure: 'M4 17l5-5 4 3 7-8M15 7h5v5', alert: 'M12 4l9 16H3L12 4zM12 10v4M12 17.2v.3',
     memory: 'M7 7h4v4c0 3-1.5 5-4 6M14 7h4v4c0 3-1.5 5-4 6', open: 'M14 5h5v5M19 5l-8 8M11 7H6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-5',
     pen: 'M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19l-4 1zM14 7l3 3', eye: 'M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
     plus: 'M12 5v14M5 12h14', left: 'M15 6l-6 6 6 6', right: 'M9 6l6 6-6 6', chev: 'M6 9l6 6 6-6', check: 'M5 12.5l4.5 4.5L19 7.5',
@@ -40,13 +40,18 @@ window.__DEN_PARTS.brief = function (D) {
   };
   const Ic = n => html`<svg class="den-ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d=${GLYPH[n] || GLYPH.info} /></svg>`;
   // a kind as the evidence says it (e.k) or as the Board says it (c.kind), to one word, its icon, and whether a card of it can be filed under a section
-  const KIND = { media: 'media', social: 'social', actor: 'actor', actors: 'actor', narrative: 'narrative', narratives: 'narrative', upcoming: 'upcoming', tone: 'tone', alert: 'alert', memory: 'memory' };
+  // measure (worker p71): a figure line the momentum section cites, an issue above its usual volume or against the window before
+  const KIND = { media: 'media', social: 'social', actor: 'actor', actors: 'actor', narrative: 'narrative', narratives: 'narrative', upcoming: 'upcoming', tone: 'tone', measure: 'measure', alert: 'alert', memory: 'memory' };
   const FILEABLE = { media: 1, social: 1, actor: 1, narrative: 1, upcoming: 1 };
   const NAMELESS = /^A narrative not yet named$/i;
   const cut = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n).trim() + '\u2026' : s; };
   const MARK = /\[[A-Z]:[A-Za-z0-9_.-]{1,40}\]/g;
   const markSays = e => { if (!e) return ''; if (e.text) return String(e.text); const l = String(e.label || ''); return e.k === 'media' ? l.split(' - ').slice(1).join(' - ') : e.k === 'social' || e.k === 'actor' ? '' : l; };
   const FS = !!(window.CSS && CSS.supports && CSS.supports('field-sizing', 'content'));   // a textarea that grows with its text by itself
+  /* The downloaded document as plain text (p71, AEP m9): one conversion for the clipboard's text/plain item and for a browser
+     that cannot copy formatted text. The body only (never the title or the stylesheet), a blank line after each block, the
+     tags removed, the entities decoded once (&amp; last, so a written "&amp;lt;" stays as it was written). */
+  function denDocPlain(h) { const s = String(h || ''); const b = (/<body[^>]*>([\s\S]*?)<\/body>/i.exec(s) || [0, s.replace(/<head[\s\S]*?<\/head>/i, '').replace(/<(style|script|title)[^>]*>[\s\S]*?<\/\1>/gi, '')])[1]; return b.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|h1|h2|h3|h4|li|div|ul|ol|table|tr)>/gi, '\n\n').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0*39;/g, "'").replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim() + '\n'; }
 
   /* ---- Brief ---- */
   /* Words added and removed between two texts (longest common run of words). Long texts compare by paragraph. */
@@ -60,12 +65,16 @@ window.__DEN_PARTS.brief = function (D) {
     while (i < n) push('del', A[i++]); while (j < m) push('ins', B[j++]);
     return out;
   }
-  /* A citation as a person reads it: the outlet, the channel or the actor, a narrative by its name, a tone figure by its
-     issue; never the bare id. */
+  /* A citation as a person reads it: the outlet, the channel or the actor, a narrative by its name, a tone figure or a
+     measure by its issue; never the bare id, and never cut mid-word without saying so. A measure is named by what it
+     measures (worker p71, review C5), as the strip names its checks: an issue's two figures, "Above baseline" (its usual
+     volume) and "Window before", read apart in one sentence; a post's reach against its account's usual is "Unusual reach". */
   function citeLabel(id, e) {
     if (!e) return id; const l = String(e.label || '');
     if (e.k === 'media') return l.split(' - ')[0].slice(0, 32) || id; if (e.k === 'social') { const p = l.split(' ')[0]; return (CH[p] || p) + ' post'; }
     if (e.k === 'actor') return l.replace(/ on ([a-z]+)$/, (m, p) => ' on ' + (CH[p] || p)).slice(0, 36); if (e.k === 'alert') return 'Sentinel alert'; if (e.k === 'tone') return 'Tone: ' + cut(l, 28);
+    if (e.k === 'measure') { const c = l.lastIndexOf(': '), m = c > 0 ? l.slice(c + 2) : '';   // "Gas taxation: above its usual volume" -> "Above baseline: Gas taxation"
+      return (/^this window against /.test(m) ? 'Window before' : /^above its usual volume/.test(m) ? 'Above baseline' : /^far above its usual/.test(m) ? 'Unusual reach' : 'Figure') + ': ' + cut(c > 0 ? l.slice(0, c) : l, 28); }
     if (e.k === 'memory') return 'Agency memory'; if (e.k === 'narrative') return !l || NAMELESS.test(l) ? 'Narrative' : 'Narrative: ' + cut(l, 28); if (e.k === 'upcoming') return 'Date: ' + cut(l, 28);
     return l.slice(0, 32) || id;
   }
@@ -80,6 +89,27 @@ window.__DEN_PARTS.brief = function (D) {
      outlet, and each flag at the sentence it concerns. `F` is the saved section's flags, or null while the words differ.
      Each sentence carries where it ends in the raw text (data-at), so a click on it puts the cursor there. */
   function sentences(par) { const out = []; const rx = /([.!?\]])(\s+)(?=[A-Z"'\[])/g; let at = 0, m; while ((m = rx.exec(par))) { out.push(par.slice(at, m.index + 1)); at = m.index + m[0].length; } if (at < par.length) out.push(par.slice(at)); return out; }
+  /* The flag a sentence carries. The worker (p71) checks the figures of a sentence that cites nothing against the whole
+     evidence and marks that entry bare: such a figure is "not in the evidence", one in a cited sentence "not in the row it
+     cites". A sentence whose ids the evidence never gave needs a source; when it also holds such a figure its one flag says
+     both (it was said twice: in place, and again under the text), and its figure was read against the whole evidence, so
+     it is "not in the evidence" whatever the entry says. `used` holds the entries already said: each is said once. */
+  function figSay(u, bare) { const f = u && Array.isArray(u.figures) ? u.figures : []; return f.join(', ') + (f.length > 1 ? ' are' : ' is') + (bare || (u && u.bare) ? ' not in the evidence' : ' not in the row it cites'); }
+  function flagOf(F, s, pl, used) {
+    const u = (F.uncited || []).findIndex((x, j) => !used.u.has(j) && x === pl.slice(0, 240)); const f = (F.unverified || []).findIndex((x, j) => !used.f.has(j) && x.sentence === pl.slice(0, 200));
+    if (u >= 0) { used.u.add(u); if (f >= 0) used.f.add(f); return 'Needs a source' + (f >= 0 ? ' (' + figSay(F.unverified[f], true) + ')' : '') + ':'; }
+    if (f >= 0) { used.f.add(f); return figSay(F.unverified[f]) + ':'; }
+    const t = (F.trimmed || []).findIndex((x, j) => !used.t.has(j) && s.indexOf(String(x).split(/\s+/).slice(0, 6).join(' ')) >= 0); if (t >= 0) { used.t.add(t); return 'A subscriber quotation was cut at thirty words:'; }
+    return '';
+  }
+  /* The flags whose sentence could not be found in the text, said under it, in the same words and each once. */
+  function flagsLeft(F, used) {
+    const out = [];
+    (F.uncited || []).forEach((x, i) => { if (used.u.has(i)) return; used.u.add(i); const f = (F.unverified || []).findIndex((y, j) => !used.f.has(j) && y.sentence === String(x).slice(0, 200)); if (f >= 0) used.f.add(f); out.push({ w: 'Needs a source' + (f >= 0 ? ' (' + figSay(F.unverified[f], true) + ')' : '') + ':', t: String(x) }); });
+    (F.unverified || []).forEach((x, i) => { if (used.f.has(i)) return; used.f.add(i); out.push({ w: figSay(x) + ':', t: String(x.sentence || '') }); });
+    (F.trimmed || []).forEach((x, i) => { if (used.t.has(i)) return; used.t.add(i); out.push({ w: 'A subscriber quotation was cut at thirty words:', t: String(x) + '...' }); });
+    return out;
+  }
   function Reads({ text, F, evidence, onJump, onEdit, ix, stack }) {
     const used = { u: new Set(), f: new Set(), t: new Set() }; const plain = s => s.replace(/\[[A-Z]:[^\]]+\]/g, '').replace(/\s+([.,;:])/g, '$1').replace(/ {2,}/g, ' ').trim();
     const I = ix || { nums: {}, names: {} };
@@ -92,14 +122,10 @@ window.__DEN_PARTS.brief = function (D) {
     const paras = raw.split(/\n\n+/).filter(p => p.trim());
     const body = paras.map((p, pi) => { const ps = raw.indexOf(p, from); if (ps >= 0) from = ps;
       return html`<p key=${pi}>${sentences(p).map((s, si) => { const k = pi + '-' + si; const pl = plain(s); let lab = null; const i = raw.indexOf(s, from); let at = null; if (i >= 0) { at = i + s.replace(/\s+$/, '').length; from = i + s.length; }
-        if (F && pl) { const u = (F.uncited || []).findIndex((x, j) => !used.u.has(j) && x === pl.slice(0, 240)); if (u >= 0) { used.u.add(u); lab = html`<span class="w">Needs a source:</span>`; }
-          else { const f = (F.unverified || []).findIndex((x, j) => !used.f.has(j) && x.sentence === pl.slice(0, 200)); if (f >= 0) { used.f.add(f); lab = html`<span class="w">${F.unverified[f].figures.join(', ')} is not in the row it cites:</span>`; }
-            else { const t = (F.trimmed || []).findIndex((x, j) => !used.t.has(j) && s.indexOf(String(x).split(/\s+/).slice(0, 6).join(' ')) >= 0); if (t >= 0) { used.t.add(t); lab = html`<span class="w">A subscriber quotation was cut at thirty words:</span>`; } } } }
+        if (F && pl) { const w = flagOf(F, s, pl, used); if (w) lab = html`<span class="w">${w}</span>`; }
         return lab ? html`<span key=${k} class="den-flag" data-at=${at}>${lab} <mark>${parts(s, k)}</mark> </span>` : html`<span key=${k} data-at=${at}>${parts(s, k)} </span>`; })}</p>`; });
     // a flag whose sentence could not be found in the text is still said, under it
-    const rest = F ? (F.uncited || []).filter((x, i) => !used.u.has(i)).map((u, i) => html`<li key=${'u' + i}><span class="w">Needs a source:</span> ${u}</li>`)
-      .concat((F.unverified || []).filter((x, i) => !used.f.has(i)).map((u, i) => html`<li key=${'f' + i}><span class="w">${u.figures.join(', ')}</span> is not in the row it cites: ${u.sentence}</li>`))
-      .concat((F.trimmed || []).filter((x, i) => !used.t.has(i)).map((u, i) => html`<li key=${'t' + i}><span class="w">A subscriber quotation was cut at thirty words:</span> ${u}...</li>`)) : [];
+    const rest = F ? flagsLeft(F, used).map((x, i) => html`<li key=${'r' + i}><span class="w">${x.w}</span> ${x.t}</li>`) : [];
     // a click on a sentence edits it in place; a chip, a link or a drag that selected words to copy does not
     const click = e => { if (!onEdit) return; const tg = e.target; if (tg && tg.closest && tg.closest('.den-cite, a, button')) return; const sel = window.getSelection ? window.getSelection() : null; if (sel && !sel.isCollapsed && String(sel).trim()) return;
       const sp = tg && tg.closest ? tg.closest('[data-at]') : null; onEdit(sp && sp.getAttribute('data-at') ? +sp.getAttribute('data-at') : null); };
@@ -212,8 +238,13 @@ window.__DEN_PARTS.brief = function (D) {
     useEffect(() => { const key = e => { if ((e.metaKey || e.ctrlKey) && e.key === 's' && brief && work) { e.preventDefault(); doSave(); } }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, [doSave]);   // eslint-disable-line
     const keepMine = () => { const t = conflict.theirs; const kept = ls.get(wk(t), null); if (kept) ls.set(wk(t), Object.assign({}, kept, { revision: t.revision })); setWork(w => Object.assign({}, w, { revision: t.revision })); L.set({ ok: true, brief: t }); setConflict(null); setSave({ s: 'dirty', msg: 'Your words are kept. Save to put them over theirs.' }); };
     const takeTheirs = () => { const t = conflict.theirs; ls.del(wk(t)); L.set({ ok: true, brief: t }); setWork({ id: t.id, revision: t.revision, sections: texts(t), ratings: t.ratings }); setConflict(null); setRestored(false); setSave({ s: 'idle', msg: '' }); };
-    // a failed draft or rewrite stays said on the page (a toast is gone in three seconds); a dropped connection has its own note
-    const guard = async (name, fn) => { if (busy) return; setBusy(name); setT0(Date.now()); setDropped(false); setFail(null); try { await fn(); } catch (e) { if (!e.code && !e.status) setDropped(true); else if (e.code === 'conflict' && e.body && e.body.brief) { setConflict({ theirs: e.body.brief }); toastMsg('Someone else changed this brief first.', true); } else { toastMsg(say(e), true); if (name === 'draft' || name === 'section') setFail({ what: name, msg: say(e) }); } } setBusy(''); bump('budget'); };
+    // a failed draft or rewrite stays said on the page (a toast is gone in three seconds); a dropped connection has its own note.
+    // worker p71 (ST2): a draft whose day gained a brief while it was written (an edit, a filing, another draft) is not saved
+    // over it, and the brief that is there comes back with the refusal: it is shown at once, and the note says what happened
+    // (review C4: the page said no draft was written and nothing here changed, and kept the old view until a reload)
+    const guard = async (name, fn) => { if (busy) return; setBusy(name); setT0(Date.now()); setDropped(false); setFail(null); try { await fn(); } catch (e) { if (!e.code && !e.status) setDropped(true); else if (e.code === 'conflict' && e.body && e.body.brief) { setConflict({ theirs: e.body.brief }); toastMsg('Someone else changed this brief first.', true); }
+      else if (e.code === 'brief_changed') { const t = e.body && e.body.brief; if (t) L.set({ ok: true, brief: t }); else L.reload(); toastMsg('The draft was not saved: the brief changed while it was written.', true); setFail({ what: 'changed', msg: say(e), shown: !!t }); }
+      else { toastMsg(say(e), true); if (name === 'draft' || name === 'section') setFail({ what: name, msg: say(e) }); } } setBusy(''); bump('budget'); };
     const draft = replace => guard('draft', async () => { const d = await call('/den/brief', { desk: desk.id, replace: !!replace }); L.set({ ok: true, brief: d.brief }); tell('draft', { id: d.brief.id, replace: !!replace }); toastMsg('Drafted from ' + Object.keys(d.brief.evidence).length + ' rows of evidence' + ((d.dropped || []).length ? '; ' + d.dropped.length + ' citation' + (d.dropped.length === 1 ? ' the evidence never gave was removed' : 's the evidence never gave were removed') : '')); });
     const regen = (section, instruction, force) => guard('section', async () => { const d = await call('/den/brief/section', { id: brief.id, section, revision: brief.revision, instruction, force: !!force }); L.set({ ok: true, brief: d.brief }); tell('regen', { id: d.brief.id, section }); toastMsg('Section written again'); });
     /* Filing asks the worker once. Its list of what the brief does not cover is checks only: a collection gap is the
@@ -227,9 +258,9 @@ window.__DEN_PARTS.brief = function (D) {
     const fname = ext => (desk.id + '-' + brief.day + (brief.status === 'filed' ? '' : '-draft') + '.' + ext);
     const download = async fmt => { try { const t = await getText('/den/brief?' + q({ id: brief.id, format: fmt })); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: fmt === 'html' ? 'text/html' : 'text/markdown' })); a.download = fname(fmt); document.body.appendChild(a); a.click(); a.remove(); tell('download', { fmt }); setTimeout(() => URL.revokeObjectURL(a.href), 4000); } catch (e) { toastMsg(say(e), true); } };
     const copy = async fmt => { try { const t = await getText('/den/brief?' + q({ id: brief.id, format: fmt === 'rich' ? 'html' : 'slack' }));
-        if (fmt === 'rich' && window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) { const body = (/<body>([\s\S]*)<\/body>/.exec(t) || [0, t])[1]; const plain = body.replace(/<\/(p|h1|h2|h3|li)>/g, '\n\n').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
-          await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([body], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) })]); toastMsg('Copied with its headings and links: paste into the document'); }
-        else { await navigator.clipboard.writeText(fmt === 'rich' ? t.replace(/<[^>]+>/g, ' ') : t); toastMsg(fmt === 'rich' ? 'Copied as plain text (this browser cannot copy formatted text)' : 'Slack summary copied'); } tell('copy', { fmt }); } catch (e) { toastMsg('Could not copy: ' + say(e), true); } };
+        if (fmt === 'rich' && window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) { const body = (/<body[^>]*>([\s\S]*?)<\/body>/i.exec(t) || [0, t])[1];
+          await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([body], { type: 'text/html' }), 'text/plain': new Blob([denDocPlain(t)], { type: 'text/plain' }) })]); toastMsg('Copied with its headings and links: paste into the document'); }
+        else { await navigator.clipboard.writeText(fmt === 'rich' ? denDocPlain(t) : t); toastMsg(fmt === 'rich' ? 'Copied as plain text (this browser cannot copy formatted text)' : 'Slack summary copied'); } tell('copy', { fmt }); } catch (e) { toastMsg('Could not copy: ' + say(e), true); } };
     const loadHist = async () => { if (hist) return setHist(null); try { setHist((await call('/den/brief/history?' + q({ id: brief.id }))).revisions || []); } catch (e) { toastMsg(say(e), true); } };
     const compare = async () => { if (cmp) return setCmp(null); try { const d = await call('/den/brief?' + q({ desk: desk.id, prev: 1, day: brief.day })); setCmp(d.brief ? d.brief : { none: true }); } catch (e) { toastMsg(say(e), true); } };
 
@@ -251,7 +282,7 @@ window.__DEN_PARTS.brief = function (D) {
     if (L.err && !L.data) return html`<${Failed} what="The brief" err=${L.err} onRetry=${L.reload} />`;
     const cost = 'One model call (a second only if the first answer cannot be read). ' + (budget ? budget.left + ' of ' + budget.cap + ' left today.' : '');
     const droppedNote = dropped ? html`<div class="den-notice bad" role="alert">The connection dropped while the worker was writing. The worker may still finish and save it: nothing here was lost. <div><button class="den-mini primary" onClick=${() => { setDropped(false); L.reload(); }}>Check for the draft</button></div></div>` : null;
-    const failNote = fail ? html`<div class="den-notice bad den-fail" role="alert"><b>${fail.what === 'draft' ? 'No draft was written.' : 'The section was not written again.'}</b> ${fail.msg} Nothing that was already here changed.<div><button class="den-mini quiet" onClick=${() => setFail(null)}>Close this note</button></div></div>` : null;
+    const failNote = fail ? html`<div class="den-notice bad den-fail" role="alert"><b>${fail.what === 'changed' ? 'The brief changed while this draft was written.' : fail.what === 'draft' ? 'No draft was written.' : 'The section was not written again.'}</b> ${fail.msg} ${fail.what === 'changed' ? (fail.shown ? 'The brief that is there is shown now.' : '') : 'Nothing that was already here changed.'}<div><button class="den-mini quiet" onClick=${() => setFail(null)}>Close this note</button></div></div>` : null;
     const progress = busy === 'draft' || busy === 'section' ? html`<div class="den-progress" data-tour="progress" role="status"><span class="den-spin" aria-hidden="true"></span><span><b>${busy === 'draft' ? 'Writing the brief from the evidence.' : 'Writing the section again.'}</b> One model call, usually a minute or two; <${Elapsed} from=${t0} /> so far. Nothing else is locked: the Board and the other tabs stay usable.</span></div>` : null;
     if (!brief && past) return html`<div class="den-briefwrap den-page">${droppedNote}<${Panel} title=${'The brief for ' + dayWords(day) + ' - ' + desk.name}>
       <${Empty}><b>No brief was written for ${dayWords(day)}.</b> A brief is drafted for today's window only; press Today in the top bar to draft one. Nothing was spent reading this day.<//><//></div>`;
@@ -300,12 +331,14 @@ window.__DEN_PARTS.brief = function (D) {
        worker p67 its words and a line of figures); a post whose words were not kept says so instead of showing a code. */
     const srcOf = (c, e) => { if (c) { const r = c.r || {}; return c.kind === 'media' ? (r.outlet || r.source || 'News') : c.kind === 'social' ? (CH[r.platform] || r.platform || 'Social') + ' post' : c.kind === 'actors' ? (r.who || 'A registered account') + (r.platform ? ' on ' + (CH[r.platform] || r.platform) : '') : c.kind === 'narratives' ? 'Narrative' : 'Date'; }
       if (!e) return 'Collected after the draft'; const l = String(e.label || '');
-      return e.k === 'media' ? (l.split(' - ')[0] || 'News') : e.k === 'social' || e.k === 'actor' ? citeLabel('', e) : e.k === 'narrative' ? 'Narrative' : e.k === 'tone' ? 'Tone' : e.k === 'alert' ? 'Sentinel alert' : e.k === 'memory' ? 'Agency memory' : e.k === 'upcoming' ? 'Date' : 'Evidence'; };
+      return e.k === 'media' ? (l.split(' - ')[0] || 'News') : e.k === 'social' || e.k === 'actor' ? citeLabel('', e) : e.k === 'narrative' ? 'Narrative' : e.k === 'tone' ? 'Tone' : e.k === 'measure' ? 'Figure' : e.k === 'alert' ? 'Sentinel alert' : e.k === 'memory' ? 'Agency memory' : e.k === 'upcoming' ? 'Date' : 'Evidence'; };
     const sayOf = (c, e) => { if (c && c.title) return { t: String(c.title) }; if (!e) return { t: c ? String(c.label || '') : '' }; if (e.text) return { t: String(e.text) }; const l = String(e.label || '');
       if (e.k === 'media') return { t: l.split(' - ').slice(1).join(' - ') || l }; if (e.k === 'narrative') return { t: NAMELESS.test(l) ? 'A narrative the Den has not named yet' : l };
-      if (e.k === 'upcoming' || e.k === 'tone' || e.k === 'alert' || e.k === 'memory') return { t: l }; return { t: 'Its words were not kept with this brief. Open the source to read it.', quiet: true }; };
+      if (e.k === 'upcoming' || e.k === 'tone' || e.k === 'measure' || e.k === 'alert' || e.k === 'memory') return { t: l }; return { t: 'Its words were not kept with this brief. Open the source to read it.', quiet: true }; };
+    // p71 fx3 (G3, C8): a story dated by its address (or stale) says its day here as on its Board card, in its line's
+    // words, never "3 h ago" from a stamp that was never its time
     const metaOf = (c, e) => { if (c) { const r = c.r || {}; const bits = c.kind === 'media' ? [c.outlets > 1 ? c.outlets + ' outlets' : '', c.reach ? fmtN(c.reach) + ' on Facebook' : ''] : c.kind === 'social' || c.kind === 'actors' ? [c.reach ? fmtN(c.reach) + ' interactions' : ''] : c.kind === 'narratives' ? [r.n ? plural(r.n, 'row') : '', r.n24 ? r.n24 + ' in the last day' : '', r.status || ''] : [r.date || ''];
-        if (c.ts) bits.push(since(c.ts)); return bits.filter(Boolean).join(' \u00b7 '); } return e ? String(e.sub || (e.gated ? 'Subscriber story: quoted at most thirty words' : '')) : ''; };
+        if (c.kind === 'media' && addrDated(r)) bits.push(addrDay(r, String(day || '').slice(0, 4))); else if (c.ts) bits.push(since(c.ts)); return bits.filter(Boolean).join(' \u00b7 '); } return e ? String(e.sub || (e.gated ? 'Subscriber story: quoted at most thirty words' : '')) : ''; };
     const auto = (c, e) => (c && c.r && c.r.named === 'auto') || (e && e.named === 'auto');
     const openIx = onSrc ? { nums: {} } : citeIndex(T(openS.id), ev);
     const evItem = (key, o) => { o = o || {}; const c = cardBy[key]; const cid = c ? citeOf(c, ev) : (ev[key] ? key : ''); const e = cid ? ev[cid] : null; const kind = KIND[c ? c.kind : e ? e.k : ''] || '';
@@ -327,6 +360,9 @@ window.__DEN_PARTS.brief = function (D) {
     const rateBar = items => (items.length ? html`<div class="den-bar den-rate">${items.map(i => { const r = (work && work.ratings && work.ratings[i.id]) || {}; const set = (k, v) => { setWork(w => Object.assign({}, w, { ratings: Object.assign({}, w.ratings, { [i.id]: Object.assign({}, r, { [k]: v }) }) })); setSave({ s: 'dirty', msg: '' }); };
       return html`<span key=${i.id} class="den-form"><label class="den-lab">${i.label}<select value=${r.level || ''} disabled=${ro} onChange=${e => set('level', e.target.value)}><option value="">Not rated</option>${desk.ratings.levels.map(l => html`<option key=${l} value=${l}>${l}</option>`)}</select></label>
         ${i.trend ? html`<label class="den-lab">Trend<select value=${r.trend || ''} disabled=${ro} aria-label=${i.label + ' trend'} onChange=${e => set('trend', e.target.value)}><option value="">-</option>${desk.ratings.trends.map(l => html`<option key=${l} value=${l}>${l}</option>`)}</select></label>` : null}</span>`; })}</div>` : null);
+    /* The Source List section (p71, AEP B3): each entry carries the number the document's text gives it (i.n), written as text,
+       "[7] Outlet - Headline, 16 November 2026 - address", one count across the groups; never an auto-numbered list, which
+       started again at 1 in each group. A worker before p71 sends no number, and none is printed. */
     const nSources = brief.sourceList.reduce((a, g) => a + g.items.length, 0);
     /* The foot's chips are presses: what is left leads to where it is. A flag opens its section at the first flagged
        sentence; a check opens the section it belongs to, at the pane's list of checks not mentioned yet. */
@@ -357,7 +393,7 @@ window.__DEN_PARTS.brief = function (D) {
               hidden=${openS !== s} rate=${rateBar(matched(s))} carets=${carets} state=${secState(brief.sections[s.id], T(s.id), filedHere(s.id).length)} onStep=${step} onJump=${jump} />`)}
             ${src ? html`<div class="den-sec den-srcsec" data-tour="section" data-section=${src.id} hidden=${!onSrc}><div class="den-eyebrow"><span>Built, not written</span><span class="den-spacer"></span><button class="den-mini quiet den-step" onClick=${() => step(-1)}>${Ic('left')}Previous</button></div>
               <h4>${src.title}<span class="den-chip" title="Built from the rows the brief cites. It is never written by a model and cannot be edited: change what is cited instead.">built from the citations</span></h4>
-              <div class="den-doc den-srcdoc">${brief.sourceList.length ? brief.sourceList.map(g => html`<div key=${g.group}><div class="den-mono den-grouph">${g.group}</div><ol class="den-ev">${g.items.map(i => html`<li key=${i.id}>${i.label}${web(i.url) ? html` - <a class="den-link" href=${web(i.url)} target="_blank" rel="noopener">${i.url}</a>` : null}</li>`)}</ol></div>`) : html`<span class="den-mono">Nothing is cited yet, so there is nothing to list.</span>`}</div></div>` : null}
+              <div class="den-doc den-srcdoc">${brief.sourceList.length ? brief.sourceList.map(g => html`<div key=${g.group}><div class="den-mono den-grouph">${g.group}</div><ul class="den-ev den-srcl" style=${{ listStyle: 'none', paddingLeft: 0 }}>${g.items.map(i => html`<li key=${i.id} data-n=${i.n || null}>${i.n ? '[' + i.n + '] ' : ''}${i.label}${i.date ? ', ' + i.date : ''}${web(i.url) ? html` - <a class="den-link" href=${web(i.url)} target="_blank" rel="noopener">${i.url}</a>` : null}</li>`)}</ul></div>`) : html`<span class="den-mono">Nothing is cited yet, so there is nothing to list.</span>`}</div></div>` : null}
           </div></div>
           <aside class="den-evpane" data-tour="evidence" aria-label="Evidence for this section">
             ${onSrc ? html`<div class="den-evhead"><div class="den-evh1"><b>Source List</b></div><p>Built from every row the brief cites, in the report's own groups. Cite a row in a section and it appears here; nothing is typed into it.</p></div>` : html`<div class="den-evin">

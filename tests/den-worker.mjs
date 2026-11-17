@@ -75,9 +75,11 @@ await S.t('DK2 the board', async () => {
     post({ url: 'https://x.com/i/web/status/190000000000000010', body: 'A minister on the gas export tax.', meta: { platform: 'x', issues: ['gastax'], id: 'pm', mp: { name: 'Alex Member', party: 'Independent' } } })]);
   await push(w, 'reddit_comment', [{ src: 'reddit', body: 'This is a disgrace', url: 'x:rcmt:1', ts: NOW - H, tone: -1, meta: { thread: 'p' + (seq - 3) } }]);
   const b = await board(w, 'aep_au');
-  eq([b.counts.news, b.counts.media], [4, 2], 'four stories on the desk in the window, two after folding'); const lead = b.media[0];
-  eq([lead.title, lead.n, lead.outlet], ['Harbour levy divides the Senate', 3, 'pointpost'], 'the copy seen first leads'); eq(lead.outlets, ['pointpost', 'The Tribune', 'coastwire']); eq(lead.fb, { reactions: 300, comments: 40, shares: 22 }, 'reach from whichever copy holds it');
-  ok(b.media[1].gated === true && b.media[1].access === 'subscriber', 'the subscriber mark'); ok(!b.media.some(m => /somebody else|Yesterday/.test(m.title)), 'another issue and another day are not on it');
+  // p71: the national subscriber story now ranks above the regional fold (the outlet's tier before the outlets that carried
+  // it), and an outlet the registry does not hold, with no name of its own, is named by its host, never by its feed key
+  eq([b.counts.news, b.counts.media], [4, 2], 'four stories on the desk in the window, two after folding'); const lead = b.media.find(m => m.n > 1);
+  eq([lead.title, lead.n, lead.outlet], ['Harbour levy divides the Senate', 3, 'pointpost.example.com.au'], 'the copy seen first leads'); eq(lead.outlets, ['pointpost.example.com.au', 'The Tribune', 'coastwire.example.com.au']); eq(lead.fb, { reactions: 300, comments: 40, shares: 22 }, 'reach from whichever copy holds it');
+  const sub = b.media.find(m => m.gated) || {}; ok(sub.access === 'subscriber' && sub.outlet === 'Australian Financial Review', 'the subscriber mark'); ok(!b.media.some(m => /somebody else|Yesterday/.test(m.title)), 'another issue and another day are not on it');
   eq(b.social.map(s => s.total), [55, 2], 'social by interactions'); ok(b.social[0].layers[0] === 2 && b.social[0].eng_at > 0 && b.social[0].url);
   eq(b.actors.map(a => [a.who, a.role, a.party]), [['Harbour Watch', 'org', ''], ['Alex Member', 'mp', 'Independent']], 'registered public actors and MPs have their own table; a registered account is on the desk whatever it posts about');
   ok(!JSON.stringify(b).includes('Jo Citizen'), 'no author anywhere on the board'); ok(b._rows === undefined);
@@ -127,7 +129,8 @@ await S.t('DK5 pins, set-asides and mutes', async () => {
 
 await S.t('DK6 nothing critical missed', async () => {
   const w = await mk(); await seedDay(w); await F(w, 'GET', '/sentinel/alerts'); await F(w, 'GET', '/narratives/status'); await F(w, 'GET', '/sentiment/status'); const db = w.env.MIND_DB.db;
-  const quiet = (await F(w, 'GET', '/den/missed?desk=mca_vic', null, 'read-key')).body; eq(quiet.signals.map(s => s.key), ['G:news'], 'a desk with nothing collected is told so, not shown a clear strip'); ok(/before reading it as a quiet day/.test(quiet.signals[0].detail) && /in this region/.test(quiet.signals[0].detail));
+  // p71: the channels the client's reports rest on (DEN_RELIED: X, Facebook, Instagram and YouTube for MCA) are named too
+  const quiet = (await F(w, 'GET', '/den/missed?desk=mca_vic', null, 'read-key')).body; eq(quiet.signals.map(s => s.key), ['G:news', 'G:x', 'G:facebook', 'G:instagram', 'G:youtube'], 'a desk with nothing collected is told so, not shown a clear strip'); ok(/before reading it as a quiet day/.test(quiet.signals[0].detail) && /in this region/.test(quiet.signals[0].detail));
   db.prepare("INSERT INTO arc_alerts(ns,client,issue,label,severity,hot,baseline,ratio,srcs,detected_ts) VALUES('aep','AEP','gastax','Gas taxation','high',9,2.9,3.1,5,?)").run(NOW - 2 * H);
   db.prepare("INSERT INTO arc_alerts(ns,client,issue,label,severity,hot,baseline,ratio,srcs,detected_ts) VALUES('mca','MCA','ftc','Fuel tax credits','high',9,2,4,5,?)").run(NOW - 2 * H);
   db.prepare("INSERT INTO narratives(id,label,issues,n,n24,first_ts,last_ts,status,muted,side,spread) VALUES('n1','Gas giants dodge the levy',?,8,7,?,?,'emerging',0,'hostile','[]')").run(JSON.stringify(['gastax']), NOW - 20 * H, NOW - H);
@@ -178,10 +181,14 @@ await S.t('DK8 a draft', async () => {
   ok(!/Jo Citizen/.test(sent) && !/fuel tax credit story/.test(sent) && !/Yesterday's gas story/.test(sent), 'no author, no other desk\'s row, nothing outside the window'); ok(/SOURCE SAFETY/.test(calls[0].system) && /Never invent an id/.test(calls[0].system) && /never name a private individual/.test(calls[0].system));
   ok(/"summary":"\.\.\."/.test(calls[0].system) && !/"sources"/.test(calls[0].system), 'the model is asked for the desk\'s sections and never the Source List');
   const br = r.body.brief; eq([br.status, br.revision, br.day.length, br.by], ['draft', 1, 10, 'Anne']); eq(br.ratings.momentum, { level: 'Moderate', trend: 'Stable' });
-  ok(br.sections.summary.cites.length === 2 && br.sections.summary.by === 'model' && br.sections.summary.edited === false); eq(br.sourceList.map(g => g.group), ['Traditional media', 'Social media']); ok(/^pointpost - Harbour levy divides the Senate$/.test(br.sourceList[0].items[0].label));
+  ok(br.sections.summary.cites.length === 2 && br.sections.summary.by === 'model' && br.sections.summary.edited === false); eq(br.sourceList.map(g => g.group), ['Traditional media', 'Social media']); ok(/^Australian Financial Review - Producers answer the windfall tax push$/.test(br.sourceList[0].items[0].label), 'p71: the first story the model is given (the national one) is the first cited, under its outlet\'s name: ' + br.sourceList[0].items[0].label);
   const got = (await F(w, 'GET', '/den/brief?desk=aep_au', null, 'read-key')).body.brief; eq([got.id, got.revision], [br.id, 1]); eq((await F(w, 'GET', '/den/briefs?desk=aep_au')).body.briefs.map(x => [x.id, x.status]), [[br.id, 'draft']]);
-  const md = (await F(w, 'GET', '/den/brief?id=' + br.id + '&format=md')).text; ok(/^# Australian Energy Producers - AEP national/.test(md) || /^# .* - AEP national/.test(md), md.slice(0, 80)); ok(/Reporting window: .* - DRAFT/.test(md) && /## Executive Summary/.test(md) && /\[\[1\]\(https:\/\/pointpost\.example\.com\.au\/a\)\]/.test(md) && /## Source List/.test(md) && /\*\*Momentum:\*\* Moderate, Stable/.test(md) === false);
-  const html = await F(w, 'GET', '/den/brief?id=' + br.id + '&format=html'); ok(/<h2>Executive Summary<\/h2>/.test(html.text) && /<sup><a href="https:\/\/pointpost\.example\.com\.au\/a">\[1\]<\/a><\/sup>/.test(html.text) && /default-src 'none'/.test(html.headers.get('Content-Security-Policy')));
+  // p71 (AEP M10): her header, the report's name, the client, the date and the window, and DRAFT on its own line; the first
+  // story cited is the national AFR story (/b), which the rank lane's relevance order now puts first
+  const md = (await F(w, 'GET', '/den/brief?id=' + br.id + '&format=md')).text; ok(/^# Daily Activist Activity Brief\n\nAustralian Energy Producers\n\nDate: \d{1,2} [A-Z][a-z]+ 20\d\d \| Reporting window: /.test(md), md.slice(0, 160)); ok(/\n\nDRAFT\n\n/.test(md) && /## Executive Summary/.test(md) && /\[\[1\]\(https:\/\/pointpost\.example\.com\.au\/b\)\]/.test(md) && /## Source List/.test(md));
+  // p71 review (EX1): the momentum section is not written in this draft, so its rating is no longer left out: it prints after the summary
+  ok(/## Executive Summary\n\n[^\n]+\n\n\*\*Momentum:\*\* Moderate, Stable\n\n## /.test(md) && (md.match(/\*\*Momentum:\*\*/g) || []).length === 1, 'the rating after the summary, once: ' + md.slice(md.indexOf('## Executive'), md.indexOf('## Executive') + 300));
+  const html = await F(w, 'GET', '/den/brief?id=' + br.id + '&format=html'); ok(/<h2>Executive Summary<\/h2>/.test(html.text) && /<sup><a href="https:\/\/pointpost\.example\.com\.au\/b">\[1\]<\/a><\/sup>/.test(html.text) && /default-src 'none'/.test(html.headers.get('Content-Security-Policy')));
   const slack = (await F(w, 'GET', '/den/brief?id=' + br.id + '&format=slack')).text; ok(/\(draft\)/.test(slack) && /\*Bottom line:\* Activity is steady\./.test(slack) && !/\[M:/.test(slack), slack);
   const u = w.env.MIND_DB.db.prepare("SELECT reserved, confirmed FROM ai_usage WHERE scope='den'").get(); eq([u.reserved, u.confirmed], [1, 1], 'counted in the ledger under the Den'); eq((await F(w, 'GET', '/den/desks')).body.budget, { used: 1, cap: 20, left: 19 });
 });
@@ -265,13 +272,14 @@ await S.t('DK12 filing', async () => {
   const f2 = await F(w, 'POST', '/den/brief/file', { id: br.id, revision: covered.body.brief.revision }); ok(f2.status === 200 || (f2.body.error === 'uncited_signals' && !f2.body.signals.some(s => /Sentinel spike/.test(s.title))), 'a signal the brief cites is not asked about: ' + f2.text.slice(0, 300));
   const thin = await mk(); const t = (await F(thin, 'POST', '/den/brief/save', { desk: 'aep_au', sections: { summary: 'Too little.' } })).body.brief; eq((await F(thin, 'POST', '/den/brief/file', { id: t.id, revision: t.revision, acknowledge: true })).body.error, 'brief_empty');
   const prev = (await F(w, 'GET', '/den/brief?desk=aep_au&prev=1&day=2999-01-01')).body.brief; ok(f2.status !== 200 || prev.id === br.id, 'the last filed brief before a day, for the comparison');
-  // p67: a brief whose only open signal is a gap files with no ask, and the history names the channel instead
+  // p67: a brief whose only open signal is a gap files with no ask, and the history names the channel instead. p71: the
+  // window's gas-tax burst is covered by stating it (its own I: line), no longer by the issue's name, so the brief states it
   const g = await mk({ ANTHROPIC_API_KEY: 'test-anthropic' }); await seedDay(g); await F(g, 'POST', '/den/watch/add', { ns: 'aep', kind: 'account', platform: 'facebook', value: 'harbourwatchpage', name: 'Harbour Watch' });
-  model(g, (ev, ids) => ({ sections: { summary: 'Coverage of the gas taxation debate continued through the window, led by regional outlets and carried by others [' + ids('M')[0] + ']. Producers answered the push in a subscriber outlet, and the conversation on X stayed small [' + ids('S')[0] + '].', bottom: 'Activity is steady and the client is not directly targeted [' + ids('M')[0] + '].' }, ratings: {} }));
+  model(g, (ev, ids) => ({ sections: { summary: 'Coverage of the gas taxation debate continued through the window, led by regional outlets and carried by others [' + ids('M')[0] + ']. Producers answered the push in a subscriber outlet, and the conversation on X stayed small [' + ids('S')[0] + '].' + (ids('I').length ? ' Gas taxation ran well above its usual volume [' + ids('I')[0] + '].' : ''), bottom: 'Activity is steady and the client is not directly targeted [' + ids('M')[0] + '].' }, ratings: {} }));
   ok((await F(g, 'GET', '/den/missed?desk=aep_au')).body.signals.some(s => s.key === 'G:facebook'), 'the strip still holds the gap, for Collection');
   const gb = (await F(g, 'POST', '/den/brief', { desk: 'aep_au' })).body.brief; const gf = await F(g, 'POST', '/den/brief/file', { id: gb.id, revision: gb.revision });
   eq([gf.status, gf.body.brief && gf.body.brief.status, gf.body.acknowledged], [200, 'filed', []], 'nothing to ask: ' + gf.text.slice(0, 300));
-  const gh = (await F(g, 'GET', '/den/brief/history?id=' + gb.id)).body.revisions[0].note; ok(/^filed; not read in this window: Facebook$/.test(gh), gh);
+  const gh = (await F(g, 'GET', '/den/brief/history?id=' + gb.id)).body.revisions[0].note; ok(/^filed; not read in this window: Facebook, Instagram, YouTube, Reddit$/.test(gh), gh);   // p71: and the channels AEP's reports rest on
 });
 
 await S.t('DK13 one desk never reads another\'s', async () => {
@@ -364,7 +372,7 @@ await S.t('DK20 the board asks only for this desk\'s rows', async () => {
 });
 
 await S.t('DK21 where a card is filed is the desk\'s, not one browser\'s', async () => {
-  const w = await mk(); await seedDay(w); const b = await board(w, 'aep_au'); const lead = b.media[0], posts = b.social;
+  const w = await mk(); await seedDay(w); const b = await board(w, 'aep_au'); const lead = b.media.find(m => m.n > 1), posts = b.social;   // p71: the folded story (no longer first by rank)
   ok(lead.section === '' && posts.every(s => s.section === ''), 'a row nobody has filed carries an empty section: ' + JSON.stringify([lead.section, posts.map(s => s.section)]));
   const f = (await F(w, 'POST', '/den/pin', { desk: 'aep_au', item: lead.id, section: 'media' })).body; eq([f.ok, f.mark, f.section], [true, 'pin', 'media'], 'a pin says which section the row is filed under');
   const b2 = await board(w, 'aep_au'); eq([b2.media[0].id, b2.media[0].pinned, b2.media[0].section], [lead.id, true, 'media'], 'and the board says so to every browser');

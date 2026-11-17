@@ -71,7 +71,7 @@ notified -> acked -> drafted. Routes: `/sentinel/alerts|scan|ack|metrics`.
 In-app: the Sentinel view (nav badge counts what is unactioned) with
 Acknowledge (stops the clock) and Draft in Ad Lab (seeds the brief).
 
-## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 8 built and live; release 8 live since 16 November 2026, page `den.js?v=r52`; worker p69 since the same day)
+## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 8 built and live; release 8 live since 16 November 2026, page `den.js?v=r52`; worker p70 since 17 November 2026)
 
 The agency's monitoring analyst files daily and weekly activist-activity briefs per client. `DEN.md` holds what her
 reports are made of (counts and public names only: the reports themselves are client material and never enter the
@@ -416,9 +416,20 @@ verifies each, and what was asked for and not built.
     clock and CPU, the tour on a live desk, Firefox and WebKit. Merged to `main` (93bf0fd) and live on GitHub Pages on
     16 November 2026; the owner deployed the worker the same day (06:08 UTC, deploy token `aa4787ea59c482f4`;
     `DEN.md` s.10.8).
-  - **Weekly desks (build p70, not deployed; `DEN.md` s.10.12).** The morning draft drafts a daily desk every morning
+  - **Weekly desks (build p70, deployed 17 November 2026; `DEN.md` s.10.12).** The morning draft drafts a daily desk every morning
     as before and a weekly desk only on its report day, `options.weekday` (0 Sunday to 6 Saturday, on the Sydney calendar,
     Monday unless set; saved by `POST /den/desk/update`, any other value dropped). `tests/den-weekly-worker.mjs` (3).
+  - **The real-data fixes (build p71, built 17 November 2026, not yet deployed; `DEN.md` s.10.13).** Every fix the real-data
+    check of 17 November called for that needs no decision of the owner: what the draft is told (the reader, platforms,
+    continuity, positions and names rules; her guides and lengths; `options.title`, `options.channels`), which evidence
+    reaches it (relevance first; a check's or pin's row always sent; folds, outlet names, clean links, engagement as read;
+    the sponsored label for `DEN_SPONSORED_HOSTS`), the strip, tone and the window before (citable bursts; tags compared
+    only from their change: `DEN_TAG_P71`, KV `den_tagsince`), the figure check and upcoming dates (the CK36 table of every
+    case the reviews listed), the document (one numbering, her header, ratings where they belong), collection (five
+    sources, the MCA mentions issue, three matchers, a listing's first read as a baseline, `POST /sources/listing` for the
+    Mac agent), and the morning draft (a guarded write, a deadline, make-up ticks within two tries a desk: KV
+    `den_cron_left_<day>`, `den_cron_day`). Seven harnesses: `den-p71-prompt` (14), `-signals` (20), `-checker` (41),
+    `-rank` (19), `-export` (25), `-sources` (29), `-merge` (4). Page den.js r58, den-brief.js r6, overview.js r2.
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -

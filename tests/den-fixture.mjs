@@ -20,6 +20,10 @@ const post = o => Object.assign({ src: 'x', title: 'x post', body: 'The windfall
 export async function world(env) {
   const w = await workerEnv({ env: Object.assign({ ANTHROPIC_API_KEY: 'test-anthropic' }, env || {}), keys: KEYS }); const F = (m, p, b, k) => w.call(m, p, b, k || 'full-key');
   const push = async (kind, rows) => { const r = await F('POST', '/archive/add', { kind, rows }); if (r.status !== 200) throw new Error('seed failed ' + r.text.slice(0, 120)); };
+  // p71: the invented outlets are in the Source Registry, as a live source is, so a story is named by its outlet's name
+  // ("The Point Post"), never its feed key; the table is made by reading it once
+  await F('GET', '/sources'); const reg = w.env.MIND_DB.db.prepare('INSERT OR REPLACE INTO sources(id,name,tier,juris,issues,methods,urls,schedule,enabled,core,edited,created,updated) VALUES(?,?,?,?,?,?,?,60,1,0,1,?,?)');
+  [['pointpost', 'The Point Post', 'https://pointpost.example.com.au'], ['tribune', 'The Tribune', 'https://tribune.example.com.au']].forEach(s => reg.run(s[0], s[1], 'regional', 'au', '[]', '["rss"]', JSON.stringify({ site: s[2] }), NOW, NOW));
   await push('news', [news({ title: 'Harbour levy divides the Senate', url: 'https://pointpost.example.com.au/a', ts: NOW - 5 * H }), news({ src: 'tribune', title: 'Harbour levy divides the Senate - Tribune', url: 'https://tribune.example.com.au/a', ts: NOW - 4 * H, meta: { issues: ['gastax'], source: 'tribune', outlet: 'The Tribune', fb: { reactions: 300, comments: 40, shares: 22 } } }),
     news({ title: 'Producers answer the windfall tax push', url: 'https://pointpost.example.com.au/b', meta: { issues: ['gastax'], source: 'afr', gated: 1, access: 'subscriber', ft: 'subscriber' } }), news({ title: 'Harbour Watch will hold a rally at Parliament on 28 December over the gas export tax', url: 'https://pointpost.example.com.au/r' })]
     .concat([1, 2, 3, 4].map(i => news({ src: 'noisy', title: 'Noisy outlet on the gas export tax ' + i, url: 'https://noisy.example.com/s' + i, ts: NOW - (6 + i) * H, meta: { issues: ['gastax'], source: 'noisy' } }))));
@@ -30,7 +34,10 @@ export async function world(env) {
   const calls = [];
   w.answer(/api\.anthropic\.com/, async (u, init) => { const b = JSON.parse(init.body); calls.push(b); if (w.slow) await new Promise(r => setTimeout(r, w.slow)); const ev = b.messages[0].content; const ids = k => (ev.match(new RegExp('\\[' + k + ':[A-Za-z0-9_.-]+\\]', 'g')) || []).map(x => x.slice(1, -1));
     const one = /"bottom":"\.\.\."/.test(b.system) && !/"summary":"\.\.\."/.test(b.system);
-    const j = one ? { sections: { bottom: 'Written again, shorter [' + ids('M')[0] + '].' } } : { sections: { summary: 'Coverage of the gas taxation debate continued through the window, led by regional outlets and carried by others [' + ids('M')[0] + ']. A campaigner named Sam Private is behind it [M:999999]. The conversation on X stayed small [' + ids('S')[0] + '].', media: 'The story ran in three outlets and drew 300 reactions on Facebook [' + ids('M')[0] + '].', bottom: 'Activity is steady and the client is not directly targeted [' + ids('M')[0] + '].', posture: 'The client should continue monitoring.' }, ratings: { momentum: { level: 'Moderate', trend: 'Stable' } } };
+    // p71: the story this stub writes about is the Harbour levy one, found by its words: the relevance order (p71) now sends
+    // the national subscriber story first, and "drew 300 reactions" cited to it would rightly be flagged
+    const hl = (ev.match(/^\[(M:\d+)\] [^\n]*Harbour levy divides the Senate/m) || [])[1] || ids('M')[0];
+    const j = one ? { sections: { bottom: 'Written again, shorter [' + hl + '].' } } : { sections: { summary: 'Coverage of the gas taxation debate continued through the window, led by regional outlets and carried by others [' + hl + ']. A campaigner named Sam Private is behind it [M:999999]. The conversation on X stayed small [' + ids('S')[0] + '].', media: 'The story ran in three outlets and drew 300 reactions on Facebook [' + hl + '].', bottom: 'Activity is steady and the client is not directly targeted [' + hl + '].', posture: 'The client should continue monitoring.' }, ratings: { momentum: { level: 'Moderate', trend: 'Stable' } } };
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(j) }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 50 } }), { status: 200, headers: { 'Content-Type': 'application/json' } }); });
   return Object.assign(w, { F, push, calls });
 }

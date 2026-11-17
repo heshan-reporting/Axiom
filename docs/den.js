@@ -83,7 +83,41 @@
       document.addEventListener('keydown', key, true); return () => { document.removeEventListener('keydown', key, true); if (prev && prev.focus) prev.focus(); }; }, []);   // eslint-disable-line
     return html`<div class="den-dialog" onMouseDown=${e => { if (e.target === e.currentTarget) onClose(); }}><div role="dialog" aria-modal="true" aria-label=${title} data-tour=${tour || null} ref=${ref} tabIndex="-1"><h3>${title}</h3>${children}</div></div>`;
   }
-  const engText = e => (e ? [['likes', 'likes'], ['comments', 'comments'], ['replies', 'replies'], ['shares', 'shares'], ['reposts', 'reposts'], ['views', 'views']].filter(k => +e[k[0]] > 0).map(k => fmtN(e[k[0]]) + ' ' + k[1]).join(', ') : '');
+  const engText = e => (e ? [['likes', 'like'], ['comments', 'comment'], ['shares', 'share'], ['reposts', 'repost'], ['quotes', 'quote'], ['replies', 'reply'], ['views', 'view']].filter(k => +e[k[0]] > 0).map(k => fmtN(e[k[0]]) + ' ' + (+e[k[0]] === 1 ? k[1] : k[0])).join(', ') : '');
+  /* A post card's count, said as the evidence line the draft is written from says it (worker p71): its interactions; its
+     views when they are its only count; "no interactions" for a post counted at nothing ({ likes: 0 }); "engagement not
+     recorded" only for one with no count at all, the line's own words since its rename (EV5; review C6: the card still
+     said "no counts held"). The card said "no counts held" for the first two while the line said otherwise.
+     p71 fx3 (G1, the line's rule since D3): "no interactions" only when a like count and a comment (or reply) count were
+     both read. A read lacking one says each count it read at nought, then the main ones not recorded ("0 comments, likes
+     not recorded": an Instagram account that hides its likes), as the line does; the card said "no interactions" for it.
+     The counts go in the line's order (engK), in the tooltip too, so a card never lists a post's counts another way. */
+  const engK = ['likes', 'comments', 'shares', 'reposts', 'quotes', 'replies', 'views'];
+  const engCounted = (e, ks) => !!e && typeof e === 'object' && (ks || engK).some(k => e[k] != null && e[k] !== '' && isFinite(+e[k]));
+  const engMiss = e => [['likes'], ['comments', 'replies']].filter(ks => !engCounted(e, ks)).map(ks => ks[0]);
+  const engSay = r => { const t = +r.total || 0, e = r.eng && typeof r.eng === 'object' ? r.eng : null, v = e ? +e.views || 0 : 0, m = engMiss(e); return t ? fmtN(t) + (t === 1 ? ' interaction' : ' interactions') : v > 0 ? fmtN(v) + (v === 1 ? ' view' : ' views') : !engCounted(e) ? 'engagement not recorded' : m.length ? engK.filter(k => engCounted(e, [k])).map(k => '0 ' + k).concat(m.join(' and ') + ' not recorded').join(', ') : 'no interactions'; };
+  const engTip = r => { const m = engMiss(r.eng); return engText(r.eng) || (+r.total ? engSay(r) + ' in all' : !engCounted(r.eng) ? 'Its engagement was not recorded' : m.length ? 'Its ' + m.join(' and ') + ' were not recorded, and every count read is zero' : 'Its counts were read, and all are zero'); };
+  /* p71 fx3 (G2, beside the count): the tone of the comments read under a post in its line's words and on its line's
+     bounds (the worker's denToneWord). The chip said "hostile", "warm" or "mixed" on bounds of its own, so comments the
+     line called "mostly negative" read "hostile" on their card (a mean of -0.3), or "mixed" (-0.17) */
+  const toneWord = m => { m = +m || 0; return m <= -0.5 ? 'strongly negative' : m <= -0.15 ? 'mostly negative' : m < 0.15 ? 'mixed' : m < 0.5 ? 'mostly positive' : 'strongly positive'; };
+  /* p71 fx5 (R1): a tone rests only on the comments that carry one (toned), and the worker gives none resting on fewer than
+     three. The count says how many carry one when not all do, and the chip's title whose tone it is, so the count and the
+     chip read as the line does ("10 comments read (6 with a tone reading), mostly negative"); the title said "the 10
+     comments read" of a tone one comment of the ten carried. A worker before p71 fx5 sends no toned: all of them, as then */
+  const heldSay = h => plural(h.n, 'comment') + ' read' + (h.tone != null && h.toned < h.n ? ' (' + h.toned + ' with a tone reading)' : '');
+  const heldTip = h => 'The tone of the ' + (h.toned < h.n ? h.toned + ' of the ' : '') + plural(h.n, 'comment') + ' read under it' + (h.toned < h.n ? ' that have a tone reading' : '');
+  /* A story dated by the day in its address (worker p71, CO7: urlDated, it came with no date) has no time of its own: its
+     card says the day, in the evidence line's words (review C8: the card printed a clock time it never had). p71 fx3
+     (G3): so does a stale one, its address dated more than a day before the window opened: its line prints that day,
+     before this window, whatever time its feed gave it, and its card printed the feed's time. addrDated is the line's
+     test (stale or urlDated), for every place the page dates a story.
+     p71 fx5 (R2): the day as the line writes it (the worker's urlDay: "12 nov", "5 sep"; Intl wrote "12 Nov", "5 Sept",
+     "June"), with its year when that is not the window's (yr, the window's year: "4 mar 2019"); neither showed a year */
+  const fmtDayKey = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const MON3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const addrDated = r => !!(r && (r.urlDated || r.stale));
+  const addrDay = (r, yr) => { const d = /^\d{4}-\d\d-\d\d$/.test(String(r.urlDate || '')) ? r.urlDate : fmtDayKey.format(new Date(+r.ts || Date.now())); const y = /^\d{4}$/.test(String(yr || '')) ? String(yr) : fmtDayKey.format(new Date()).slice(0, 4); return +d.slice(8, 10) + ' ' + MON3[+d.slice(5, 7) - 1] + (d.slice(0, 4) !== y ? ' ' + d.slice(0, 4) : '') + (r.stale ? ' (the date in its address, before this window)' : ' (the date in its address)'); };
   /* Where a signal's or a row's evidence opens: a view of AXIOM, a tab of the Den, or the post itself. */
   /* What a person just did, said to anything listening (the guided tour, docs/den-tour.js): window event 'den:did' with
      { what, ... } after a write or a step succeeds. Nothing in the Den listens to it; it changes nothing by itself. */
@@ -140,14 +174,20 @@
   const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
   /* One card for each row of the board's five lists. `key` is how the page knows the card (and what a filing is kept
      under); `cite` is the id a brief cites it by; `pin` says whether the worker can pin it (an archive row can, a
-     narrative or a date cannot). */
+     narrative or a date cannot). A date's key names its row (or the parliament's record it was read from) beside its day
+     and event (review C7, CK3): eight towns' vigils on one day were one key, so the page kept one card of eight. Since the
+     third review (K1) it names the worker's fold instead of the row where the worker gives one: the row that speaks for a
+     standing vigil changes when a newer story tells it, and the key with it, so a date filed on this computer fell back to
+     Unsorted. The fold (the entry's days and the names of its earliest telling) stays; a board from before it keys by row. */
   function toCards(d) {
     const out = []; if (!d) return out;
-    (d.media || []).forEach(m => out.push({ key: 'M:' + m.id, cite: 'M:' + m.id, id: m.id, kind: 'media', pin: true, title: m.title, url: m.url, ts: m.ts, pinned: !!m.pinned, wsec: m.section || '', reach: fbTotal(m.fb), outlets: m.n || 1, growth: 0, r: m }));
+    // p71 fx3 (G3): a stale story is dated by its address here, at midday of that day as its evidence record is, not by the
+    // time its feed gave it: its weight never calls it recent, and the Brief's card never says it came hours ago
+    (d.media || []).forEach(m => out.push({ key: 'M:' + m.id, cite: 'M:' + m.id, id: m.id, kind: 'media', pin: true, title: m.title, url: m.url, ts: m.stale && /^\d{4}-\d\d-\d\d$/.test(String(m.urlDate || '')) ? Date.parse(m.urlDate + 'T02:00:00Z') : m.ts, pinned: !!m.pinned, wsec: m.section || '', reach: fbTotal(m.fb), outlets: m.n || 1, growth: 0, r: m }));
     (d.social || []).forEach(s => out.push({ key: 'S:' + s.id, cite: 'S:' + s.id, id: s.id, kind: 'social', pin: true, title: s.text, url: s.url, ts: s.ts, pinned: !!s.pinned, wsec: s.section || '', reach: +s.total || 0, outlets: 1, growth: +s.growth || 0, r: s }));
     (d.actors || []).forEach(a => out.push({ key: 'P:' + a.id, cite: 'P:' + a.id, id: a.id, kind: 'actors', pin: true, title: a.text, url: a.url, ts: a.ts, pinned: !!a.pinned, wsec: a.section || '', reach: +a.total || 0, outlets: 1, growth: +a.growth || 0, r: a }));
     (d.narratives || []).forEach(n => out.push({ key: 'N:' + n.id, cite: 'N:' + n.id, id: n.id, kind: 'narratives', pin: false, title: n.label, url: '', ts: n.last, pinned: false, reach: 0, outlets: 1, growth: 0, r: n }));
-    (d.upcoming || []).forEach((u, i) => out.push({ key: 'U:' + u.date + '|' + String(u.event || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40), cite: 'U:' + (i + 1), label: u.date + ' ' + u.event, id: 0, kind: 'upcoming', pin: false, title: u.event, url: u.url, ts: 0, pinned: false, reach: 0, outlets: 1, growth: 0, r: u }));
+    (d.upcoming || []).forEach((u, i) => out.push({ key: 'U:' + u.date + '|' + String(u.event || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) + '|' + (u.process ? 'p' + u.process : u.fold ? String(u.fold) : +u.item || ''), cite: 'U:' + (i + 1), label: u.date + ' ' + u.event, id: 0, kind: 'upcoming', pin: false, title: u.event, url: u.url, ts: 0, pinned: false, reach: 0, outlets: 1, growth: 0, r: u }));
     return out;
   }
   /* The strip signals that name a card: by the ids a signal says cover it, or by the row it opens. */
@@ -162,7 +202,9 @@
     if (c.growth > 0) { w += Math.min(14, Math.log10(1 + c.growth) * 4.5); why.push('+' + fmtN(c.growth) + ' since yesterday'); }
     if (c.kind === 'narratives' && c.r.n24 > 0) { w += Math.min(20, Math.log10(1 + c.r.n24) * 10); why.push(c.r.n24 + ' rows in the last day'); }
     const named = sigsFor(c, signals); if (named.length) { w += 16; why.push(((SIG[named[0].sig] || [named[0].sig])[0] + '').toLowerCase()); }
-    if (c.ts) { const fresh = Math.max(0, 8 - (now - c.ts) / 3600000 / 3); w += fresh; if (fresh >= 6) why.push('in the last six hours'); }
+    // p71 fx3 (G3): a story dated by its address has no time of its own; its stamp is the moment it was found or earlier,
+    // so a recent stamp says only that it was found in the last six hours
+    if (c.ts) { const fresh = Math.max(0, 8 - (now - c.ts) / 3600000 / 3); w += fresh; if (fresh >= 6) why.push(c.kind === 'media' && addrDated(c.r) ? 'found in the last six hours' : 'in the last six hours'); }
     return { score: Math.max(1, Math.min(99, Math.round(w))), why };
   }
   const LOW = 10;   // under this a card folds into Low weight
@@ -184,13 +226,27 @@
     return secOfKind(secs, s.sig === 'emerging' ? ['narratives', 'developments'] : s.sig === 'first_seen' || s.sig === 'outlier' ? ['actors', 'social'] : ['momentum', 'summary']);
   }
   function secState(sec, text, n) {
-    const f = sec ? (sec.uncited || []).length + (sec.unverified || []).length + (sec.trimmed || []).length : 0;
+    // a sentence that needs a source and also holds a figure the evidence lacks is one flag, as the Brief marks it (worker p71)
+    const un = sec ? (sec.uncited || []).map(u => String(u).slice(0, 200)) : []; const f = sec ? un.length + (sec.unverified || []).filter(x => un.indexOf(x && x.sentence) < 0).length + (sec.trimmed || []).length : 0;
     if (f && sec.text === text) return ['Flagged ' + f, 'warn']; if (String(text || '').trim()) return sec && sec.edited ? ['Edited', 'pos'] : ['Drafted', 'acc']; if (n) return ['Has evidence', 'info']; return ['Empty', ''];
   }
   const secKey = i => (i < 9 ? String(i + 1) : i === 9 ? '0' : '');
   /* The id a brief cites a card by, when that brief's evidence holds it. A date's id is its place in the list the draft
-     was written from, so it is matched by what it says. */
-  function citeOf(c, ev) { if (!ev) return ''; if (c.kind !== 'upcoming') return ev[c.cite] ? c.cite : ''; return Object.keys(ev).find(k => /^U:/.test(k) && ev[k].label === c.label) || ''; }
+     was written from, so it is matched among the lines that say its day and event (review C7: every vigil of one day was
+     matched to the first U: line with its label). Since the third review (K1, K3): a row's card takes the line of its own
+     row when there is one (and, where both carry a fold, of its own fold: one story can tell two towns' vigils); else the
+     line of its fold, the same schedule now told by a newer story (its item moved and the card read as new since the
+     draft); never a recorded date's line, nor another row's. A recorded date's card takes the line of its own record, so
+     two inquiries' hearings on one day stay apart. A line that names no row, fold or record (a brief stored before them)
+     is matched by its label alone. */
+  function citeOf(c, ev) {
+    if (!ev) return ''; if (c.kind !== 'upcoming') return ev[c.cite] ? c.cite : '';
+    const u = c.r || {}, it = +u.item || 0, fo = String(u.fold || ''), pr = u.process != null && u.process !== '' ? String(u.process) : '';
+    const ks = Object.keys(ev).filter(k => /^U:/.test(k) && ev[k] && ev[k].label === c.label), has = (k, f) => ev[k][f] != null && ev[k][f] !== '';
+    const bare = k => !(+ev[k].item) && !has(k, 'fold') && !has(k, 'process');
+    if (pr) return ks.find(k => has(k, 'process') && String(ev[k].process) === pr) || ks.find(bare) || '';
+    return ks.find(k => it && +ev[k].item === it && !(fo && has(k, 'fold') && String(ev[k].fold) !== fo)) || (fo && ks.find(k => String(ev[k].fold || '') === fo)) || ks.find(k => !has(k, 'item') && bare(k)) || '';
+  }
 
   /* ---- Nothing critical missed: the five checks, as a rail of pills. A channel that delivered nothing is not a check: it
      is a collection fact, said on the Collection tab only (owner's item (a), 16 November 2026). ---- */
@@ -258,17 +314,19 @@
   const MOVE = '__move';
   const layerTitle = l => (l === 1 ? 'Layer 1: an official route' : l === 2 ? 'Layer 2: a signed-in collector on the Mac' : 'Layer 3: a keyless read from the worker');
   /* One evidence card. The same card in Unsorted and under a section; what differs by kind is what the row carries. */
-  function Card({ c, desk, canWrite, onDone, onFile, secs, cited, onDrag, picked, onPick }) {
+  function Card({ c, desk, canWrite, onDone, onFile, secs, cited, onDrag, picked, onPick, yr }) {
     const r = c.r, k = c.kind; const lvl = c.w.score >= 60 ? 3 : c.w.score >= 30 ? 2 : 1; const pick = !!(canWrite && onPick && c.pin);
     const kindWord = k === 'media' ? 'story' : k === 'social' ? 'post' : k === 'actors' ? 'post by ' + r.who : k === 'narratives' ? (r.named === 'auto' ? 'Narrative, working title' : 'Narrative') : 'Upcoming';
     const name = (c.pinned ? 'Pinned. ' : '') + (k === 'upcoming' ? 'Upcoming: ' + r.event + ' on ' + r.date : kindWord + ': ' + String(c.title || '').slice(0, 120));
     const src = k === 'media' ? html`<span class="den-src"><b>${r.outlet}</b> ${r.tier ? html`<span>${r.tier}${r.juris && r.juris !== 'au' ? ', ' + r.juris.toUpperCase() : ''}</span>` : null}</span>`
       : k === 'narratives' ? html`<span class="den-src"><b>Narrative</b>${r.named === 'auto' ? html` <span class="den-chip den-worktitle" title=${WORKTITLE_T}>working title</span>` : null}</span>` : k === 'upcoming' ? html`<span class="den-src"><b>Upcoming</b></span>`
       : html`<span class="den-src"><b>${CH[r.platform] || r.platform}</b> ${r.sub ? html`<span>r/${r.sub} </span>` : null}${k === 'social' && r.registered ? html`<span>registered </span>` : null}</span>`;   // which collector layer read it (L1-L3) is collection detail: the Collection tab's, not the card's
-    const when = k === 'upcoming' ? html`<span>${String(r.weekday || '').slice(0, 3)} ${r.date}${r.yearWritten ? '' : html` <span title="The source wrote no year: this is the next time that day comes">*</span>`}</span>` : k === 'narratives' ? (r.last ? aest(r.last) : '') : (k !== 'media' && r.eng_at ? 'read ' + since(r.eng_at) : aest(r.ts));
+    const when = k === 'upcoming' ? html`<span>${String(r.weekday || '').slice(0, 3)} ${r.date}${r.yearWritten ? '' : html` <span title="The source wrote no year: this is the next time that day comes">*</span>`}</span>` : k === 'narratives' ? (r.last ? aest(r.last) : '') : (k === 'media' && addrDated(r) ? addrDay(r, yr) : k !== 'media' && r.eng_at ? 'read ' + since(r.eng_at) : aest(r.ts));
     const meta = [];
     if (k === 'media') { if (r.fb) meta.push(html`<span key="fb" title=${(r.fb.reactions || 0) + ' reactions, ' + (r.fb.comments || 0) + ' comments, ' + (r.fb.shares || 0) + ' shares'}>${fmtN(c.reach)} on Facebook</span>`); if (r.n > 1) meta.push(html`<span key="n">${r.n} outlets</span>`); }
-    if (k === 'social' || k === 'actors') { meta.push(html`<span key="e" title=${engText(r.eng) || 'No counts are held for this post'}>${r.total ? fmtN(r.total) + ' interactions' : 'no counts held'}</span>`); if (r.growth != null && r.growth !== 0) meta.push(html`<span key="g">${(r.growth > 0 ? '+' : '') + fmtN(r.growth)} since yesterday</span>`); if (r.held) meta.push(html`<span key="h">${plural(r.held.n, 'comment')} held</span>`); }
+    // p71 fx3 (G2): the comments under a post are counted as its evidence line counts them, "read" (the card said "held",
+    // a word the reader rule keeps out of the line)
+    if (k === 'social' || k === 'actors') { meta.push(html`<span key="e" title=${engTip(r)}>${engSay(r)}</span>`); if (r.growth != null && r.growth !== 0) meta.push(html`<span key="g">${(r.growth > 0 ? '+' : '') + fmtN(r.growth)} since yesterday</span>`); if (r.held) meta.push(html`<span key="h">${heldSay(r.held)}</span>`); }
     if (k === 'narratives') { meta.push(html`<span key="n">${fmtN(r.n)} rows, ${fmtN(r.n24)} in the last day</span>`); if ((r.spread || []).length) meta.push(html`<span key="s">${r.spread.map(s => CH[s] || s).join(' > ')}</span>`); }
     return html`<article class=${'den-row den-card w' + lvl + (c.pinned ? ' pinned' : '') + (picked ? ' picked' : '')} data-kind=${k} data-key=${c.key} data-tour="card" data-pin=${c.pin ? '1' : '0'} data-pinned=${c.pinned ? '1' : '0'} tabIndex="0" aria-label=${name} draggable=${canWrite && onDrag ? 'true' : 'false'}
         onDragStart=${e => { if (!canWrite || !onDrag) return; try { e.dataTransfer.setData('text/plain', c.key); e.dataTransfer.effectAllowed = 'move'; } catch (x) {} onDrag(c.key); }} onDragEnd=${() => onDrag && onDrag('')}
@@ -285,7 +343,7 @@
         ${k === 'media' && r.gated ? html`<span class="den-chip warn" title="Read through the agency's subscription. A brief quotes at most thirty words.">subscriber</span>` : k === 'media' && r.full ? html`<span class="den-chip" title="The full text is held">full text</span>` : null}
         ${k === 'narratives' ? html`<span class=${'den-chip ' + (r.side === 'hostile' ? 'neg' : r.side === 'supportive' ? 'pos' : '')}>${r.side || 'not read yet'}</span>` : null}${k === 'narratives' && r.status ? html`<span class="den-chip">${r.status}</span>` : null}
         ${k === 'upcoming' && r.recorded ? html`<span class="den-chip info" title="Read from the parliament's own page for this bill or inquiry, not worked out from a sentence">recorded</span>` : null}
-        ${(k === 'social' || k === 'actors') && r.held && r.held.tone != null ? html`<span class=${'den-chip ' + (r.held.tone < -0.2 ? 'neg' : r.held.tone > 0.2 ? 'pos' : '')}>${r.held.tone < -0.2 ? 'hostile' : r.held.tone > 0.2 ? 'warm' : 'mixed'}</span>` : null}
+        ${(k === 'social' || k === 'actors') && r.held && r.held.tone != null ? html`<span class=${'den-chip ' + (r.held.tone <= -0.15 ? 'neg' : r.held.tone >= 0.15 ? 'pos' : '')} title=${heldTip(r.held)}>${toneWord(r.held.tone)}</span>` : null}
         ${c.sigs.map(s => html`<span key=${s.key} class=${'den-chip ' + (SIG[s.sig] || ['', ''])[1]} title=${s.title}>${(SIG[s.sig] || [s.sig])[0]}</span>`)}
         ${cited ? html`<span class="den-chip pos" title="The brief cites this row">Cited${cited > 1 ? ' x' + cited : ''}</span>` : null}
       </div>
@@ -371,7 +429,8 @@
     // a check is "not in the brief" only once there is a brief to be in; once filed, what it left out was acknowledged at filing
     const unc = brief ? sigs.filter(s => !covered(s, brief, texts)) : []; const filedB = !!(brief && brief.status === 'filed'); const ackd = new Set(filedB ? (brief.acknowledged || []).map(a => (a && typeof a === 'object' ? a.key : a)) : []);
     const selected = sel.map(k => uns.find(x => x.key === k)).filter(x => x && x.pin);   // a card that left Unsorted leaves the selection
-    const card = x => html`<${Card} key=${x.key} c=${x} desk=${desk} canWrite=${canWrite} onDone=${done} onFile=${fileCard} secs=${secs} cited=${citedN(x)} onDrag=${setDrag} picked=${!x.sec && sel.indexOf(x.key) >= 0} onPick=${!x.sec ? pickCard : null} />`;
+    const yr = String((d.window && d.window.day) || '').slice(0, 4);   // p71 fx5 (R2): the window's year, beside which a card's address day says its own
+    const card = x => html`<${Card} key=${x.key} c=${x} desk=${desk} canWrite=${canWrite} onDone=${done} onFile=${fileCard} secs=${secs} cited=${citedN(x)} onDrag=${setDrag} picked=${!x.sec && sel.indexOf(x.key) >= 0} onPick=${!x.sec ? pickCard : null} yr=${yr} />`;
     const total = { media: (d.media || []).length, social: (d.social || []).length, actors: (d.actors || []).length, narratives: (d.narratives || []).length, upcoming: (d.upcoming || []).length };
     const WHY = { narratives: 'No narrative on this desk\'s issues gained rows in this window.', media: 'No story on this desk\'s issues' + (desk.region !== 'au' ? ' in ' + desk.region.toUpperCase() : '') + ' was collected in this window.', social: 'No post on this desk\'s terms or from its registered accounts was collected in this window.',
       actors: 'No registered organisation, official or MP posted on this desk in this window.', upcoming: 'No row in this window names a day and a month beside an action that has not yet passed, and no watched bill or inquiry has a date ahead.' };
@@ -440,7 +499,7 @@
     fmtDay, aest, since, ls, say, web, q, BUSY_WAITS, get, getText, useLoad, Loading, Failed, Empty, Boundary, Panel,
     Dialog, engText, tell, openEvidence, KINDS_ROW, fbTotal, sydDay, sydOffset, dayEnd, dayWords, BUDGET_T, wc, plural,
     toCards, sigsFor, weigh, LOW, deck, byWeight, covered, secOfKind, KIND_SEC, sigSec, secState, secKey, citeOf,
-    STRIP_PENDING, CHECKS, Strip, RowActions, layerTitle, Card, Board, ICONS, Ic, WORKTITLE_T
+    STRIP_PENDING, CHECKS, Strip, RowActions, layerTitle, Card, Board, ICONS, Ic, WORKTITLE_T, addrDated, addrDay
   };
   const { BriefPanel } = PARTS.brief(D);
   const { WatchPanel, CollectionPanel, OptionsPanel } = PARTS.desk(D);

@@ -81,7 +81,7 @@ const EXTRA = {
   'T:gastax': { k: 'tone', label: 'Gas taxation', url: '', gated: 0, item: 0, sub: '214 rows judged, mean tone -0.2' },
   'A:9': { k: 'alert', label: 'Sentinel spike: Gas taxation', url: '', gated: 0, item: 0 },
   'N:zz1': { k: 'narrative', label: 'Diesel rebate criticism grows among regional growers and their peak bodies', url: '', gated: 0, item: 0 },
-  'M:888881': { k: 'media', label: 'pointpost - A second pointpost story on the levy', url: 'https://pointpost.example.com.au/z', gated: 0, item: 888881 },
+  'M:888881': { k: 'media', label: 'The Point Post - A second Point Post story on the levy', url: 'https://pointpost.example.com.au/z', gated: 0, item: 888881 },
 };
 const MORE = ' One post said it plainly [S:777777]. Another agreed [S:777778]. Tone held [T:gastax]. Sentinel saw it [A:9]. A story grew [N:zz1]. It ran again [M:888881].';
 const w2 = await world(); await w2.F('POST', '/den/brief', { desk: 'aep_au' });
@@ -102,7 +102,7 @@ await t('an evidence card is headed by its source in words; a row the Board has 
   // every card in the pane leads with words: the head is never a raw id
   const heads = await p2.$$eval('.den-evpane .den-evcard', els => els.map(e => e.innerText.trim().split('\n')[0])); ok(heads.length >= 6 && heads.every(h => !/^[A-Z]:[A-Za-z0-9_.-]+$/.test(h)), JSON.stringify(heads));
   // a board card cited here is headed by its outlet and says what it is
-  const m = p2.locator('.den-evpane li[data-kind="media"]').first(); ok(/pointpost/.test(await m.locator('.den-evsrc').innerText()) && /Harbour levy/.test(await m.locator('.den-t').innerText()));
+  const m = p2.locator('.den-evpane li[data-kind="media"]').first(); ok(/The Point Post/.test(await m.locator('.den-evsrc').innerText()) && /Harbour levy/.test(await m.locator('.den-t').innerText()));
   ok(await m.locator('.den-evact a.den-link', { hasText: 'Open' }).count() === 1, 'Open is inside the card');
   eq(p2.errors, []);
 });
@@ -112,7 +112,7 @@ await t('a tone figure, a Sentinel alert and agency memory say nothing about fil
   { const nli = p2.locator('.den-evpane li[data-kind="narrative"]').first(); eq(await nli.getAttribute('data-filed'), 'none', 'a narrative can be filed, and is not'); ok(!/not filed/.test(await nli.textContent()), 'without the words "not filed" on the card (release review)'); }
   const chips = await all(p2, S + ' .den-cites button.den-cite'); ok(chips.indexOf('Tone: Gas taxation') >= 0 && chips.indexOf('Sentinel alert') >= 0, JSON.stringify(chips));
   ok(chips.some(c => /^Narrative: Diesel rebate criticism/.test(c) && c.length <= 'Narrative: '.length + 29), 'the narrative chip names it, shortened: ' + JSON.stringify(chips));
-  ok(chips.indexOf('pointpost') >= 0 && chips.indexOf('pointpost 2') >= 0, 'two stories of one outlet read apart: ' + JSON.stringify(chips));
+  ok(chips.indexOf('The Point Post') >= 0 && chips.indexOf('The Point Post 2') >= 0, 'two stories of one outlet read apart: ' + JSON.stringify(chips));
   const ns = await p2.$$eval(S + ' .den-cites .den-cite[data-n]', els => els.map(e => [e.getAttribute('data-n'), (/^\[?([A-Z]:[A-Za-z0-9_.-]+)/.exec(e.title) || [])[1]]));
   ok(ns.length >= 7 && ns.every((x, i, a) => +x[0] >= 1 && (i === 0 || +x[0] >= +a[i - 1][0])), 'chips are numbered in order: ' + JSON.stringify(ns));
   const [n, id] = ns.find(x => x[1] === 'S:777777'); eq((await p2.locator('.den-evpane li[data-cite="' + id + '"] .den-evnum').innerText()).trim(), n, 'the card carries the chip\'s number');

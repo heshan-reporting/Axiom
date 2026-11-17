@@ -170,7 +170,7 @@ await S.t('CH11 our own Pages: counts, comments, the daily snapshot, Instagram, 
   ok(r.capped && r.capped.some(c => /700_1: 2 of 5 comments read/.test(c)) && r.capped.some(c => /page 700: 1 posts read and the Page had more/.test(c)), 'the caps are said: ' + JSON.stringify(r.capped));
   const asked = hits(w, /\/700\/posts/)[0].url; ok(!/from|username/.test(decodeURIComponent(asked).split('access_token')[0]), 'no name is asked for');
   let t = arc(w, 'sig_thread'); const fb = t.find(x => x.src === 'meta'), ig = t.find(x => x.src === 'instagram');
-  eq(fb.meta.eng, { likes: 13, reposts: 4, replies: 5, quotes: 0, views: 0 }); eq([fb.meta.reactions.like, fb.meta.reactions.angry, fb.meta.ns], [10, 3, 'mca']);
+  eq(fb.meta.eng, { likes: 13, reposts: 4, replies: 5 }); eq([fb.meta.reactions.like, fb.meta.reactions.angry, fb.meta.ns], [10, 3, 'mca']);
   eq([ig.meta.eng.likes, ig.meta.eng.replies, ig.url], [21, 1, 'https://www.instagram.com/p/abc/']);
   const cm = arc(w, 'sig_comment'); eq(cm.length, 3); ok(cm.every(c => !c.author) && !/A Person|someone/.test(JSON.stringify(cm)), 'nobody is named');
   eq(arc(w, 'sig_eng').length, 2, 'a snapshot for each post');
@@ -189,7 +189,7 @@ await S.t('CH12 LinkedIn', async () => {
   const r = await w.t.linkedinSweep(w.env, { posts: 2, commentsPer: 5 }); eq([r.ok, r.threads, r.withCounts, r.comments], [true, 2, 1, 1], JSON.stringify(r).slice(0, 400));
   ok(/^20\d{4}$/.test(ver) && ver !== '202409', 'a version that is still served: ' + ver);
   ok(r.capped && r.capped.some(c => /2 posts read and LinkedIn had more/.test(c)) && r.capped.some(c => /1 of 80 comments read/.test(c)), JSON.stringify(r.capped));
-  const t = arc(w, 'sig_thread').find(x => /ugcPost:1/.test(x.url)); eq(t.meta.eng, { likes: 7, reposts: 2, replies: 3, quotes: 0, views: 900 }); eq(t.meta.stats.clicks, 40);
+  const t = arc(w, 'sig_thread').find(x => /ugcPost:1/.test(x.url)); eq(t.meta.eng, { likes: 7, reposts: 2, replies: 3, views: 900 }); eq(t.meta.stats.clicks, 40);
   ok(!/urn:li:person/.test(JSON.stringify(arc(w, 'sig_comment'))), 'the commenter is not kept');
   const w2 = await mk({ LINKEDIN_TOKEN: 'old', LINKEDIN_ORGS: org + ':mca' }); w2.answer(/api\.linkedin\.com/, () => J({ message: 'expired' }, 401));
   const r2 = await w2.t.linkedinSweep(w2.env, {}); ok(!r2.ok && /linkedin_token_invalid/.test(r2.detail) && /LINKEDIN_REFRESH_TOKEN/.test(r2.detail), r2.detail); eq(hits(w2, /api\.linkedin\.com/).length, 1);

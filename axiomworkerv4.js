@@ -343,6 +343,27 @@ const AU_FEEDS = {
   flagpost:      'https://parliamentflagpost.blogspot.com/feeds/posts/default?alt=rss', // Parliamentary Library FlagPost (Blogspot mirror)
 };
 
+/** A link as a feed or a sitemap writes it, read as the address it is (p71, AEP M8, M9): XML requires an ampersand in element
+ *  text to be written &amp; (WordPress writes &#038;), and before p71 the entity was filed as written, so the archive, the
+ *  export and the recall measure all held an address no server answers. Decoded here, at collection; a link written twice
+ *  over (&amp;amp;) is read down to its ampersand too. */
+function feedLink(s) { let v = String(s == null ? '' : s).trim(); for (let i = 0; i < 3 && /&(amp|#0*38|#x0*26);/i.test(v); i++) v = v.replace(/&(amp|#0*38|#x0*26);/gi, '&'); return v; }
+/** The day a story's own address gives (p71, MCA 2): /2026/11/10/, -2026-11-10 or -20261110- in its path. For a feed item that
+ *  arrived with no date, which was stamped with the moment it was found, so a week-old story read as new: the first moment it
+ *  is known to have existed. Found on that Sydney day, the moment it was found; found later, the end of that day, the last
+ *  moment of the day its address gives, so a 24-hour window keeps it until the next midnight. Review B1: noon (CO7's stamp)
+ *  was a time an evening story may not yet have had, threw away the found time of an item found that afternoon, and took a
+ *  story dated yesterday out of the window at noon. meta.urldate says the day came from the address: the evidence and the
+ *  Source List print that day and never the stamp's time (review CO7). 0 when the address carries no such day, or one in the
+ *  future or more than thirty days old (a number that only looks like a date). */
+function feedUrlDate(link, now) {
+  const x = denUrl(link); if (!x) return 0; now = now || Date.now(); const p = x.pathname;
+  const m = p.match(/\/(20\d\d)\/(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])(?=\/|$)/) || p.match(/[-_/](20\d\d)-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?![0-9])/) || p.match(/-(20\d\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?=[-/.]|$)/);
+  if (!m) return 0; const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3]); const noon = Date.UTC(y, mo, d, 12); if (new Date(noon).getUTCDate() !== d) return 0;
+  const end = Date.UTC(y, mo, d, 23, 59, 59) - auOffsetMs(noon);
+  if (new Date(noon).toISOString().slice(0, 10) > auDayKey(now) || end < now - 30 * 86400000) return 0;
+  return Math.min(now, end);   // 23:59:59 in Sydney that day: the offset read late that Sydney evening, after a 2-3 am clock change
+}
 /** Parse an RSS/Atom string into [{ title, link, date, desc }] */
 function parseFeedXml(xml = '') {
   const blocks = [
@@ -352,8 +373,9 @@ function parseFeedXml(xml = '') {
   return blocks.map(m => {
     const b = m[1];
     const title = stripHtml((b.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1] || ''));
-    // podcast and some CMS feeds carry no <link>: fall back to a permalink guid, then the enclosure
-    const link  = (b.match(/<link[^>]*href="([^"]+)"/) || b.match(/<link[^>]*>(https?[^<]+)<\/link>/) || b.match(/<guid[^>]*>\s*(https?[^<\s]+)\s*<\/guid>/) || b.match(/<enclosure[^>]*url="([^"]+)"/) || [])[1]?.trim();
+    // podcast and some CMS feeds carry no <link>: fall back to a permalink guid, then the enclosure. p71: the XML escape decoded
+    const raw   = (b.match(/<link[^>]*href="([^"]+)"/) || b.match(/<link[^>]*>(https?[^<]+)<\/link>/) || b.match(/<guid[^>]*>\s*(https?[^<\s]+)\s*<\/guid>/) || b.match(/<enclosure[^>]*url="([^"]+)"/) || [])[1]?.trim();
+    const link  = raw ? feedLink(raw) : raw;
     const date  = (b.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || b.match(/<published>([\s\S]*?)<\/published>/) || b.match(/<updated>([\s\S]*?)<\/updated>/) || [])[1]?.trim();
     const descRaw = (b.match(/<description[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/) || b.match(/<summary[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/summary>/) || [])[1] || '';
     return { title, link, date, desc: stripHtml(descRaw).slice(0, 240) };
@@ -4926,6 +4948,21 @@ async function archiveIndexEnsure(env, opts) {
   await kvPut(env.AXIOM_KV, 'arc_idx_v2', String(Date.now()), 30 * 86400);
   return { ok: true, made, ms: Date.now() - t0 };
 }
+/* p71 (AEP M8, M9): feed and sitemap links are decoded at collection now (feedLink), and the archive is unique on (kind, url) as
+ * written, so an item held under its escaped address from before p71 would be filed a second time under the decoded one. A
+ * row of a kind a feed files whose address carries an ampersand is looked up first under every escaped form feedLink reads
+ * back to it (review CO6: &amp; and WordPress's &#038; were caught, &#38;, &#x26; and a doubled escape were filed again; review
+ * B5: &#0038;, &#x026; and &#X26; too), on the (kind, url) index; one held under any is left out. Rows with no ampersand cost
+ * nothing. Nine forms an address, 99 keys a query: the kind and 99 keys stay within D1's 100 bound values. */
+const ARC_ESC_KINDS = ['news', 'sig_thread', 'forum'];
+const ARC_ESC_FORMS = ['&amp;', '&#038;', '&#38;', '&#x26;', '&amp;amp;', '&amp;#038;', '&#0038;', '&#x026;', '&#X26;'];
+async function arcEscUnheld(env, kind, rows) {
+  if (ARC_ESC_KINDS.indexOf(kind) < 0) return rows;
+  const esc = new Map(); rows.forEach(r => { const u = String(r.url || '').slice(0, 700); if (u.indexOf('&') < 0) return; ARC_ESC_FORMS.forEach(f => esc.set(u.split('&').join(f).slice(0, 700), u)); });
+  if (!esc.size) return rows; const keys = Array.from(esc.keys()); const held = new Set();
+  for (let i = 0; i < keys.length; i += 99) (((await env.MIND_DB.prepare('SELECT url FROM arc_items WHERE kind=? AND url IN (' + keys.slice(i, i + 99).map(() => '?').join(',') + ')').bind(kind, ...keys.slice(i, i + 99)).all()).results) || []).forEach(x => held.add(esc.get(x.url)));
+  return held.size ? rows.filter(r => !held.has(String(r.url || '').slice(0, 700))) : rows;
+}
 async function archiveItems(env, kind, rows, strict) {
   try {
     if (!rows || !rows.length) return 0;
@@ -4933,7 +4970,8 @@ async function archiveItems(env, kind, rows, strict) {
     const now = Date.now();
     const stmt = env.MIND_DB.prepare(
       'INSERT INTO arc_items(kind,src,title,body,url,author,tone,meta,ts,seen) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(kind,url) DO NOTHING');
-    const batch = rows.slice(0, 150).map(r => stmt.bind(
+    const use = await arcEscUnheld(env, kind, rows.slice(0, 150)); if (!use.length) return 0;   // p71: never a second copy of an escaped one
+    const batch = use.map(r => stmt.bind(
       kind,
       String(r.src || '').slice(0, 60),
       String(r.title || '').slice(0, 500),
@@ -4963,7 +5001,10 @@ function arcCoreRow(it, lexv) {
   const meta = { source: src, tier: cm ? (cm[1] || 'core') : 'sweep', juris: cm ? (cm[2] || 'au') : 'au', issues: issueTag(title + ' ' + String(it.desc || '')), tagv: lexv || arcLexVersion() };
   if (outlet) meta.outlet = outlet.slice(0, 60);
   if (it.parties && it.parties.length) meta.parties = it.parties;
-  return { src, title, body: it.desc, url: it.link, tone: it.tone, meta, ts: Date.parse(it.date || '') || 0 };
+  // p71 (MCA 2, review B1): an item the feed gave no date takes the day its own address carries (feedUrlDate): the moment it
+  // was found on that day, the day's end when found later, never the moment it was found days after
+  let ts = Date.parse(it.date || '') || 0; if (!ts) { ts = feedUrlDate(it.link, Date.now()); if (ts) meta.urldate = 1; }
+  return { src, title, body: it.desc, url: it.link, tone: it.tone, meta, ts };
 }
 /** Archive an /allnews snapshot (the JSON string buildAllNews returns), or a list of core items. */
 async function arcNewsSnap(env, jsonStr) {
@@ -5500,6 +5541,23 @@ const SOURCE_SEED_EXT = [
   ['wn_finmin', 'Minister for Finance', 'official', 'au', 'gov,econ', { s: 'financeminister.gov.au' }],
   ['wn_wamedia', 'WA Government media statements', 'official', 'wa', 'gov,gasprojects,mining', { s: 'wa.gov.au/government/media-statements' }],
   ['wn_nswmedia', 'NSW Government media releases', 'official', 'nsw', 'gov', { s: 'nsw.gov.au/media-releases' }],
+  // -- p71: the analyst's non-subscriber outlets, read directly (the real-data check of 17 November 2026, compare-aep s.6-7: none
+  //    of her links was held). Already held and left as they are: ABC News (the core abc feed carried the federal politics live
+  //    blog of 16 November onto the gas desk's Board, with stories from other sections; abc_business), RenewEconomy (its own
+  //    feed delivered nine stories to that Board), and the two clients' newsrooms by their main feed, WordPress, sitemap and
+  //    Google News (neither delivered a row in the windows checked). Region is held as region_au, whose sitemap route files
+  //    category pages ("Courts crime") and, since a route that delivers ends the chain, never reaches its listing page or Google
+  //    News: its stories reached the Den only as PS News through Google News. What was missing is added here; nothing above is
+  //    changed. No subscriber outlet (D8). Every address is unverified until a sweep proves it; the Sources view shows a failing
+  //    one after the first live tick. A listing page is undated: its first sweep files what it finds as a baseline, before
+  //    every window, and later sweeps stamp only new links as first seen (sourceRows, p71 review CO3). --
+  ['p71_abc_environment', 'ABC News Environment', 'broadcaster', 'au', 'energy,gasprojects,mining', { h: 'https://www.abc.net.au/news/topic/environment', g: 'site:abc.net.au environment OR climate' }],
+  ['p71_abc_topstories', 'ABC News Top Stories (ABC Listen)', 'podcast', 'au', 'gov', { p: 'ABC News Top Stories' }],
+  ['p71_region', 'Region Canberra', 'regional', 'act', 'gov', { r: 'https://region.com.au/feed/', w: 'https://region.com.au', g: 'site:region.com.au' }],
+  // the clients' own news pages: AEP's stories sit under /news/, MCA's releases under /resources/ (a post type of their own, so
+  // the site's main feed and its posts API may not carry them); the listing page is read when no feed answers
+  ['p71_aep_newsroom', 'Australian Energy Producers: newsroom', 'sector', 'au', 'gas,energy', { h: 'https://energyproducers.au/news/' }],
+  ['p71_mca_newsroom', 'Minerals Council of Australia: media releases', 'sector', 'au', 'mining,ftc,cm', { r: 'https://minerals.org.au/resources/feed/', h: 'https://minerals.org.au/resources/' }],
 ];
 function sourceMethods(urls, explicit) {
   urls = urls || {};
@@ -5765,11 +5823,11 @@ function parseSitemap(xml) {
   const out = [];
   for (const m of xml.matchAll(/<url>([\s\S]*?)<\/url>/g)) {
     const b = m[1];
-    const loc = (b.match(/<loc>\s*([^<\s]+)\s*<\/loc>/) || [])[1];
+    const loc = feedLink((b.match(/<loc>\s*([^<\s]+)\s*<\/loc>/) || [])[1]);   // p71: a location is XML text too (&amp;)
     if (!loc) continue;
     const title = stripHtml((b.match(/<news:title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/news:title>/) || [])[1] || '');
     const date = ((b.match(/<news:publication_date>([^<]+)<\/news:publication_date>/) || b.match(/<lastmod>([^<]+)<\/lastmod>/) || [])[1] || '').trim();
-    out.push({ title: title || slugTitle(loc), link: loc.trim(), date, desc: '' });
+    out.push({ title: title || slugTitle(loc), link: loc, date, desc: '' });
   }
   return out;
 }
@@ -5819,7 +5877,7 @@ async function srcSitemap(env, src) {
     if (!f.ok) { detail = f.error || ('HTTP ' + f.status); continue; }
     let xml = f.text;
     if (/<sitemapindex/i.test(xml)) {
-      const kids = Array.from(xml.matchAll(/<sitemap>[\s\S]*?<loc>\s*([^<\s]+)\s*<\/loc>[\s\S]*?<\/sitemap>/g)).map(x => x[1]);
+      const kids = Array.from(xml.matchAll(/<sitemap>[\s\S]*?<loc>\s*([^<\s]+)\s*<\/loc>[\s\S]*?<\/sitemap>/g)).map(x => feedLink(x[1]));   // p71: asked for as the address it is
       const pick = kids.filter(k => /news|latest|recent|article/i.test(k)).concat(kids).slice(0, 1);
       if (!pick.length) { detail = 'sitemap index with no children'; continue; }
       const g = await srcFetch(pick[0], 'application/xml,text/xml,*/*');
@@ -5833,7 +5891,8 @@ async function srcSitemap(env, src) {
   const cut = Date.now() - 48 * 3600000;
   const dated = items.filter(i => i.date && Date.parse(i.date) >= cut);
   const use = (dated.length ? dated : items.filter(i => !i.date).slice(0, 30)).filter(i => i.title);
-  return use.length ? { ok: true, items: use.slice(0, 60), status } : { ok: false, items: [], status, detail: 'sitemap entries are all older than 48h or have no usable title' };
+  // p71 (review B6): entries with no date are a listing: read for the first time, or afresh, they are a baseline (sourceRows)
+  return use.length ? { ok: true, items: use.slice(0, 60), status, undated: !dated.length } : { ok: false, items: [], status, detail: 'sitemap entries are all older than 48h or have no usable title' };
 }
 async function srcPodcast(env, src) {
   const term = String(src.urls.podcast || '').trim();
@@ -6241,12 +6300,33 @@ async function sourceRun(env, src, opts) {
   // a run that delivered nothing because a route was held is not a failure of the source: its chain was never finished
   return { src, hit, tried, ok: !!hit, held: !hit && tried.some(t => t.held), method: hit ? hit.method : '', items: hit ? hit.items : [] };
 }
+/* p71 (review CO3): a listing page gives no dates, and before this every link on it with none in its address was stamped as
+ * found, so a newsroom's first sweep (p71_aep_newsroom is AEP's only route) filed months of the client's releases as the
+ * day's news. A page read for the first time, or afresh (its route is not the one that last delivered, or that was more than
+ * SOURCE_WINDOW_H ago), is a baseline: such a link is filed SOURCE_BASELINE_MS back, before every window a desk reads (336
+ * hours at most), the window before it and the fortnight a baseline is drawn from, with meta.baseline; the archive then
+ * holds it, so a later read stamps only links that are new. html and render read the same page; public reads another.
+ * p71 (review H1): a read a person asked for (hit.asked: the Sources drawer's Probe with a browser, filed by the Mac through
+ * POST /sources/listing or by the worker's own render job) is afresh only when its page has not delivered before; a later
+ * probe files the links the archive does not hold as found, however long since the last read, as the Mac did before p71.
+ * Sources that need a browser are read only when a person asks (no schedule queues a render job), so most later probes came
+ * more than SOURCE_WINDOW_H after the last and a release new since went in as a baseline, never on the Board. The window
+ * rule stays for the sweeps a schedule runs: a source that has not delivered for three days was failing or off, and its page
+ * may hold the whole gap. A page another route delivered last (a newsroom's feed) is still read afresh: the archive may not
+ * hold its older links, which CO3 keeps out of the day's news. */
+const SOURCE_LISTING = ['html', 'render', 'public'];
+const SOURCE_BASELINE_MS = 30 * 86400000;
+// what a probe's log adds when its read was a baseline, so "filed N new rows" is not read as N new stories (review H1); the
+// Mac agent (tools/reach-agent.py job_render) says the same when POST /sources/listing answers baseline: true
+const SOURCE_BASELINE_SAY = ' (the first read of this page: filed as a baseline, before every window, so none of them is the day\'s news; the next probe files what is new as found)';
 /** Items -> archive rows of kind news. Every row carries the source, its tier
  *  and jurisdiction, the method that found it, the client issues it speaks to
  *  and whether it arrived with a date. WordPress and JSON feeds bring the full
  *  article text; meta.ft records that so the full-text pass leaves them alone. */
 function sourceRows(src, hit, now) {
   const cut = now - SOURCE_WINDOW_H * 3600000;
+  const page = m => (m === 'render' ? 'html' : String(m || ''));
+  const base = (!!hit.undated || SOURCE_LISTING.indexOf(hit.method) >= 0) && !(page(src.method_ok) === page(hit.method) && Number(src.last_ok) > (hit.asked ? 0 : cut));
   const seen = new Set(); const rows = [];
   for (const it of (hit.items || [])) {
     const title = String(it.title || '').replace(/\s+/g, ' ').trim(); const link = String(it.link || '').trim();
@@ -6264,7 +6344,9 @@ function sourceRows(src, hit, now) {
     if (it.wpid) meta.wp = it.wpid;                               // the site's own post number: what its comments hang from
     const claim = claimOf(title + '. ' + (it.desc || '') + ' ' + text.slice(0, 3000)); if (claim) meta.claim = claim;
     if (text.length > 600) { meta.full = 1; meta.ft = hit.method; }
-    rows.push({ src: src.id, title: title.slice(0, 500), body: (text.length > (it.desc || '').length ? text : String(it.desc || '')).slice(0, 6000), url: link, tone: e.tone, meta, ts: dated ? t : now });
+    // p71 (MCA 2): undated, it takes the day its own address carries when there is one (still dated 0: the feed gave none)
+    const ud = dated ? 0 : feedUrlDate(link, now); if (ud) meta.urldate = 1; else if (!dated && base) meta.baseline = 1;   // p71 (CO3): a listing's first read
+    rows.push({ src: src.id, title: title.slice(0, 500), body: (text.length > (it.desc || '').length ? text : String(it.desc || '')).slice(0, 6000), url: link, tone: e.tone, meta, ts: dated ? t : (ud || (meta.baseline ? now - SOURCE_BASELINE_MS : now)) });
   }
   return rows;
 }
@@ -6345,7 +6427,8 @@ async function sourceSweep(env, opts) {
     if (run.ok) {
       // a method may hand back rows in another shape (videos and newsletter
       // posts file as Signals threads, with their comments beside them)
-      const rws = run.hit.rows || sourceRows(s, run.hit, now);
+      // p71 integration (round-4 review of H1): a person's Sweep of named sources is a read they asked for, as Probe is
+      const rws = run.hit.rows || sourceRows(s, opts.asked ? Object.assign({}, run.hit, { asked: true }) : run.hit, now);
       run.rows = rws.length;
       if (opts.file !== false) {
         for (let i = 0; i < rws.length; i += 150) added += await archiveItems(env, run.hit.kind || 'news', rws.slice(i, i + 150));
@@ -6603,6 +6686,36 @@ function metaJson(meta) {
   if (s.length > 2000 && Array.isArray(meta.issues)) { meta.issues = meta.issues.slice(0, 4); s = JSON.stringify(meta); }
   return s.slice(0, 2400);
 }
+/* p71 (AEP M9, item 14): the resolved address of a row (meta.link: the publisher's page behind a Google News redirect, or where a
+ * rendered page landed), kept where the recall measure can find it on a key. meta sits inside a JSON column with no index, so
+ * denHeld could never ask "which row resolved to this address": arc_links answers it on its primary key. The address is kept
+ * as a reader opens it (denCleanUrl); when two rows resolve to one address, the one filed first stands. */
+let ARC_LINKS_READY = false;
+async function ensureArcLinks(env) {
+  if (!env.MIND_DB) return false; if (ARC_LINKS_READY) return true;
+  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS arc_links(url TEXT PRIMARY KEY, item INTEGER NOT NULL, ts INTEGER)').run();
+  ARC_LINKS_READY = true; return true;
+}
+const arcLinkPut = (env, link, item, ts) => { const u = denCleanUrl(link).replace(/#.*$/, '').slice(0, 700); return u && Number(item) > 0 ? env.MIND_DB.prepare('INSERT INTO arc_links(url,item,ts) VALUES(?,?,?) ON CONFLICT(url) DO UPDATE SET item=excluded.item, ts=excluded.ts WHERE excluded.item<arc_links.item').bind(u, Number(item), Number(ts) || 0) : null; };
+/** The rows resolved before arc_links existed (p71): a walk up the news of the last sixty days in (ts, id) order on the
+ *  (kind, ts) index, at most ARC_LINKS_FILL rows a call, from a cursor in KV (arc_links_fill); a row that carries meta.link is
+ *  written to arc_links. The full-text pass runs one call a tick until the walk reaches the newest row; from then on every
+ *  writer of meta.link (the full-text pass, fulltextSave) writes its link as it sets it. */
+const ARC_LINKS_FILL = 500;
+async function arcLinksFill(env, opts) {
+  opts = opts || {}; const out = { ok: true, read: 0, written: 0, done: false };
+  if (!env.MIND_DB || !(await ensureArchive(env)) || !(await ensureArcLinks(env))) return Object.assign(out, { ok: false });
+  let st = null; try { st = JSON.parse((await kvGet(env.AXIOM_KV, 'arc_links_fill')) || 'null'); } catch (e) { st = null; }
+  if (st && st.done && !opts.restart) return Object.assign(out, { done: true });
+  const now = Date.now(); const lim = Math.min(Math.max(parseInt(opts.limit, 10) || ARC_LINKS_FILL, 1), ARC_LINKS_FILL);
+  const cur = st && !opts.restart && Number(st.ts) > 0 ? { ts: Number(st.ts), id: Number(st.id) || 0 } : { ts: now - 60 * 86400000, id: 0 };
+  const rows = ((await env.MIND_DB.prepare("SELECT id, ts, json_extract(meta,'$.link') link FROM arc_items WHERE kind='news' AND ts>=? AND NOT (ts=? AND id<=?) ORDER BY ts, id LIMIT ?").bind(cur.ts, cur.ts, cur.id, lim).all()).results) || [];
+  const stmts = rows.filter(r => /^https?:\/\//i.test(String(r.link || ''))).map(r => arcLinkPut(env, r.link, r.id, r.ts)).filter(Boolean);
+  for (let i = 0; i < stmts.length; i += 100) await env.MIND_DB.batch(stmts.slice(i, i + 100));
+  const last = rows[rows.length - 1]; out.read = rows.length; out.written = stmts.length; out.done = rows.length < lim;
+  await kvPut(env.AXIOM_KV, 'arc_links_fill', JSON.stringify({ ts: last ? Number(last.ts) || 0 : cur.ts, id: last ? Number(last.id) || 0 : cur.id, done: out.done ? 1 : 0, at: now }), 400 * 86400);
+  return out;
+}
 /** Write body text back onto an archive row (by id or url). Used by the
  *  route, the cron, the render job and the desktop collector. */
 async function fulltextSave(env, b) {
@@ -6610,16 +6723,18 @@ async function fulltextSave(env, b) {
   if (b.gated || b.wall) return gatedSave(env, b, b.by);   // read through a subscription: its own store and its own rules
   if (!env.MIND_DB || !(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
   const id = parseInt(b.id, 10) || 0; const url = String(b.url || '');
-  const row = id ? await env.MIND_DB.prepare('SELECT id,meta FROM arc_items WHERE id=?').bind(id).first()
-    : (url ? await env.MIND_DB.prepare("SELECT id,meta FROM arc_items WHERE kind='news' AND url=?").bind(url).first() : null);
+  const row = id ? await env.MIND_DB.prepare('SELECT id,meta,ts FROM arc_items WHERE id=?').bind(id).first()
+    : (url ? await env.MIND_DB.prepare("SELECT id,meta,ts FROM arc_items WHERE kind='news' AND url=?").bind(url).first() : null);
   if (!row) return { ok: false, error: 'unknown_row', detail: 'No archive row with that id or url.' };
   const text = String(b.text || '').replace(/\s+\n/g, '\n').trim().slice(0, 6000);
   if (text.length < 200) return { ok: false, error: 'too_short', detail: 'Body text under 200 characters is not filed as the article.' };
   let meta = {}; try { meta = JSON.parse(row.meta || '{}') || {}; } catch (e) { meta = {}; }
   meta.ft = String(b.method || 'desktop').slice(0, 20); meta.ft_chars = text.length; delete meta.ft_try; delete meta.ft_err;
-  if (b.link && /^https?:\/\//.test(String(b.link))) meta.link = String(b.link).slice(0, 300);
+  const linked = !!(b.link && /^https?:\/\//.test(String(b.link))); if (linked) meta.link = String(b.link).slice(0, 300);
   if (b.published) meta.published = String(b.published).slice(0, 40);
   await env.MIND_DB.prepare('UPDATE arc_items SET body=?, meta=? WHERE id=?').bind(text, metaJson(meta), row.id).run();
+  // p71: the resolved address, where the recall measure reads it (a failure here never undoes the text just filed)
+  if (linked) { try { await ensureArcLinks(env); const st = arcLinkPut(env, meta.link, row.id, row.ts); if (st) await st.run(); } catch (e) {} }
   return { ok: true, id: row.id, chars: text.length, method: meta.ft };
 }
 /** Every tick: the news of the last two days that arrived as a headline and a
@@ -6630,14 +6745,16 @@ async function fulltextCron(env, opts) {
   if (!env.MIND_DB || !(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
   const now = Date.now();
   const limit = Math.min(Math.max(parseInt(opts.limit, 10) || FT_PER_TICK, 1), 100);
-  const rows = (await env.MIND_DB.prepare("SELECT id,url,src,title,meta FROM arc_items WHERE kind='news' AND ts>? AND LENGTH(COALESCE(body,''))<? AND (meta IS NULL OR json_extract(meta,'$.ft') IS NULL OR (json_extract(meta,'$.ft')='retry' AND COALESCE(json_extract(meta,'$.ft_try'),0)<2)) ORDER BY ts DESC LIMIT ?")
+  const rows = (await env.MIND_DB.prepare("SELECT id,url,src,title,meta,ts FROM arc_items WHERE kind='news' AND ts>? AND LENGTH(COALESCE(body,''))<? AND (meta IS NULL OR json_extract(meta,'$.ft') IS NULL OR (json_extract(meta,'$.ft')='retry' AND COALESCE(json_extract(meta,'$.ft_try'),0)<2)) ORDER BY ts DESC LIMIT ?")
     .bind(now - 48 * 3600000, FT_MIN, limit).all()).results || [];
   const out = { ok: true, tried: rows.length, got: 0, failed: 0, byMethod: {}, ms: 0 };
   const stmts = [];
+  // p71: a resolved Google address also goes to arc_links, in its own batch after the rows' (a failure there never loses a text)
+  let links = false; try { links = await ensureArcLinks(env); } catch (e) { links = false; } const lstmts = [];
   await mapPool(rows, 4, async (r) => {
     const ft = await fullText(env, r.url, { light: true, ms: 7000, render: !!env.FULLTEXT_RENDER });
     let meta = {}; try { meta = JSON.parse(r.meta || '{}') || {}; } catch (e) { meta = {}; }
-    if (ft.decoded) meta.link = String(ft.decoded).slice(0, 300);
+    if (ft.decoded) { meta.link = String(ft.decoded).slice(0, 300); const st = links ? arcLinkPut(env, meta.link, r.id, r.ts) : null; if (st) lstmts.push(st); }
     if (ft.ok) {
       meta.ft = ft.method; meta.ft_chars = ft.chars; delete meta.ft_try; delete meta.ft_err;
       if (ft.published) meta.published = String(ft.published).slice(0, 40);
@@ -6652,6 +6769,9 @@ async function fulltextCron(env, opts) {
     }
   });
   for (let i = 0; i < stmts.length; i += 100) { try { await env.MIND_DB.batch(stmts.slice(i, i + 100)); } catch (e) {} }
+  for (let i = 0; i < lstmts.length; i += 100) { try { await env.MIND_DB.batch(lstmts.slice(i, i + 100)); } catch (e) {} }
+  // p71: one bounded step of the arc_links backfill a tick, until it reaches the newest row (then a KV read a tick)
+  if (links && !opts.noFill) { try { out.links = await arcLinksFill(env); } catch (e) { out.links = { ok: false }; } }
   out.ms = Date.now() - now;
   if (rows.length) await kvPut(env.AXIOM_KV, 'fulltext_last', JSON.stringify(Object.assign({ at: now }, out)), 7 * 86400);
   return out;
@@ -6673,12 +6793,15 @@ async function renderJob(env, job, log) {
     if (!r.ok) { await log('err', r.detail); return { ok: false, error: 'render_failed', detail: r.detail }; }
     const items = listingLinks(r.html, url);
     await log('out', items.length + ' article-shaped links on the rendered page (' + r.ms + 'ms)');
-    const rows = sourceRows(s, { items, method: 'render' }, now);
+    // p71 (review H1): only a person starts this job (the Sources drawer's Probe with a browser; no schedule queues one), the
+    // same press the Mac serves through POST /sources/listing when the worker has no render service, so it reads by the same
+    // rule: a later probe files what is new as found, however long since the last. One button, one answer, wherever it renders.
+    const rows = sourceRows(s, { items, method: 'render', asked: true }, now); const base = rows.some(x => x.meta.baseline === 1);
     let added = 0; for (let i = 0; i < rows.length; i += 150) added += await archiveItems(env, 'news', rows.slice(i, i + 150));
     const run = { src: s, ok: items.length > 0, method: 'render', items, tried: [{ method: 'render', ok: items.length > 0, n: items.length, ms: r.ms, status: 200, skipped: false, detail: items.length ? '' : 'rendered page had no article-shaped links' }] };
     try { await env.MIND_DB.batch(sourceStmts(env, run, added, now)); } catch (e) {}
-    await log('info', 'filed ' + added + ' new rows for ' + s.id);
-    return { ok: items.length > 0, source: s.id, url, items: items.length, added, method: 'render' };
+    await log('info', 'filed ' + added + ' new rows for ' + s.id + (base ? SOURCE_BASELINE_SAY : ''));
+    return { ok: items.length > 0, source: s.id, url, items: items.length, added, method: 'render', baseline: base };
   }
   const url = String(p.url || '');
   if (!/^https?:\/\//.test(url)) return { ok: false, error: 'missing_url', detail: 'Give a url, or a source id.' };
@@ -6731,7 +6854,11 @@ async function socialJson(url, init, ms) {
     return { ok: false, status: 0, json: null, text: '', ms: Date.now() - t0, error: /timeout|abort/i.test(s) ? 'timed out' : s.trim().slice(0, 90) };
   }
 }
-function engRow(row, e) { e = e || {}; row.meta.eng = { likes: e.likes || 0, reposts: e.reposts || 0, replies: e.replies || 0, quotes: e.quotes || 0, views: e.views || 0 }; return row; }
+/* p71 (the MCA real-data check, finding 11): only the counts a collector gave are kept. A count it did not give stays absent
+ * rather than 0, so "counted, and none" ({ likes: 0 }) differs from "no counts held" ({}). Every reader takes a missing count
+ * as none (Number(x) || 0, or a test that it is above 0): denBoard's total, the evidence line, the growth against yesterday's
+ * snapshot, the page's count text. A count that is not a number is not a count either. */
+function engRow(row, e) { e = e || {}; const eng = {}; ['likes', 'reposts', 'replies', 'quotes', 'views'].forEach(k => { const v = e[k]; const n = v == null || v === '' ? NaN : Number(v); if (isFinite(n)) eng[k] = n; }); row.meta.eng = eng; return row; }
 
 // -- Bluesky: the public AppView, no key ---------------------------------------
 function bskyNorm(p, q) {
@@ -7684,12 +7811,19 @@ async function denPlan(env, ns, platform) {
   const own = denNsIssues(ns).length ? issueQueries(denNsIssues(ns)) : [];
   return { ok: true, ns, plan, terms, queries: own.concat(terms.filter(t => own.indexOf(t) < 0)), urls, caps: DEN_CAPS };
 }
+/* p71 (review CO2, MCA 11): a count the collector did not read stays absent, as engRow keeps it, so a post whose counts were
+ * never read (a hidden like count on Instagram, a Mac scrape that found none: reach_social's _eng gives {}) is not stored as
+ * seven zeros and never reads "no interactions" in the evidence, a statement of fact the model repeats. A count given is a
+ * whole number, never below nought; the reactions likewise, each only when it is a number. */
 function denEng(e) {
-  e = (e && typeof e === 'object') ? e : {}; const n = v => Math.max(0, Math.round(Number(v) || 0)); const rx = (e.reactions && typeof e.reactions === 'object') ? e.reactions : null;
-  const out = { likes: n(e.likes), comments: n(e.comments), shares: n(e.shares), reposts: n(e.reposts), replies: n(e.replies), quotes: n(e.quotes), views: n(e.views) };
-  if (rx) { out.reactions = {}; ['like', 'love', 'care', 'wow', 'haha', 'sad', 'angry'].forEach(k => { if (rx[k] != null) out.reactions[k] = n(rx[k]); }); }
+  e = (e && typeof e === 'object') ? e : {}; const n = v => { const x = v == null || v === '' ? NaN : Number(v); return isFinite(x) ? Math.max(0, Math.round(x)) : NaN; }; const rx = (e.reactions && typeof e.reactions === 'object') ? e.reactions : null;
+  const out = {}; ['likes', 'comments', 'shares', 'reposts', 'replies', 'quotes', 'views'].forEach(k => { const x = n(e[k]); if (!isNaN(x)) out[k] = x; });
+  if (rx) { out.reactions = {}; ['like', 'love', 'care', 'wow', 'haha', 'sad', 'angry'].forEach(k => { const x = n(rx[k]); if (!isNaN(x)) out.reactions[k] = x; }); }
   return out;
 }
+/** A post's score and comment count from what denEng kept (p71, CO2): a count not read adds nothing, never NaN. */
+function denEngScore(e) { return (Number(e.likes) || 0) + (Number(e.reposts) || 0) + (Number(e.shares) || 0); }
+function denEngComments(e) { return Number(e.comments) || Number(e.replies) || 0; }
 /** The one way in. body: { ns, layer 1|2|3, via, rows: [{platform, url, text, ts, eng, eng_at, watch, q, hashtag, link}],
  *  comments: [{platform, thread_url, id, text, ts, likes, depth}], fb: [{url, reactions, comments, shares}] }.
  *  Nothing in a row that names a person is read: not author, not username, not from_name. */
@@ -7728,7 +7862,7 @@ async function signalsIngest(env, body, who) {
     if (!own.length && !term) { out.skipped.off_topic++; continue; }
     const eng = denEng(r.eng); const engAt = Math.min(Number(r.eng_at) || now, now + 3600000);
     const ts = Number(r.ts) > 1e11 ? Number(r.ts) : (Date.parse(String(r.ts || '')) || now);
-    const meta = { platform, id: 'p' + arcHash(url), page: w ? w.value : '', page_name: '', score: eng.likes + eng.reposts + eng.shares, comments: eng.comments || eng.replies,
+    const meta = { platform, id: 'p' + arcHash(url), page: w ? w.value : '', page_name: '', score: denEngScore(eng), comments: denEngComments(eng),
       link: String(r.link || '').slice(0, 300), issues: tags, issue: own[0] || tags[0] || '', q, ns, via, layer, layers: [layer], eng, eng_at: engAt };
     if (tag) meta.hashtag = tag;
     if (term) meta.term = term.value;
@@ -7748,7 +7882,9 @@ async function signalsIngest(env, body, who) {
     const old = have.get(url);
     if (old) {
       let m = {}; try { m = JSON.parse(old.meta || '{}') || {}; } catch (e) { m = {}; }
-      if (row.meta.eng_at >= (Number(m.eng_at) || 0)) { m.eng = row.meta.eng; m.eng_at = row.meta.eng_at; m.score = row.meta.score; m.comments = row.meta.comments; }
+      // p71 (CO2): a later read replaces the counts it gave and keeps the rest, so a read with fewer counts (a keyless read
+      // after the Graph's) never turns a count read before into one never read
+      if (row.meta.eng_at >= (Number(m.eng_at) || 0)) { m.eng = Object.assign({}, (m.eng && typeof m.eng === 'object') ? m.eng : {}, row.meta.eng); m.eng_at = row.meta.eng_at; m.score = denEngScore(m.eng); m.comments = denEngComments(m.eng); }
       m.layers = Array.from(new Set([].concat(m.layers || (m.layer ? [m.layer] : []), [layer]))).sort();
       if (row.meta.watch && !m.watch) { m.watch = row.meta.watch; if (row.meta.actor) m.actor = row.meta.actor; m.page = row.meta.page; }
       ups.push(env.MIND_DB.prepare('UPDATE arc_items SET meta=?, seen=? WHERE id=?').bind(jsonFit(m, 1500), now, old.id));
@@ -8412,7 +8548,7 @@ const denJ = (s, d) => { try { const v = JSON.parse(s || ''); return v == null ?
 function deskView(r) {
   const o = Object.assign({}, DEN_OPTIONS, denJ(r.options, {})); if (!Array.isArray(o.mutes)) o.mutes = []; if (!Array.isArray(o.hidden)) o.hidden = [];
   const ci = CLIENT_ISSUES.filter(c => c.ns === r.ns);
-  return { id: r.id, ns: r.ns, name: r.name, client: (ci[0] && ci[0].client) || r.ns, region: r.region || 'au', cadence: r.cadence || 'daily', window_h: Number(r.window_h) || 24, sections: denJ(r.sections, []), ratings: denJ(r.ratings, DEN_RATINGS_A),
+  return { id: r.id, ns: r.ns, name: r.name, client: (ci[0] && ci[0].client) || r.ns, short: denShort(r.ns, (ci[0] && ci[0].client) || r.ns), region: r.region || 'au', cadence: r.cadence || 'daily', window_h: Number(r.window_h) || 24, sections: denJ(r.sections, []), ratings: denJ(r.ratings, DEN_RATINGS_A),
     options: o, auto_draft: !!r.auto_draft, revision: Number(r.revision) || 1, updated: r.updated || 0, updated_by: r.updated_by || '', issues: ci.map(c => ({ id: c.id, label: c.label })) };
 }
 async function deskGet(env, id) {
@@ -8428,12 +8564,18 @@ async function deskList(env) {
   return { ok: true, desks, levels: DEN_LEVELS, trends: DEN_TRENDS, sectionKinds: DEN_SECTION_KINDS, regions: SOURCE_JURIS, budget: await denBudget(env) };
 }
 async function denBudget(env) { try { const u = await aiUsage(env, 'den'); const cap = AI_SCOPES.den.cap(env); return { used: Number(u.reserved) || 0, cap, left: Math.max(0, cap - (Number(u.reserved) || 0)) }; } catch (e) { return { used: 0, cap: AI_SCOPES.den.cap(env), left: AI_SCOPES.den.cap(env) }; } }
-/** Create or change a desk. Compare-and-swap on revision. patch: name, region, cadence, window_h, sections, ratings, options (hidden, minEng, fold, density, weekday), auto_draft. */
+/** Create or change a desk. Compare-and-swap on revision. patch: name, region, cadence, window_h, sections (id, kind, title, guide), ratings, options (hidden, minEng, fold, density, weekday, title, channels), auto_draft. */
 async function deskUpdate(env, b, who) {
   b = b || {}; if (!(await ensureDesks(env))) return { ok: false, status: 501, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
   const p = (b.patch && typeof b.patch === 'object') ? b.patch : {}; const now = Date.now();
   const str = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
-  const cleanSections = v => (Array.isArray(v) ? v : []).slice(0, 20).map(s => ({ id: str(s && s.id, 24).toLowerCase().replace(/[^a-z0-9_]/g, ''), kind: DEN_SECTION_KINDS.indexOf(String(s && s.kind)) >= 0 ? String(s.kind) : '', title: str(s && s.title, 80) })).filter(s => s.id && s.kind && s.title);
+  // p71: plain text a person typed for the model's prompt or the report's header: control characters out, one line
+  const plain = (v, n) => String(v).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n).trim();
+  // p71 (compare-mca s.8.6): a section may carry its own guide, plain text of at most 400 characters, which the draft's
+  // prompt uses in place of its kind's. A section sent without one (or with anything but text) keeps the guide it has, so
+  // a save from a page that sends sections without guides never wipes them; '' clears it.
+  const cleanSections = (v, old) => (Array.isArray(v) ? v : []).slice(0, 20).map(s => { const o = { id: str(s && s.id, 24).toLowerCase().replace(/[^a-z0-9_]/g, ''), kind: DEN_SECTION_KINDS.indexOf(String(s && s.kind)) >= 0 ? String(s.kind) : '', title: str(s && s.title, 80) };
+    const had = (Array.isArray(old) ? old : []).find(x => x && x.id === o.id); const g = s && typeof s.guide === 'string' ? plain(s.guide, 400) : (had && typeof had.guide === 'string' ? had.guide : ''); if (g) o.guide = g; return o; }).filter(s => s.id && s.kind && s.title);
   const cleanRatings = v => { v = (v && typeof v === 'object') ? v : {}; const lv = (Array.isArray(v.levels) ? v.levels : []).map(x => str(x, 40)).filter(Boolean).slice(0, 9); const tr = (Array.isArray(v.trends) ? v.trends : []).map(x => str(x, 40)).filter(Boolean).slice(0, 6);
     return { levels: lv.length >= 2 ? lv : DEN_LEVELS, trends: tr.length ? tr : DEN_TRENDS, items: (Array.isArray(v.items) ? v.items : []).slice(0, 8).map(i => ({ id: str(i && i.id, 24).toLowerCase().replace(/[^a-z0-9_]/g, ''), label: str(i && i.label, 60), trend: !!(i && i.trend) })).filter(i => i.id && i.label) }; };
   const cleanOptions = (v, old) => { v = (v && typeof v === 'object') ? v : {}; const o = Object.assign({}, old);
@@ -8444,6 +8586,13 @@ async function deskUpdate(env, b, who) {
     // p70: a weekly desk's report day, the Sydney weekday its morning draft is written on (0 Sunday to 6 Saturday; Monday
     // when unset): a whole number 0-6, or that one digit as a select sends it; anything else is dropped and the saved day stands
     if (v.weekday != null && /^[0-6]$/.test(String(v.weekday))) o.weekday = Number(v.weekday);
+    // p71: the report's own name (title: plain text of at most 80 characters, which denTitle prints and the prompt names),
+    // and the channels the desk relies on (channels: unique platform ids, never web or any, at most ten; the signals lane
+    // reads it as its override). Each survives a save that leaves it out, as weekday does; '' or [] clears it; a value of
+    // the wrong type, or a list with no platform in it, is dropped and the saved one stands.
+    if (typeof v.title === 'string') { const t = plain(v.title, 80); if (t) o.title = t; else delete o.title; }
+    if (Array.isArray(v.channels)) { const c = Array.from(new Set(v.channels.map(x => (typeof x === 'string' ? x.trim().toLowerCase() : '')).filter(x => x && x !== 'web' && x !== 'any' && DEN_PLATFORMS.indexOf(x) >= 0))).slice(0, 10);
+      if (c.length) o.channels = c; else if (!v.channels.length) delete o.channels; }
     return o; };
   if (!b.id) {   // a new desk: a client, a name, and the format of a desk like it
     const ns = String(b.ns || '').toLowerCase(); const name = str(b.name, 60);
@@ -8459,7 +8608,7 @@ async function deskUpdate(env, b, who) {
   }
   const d = await deskGet(env, b.id); if (!d) return DESK_UNKNOWN;
   const next = { name: p.name != null ? str(p.name, 60) : d.name, region: p.region != null && SOURCE_JURIS.indexOf(String(p.region)) >= 0 ? String(p.region) : d.region, cadence: p.cadence != null && ['daily', 'weekly'].indexOf(String(p.cadence)) >= 0 ? String(p.cadence) : d.cadence,
-    window_h: p.window_h != null ? Math.max(1, Math.min(336, parseInt(p.window_h, 10) || d.window_h)) : d.window_h, sections: p.sections != null ? cleanSections(p.sections) : d.sections, ratings: p.ratings != null ? cleanRatings(p.ratings) : d.ratings,
+    window_h: p.window_h != null ? Math.max(1, Math.min(336, parseInt(p.window_h, 10) || d.window_h)) : d.window_h, sections: p.sections != null ? cleanSections(p.sections, d.sections) : d.sections, ratings: p.ratings != null ? cleanRatings(p.ratings) : d.ratings,
     options: p.options != null ? cleanOptions(p.options, d.options) : d.options, auto_draft: p.auto_draft != null ? (p.auto_draft ? 1 : 0) : (d.auto_draft ? 1 : 0) };
   if (next.name.length < 3) return { ok: false, status: 400, error: 'name_required', detail: 'Give the desk a name of three characters or more.' };
   if (!next.sections.length) return { ok: false, status: 400, error: 'sections_required', detail: 'A desk needs at least one section, each with a title and a kind (' + DEN_SECTION_KINDS.join(', ') + ').' };
@@ -8471,6 +8620,47 @@ async function deskUpdate(env, b, who) {
   return { ok: true, desk: await deskGet(env, d.id) };
 }
 function denHost(u) { const x = denUrl(u); return x ? x.hostname.toLowerCase().replace(/^www\.|^m\.|^mobile\./, '') : ''; }
+/* p71 shared helpers (the real-data check of 17 November 2026, DEN.md s.10.13). */
+/** The name the client's own team uses for it, in the brief and its posture ("AEP should continue monitoring ..."). */
+const DEN_CLIENT_SHORT = { aep: 'AEP', mca: 'MCA', guns: 'SIFA and the Shooters Union', vicnats: 'the Nationals', pca: 'the Property Council', mba: 'Master Builders', pharm: 'the Guild', cmm: 'Curious Minds' };
+function denShort(ns, client) { return DEN_CLIENT_SHORT[String(ns || '')] || String(client || ns || 'the client'); }
+/** The report's own name, as its header and the model's brief say it: the desk's options.title when a person set one, else
+ *  by cadence (her daily AEP briefs are "Daily Activist Activity Brief"). */
+function denTitle(desk) { const t = desk && desk.options && desk.options.title; return t ? String(t).slice(0, 80) : (desk && desk.cadence === 'weekly' ? 'Weekly Activist Activity Brief' : 'Daily Activist Activity Brief'); }
+/** A link as a reader would open it: the feed's XML escapes decoded (&amp; and &#038; reached the export as written, and the
+ *  html escaped them again), and the tracking parameters a feed or a share adds struck. The rest of the address is kept as
+ *  given. '' for anything that is not an http(s) address. */
+const DEN_TRACK_RX = /^(utm_[a-z0-9_]*|ref|ref_src|ref_url|fbclid|gclid|dclid|msclkid|mc_cid|mc_eid|igshid|cmpid|ocid|sr_share|s_cid|_ga|_gl|rss|feed_source)$/i;
+function denCleanUrl(u) {
+  let s = String(u || '').trim(); for (let i = 0; i < 3 && /&(amp|#0*38|#x0*26);/i.test(s); i++) s = s.replace(/&(amp|#0*38|#x0*26);/gi, '&');
+  const x = denUrl(s); if (!x) return '';
+  const keep = []; x.searchParams.forEach((v, k) => { if (!DEN_TRACK_RX.test(k)) keep.push([k, v]); });
+  if (keep.length !== Array.from(x.searchParams.keys()).length) { x.search = ''; keep.forEach(kv => x.searchParams.append(kv[0], kv[1])); }
+  return x.toString();
+}
+/** A Google News redirect (news.google.com/rss/articles/...): not the publisher's address. */
+function denGoogleLink(u) { return /^https?:\/\/news\.google\.[a-z.]+\//i.test(String(u || '')); }
+/** A key under which near-identical texts fall together: one templated post ("I just signed the open letter ...") from many
+ *  accounts, or one story under its syndicated copies. Addresses, handles and hashtags are struck, case and punctuation
+ *  ignored, the first ninety letters kept. */
+function denTextKey(t) { return String(t || '').toLowerCase().replace(/https?:\/\/\S+/g, ' ').replace(/[@#][\w.]+/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 90); }
+/** How a row bears on the desk's issues (p71). tight: an issue's own trigger (rx), or one of the desk's lexicon terms, fires
+ *  in its words; inTitle: any of its issues' triggers fires in the title; passing: neither, so the desk's tag rests on a word
+ *  the wide trigger found in the body (a suburb feature that mentions gas once). A row a search term found, or a registered
+ *  account's or an MP's post, is never passing: someone chose it. */
+function denRel(title, body, issueIds, meta) {
+  const t = String(title || ''), b = String(body || ''); const lex = (typeof DESK_LEX === 'object' && DESK_LEX && DESK_LEX.by) || {}; let tight = false, inTitle = false;
+  for (const id of issueIds || []) { const ci = CLIENT_ISSUES.find(c => c.id === id); if (!ci) continue; const lx = lex[id];
+    if (ci.rx.test(t) || ci.rx.test(b) || (lx && (lx.test(t) || lx.test(b)))) tight = true;
+    if ((ci.wide || ci.rx).test(t) || (lx && lx.test(t))) inTitle = true; }
+  const m = meta || {}; const chosen = !!(m.term || m.q || m.hashtag || m.watch || m.actor || m.mp);
+  return { tight, inTitle, passing: !tight && !inTitle && !chosen };
+}
+/** Tone in words for client prose (the reader rule, p71): a mean tone between -1 and 1 never reaches the brief as a score. */
+function denToneWord(mean, n) {
+  if (!(Number(n) > 0) && n != null) return 'none judged'; const m = Number(mean) || 0;
+  return m <= -0.5 ? 'strongly negative' : m <= -0.15 ? 'mostly negative' : m < 0.15 ? 'mixed' : m < 0.5 ? 'mostly positive' : 'strongly positive';
+}
 function denWindow(desk, o, nowIn) {
   const to = Math.max(0, Number((o || {}).to) || 0) || nowIn || Date.now(); const hours = Math.max(1, Math.min(336, parseInt((o || {}).hours, 10) || desk.window_h || 24)); const from = to - hours * 3600000;
   const d = t => new Date(t + auOffsetMs(t)); const a = d(from), b = d(to); const M = i => DEN_MONTHS[i].charAt(0).toUpperCase() + DEN_MONTHS[i].slice(1);
@@ -8479,35 +8669,470 @@ function denWindow(desk, o, nowIn) {
   return { from, to, hours, day: auDayKey(to), label };
 }
 /** Dated actions written out in the rows themselves: a day and a month in the same sentence as an action word, the
- *  date not yet passed. Never a guess: "next week" and "soon" are not dates. */
+ *  date not yet passed. Never a guess: "next week" and "soon" are not dates. p71 (AEP m2): a standing weekly schedule
+ *  beside an action word ("a vigil every Tuesday and Friday", "rallies on Saturdays", "weekly on Thursdays", or a title
+ *  "... Tuesdays and Fridays in Pointville" over a body that names the action) gives the next day of each weekday it
+ *  names, marked recurring with the schedule as written, so a standing vigil is not read as a new event or an escalation.
+ *  A schedule names its days or it is not read: "regularly", "fortnightly", "every other Tuesday" and a one-off "on
+ *  Tuesday" give nothing. p71 fixes (review CK3, CK4): one entry for each schedule, at the next of the days it names (the
+ *  schedule as written names them all, and "Mondays to Fridays" is every day between); the same event on the same days at
+ *  the same place, told by several rows or in several wordings, is one entry; a schedule that ended or is told of a past
+ *  year gives nothing, nor one whose end ("until 10 November") has passed, and one that starts later ("starting 4
+ *  December") gives no day before its start. Dated entries are kept before standing ones (denUpPick). p71 fixes after the
+ *  second review: a vow runs on ("every Friday until the tax is scrapped"), as does one told of a past year in the present
+ *  or as still running ("since last year", "goes on"), and a day with no year is read by the sentence's tense ("will hold
+ *  ... until 30 June" is next June, "has been held ... from 4 March" this March) (A7); one dated event told by many stories
+ *  is one entry, placed as a standing one is (A8); a headline's sentence takes the names of the body's lead (A9). After the
+ *  third review: a day's tense is read in its own clause, never anywhere in the sentence (E2, E3: "began on 1 October and
+ *  closes on 30 January" is next January); after until, an end told in the past ends a schedule, and of a past year, a
+ *  habit told in the past has ended (E3); a telling is placed by its names, its place and what it is about, the body's lead
+ *  naming a headline only when the headline names nothing, and two tellings are one event when neither contradicts the
+ *  other and they share a word or one says nothing (E6, E7). After the fifth round (fx5, held to one table of every
+ *  sentence the reviewers listed): a day is told as begun only by the verb that governs it, and a dated entry is named by
+ *  the action nearest its day (P1); a past form describing a noun in a vow's until clause does not end it (P2); a headline
+ *  whose only name is its first word is placed by a lead that says where (P3); tellings agree on what an action is about
+ *  when they share a word naming it, a telling that says only where is the event of one that gives no place, and entries
+ *  a later telling joins are one whatever the order (P4); an end before its own start is next year's, and an end told in
+ *  the past is never a date to come (P0). After the sixth round (fx6, its rows in the same table): that end is a
+ *  schedule's, so a one-off day "delayed until 4 February" is next February's (S1); a begun verb governs its day across
+ *  its object and where or how ("began in Pointville on 3 March") until another action, day or and/with/ahead of comes
+ *  between (S2); a dated entry is named by the action before its day in its clause (S3); an appositive or a which, who or
+ *  that clause after until is not the until clause's own (S4); tellings about the same head agree only when each narrows
+ *  it in its own way ("the gas tax", "the export tax"), never two heads or two of one kind ("the coal mine", "the gold
+ *  mine") (S5). After the seventh (fx7), each rule narrowed to what the words leave no doubt of: a begun verb governs a day
+ *  only within its own stretch of words, never across a comma, an -ing word, "to" or "through to", nor a day that
+ *  modifies a noun (T1); a levy is the tax only when every other word of the two phrases matches (T2); a hike, rise,
+ *  increase or cut is no measure's head (T3); after until, only a postponement verb gives the next such day (T4); an
+ *  appositive closed by a second comma is dropped from the until clause (T5). */
 function denUpcoming(rows, now) {
   const today = auDayKey(now); const horizon = auDayKey(now + 120 * 86400000); const out = []; const seen = new Set();
-  const EV = /\b(rall(?:y|ies)|protests?|march(?:es)?|blockades?|vigil|strike|walk-?out|hearings?|inquiry|submissions?|deadline|launch(?:es)?|vote|debate|forum|town hall|meeting|summit|conference|agm|petition|consultation|decision|ruling|sitting|convoy|picket|day of action|closes?|closing)\b/i;
+  // p71 fix after the second review (A8): the month beside its day ("4 March", "March 4") is not the action "march", so the
+  // event a dated entry is folded by is the sentence's action ("started on 4 March, plans a rally on 21 November" is a rally);
+  // p71 fx5: nor is the month after in, since, by and the like ("Vigils began in March and resume every Friday")
+  const EVW = 'rall(?:y|ies)|protests?|(?<!\\d(?:st|nd|rd|th)?\\s+(?:of\\s+)?|\\b(?:in|since|from|until|till|by|before|after|during|early|late|mid)\\s+)march(?:es)?(?!\\s+\\d)|blockades?|vigil|strike|walk-?out|hearings?|inquiry|submissions?|deadline|launch(?:es)?|vote|debate|forum|town hall|meeting|summit|conference|agm|petition|consultation|decision|ruling|sitting|convoy|picket|day of action|closes?|closing';
+  const EV = new RegExp('\\b(' + EVW + ')\\b', 'i'), EVG = new RegExp(EV.source, 'gi');
+  // a schedule's action may also be a standing "action", "gathering" or "sit-in" (the listing of the weekly vigil in AEP
+  // m2 called it a weekly action); a one-off date keeps the words above
+  const EVS = new RegExp('\\b(' + EVW + '|vigils|actions?|gatherings?|sit-?ins?)\\b', 'gi'), EV1 = new RegExp('^(?:' + EVW + '|vigils|actions?|gatherings?|sit-?ins?)$', 'i');
+  // p71 fix (CK4): days joined by "to", "through" or a dash are a range ("Mondays to Fridays", "every Monday-Friday")
+  const WD = '(?:mon|tues|wednes|thurs|fri|satur|sun)days?', WL = WD + '(?:(?:\\s*,\\s*(?:and\\s+)?|\\s+(?:and|&|to|through|thru|till)\\s+|\\s*[\\/\\-\\u2013]\\s*)' + WD + ')*';
+  const SCH = new RegExp('\\b(?:(?:every|each)\\s+' + WL + '|(?:(?:once|twice|three\\s+times)[\\s-]+(?:a\\s+|per\\s+)?week(?:ly)?|weekly|every\\s+week),?\\s+(?:on\\s+)?' + WL + '|(?:on\\s+)?' + WL + '(?:\\s+(?:mornings|afternoons|evenings|nights))?)\\b', 'gi');
+  const WDN = { sun: 0, mon: 1, tues: 2, wednes: 3, thurs: 4, fri: 5, satur: 6 };
+  // a match of SCH that is a schedule ("every Friday", "weekly on Thursdays", "Tuesdays and Fridays"), never one day ("on
+  // Tuesday"); Fridays for Future is the movement, not a day
+  const SCH1 = /^(?:every|each)\b|week|days\b|(?:mornings|afternoons|evenings|nights)$/i, upFFF = s => s.replace(/fridays\s*(?:for|4)\s*future/gi, x => x.replace(/[a-z0-9]/gi, '_'));
   const MN = DEN_MONTHS.join('|');
   const DT = new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(' + MN + ')(?:,?\\s+(20\\d\\d))?\\b|\\b(' + MN + ')\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(20\\d\\d))?\\b', 'gi');
   const y0 = Number(today.slice(0, 4));
   const iso = (y, m, d) => y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  // p71 fixes (review CK3, CK4). The days a schedule names, a range filled in: "Mondays to Fridays" is Monday to Friday.
+  const RDAY = new RegExp('(?:mon|tues|wednes|thurs|fri|satur|sun)(?=days?\\b)|\\b(?:to|through|thru|till)\\b|[-\\u2013]', 'gi');
+  const upDays = sched => { const ds = []; let rng = false; (sched.match(RDAY) || []).forEach(t => { const d = WDN[t.toLowerCase()];
+    if (d == null) { rng = ds.length > 0; return; } if (rng) for (let p = (ds[ds.length - 1] + 1) % 7; p !== d; p = (p + 1) % 7) ds.push(p); ds.push(d); rng = false; }); return Array.from(new Set(ds)); };
+  // The start and the end a schedule's sentence gives ("starting 4 December", "from 4 December", "until 10 November", "from
+  // 4 to 18 December"). A day with no year written that fell within half a year back has passed; one further back is
+  // next year's. p71 fix after the second review (A7): the tense comes first. Told in the future ("will hold ... until 30
+  // June", "planned ... from 4 March"), a passed day is next year's; a start told as begun ("has been held every Friday
+  // from 4 March") has passed however far back, so the schedule runs now
+  const RG = new RegExp('\\b(?:from|between)\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:to|and|until|till|-|\\u2013)\\s*$', 'i'), TOEND = new RegExp('(?:\\b(?:to|and)\\s+(?:the\\s+)?|[-\\u2013]\\s*)$', 'i');
+  // p71 fx3 (E2, E3): a date's tense is its own clause's, the last verb before it (a clause between commas that opens with
+  // who or which struck, nothing before a semicolon read), never a word anywhere in the sentence: "began on 1 October and
+  // closes on 30 January" closes next January, and "held a vigil every Friday until 10 November and say they will return"
+  // has ended. had: begun or running ("has been held ... from 4 March", "began on 1 October"); fut: to come ("will hold ...
+  // until 30 June", "plans a rally on 4 March", "is set for", "until 30 June next year"); past: done ("held ... until 4
+  // March", "would hold"); pres: the present ("closes on 30 January", "is held on 4 March"), which says neither, so its day
+  // is read as an untold one is (half a year back is next year's); its one use is to end the tense of a verb before it
+  const UPWASW = '(?:held|met|gathered|rallied|staged|ran|kept|marched|protested|picketed|ended|closed|drew|was|were|took\\s+place|went|came|fell|finished|concluded|wrapped\\s+up|lasted|continued|returned|resumed|heard|stopped|ceased|scrapped|abandoned|cancell?ed|suspended|called\\s+off|wound\\s+up|discontinued|backed\\s+down|relented|caved|conceded|withdrew|dropped|shelved|reversed|rejected|approved|passed|won|lost|agreed|signed|settled|resigned|collapsed|voted|announced|decided|ruled)';
+  const UPWAS = '(?<!\\b(?:be|been|being|is|are|am|ha(?:s|ve|d)|to|will|would|shall|the|a|an|its|their|this|that|these|those|our|his|her)\\s+)' + UPWASW;
+  const UPBEGUN = 'began|started|commenced|launched|kicked\\s+off|opened';
+  const VB = new RegExp('\\b(?:(ha(?:s|ve|d)\\s+(?:not\\s+)?(?:been\\s+)?(?:held|run|kept(?:\\s+up)?|met|staged|gathered|rallied|marched|protested|picketed|begun|started|continued|camped|running|going|under\\s?way)|' + UPBEGUN + ')'
+    + '|((?:will|shall)(?:\\s+not)?(?:\\s+(?:be|have\\s+been))?(?:\\s+[a-z]+)?|(?:could|might|should|must|can)\\s+(?:be\\s+)?[a-z]+|(?:plans?|planned|planning|hopes?|aims?|intends?|vows?|vowed|pledged?|promised?|agreed|voted|decided|wants?)\\s+to(?:\\s+[a-z]+)?|(?:is|are|was|were|ha(?:s|ve)\\s+been)\\s+(?:now\\s+)?(?:set|due|expected|scheduled|slated|planned|tipped|listed|booked)|plans?|planned|planning|set\\s+(?:for|to)|scheduled|slated|due|expected|upcoming|next\\s+year)'
+    + '|((?:would|used\\s+to)\\s+[a-z]+|had\\s+[a-z]+|' + UPWAS + ')'
+    + '|(is|are|am|opens|closes?|begins?|starts?|ends?|runs?|sits?|meets?|hears?|holds?|resumes?|returns?|follows?|reconvenes|remains|expires|lapses|concludes|finishes|continues?|falls|comes|goes|takes?\\s+place|kicks\\s+off|wraps\\s+up|gathers?|closing|ending|opening|starting|beginning|running|continuing|concluding|finishing|lasting|wrapping\\s+up))\\b', 'gi');
+  const upClause = (s, at) => { const l = s.slice(0, at).replace(/,\s*(?:who|which|whose|whom)\b[^,]*,/gi, ','); return l.slice(l.lastIndexOf(';') + 1); };
+  const upTense = (s, at, len) => { const l = upClause(s, at); let t = '', v; VB.lastIndex = 0;
+    while ((v = VB.exec(l))) t = v[1] ? 'had' : v[2] ? 'fut' : v[3] ? 'past' : 'pres';
+    return /^,?\s+next\s+year\b/i.test(s.slice(at + (len || 0))) ? 'fut' : t; };
+  // p71 fx5 (P1): a day is told as begun only by the verb that governs it, with at most a preposition, a weekday or "the"
+  // between ("began on 1 October", "opened on 1 October", "has been held since 4 March"); a begun verb further back in the
+  // clause tells another day ("began on 1 October, with a final hearing on 2 February" keeps next February's hearing).
+  // p71 fx6 (S2): the begun verb governs a later day across its object and where, when or how ("began in Pointville on 3
+  // March", "opened public hearings in Seaview on 3 March", "was launched by Harbour Watch on 4 March", "began again on"),
+  // until another action, another day, or and, with, ahead of, before or after comes between ("started a petition last
+  // month ahead of a rally on 10 January" keeps next January's rally)
+  const UPSTOP = 'in|on|at|of|for|to|by|from|into|with|and|since|during|ahead|before|after|following|then|while|until|till';
+  const UPOBJ = new RegExp('^\\s+(?:(?!(?:' + UPSTOP + ')\\b)[a-z]+\\s+){0,2}?(?:' + EVW + ')\\b', 'i'), UPBRK = new RegExp('\\b(?:' + EVW + '|and|with|ahead\\s+of|before|after|following|then|while|until|till)\\b|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:' + MN + ')\\b', 'i');
+  // p71 fx7 (T1): only within its own stretch of words: never across a comma, past a word ending in -ing, "to" or "through
+  // to" ("began in Seaview last month, resuming in Pointville on 3 February", "opened submissions on Monday through to 4
+  // March" are next year's), and never a day that modifies a noun ("opened today for the 4 March forum", "launched a
+  // campaign for the 3 February deadline")
+  const UPMOD = /^\s+(?!(?:and|or|but|nor|to|in|on|at|by|for|from|of|with|until|till|when|while|after|before|as|is|are|was|were|will|has|have|had|last|this|that|which|who|where|then)\b)[a-z]/;
+  const upBegun = (s, at, len) => { const l = upClause(s, at); let b = null, v; VB.lastIndex = 0; while ((v = VB.exec(l))) b = v; const r = b ? l.slice(b.index + b[0].length).replace(UPOBJ, ' ') : '';
+    return !!(b && b[1]) && !UPBRK.test(r) && !/,|\b[a-z]+ing\b|\bto\b/i.test(r) && !(/\b(?:the|a|an|its|their|this|that|our)\s+$/i.test(l) && UPMOD.test(s.slice(at + len))); };
+  // a day that starts something ("from 4 March", "starting 4 December"): told in the past or as begun, it has passed, as an
+  // end does (fx3, E3: "The vigil, held every Friday from 4 March, continues" runs now, never from next March)
+  const UPFROM = /\b(?:from|starting|beginning|commencing|starts?|begins?|commences?)(?:\s+(?:on|from))?\s+(?:the\s+)?$/i;
+  // p71 fx7 (T4): the verbs that move a one-off day on, so the day after their until is still to come
+  // p71 integration (the round-7 review): the ways a vote, a debate or a hearing is reported as moved to a later day, so
+  // "was put off until 3 February" keeps its date as "was delayed until" does
+  const UPPOST = /\b(?:delayed|adjourned|extended|deferred|postponed|pushed\s+(?:back|out)|put\s+(?:off|back)|held\s+over|stood\s+(?:over|down)|suspended|paused|halted|recessed|moved|rescheduled)\b/i;
+  const upBounds = s => { const o = { start: '', until: '' }; DT.lastIndex = 0; let d;
+    while ((d = DT.exec(s))) { const day = Number(d[1] || d[5]), mon = DEN_MONTHS.indexOf(String(d[2] || d[4]).toLowerCase()), yr = Number(d[3] || d[6]) || 0; if (!(day >= 1 && day <= 31) || mon < 0) continue;
+      const tn = upTense(s, d.index, d[0].length), fut = tn === 'fut', had = tn === 'had', was = tn === 'past';
+      const date = iso(yr || y0, mon, day), back = !yr && date < today ? Date.parse(today) - Date.parse(date) : 0, half = back > 182 * 86400000, next = iso(y0 + 1, mon, day); const lead = s.slice(Math.max(0, d.index - 40), d.index);
+      // an end that passed stays passed, unless told in the future, or untold or in the present and over half a year back;
+      // told in the past or as begun, however far back, it has passed (fx3, E3: "held a vigil every Friday until 4 March")
+      const end = back && (fut || (half && !had && !was)) ? next : date;
+      const rg = RG.exec(lead); if (rg && Number(rg[1]) >= 1 && Number(rg[1]) <= 31) { o.start = o.start || end.slice(0, 8) + rg[1].padStart(2, '0'); o.until = o.until || end; continue; }
+      if (UPFROM.test(lead)) o.start = o.start || (back && (fut || (half && !had && !was)) ? next : date);
+      else if (/\b(?:until|till|til|through|ending|ends?|end|runs?\s+(?:until|till|to|through))(?:\s+on)?\s+(?:the\s+)?$/i.test(lead) || (o.start && TOEND.test(lead))) { if (!o.until) { o.until = end; o.roll = !yr && !was; } } }
+    // p71 fx5 (P0): an end before its own start, neither told in the past, is next year's ("hold a vigil every Friday from 4
+    // October until 30 June", told in November, runs to next June)
+    if (o.roll && o.start && o.until < o.start) o.until = (Number(o.until.slice(0, 4)) + 1) + o.until.slice(4);
+    return o; };
+  // One standing event's key: its action word in one number ("vigils" is "vigil"), and the names a telling gives (its
+  // capitalised words but days, months, action words and the common words a sentence or a headline opens with), so a
+  // place or a body tells two events apart while a templated post, or a vigil told twice, is one.
+  const upEv = x => String(x).toLowerCase().replace(/ies$/, 'y').replace(/(ch|sh)es$/, '$1').replace(/s$/, '');
+  const COMMON = /^(?:a|an|the|this|that|these|those|every|each|weekly|on|in|at|of|to|for|from|by|with|over|outside|near|and|or|but|as|our|we|they|it|its|their|there|here|once|twice|since|until|after|before|today|tonight|tomorrow|hold|holds|held|host|hosts|run|runs|continue|continues|join|joins|residents?|locals?|protesters?|organisers?|organizers?|campaigners?|activists?|members?|supporters?|volunteers?|people|crowds?|groups?)$/;
+  const CAP = "\\b[A-Z][A-Za-z'\\u2019-]*", POSS = new RegExp("['\\u2019]s$");
+  const upPlace = (s, ev) => { const P = new Set(); const rx = new RegExp(CAP, 'g'); let c; while ((c = rx.exec(s))) { const w = c[0].toLowerCase().replace(POSS, '');
+    if (w.length > 1 && !/^(?:mon|tues|wednes|thurs|fri|satur|sun)days?$/.test(w) && DEN_MONTHS.indexOf(w) < 0 && !EV1.test(w) && upEv(w) !== upEv(ev) && !COMMON.test(w)) P.add(w); } return P; };
+  // p71 fx3 (E6): what a telling's action is about, in the lower-case words a name test misses (A: the phrase it is on, over,
+  // against, into or about, or that oppose or support takes: "a vote on the levy" is not "a vote on the mine approval"), and
+  // where it is (W: at, outside or near: "a vigil at the pier"), kept apart so one telling's place and another's cause never
+  // read as two events
+  const SW = "(?!(?:is|are|was|were|be|been|will|would|set|has|have|had|and|or|but|as|to|for|from|by|with|in|on|at|of|that|which|who|when|where|while|after|before|since|until|till|says?|said|reports?|according|next|last|this|every|each|today|tonight|tomorrow|noon|midday|midnight|dawn|dusk|night|lunchtime|least|most|once|times?|days?|weeks?|weekend|way|half|end|start|eve|behalf|record|track|it|them|him|her|us|you|both|all|any|some|such)\\b)[A-Za-z][A-Za-z'\\u2019-]*", UPDET = '(?:(?:the|a|an|its|their|this|that|these|those|our|proposed|planned|new)\\s+)*';
+  const SUBJ = new RegExp('\\b(on|over|against|into|about|at|outside|near|opposing|oppose[sd]?|supporting|support(?:s|ed)?|backing|fighting)\\s+' + UPDET + '(' + SW + '(?:\\s+(?:(?:of|for)\\s+' + UPDET + ')?' + SW + '){0,3})', 'gi');
+  // p71 fx6 (S5): H holds each phrase's head, the last word that is not one any measure has ("the gas export tax" and "the
+  // gas tax bill" are a tax, "the mine approval" a mine, "the gas reservation scheme" a reservation). p71 fx7 (T2): a levy
+  // is the tax only when every other word of the two phrases matches ("the gas export levy" is "the gas export tax", never
+  // "the gas tax" nor "the mining levy" "the gas tax"), so M keeps each phrase's other words by its levy or tax
+  const upSubj = (s, ev) => { const o = { W: new Set(), A: new Set(), H: new Set(), M: new Set() }; SUBJ.lastIndex = 0; let m; while ((m = SUBJ.exec(s))) { const K = /^(?:at|outside|near)$/i.test(m[1]) ? o.W : o.A; let h = ''; const ws = [];
+    m[2].split(/\s+/).forEach(x => { const w = x.toLowerCase().replace(POSS, '').replace(/^lev(?:y|ies)$/, 'levy'); if (/^[a-z]/.test(x) && w.length > 2 && !/^(?:proposed|planned|new)$/.test(w) && !/^(?:mon|tues|wednes|thurs|fri|satur|sun)days?$/.test(w) && DEN_MONTHS.indexOf(w) < 0 && !EV1.test(w) && upEv(w) !== upEv(ev) && !COMMON.test(w)) { K.add(w); ws.push(w); if (!h || !UPGEN.test(w)) h = w; } });
+    if (h && K === o.A) { o.H.add(h); ws.forEach(w => { if (w === 'levy' || w === 'tax') o.M.add(w + ':' + ws.filter(x => x !== w).sort().join(' ')); }); } } return o; };
+  // one event (E6, E7): neither telling says a name, a place or a topic the other contradicts (each kind of the one within
+  // the other's), and they share a word or one says nothing at all: "Harbour Watch ... at the Point office" and "Harbour
+  // Watch ... over the levy" are one vigil, "Farmers plan a rally" and "a rally ... will oppose the mine" two rallies
+  // p71 fx5 (P4): what an action is about agrees when one says less or the two share a word that names it ("the gas export
+  // tax", "the export tax", "the gas export levy" and "the tax bill" are one Senate vote, however they fold in), never only a
+  // word any measure has ("bill", "plan": "the mine expansion" is not "the port expansion"); and a standing schedule told
+  // only by where ("a vigil every Friday at the pier") is the one a telling that names who and gives no place tells ("Harbour
+  // Watch holds a vigil every Friday"), as a telling that says nothing is; a day's rallies may be many, so a dated telling by
+  // place alone stays apart from one by name (rule 2)
+  // p71 fx6 (S5): sharing a word is not enough ("the gas pipeline" is not "the gas tax"). What an action is about agrees when
+  // one telling says less, or when the two name the same head and each narrows it in its own way: by what it is on (a
+  // commodity: gas, coal, gold) or by what kind it is (export, reservation), so "the gas tax" and "the export tax" are the gas
+  // export tax; never two different ones of the same ("the coal mine" and "the gold mine", "the gas tax" and "the carbon
+  // tax"), nor two heads ("the mine levy" and "the mine approval", "the gas export tax" and "the gas reservation scheme")
+  // p71 fx7 (T3): a word after the measure's noun that says how it changes ("the gas tax hike", "the royalty rise") is one
+  // any measure has, never its head
+  const recs = [], sub = (x, y) => Array.from(x).every(w => y.has(w)), fits = (x, y) => sub(x, y) || sub(y, x), UPGEN = /^(?:bill|act|law|plan|project|proposal|expansion|approval|scheme|policy|reform|changes?|deal|legislation|motion|package|hikes?|rises?|increases?|cuts?|reductions?)$/;
+  const UPON = /^(?:gas|lng|oil|coal|carbon|petrol|diesel|hydrogen|uranium|gold|silver|copper|iron|nickel|zinc|lithium|cobalt|bauxite|minerals?)$/;
+  const upAbout = (x, y) => { if (!x.H.size || !y.H.size || !fits(x.H, y.H)) return false; const d = (a, b) => Array.from(a.A).filter(w => !b.A.has(w) && !a.H.has(w) && !UPGEN.test(w)), dx = d(x, y), dy = d(y, x), on = l => l.some(w => UPON.test(w)), kind = l => l.some(w => !UPON.test(w));
+    return !(on(dx) && on(dy)) && !(kind(dx) && kind(dy)); };
+  const onlyW = x => x.W.size > 0 && !x.N.size && !x.A.size;
+  // fx7 (T2): two tellings read the levy as the tax when a phrase of one is a phrase of the other but for levy and tax
+  const upLv = (x, y) => Array.from(x.M).some(k => y.M.has((/^levy:/.test(k) ? 'tax:' : 'levy:') + k.replace(/^[a-z]+:/, ''))), upTx = x => { const t = S => new Set(Array.from(S).map(w => w === 'levy' ? 'tax' : w)); return { N: x.N, W: x.W, A: t(x.A), H: t(x.H), all: t(x.all) }; };
+  const same = (x0, y0, st) => { const lv = upLv(x0, y0), x = lv ? upTx(x0) : x0, y = lv ? upTx(y0) : y0;
+    return fits(x.N, y.N) && fits(x.W, y.W) && (fits(x.A, y.A) || upAbout(x, y)) && (!x.all.size || !y.all.size || Array.from(x.all).some(w => y.all.has(w)) || (!!st && (onlyW(x) || onlyW(y)))); };
+  // p71 fixes after the second review (A7): the words that end a schedule are read before its until, and after it only in
+  // the past ("until it was scrapped"), so a vow runs on ("every Friday until the tax is scrapped", "until the final vote");
+  // told of a past year or of last year, a schedule runs on when the sentence says so or tells it in the present ("since
+  // last year", "goes on", "Protesters arrested in 2025 hold a vigil every Tuesday")
+  // p71 fx3 (E3): after until, an end told in the past ends it, whatever the verb ("until the campaign ended", "until the
+  // government scrapped the tax", "until the final vote was held", "until the vote took place"); one still to come is a vow
+  // ("until the tax is scrapped", "until it has been stopped", "until the mine closes", "until the final vote"). Told of a
+  // past year, the schedule runs on when the sentence says so ("since", "continues", "still", "goes on"), else as the verb
+  // nearest the schedule tells it: in the present or the future it runs on ("Protesters arrested in 2025 hold a vigil every
+  // Tuesday", "plans to hold"), in the past it has ended ("Every Friday in 2025, locals would hold a vigil", "Locals who hold
+  // the lease held a vigil every Friday in 2024", "held a vigil every Friday in 2024 and say they will return")
+  const ENDW = 'no longer|cancell?ed|discontinued|suspended|used to|formerly|ended|ceased|stopped|finished|concluded|wound up|called off|scrapped|abandoned|final', ENDED = new RegExp('\\b(?:' + ENDW + ')\\b', 'i');
+  // p71 fx5 (P2): an until clause that says is, are, be, gets or has been anywhere is still to come, so a past form in it
+  // describes a noun or shares that verb ("until the levy, announced in May, is scrapped", "until the mine approved last
+  // year is stopped", "until the mine is approved or rejected"), as one in a who or which clause does ("until the minister
+  // who approved the mine resigns"); only a clause with a past form and neither ends the schedule ("until the campaign
+  // ended", "until the government scrapped the tax"). The clause ends at a semicolon or a comma before and, but or while.
+  // p71 fx6 (S4): a who, which or that clause's own verb is struck with it, is or are too ("until the minister who is
+  // responsible for the mine resigned", "until the company that is building the mine withdrew" have ended)
+  const ENDPAST = new RegExp('\\b(?:had|' + UPWAS + '|' + UPBEGUN + ')\\b', 'i'), UPYET = new RegExp('\\b(?:is|are|am|be|being|gets?|ha(?:s|ve)\\s+been)\\b|\\b(?:it|that|this|he|she|there|what)' + POSS.source.replace(/\$$/, '') + '\\b', 'i'), UPREL = new RegExp('\\b(?:who|which|that)\\s+(?:(?:had\\s+)?' + UPWASW + '|is|are|ha(?:s|ve)\\s+been)\\b', 'gi');
+  const RUNS = /\b(?:since|continu\w*|still|ongoing|now|goes\s+on|go\s+on|carr(?:y|ies)\s+on)\b/i;
+  const NOWV = /(?<!\b(?:would|could|might|should|did|to)\s+)\b(?:hold|holds|meet|meets|gather|gathers|runs?|keeps?\s+up|stages?|remains?|(?:will|shall)(?:\s+not)?(?:\s+be)?\s+[a-z]+|plans?\s+to\s+[a-z]+|(?:is|are)\s+(?:being\s+|now\s+|still\s+)?(?:held|staged|run)|ha(?:s|ve)\s+(?:been\s+)?(?:held|staged|run|kept|gathered|met|rallied|marched|protested|picketed))\b/gi;
+  const WASV = /\b(?:(?<!\b(?:is|are|be|been|being|ha(?:s|ve))\s+)(?:held|met|gathered|staged|ran|kept\s+up|rallied|marched|protested|picketed|was|were)|(?:would|used\s+to)\s+[a-z]+)\b/gi;
+  const upNow = s => { const at = s.search(/\b(?:every|each|weekly)\b|(?:mon|tues|wednes|thurs|fri|satur|sun)days\b/i); let best = Infinity, now = false, v;
+    [[NOWV, true], [WASV, false]].forEach(([rx, k]) => { rx.lastIndex = 0; while ((v = rx.exec(s))) { const dd = Math.abs(v.index - at); if (dd < best) { best = dd; now = k; } } }); return now; };
   for (const r of rows) {
     const text = String(r.title || '') + '. ' + String(r.body || '');
     const closes = r.kind === 'petition' && r.meta && r.meta.closes ? String(r.meta.closes) : '';
     const sentences = text.split(/(?<=[.!?])\s+|\n+/).concat(closes ? ['This petition closes ' + closes] : []);
-    for (const s of sentences) {
+    const nTitle = String(r.title || '').split(/(?<=[.!?])\s+|\n+/).length; const bodyEv = (String(r.body || '').match(EVS) || [])[0] || '';
+    // where a telling places its event (CK3): a body's sentence takes its headline's names, and a headline's sentence the
+    // names of the body's lead, the first of its opening sentences that names any (A9 after the second review): "Weekly
+    // vigil every Tuesday and Friday" over "Seaview residents gather at the pier." is Seaview's vigil, not any vigil then.
+    // p71 fx3 (E6, E7): a telling is placed by its names (N), its place (W) and what its action is about (A), and every
+    // sentence of a row takes its headline's; the body's lead names it only when the headline names no one and nowhere, so
+    // one town's vigil told under two headlines whose bodies open with different names is one, and six headlines of one
+    // vote are one, while "Weekly vigil" over "Seaview residents gather" is still Seaview's. p71 fx5 (P3): a headline's first
+    // word is capitalised whatever it is, so when it is the only name the headline gives ("Farmers hold a vigil every Friday",
+    // "Climate vigil every Friday", "Senate vote on 3 December"), the lead names and places it too if it says where
+    // ("Seaview farmers gather at the pier") or names that word again ("Pointville Residents Association says"): two towns'
+    // farmers keep two vigils, while a lead naming only who spoke of it ("Harbour Watch welcomes the vote") places nothing
+    const hl = String(r.title || ''), tN = upPlace(hl, ''), tS = upSubj(hl, ''), t0 = ((/^[^A-Za-z]*([A-Za-z][A-Za-z'-]*)/.exec(hl) || [])[1] || '').toLowerCase(), ls = sentences.slice(nTitle, nTitle + 3).find(x => upPlace(x, '').size) || '';
+    const lW = ls ? Array.from(upSubj(ls, '').W) : [], lUse = !!ls && (!tN.size || (tN.size === 1 && tN.has(t0) && (lW.length > 0 || new RegExp('\\b' + t0 + '\\b', 'i').test(ls)))), lead = lUse ? Array.from(upPlace(ls, '')) : [], leadW = lUse && tN.size ? lW : [];
+    const upP = (s, ev) => { const x = upSubj(s, ev), o = { N: new Set(Array.from(upPlace(s, ev)).concat(Array.from(tN), lead)), W: new Set(Array.from(x.W).concat(Array.from(tS.W), leadW)), A: new Set(Array.from(x.A).concat(Array.from(tS.A))), H: new Set(Array.from(x.H).concat(Array.from(tS.H))), M: new Set(Array.from(x.M).concat(Array.from(tS.M))) };
+      o.all = new Set(Array.from(o.N).concat(Array.from(o.W), Array.from(o.A))); return o; };
+    // a telling folded in adds what it says to the entry's (each kind), so a later telling is read against all of it; the
+    // fullest single telling speaks for the entry (n: how much it says)
+    const fold = (f, P, e) => { if (P.all.size > f.n) { Object.assign(f.e, e); f.n = P.all.size; } ['N', 'W', 'A', 'H', 'M', 'all'].forEach(k => P[k].forEach(w => f.P[k].add(w))); };
+    for (const [si, s] of sentences.entries()) {
       if (s.length > 600 || !EV.test(s)) continue; DT.lastIndex = 0; let m;
       while ((m = DT.exec(s))) {
         const day = Number(m[1] || m[5]), mon = DEN_MONTHS.indexOf(String(m[2] || m[4]).toLowerCase()); const yr = Number(m[3] || m[6]) || 0;
         if (!(day >= 1 && day <= 31) || mon < 0) continue;
-        let date = iso(yr || y0, mon, day); if (!yr && date < today) date = iso(y0 + 1, mon, day);   // no year written: the next time that day comes
+        let date = iso(yr || y0, mon, day); if (!yr && date < today) { const tn = upTense(s, m.index, m[0].length), lead = s.slice(Math.max(0, m.index - 40), m.index); if (upBegun(s, m.index, m[0].length) || /\bsince\s+(?:the\s+)?$/i.test(lead) || ((tn === 'had' || tn === 'past') && (UPFROM.test(lead) || (/\b(?:until|till|til)\s+(?:the\s+)?$/i.test(lead) && !UPPOST.test(upClause(s, m.index)))))) continue; date = iso(y0 + 1, mon, day); }   // no year written: the next time that day comes, unless the verb that governs it tells it as begun ("began on 1 October", fx5 P1: "began on 1 October, with a final hearing on 2 February" keeps the 2nd), "since" dates it, or it starts or ends what its clause tells as begun or in the past ("has been held every Friday from 4 March", A7; "held every Friday from 4 March", fx3 E3; "was held every Friday until 4 March", fx5); fx7 (T4): after until, only a postponement verb gives the next such day ("was delayed until 4 February", fx6 S1), any other past or begun verb ends it ("The blockade lasted until 4 March", "was open until 4 March")
         const real = new Date(date + 'T00:00:00Z'); if (real.getUTCDate() !== day) continue;        // the 31st of a thirty-day month is not a date
         if (date < today || date > horizon) continue;
-        const ev = EV.exec(s)[1].toLowerCase(); const key = date + '|' + ev + '|' + (r.kind === 'news' ? denFoldKey(r.title) : r.id);
+        // p71 fx5 (P1): the event is the action nearest its day, so "the strike began last week and a rally follows on 10
+        // January" is a rally; a closing ("closes on 30 January") names it only when no other action is told. p71 fx6 (S3):
+        // the nearest before the day in its own clause comes first, never what that action is to or of ("Submissions to the
+        // inquiry close on 15 January" is the submissions; "the strike will go ahead on 3 December despite a vote" the strike);
+        // one after the day, or outside the clause, only when the clause names none
+        let ev = '', near = Infinity, e, p = null; const cl = upClause(s, m.index); EVG.lastIndex = 0;
+        while ((e = EVG.exec(cl))) { if (!/^clos/i.test(e[1]) && !(p && /^\s+(?:to|of|into|on|over|about|against)\s+(?:(?:the|a|an|its|their|this|that)\s+)*$/i.test(cl.slice(p.index + p[0].length, e.index)))) ev = e[1]; p = e; }
+        if (!ev) { EVG.lastIndex = 0; while ((e = EVG.exec(s))) { const d = Math.abs(e.index - m.index) + (/^clos/i.test(e[1]) ? 1000 : 0); if (d < near) { near = d; ev = e[1]; } } } ev = ev.toLowerCase(); const key = date + '|' + ev + '|' + (r.kind === 'news' ? denFoldKey(r.title) : r.id);
         if (seen.has(key)) continue; seen.add(key);
-        out.push({ date, weekday: DEN_DAYS[real.getUTCDay()], event: ev, what: s.replace(/\s+/g, ' ').trim().slice(0, 240), item: r.id, url: /^https?:/.test(String(r.url || '')) ? r.url : '', yearWritten: !!yr });
+        // A8 (after the second review): one dated event told by many stories is one entry, as a standing one is: the same
+        // action on the same day where neither telling contradicts the other (same, fx3); the fuller speaks for it
+        const what = s.replace(/\s+/g, ' ').trim().slice(0, 240), url = /^https?:/.test(String(r.url || '')) ? r.url : '', P = upP(s, ev), base = date + '|' + upEv(ev); const f = recs.find(x => x.base === base && same(x.P, P));
+        if (f) { fold(f, P, { what, item: r.id, url }); continue; }
+        const one = { date, weekday: DEN_DAYS[real.getUTCDay()], event: ev, what, item: r.id, url, yearWritten: !!yr }; out.push(one); recs.push({ base, P, n: P.all.size, e: one });
       }
     }
+    // p71: then the standing schedules (fixed after review, CK3 and CK4): one entry for each, at the next of the days it
+    // names, never before a start it gives nor after an end it gives; a date written out above keeps its day
+    sentences.forEach((s, si) => {
+      // ended or past: "no longer", "ended last week", "the final vigil", "every Friday in 2024" (a past year or last year,
+      // unless the schedule runs on: "since 2019", "and continues"); read as above (A7, fx3 E3)
+      // p71 fx6 (S4): the until clause also ends at a comma that opens a which or who clause or an appositive ("until the
+      // council approved the mine, a decision they say is unlawful"), whose is or are is never the until clause's own verb.
+      // p71 fx7 (T5): an appositive closed by a second comma is dropped, as a who or which clause is ("until the minister, a
+      // former miner, resigned" has ended). p71 integration (the round-7 review): with closed ones dropped, an appositive left
+      // open is a trailing aside, so the clause always ends at it: "until the government scraps the levy, a tax it announced
+      // in May" is a vow still running (its verb, "scraps", is in the present, which the past test never reads)
+      const ui = s.search(/\b(?:until|till|til|unless)\b/i), u0 = ui < 0 ? '' : s.slice(ui).split(/;|,\s*(?:and|but|while)\b/)[0].replace(/,\s*(?:who|which|whose|whom|a|an|the)\b[^,]*,/gi, ',').split(/,\s*(?:who|which|whose|whom)\b/i)[0];
+      const ua = u0.search(/,\s*(?:a|an|the)\b/i), uc = (ua >= 0 ? u0.slice(0, ua) : u0).replace(UPREL, ' ');
+      if (s.length > 600 || ENDED.test(ui < 0 ? s : s.slice(0, ui)) || (ENDPAST.test(uc) && !UPYET.test(uc))) return;
+      if ((/\blast year\b/i.test(s) || (s.match(/\b20\d\d\b/g) || []).some(y => Number(y) < y0)) && !RUNS.test(s) && !upNow(s)) return;
+      const b = upBounds(s); if (b.until && b.until < today) return;
+      SCH.lastIndex = 0; let m;
+      const sv = upFFF(s);   // the movement, not a day
+      while ((m = SCH.exec(sv))) {
+        const sched = m[0].replace(/\s+/g, ' ').trim(); if (!SCH1.test(sched)) continue;   // "on Tuesday" is one day, not a schedule
+        let ev = '', best = Infinity, e; EVS.lastIndex = 0; while ((e = EVS.exec(s))) { const d = Math.abs(e.index - m.index); if (d < best) { best = d; ev = e[1]; } }
+        if (!ev && si < nTitle) ev = bodyEv;   // a listing's title names the days, its first lines the action
+        if (!ev) continue; ev = ev.toLowerCase(); const days = upDays(sched); if (!days.length) continue;
+        const from = b.start && b.start > today ? b.start : today, f0 = Date.parse(from + 'T00:00:00Z'), fd = new Date(f0).getUTCDay();
+        const date = new Date(f0 + Math.min(...days.map(d => (d - fd + 7) % 7)) * 86400000).toISOString().slice(0, 10); if (date > horizon || (b.until && date > b.until)) continue;
+        const key = date + '|' + ev + '|' + (r.kind === 'news' ? denFoldKey(r.title) : r.id); if (seen.has(key)) continue; seen.add(key);
+        // one event: the same action on the same days, where neither telling contradicts the other (same, fx3)
+        // ("Harbour Watch ... at the Point office" and "a vigil every Tuesday and Friday"; a templated post told by many
+        // accounts). A sentence in the body takes its headline's names too, so two towns' stories that share a sentence
+        // stay two: a vigil told twice is a lesser harm than a town's vigil lost
+        const base = upEv(ev) + '|' + days.slice().sort((x, y) => x - y).join(','), what = s.replace(/\s+/g, ' ').trim().slice(0, 240), url = /^https?:/.test(String(r.url || '')) ? r.url : '';
+        const P = upP(s, ev); const f = recs.find(x => x.base === base && same(x.P, P, true));
+        if (f) { fold(f, P, { what, item: r.id, url, schedule: sched.slice(0, 80) }); continue; }   // the fuller telling speaks for it
+        const one = { date, weekday: DEN_DAYS[new Date(date + 'T00:00:00Z').getUTCDay()], event: ev, what, item: r.id, url, yearWritten: false, recurring: true, schedule: sched.slice(0, 80) }; out.push(one); recs.push({ base, P, n: P.all.size, e: one });
+      }
+    });
   }
-  return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(0, 40);
+  // p71 fx5 (P4): two entries a later telling has shown to be one (the Senate's vote "on the gas export levy", read before
+  // its tellings "on the gas tax" and "on the tax bill" joined "the gas export tax") are one, whatever order the stories came
+  // in; the fuller telling speaks for it
+  for (let i = 0; i < recs.length; i++) for (let j = i + 1; j < recs.length; j++) { const a = recs[i], b = recs[j]; if (a.base !== b.base || !same(a.P, b.P, a.e.recurring)) continue;
+    if (b.n > a.n) { ['what', 'item', 'url', 'schedule'].forEach(k => { if (b.e[k] !== undefined) a.e[k] = b.e[k]; }); a.n = b.n; } ['N', 'W', 'A', 'H', 'M', 'all'].forEach(k => b.P[k].forEach(w => a.P[k].add(w)));
+    out.splice(out.indexOf(b.e), 1); recs.splice(j, 1); j = i; }
+  return denUpPick(out, 40);
+}
+/** The dates a list keeps (p71 fix, review CK3): every dated or recorded entry before any standing schedule, n at most,
+ *  in date order. A schedule always falls in the week ahead, so a list sorted by date alone let a town's vigils push a
+ *  vote three weeks out off the Board's forty and the draft's fifteen. p71 fix after the second review (A8): three places
+ *  stay for standing schedules when there are any, so dated events, however many stories tell them, never push every
+ *  standing vigil out (its RECURRING line is how the model knows a vigil is not a new event, AEP m2). */
+function denUpPick(list, n) {
+  const l = (list || []).slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)); const rec = l.filter(u => u.recurring), dated = l.filter(u => !u.recurring);
+  const k = Math.min(rec.length, Math.max(n - dated.length, Math.min(3, n))); const keep = new Set(dated.slice(0, Math.max(0, n - k)).concat(rec.slice(0, k)));
+  return l.filter(u => keep.has(u));
 }
 function denFoldKey(title) { return String(title || '').toLowerCase().replace(/\s[-|]\s[^-|]{2,40}$/, '').replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 90); }
+/* p71 rank lane (the real-data check of 17 November 2026: combined M1; AEP M1, M5, M8, m5; MCA 2, 11, 13, 15, 16). How the
+ * Board ranks a window's stories and posts and names their outlets, and which of them reach the model. The model was given
+ * the first thirty stories by syndication and time and the first thirty posts by likes: ABC's and AAP's bill stories, the
+ * AFR's China warning and every YouTube video were cut, while paywall notices, an OzBargain deal and one trade site's
+ * sixteen rows got in. */
+/** The evidence text's ceiling. It was 60,000, cut silently, so a long text lost its tail (the tone and the last bottom
+ *  line); over this the lowest-ranked stories and posts not in must are dropped, and nothing else is ever cut. */
+const DEN_EVIDENCE_MAX = 90000;
+/** How far an outlet's tier carries within one relevance class (SOURCE_TIERS lists every tier in use): national,
+ *  broadcast and wire first; a Google News sweep's outlet is unknown until its publisher is named. */
+const DEN_TIER_RANK = { national: 0, broadcaster: 0, wire: 0, metro: 1, official: 1, regional: 2, thinktank: 2, party: 2, independent: 3, sector: 3, polling: 3, core: 3, sweep: 4, newsletter: 4, podcast: 4, video: 4, community: 5 };
+const DEN_MON3 = DEN_MONTHS.map(m => m.slice(0, 3));
+/** The outlets whose "Special Report" is a sponsored format, a piece made with the company it is about, by the hosts their
+ *  own addresses are on (p71 ST4; MCA 15: Stockhead's label, which its feed writes into the summary). Any other outlet's
+ *  "Special Report" is its own reporting: a wire heads its investigations so, and a summary may quote another body's. */
+const DEN_SPONSORED_HOSTS = ['stockhead.com.au'];
+/** That label as such an outlet writes it (p71 fx2, D4b; fx3, F1; fx5, Q1): "Special Report:" with a capital S, in any case
+ *  after it ("SPECIAL REPORT:", "Special report:"), before anything (the company's name, which some write in lower case, a
+ *  quote, a figure), opening a headline or a summary or after the summary's standfirst, whatever that ends in: a word ("...
+ *  drilling is under way Special Report: Pier Point Minerals says"), a figure, a quote ("... 'the best in years' Special
+ *  Report:"), a name, or an article or a possessive and a name ("... on the PSX Special Report: Pier Point Energy has").
+ *  Never a report another body names, which is one only where it is named so on the label's own line, both sides of it:
+ *  right before, an article, a possessive, "according to", "citing" or "quoting", alone or with names between (an acronym,
+ *  with points or not, a word with a capital or a figure, one in brackets, joined by and, of, for, the, & or /) and words
+ *  that describe a report, from a list (latest, second, upcoming, updated, recently released, long-awaited, first-ever);
+ *  and right after, the report's title ("the agency's Special Report: Gas Demand to 2035, released overnight", "the PEA's
+ *  Regional Outlook Special Report: The Role of Critical Minerals in their notes"). fx3 read the words before the label
+ *  alone, so a standfirst ending in "on the PSX" or "its PFS" (Stockhead's bullets often do) lost the outlet's label, and
+ *  a name on the line above counted. Where the rounds disagreed the outlet's own label wins (a miss counts its piece as
+ *  press tone; a false label moves one story out of it): a company and its verb after the label, a title and then a verb
+ *  ("Gas Demand to 2035 shows"), a name alone heading a sentence or a paragraph ("PEA Special Report: demand will fall"),
+ *  and a name or a title on another line are all the label. A plural possessive is one only where its mark closes no quote
+ *  the sentence opened. tests/den-p71-rank-worker.mjs RK20 holds every form any review has listed, with its flag. */
+const DEN_SPONSORED_RX = (() => { const ap = '[\'\\u2019]', b = '(?:^|[.!?][\'\\u2019"\\u201d)\\]]*\\s+|\\n\\s*)', sp = '[^\\S\\r\\n]', link = '(?:(?:and|of|for|the|&)' + sp + '+)?';
+  const nm = '(?:(?:[A-Z]\\.){2,}|\\(?[A-Z0-9][A-Za-z0-9&/-]*\\)?)' + sp + '+', adj = '(?:latest|newest|new|annual|own|first|second|third|next|last|recent|final|interim|flagship|landmark|joint|inaugural|major|draft|full|independent'
+    + '|biennial|yearly|quarterly|monthly|weekly|daily|upcoming|forthcoming|updated|revised|released|published|commissioned|anticipated|awaited|delayed|belated|leaked|expected|promised|planned|detailed|combined'
+    + '|(?:recently|newly|widely|eagerly|highly|hotly|keenly|long|much)' + sp + '+[a-z]+ed|[a-z]+(?:-[a-z]+)*-(?:[a-z]+ed|ever))' + sp + '+';   // a list, never any word in -ed or -ly: "the anomaly", "the seabed", "a watershed" end a standfirst
+  const tail = '(?:(?:' + nm + '|' + adj + ')(?:' + link + '(?:' + nm + '|' + adj + '))*)?';
+  const det = '(?:(?:^|[^\\w\'\\u2019])(?:[Tt]he|THE|[Aa]n|a|[Ii]ts|[Tt]heir|[Tt]his|[Tt]hat|[Tt]hese|[Tt]hose|[Hh]is|[Hh]er|[Oo]ur|[Ww]hose|according\\s+to|[Cc]iting|[Qq]uoting)|' + b + 'A)' + sp + '+' + tail;
+  const own = '\\w' + ap + '[sS]' + sp + '+' + tail, owns = '(?<!(?:^|[\\s(\\[\\u201c"])[\'\\u2018](?:[^.!?\'\\u2018\\u2019]|' + ap + '(?=\\w))*)\\w[sS]' + ap + sp + '+' + tail;
+  // fx5 (Q1): the report's title, on the label's line: capitalised words (small words between), then a stop, the line's
+  // end, ", released" and the like, or " in"; never a company and its verb ("Pier Point Energy has", "quillmine says")
+  const tw = '[A-Z0-9][A-Za-z0-9\'\\u2019&/-]*', title = sp + '*' + tw + '(?:' + sp + '+(?:(?:of|to|and|the|in|for|on|at|by|with|a|an|from|or|&)' + sp + '+)*' + tw + ')*'
+    + '(?=' + sp + '*(?:[;:!?)\\]\\u2013\\u2014]|\\.(?!\\.)|,' + sp + '*(?:released|published|issued|out|due|which|that)\\b|[\\r\\n]|$)|' + sp + '+(?:in|released|published|issued|out|due|which|that)\\b)';
+  const label = '\\bS(?:pecial|PECIAL)\\s+(?:R(?:eport|EPORT)|report)\\s*:';
+  return new RegExp('(?<!' + det + '|' + own + '|' + owns + ')' + label + '|' + label + '(?!' + title + ')'); })();   // the quotes as escapes, the source ASCII
+/** Whether a news row is one of those outlets': by its outlet's key, its registry hosts, its publisher's or its own address. */
+function denSponsored(r) {
+  const ol = r.ol || {}; const hs = [ol.key, denHost(ol.pub), denHost(r.url)].concat(ol.sites || []).map(h => String(h || '').toLowerCase()).filter(Boolean);
+  return hs.some(h => DEN_SPONSORED_HOSTS.some(s => h === s || h.endsWith('.' + s)));
+}
+/** A story's own slug, from its address (AEP m5): the last path segment that is a real slug (four words or more and
+ *  twenty letters, once a trailing date, id or stray letter is struck), looking past a trailing id or "news-story". One
+ *  wire story under two headlines on two mastheads shares it. '' for a Google News redirect or an address with none.
+ *  p71 (EV3): a day number written after a month name stays ("...-live-blog-november-16"): one outlet's daily page keeps
+ *  its slug from day to day, and striking the day folded a week of its pages into the first day's headline. */
+function denSlugKey(u) {
+  const x = denUrl(u); if (!x || denGoogleLink(u)) return '';
+  const day = (w, i) => /^(0?[1-9]|[12]\d|3[01])(st|nd|rd|th)?$/.test(w[i]) && i > 0 && (DEN_MONTHS.indexOf(w[i - 1]) >= 0 || DEN_MON3.indexOf(w[i - 1]) >= 0 || w[i - 1] === 'sept');
+  for (const s0 of x.pathname.split('/').filter(Boolean).slice(-3).reverse()) { let s = s0; try { s = decodeURIComponent(s0); } catch (e) {}
+    const w = s.toLowerCase().replace(/\.(s?html?|php|aspx?)$/, '').split(/[-_+]+/).filter(Boolean); while (w.length && (/\d/.test(w[w.length - 1]) || w[w.length - 1].length < 2) && !day(w, w.length - 1)) w.pop();
+    const k = w.join('-'); if (w.filter(t => /[a-z]/.test(t)).length >= 4 && k.length >= 20) return k; }
+  return '';
+}
+/** The date a story's own address carries (MCA 2: a feed row with no date is stamped when it was fetched, so week-old
+ *  Mining Weekly stories read as the night's): /2026/11/10/, /2026/nov/10/, -2026-11-10, or -20261110- (AFR's
+ *  -20261116-p61e86), as YYYY-MM-DD; '' when it carries none, or none that is a real date. */
+function denUrlDate(u) {
+  const x = denUrl(u); if (!x || denGoogleLink(u)) return ''; const p = x.pathname.toLowerCase(); let m = null;
+  const iso = (y, mo, d) => { y = +y; mo = +mo; d = +d; if (!(y >= 2000 && y <= 2099 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31)) return ''; const t = new Date(Date.UTC(y, mo - 1, d)); return t.getUTCDate() === d ? t.toISOString().slice(0, 10) : ''; };
+  if ((m = /\/(20\d\d)\/(\d{1,2})\/(\d{1,2})(?=\/|$)/.exec(p))) return iso(m[1], m[2], m[3]);
+  if ((m = /\/(20\d\d)\/([a-z]{3})[a-z]*\/(\d{1,2})(?=\/|$)/.exec(p)) && DEN_MON3.indexOf(m[2]) >= 0) return iso(m[1], DEN_MON3.indexOf(m[2]) + 1, m[3]);
+  if ((m = /[\/_-](20\d\d)-(\d\d)-(\d\d)(?=[\/_.-]|$)/.exec(p))) return iso(m[1], m[2], m[3]);
+  if ((m = /[\/_-](20\d\d)(\d\d)(\d\d)(?=[\/_.-]|$)/.exec(p))) return iso(m[1], m[2], m[3]);
+  return '';
+}
+/** Paywall and feed boilerplate a summary must never carry (MCA 2: sixteen of thirty places went to Mining Weekly's
+ *  notice; AEP B5: a suburb feature reached the model as its saved-items count). Matched a sentence at a time. */
+const DEN_BOILER_RX = /subscriber benefit|articles? can be saved|saved (items|list|articles)|gift articles?|subscribe (now|today|to (read|continue|access|unlock|view|keep))|already a subscriber|not a subscriber|subscription options|(sign|log) ?in to (continue|read|save|access|view|keep)|(only )?available (only )?to (paid )?(subscribers|members)|for subscribers only|subscribers?[- ]only|you('ve| have) (reached|used) (your|the|all)|reached your (free )?(article )?limit|free articles? (remaining|left|this month)|create a (free )?account to|register (for free )?to (continue|read)|become a (subscriber|member)|appeared first on|will become available on the|^\s*(read more|continue reading)\W*$/i;
+/** Sentence ends, and the end of a cut, with curly quotes and the dashes written by character code so the source stays
+ *  ASCII: a sentence starts after . ! or ? and a space, at a capital or an opening quote; a summary ends on a mark. */
+const DEN_SENT_RX = new RegExp('\\n+|(?<=[.!?])\\s+(?=["\'(' + String.fromCharCode(8216, 8220) + ']?[A-Z])'), DEN_CUT_END = new RegExp('[' + ARC_GN_DASH + '\\s,;:.]+$'), DEN_SENT_END = new RegExp('[.!?\'")' + String.fromCharCode(8217, 8221) + ']$');
+/** A story's summary as the model may read it: boilerplate struck sentence by sentence (struck: some was), the rest as
+ *  written. A real teaser from the feed is kept even when the article behind it is walled (meta.paywall). */
+function denSummary(body) {
+  let struck = false; const keep = String(body || '').replace(/\r/g, '').split(DEN_SENT_RX).filter(s => { if (!s.trim()) return false; if (DEN_BOILER_RX.test(s)) { struck = true; return false; } return true; });
+  return { text: keep.join(' ').replace(/\s*(?:read more|continue reading)\W*$/i, '').replace(/\s+/g, ' ').trim(), struck };
+}
+/** Cut at a word, up to n characters, with "..." when cut (MCA 13: a summary cut at 220 halved a title, "the head of the
+ *  Climate Change"). */
+function denCut(s, n) { s = String(s || '').replace(/\s+/g, ' ').trim(); if (s.length <= n) return s; let c = s.slice(0, n); const at = c.lastIndexOf(' '); if (at > n * 0.6) c = c.slice(0, at); return c.replace(DEN_CUT_END, '') + '...'; }
+/** One Source Registry entry as an outlet is named by (AEP M8): its name and tier, the hosts its own addresses are on,
+ *  and whether it is a topic rather than an outlet (a Google News sweep or a query, whose rows are named by their
+ *  publisher, never "Sweep: energy"). */
+function denRegEntry(id, name, tier, urls) {
+  const u = urls && typeof urls === 'object' ? urls : denJ(urls, {}); const hosts = new Set();
+  ['site', 'rss', 'home', 'wp', 'json', 'sitemap', 'public', 'substack', 'process'].forEach(k => { const v = String((u || {})[k] || '').trim(); if (!v) return; const h = denHost(/^https?:\/\//i.test(v) ? v : 'https://' + v); if (h && !/(^|\.)(news\.google\.[a-z.]+|feedburner\.com)$|^feeds\./.test(h)) hosts.add(h); });
+  return { id: String(id), name: String(name || '').replace(/\s+/g, ' ').trim(), tier: String(tier || ''), hosts, topic: tier === 'sweep' || /^gnews_/.test(String(id)) || !hosts.size };
+}
+/** Of two sources on one host, the masthead itself: smh before smh_pol, abc before abc_business. */
+const denRegBefore = (a, b) => ((a.id.indexOf('_') >= 0) - (b.id.indexOf('_') >= 0) || a.id.length - b.id.length) < 0;
+let DEN_SEED_IX = null;
+/** The registry's seed (sourceSeed: the core feeds and the extension list), indexed once an isolate: a name for a row
+ *  whose source is not in the table (a fresh database, a source since removed), and the outlet a publisher's host is. */
+function denSeedIx() {
+  if (DEN_SEED_IX) return DEN_SEED_IX; const byId = new Map(), byHost = new Map();
+  try { sourceSeed().forEach(s => { const e = denRegEntry(s.id, s.name, s.tier, s.urls); byId.set(e.id, e); if (!e.topic) e.hosts.forEach(h => { const o = byHost.get(h); if (!o || denRegBefore(e, o)) byHost.set(h, e); }); }); } catch (e) {}
+  return (DEN_SEED_IX = { byId, byHost });
+}
+/** The registry entries a board's stories name, read once a board (AEP M8): the table first (a person's edits and the
+ *  sources they added), then the seed, then CORE_META. byHost(h) is the outlet a host belongs to: the host itself, or a
+ *  parent of it (aapnews.aap.com.au is AAP). */
+async function denRegistry(env, keys) {
+  const ix = denSeedIx(); const byId = new Map(); const want = Array.from(new Set(keys.filter(Boolean).map(String))).slice(0, 600);
+  try { for (let i = 0; i < want.length; i += 90) { const part = want.slice(i, i + 90); (((await env.MIND_DB.prepare('SELECT id, name, tier, urls FROM sources WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results) || []).forEach(s => byId.set(String(s.id), denRegEntry(s.id, s.name, s.tier, s.urls))); } }
+  catch (e) { if (denBusy(e)) throw e; }   // no registry table in this database yet: the seed names them
+  want.forEach(k => { if (byId.has(k)) return; const s = ix.byId.get(k); if (s) byId.set(k, s); else if (CORE_META[k]) byId.set(k, { id: k, name: CORE_META[k][0], tier: CORE_META[k][1] || '', hosts: new Set(), topic: false }); });
+  const local = new Map(); byId.forEach(e => { if (!e.topic) e.hosts.forEach(h => { const o = local.get(h); if (!o || denRegBefore(e, o)) local.set(h, e); }); });
+  const byHost = h => { let x = denHost('https://' + String(h || '').trim().replace(/^https?:\/\//i, '')); while (x && x.split('.').length >= 2) { const e = local.get(x) || ix.byHost.get(x); if (e) return e; x = x.slice(x.indexOf('.') + 1); } return null; };
+  return { byId, byHost };
+}
+/** How a story names its outlet (AEP M8, m5; MCA 16): the registry's name for its source, never the key; for a Google
+ *  News sweep or a query, the publisher the row names (an address there is looked up as a host, so AAP is not a URL);
+ *  else its publisher's host. key: the masthead it is counted by, so one masthead under two keys counts once; sites: the
+ *  registry's own hosts for its source, which a link on another site is said against; pub: the publisher's address. */
+function denOutlet(r, reg) {
+  const m = r.meta || {}; const e = reg.byId.get(String(m.source || '')) || reg.byId.get(String(r.src || '')) || null; const own = e && !e.topic ? e : null;
+  const pub = denGoogleLink(r.url) ? (m.link && !denGoogleLink(m.link) ? String(m.link) : '') : String(r.url || ''); const ph = denHost(pub);
+  let name = own ? own.name : '', ent = own;
+  if (!name && m.outlet) { const o = String(m.outlet).replace(/\s+/g, ' ').trim(); if (/^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+\/?$/i.test(o)) { const he = reg.byHost(o); name = he ? he.name : denHost('https://' + o.replace(/^https?:\/\//i, '')); ent = he; } else name = o.slice(0, 60); }
+  if (!name && ph) { const he = reg.byHost(ph); name = he ? he.name : ph; ent = he; }
+  if (!ent && ph) ent = reg.byHost(ph);
+  const tier = (own && own.tier) || (ent && ent.tier) || String(m.tier || '');
+  return { name: name || 'an outlet found through Google News', key: ph || (ent && ent.hosts.size ? Array.from(ent.hosts)[0] : '') || String(name || r.id).toLowerCase().replace(/^the\s+/, ''), tier,
+    official: tier === 'official' || m.tier === 'official' || !!(r.w || m.actor || m.mp), sites: own ? Array.from(own.hosts) : [], pub };
+}
+/** How many stories, and how many posts, reach the model: thirty each at a day's window or less, sixty at a week, in
+ *  proportion between (combined M1: the weekly desk was given a day's thirty). */
+const denEvCap = h => { h = Number(h) || 24; return h <= 24 ? 30 : h >= 168 ? 60 : Math.round(30 + (h - 24) * 30 / 144); };
+/** Which of a ranked list reach the model (combined M1, MCA 2). Every item in must first, whatever the caps; then, within
+ *  the cap, one place for each channel (o.channel, posts only), a share for each of the desk's issues taken in turn by
+ *  rank so none starves, an item from each quarter of the window that has one, and the rest by rank; no outlet holds
+ *  more than o.per places (o.outlet, stories only: one trade site took sixteen of thirty). Rank order, must first. */
+function denPick(list, o) {
+  const sel = new Set(), per = new Map(), cap = o.cap; const oc = it => (o.outlet ? o.outlet(it) : '');
+  const take = it => { sel.add(it); if (o.outlet) per.set(oc(it), (per.get(oc(it)) || 0) + 1); };
+  const room = it => !sel.has(it) && sel.size < cap && (!o.outlet || (per.get(oc(it)) || 0) < o.per);
+  list.forEach(it => { if (o.must(it)) take(it); });
+  const pool = list.filter(it => !sel.has(it) && o.ok(it)); const first = pred => pool.find(it => pred(it) && room(it));
+  if (o.channel) Array.from(new Set(pool.map(o.channel))).forEach(ch => { const it = first(x => o.channel(x) === ch); if (it) take(it); });
+  const iss = (o.issues || []).filter(id => pool.some(it => (it.issues || []).indexOf(id) >= 0));
+  if (iss.length) { const share = Math.max(1, Math.floor(cap / 2 / iss.length)); const got = id => Array.from(sel).filter(it => (it.issues || []).indexOf(id) >= 0).length;
+    for (let moved = true; moved && sel.size < cap;) { moved = false; for (const id of iss) { if (sel.size >= cap) break; if (got(id) >= share) continue; const it = first(x => (x.issues || []).indexOf(id) >= 0); if (it) { take(it); moved = true; } } } }
+  const span = Math.max(1, (o.to - o.from) / 4); const q = it => Math.max(0, Math.min(3, Math.floor((Number(it.ts) - o.from) / span)));
+  for (let k = 0; k < 4; k++) { if (Array.from(sel).some(it => q(it) === k)) continue; const it = first(x => q(x) === k); if (it) take(it); }
+  pool.forEach(it => { if (room(it)) take(it); });
+  return list.filter(it => sel.has(it) && o.must(it)).concat(list.filter(it => sel.has(it) && !o.must(it)));
+}
+/** The account a post's address names, only to count how many accounts posted one templated text (AEP M5); never shown,
+ *  never stored. '' when the address does not say. */
+function denAcct(u) {
+  const x = denUrl(u); if (!x) return ''; const h = x.hostname.toLowerCase().replace(/^www\./, ''); const p = x.pathname.split('/').filter(Boolean);
+  if (/(^|\.)bsky\.app$/.test(h) && p[0] === 'profile' && p[1]) return 'bsky:' + p[1].toLowerCase();
+  if (/^(x|twitter|mobile\.twitter)\.com$/.test(h) && p[0] && p[0] !== 'i' && p[1] === 'status') return 'x:' + p[0].toLowerCase();
+  if (p[0] && /^@[\w.-]+$/.test(p[0])) return h + '/' + p[0].toLowerCase();
+  if (/(^|\.)reddit\.com$/.test(h) && (p[0] === 'user' || p[0] === 'u') && p[1]) return 'reddit:' + p[1].toLowerCase();
+  if (/(^|\.)facebook\.com$/.test(h) && p[0] && p[1] === 'posts') return 'fb:' + p[0].toLowerCase();
+  return '';
+}
 /** The window's rows, sorted into the report's sections. opts { hours, to, asides } */
 async function denBoard(env, deskId, opts) {
   opts = opts || {}; const desk = typeof deskId === 'object' ? deskId : await deskGet(env, deskId); if (!desk) return DESK_UNKNOWN;
@@ -8530,34 +9155,94 @@ async function denBoard(env, deskId, opts) {
     const ch = platformOf(r0.kind, m); const eng = (m.eng && typeof m.eng === 'object') ? m.eng : null;
     const total = eng ? (Number(eng.likes) || 0) + (Number(eng.comments) || 0) + (Number(eng.shares) || 0) + (Number(eng.reposts) || 0) + (Number(eng.replies) || 0) + (Number(eng.quotes) || 0) : (Number(m.score) || 0) + (Number(m.comments) || 0);
     if (ch !== 'news' && o.minEng[ch] && total < o.minEng[ch] && !w && !m.mp && !m.actor) { nLow++; continue; }   // a registered account's or an MP's post is shown whatever it drew
-    rows.push({ id: r0.id, kind: r0.kind, src: r0.src, url: r0.url, title: String(r0.title || ''), body: String(r0.body || ''), tone: r0.tone, ts: r0.ts, seen: r0.seen, meta: m, issues, w, ch, eng, total, host });
+    // rel (p71): how the row bears on the desk's issues (denRel), which ranks it below and which the strip and the tone read
+    rows.push({ id: r0.id, kind: r0.kind, src: r0.src, url: r0.url, title: String(r0.title || ''), body: String(r0.body || ''), tone: r0.tone, ts: r0.ts, seen: r0.seen, meta: m, issues, w, ch, eng, total, host, rel: denRel(r0.title, r0.body, issues, m) });
   }
+  // p71 (EV2): a count-only pass (opts.countOnly), for THE WINDOW BEFORE: each issue's posts and stories in the window as this
+  // board admits them (its region, mutes and minimum engagement above, its set-asides read here in one query), so the window
+  // before is counted the way the Board counts this one. It counted what the desk had muted or set aside: forty stories from a
+  // muted site read as a ninefold rise beside a Board of five
+  if (opts.countOnly) { const inWin = new Set(rows.map(r => r.id)); const set = new Set();
+    (((await env.MIND_DB.prepare("SELECT d.item FROM den_marks d JOIN arc_items a ON a.id=d.item WHERE d.desk=? AND d.mark='aside' AND a.ts>? AND a.ts<=?").bind(desk.id, win.from, win.to).all()).results) || []).forEach(k => { if (inWin.has(k.item)) set.add(k.item); });
+    const byIssue = {}; let n = 0; rows.forEach(r => { if (set.has(r.id)) return; n++; r.issues.forEach(i => { byIssue[i] = (byIssue[i] || 0) + 1; }); });
+    return { ok: true, desk, window: win, byIssue, capped: raw.length >= DEN_BOARD_ROWS, counts: { rows: n, aside: set.size, muted: nMuted, underMinimum: nLow, otherRegions: nRegion } }; }
   const marks = new Map(); const ids = rows.map(r => r.id);
   for (let i = 0; i < ids.length; i += 90) (((await env.MIND_DB.prepare('SELECT item, mark, reason, section, by, at FROM den_marks WHERE desk=? AND item IN (' + ids.slice(i, i + 90).map(() => '?').join(',') + ')').bind(desk.id, ...ids.slice(i, i + 90)).all()).results) || []).forEach(k => marks.set(k.item, k));
   const live = []; const aside = [];
   // section: which column of the report a pinned row is filed under, the desk's own record (p66); '' is Unsorted
   rows.forEach(r => { const k = marks.get(r.id); r.pinned = !!(k && k.mark === 'pin'); r.section = r.pinned ? String(k.section || '') : ''; if (k && k.mark === 'aside') aside.push({ id: r.id, title: r.title.slice(0, 160), channel: r.ch, reason: k.reason, by: k.by, at: k.at }); else live.push(r); });
-  const link = r => (/^https?:/.test(String(r.url || '')) ? r.url : '');
-  // traditional media: syndicated copies fold into the copy seen first, with the outlets that carried it
-  const news = live.filter(r => r.kind === 'news'); const folds = new Map();
-  news.slice().sort((a, b) => a.ts - b.ts).forEach(r => { const k = o.fold === false ? 'r' + r.id : (denFoldKey(r.title) || 'r' + r.id); const f = folds.get(k); const outlet = String(r.meta.outlet || r.meta.source || r.src || r.host || '').slice(0, 60);
-    if (!f) folds.set(k, { head: r, outlets: [outlet], ids: [r.id], pinned: r.pinned, section: r.section, gated: !!r.meta.gated, fb: r.meta.fb || null }); else { if (f.outlets.indexOf(outlet) < 0) f.outlets.push(outlet); f.ids.push(r.id); f.pinned = f.pinned || r.pinned; f.section = f.section || r.section; f.gated = f.gated || !!r.meta.gated; if (!f.fb && r.meta.fb) f.fb = r.meta.fb; } });
-  const fbTotal = fb => (fb ? (Number(fb.reactions) || 0) + (Number(fb.comments) || 0) + (Number(fb.shares) || 0) : 0);
-  const media = Array.from(folds.values()).map(f => ({ id: f.head.id, title: f.head.title.slice(0, 300), url: link(f.head), outlet: f.outlets[0], outlets: f.outlets.slice(0, 12), n: f.outlets.length, copies: f.ids.slice(0, 40), ts: f.head.ts, tier: f.head.meta.tier || '', juris: f.head.meta.juris || '',
-    gated: f.gated, access: f.head.meta.access || '', full: !!(f.head.meta.full || (f.head.meta.ft && f.head.meta.ft !== 'none' && f.head.meta.ft !== 'retry')), fb: f.fb, issues: f.head.issues, tone: f.head.tone, pinned: f.pinned, section: f.section || '', summary: f.head.body.slice(0, 260), claim: f.head.meta.claim || null }))
-    .sort((a, b) => (b.pinned - a.pinned) || (b.n - a.n) || (fbTotal(b.fb) - fbTotal(a.fb)) || (b.ts - a.ts)).slice(0, 150);
-  // social: what the register's accounts posted and what the terms found; public actors and MPs go to their own table
+  const link = r => denCleanUrl(r.url);   // p71 (AEP M8): a link as a reader opens it, escapes decoded and tracking struck ('' if not http)
+  // traditional media (p71, AEP m5 and M8; MCA 2, 15, 16): syndicated copies fold into the copy seen first, by the headline
+  // or by the address's own slug (one wire story under two headlines); each copy is named as the registry names its
+  // outlet, and the outlets that carried a story are counted once a masthead
+  const news = live.filter(r => r.kind === 'news'); const reg = await denRegistry(env, news.map(r => r.meta.source).concat(news.map(r => r.src)));
+  const staleBefore = auDayKey(win.from - 86400000); const folds = []; const fkeys = new Map(), sfolds = new Map();
+  news.slice().sort((a, b) => a.ts - b.ts).forEach(r => { r.ol = denOutlet(r, reg);
+    // rc, the relevance class: the issue's own trigger in the title, in the body, any of its triggers in the title, a row a
+    // person or a search chose, a passing word in the body (combined M1: a suburb feature led the AEP board on four copies)
+    r.rc = denRel(r.title, '', r.issues, {}).tight ? 0 : r.rel.tight ? 1 : r.rel.inTitle ? 2 : r.rel.passing ? 4 : 3;
+    // p71 (EV3): a slug joins two rows only when their addresses carry one date, or one carries none: one outlet's daily page
+    // keeps its slug from day to day (-20261116-p61aaa.html, then -20261117-), and folding them sent the model one day only
+    const tk = o.fold === false ? '' : denFoldKey(r.title), sk = o.fold === false ? '' : denSlugKey(r.url), rd = denUrlDate(denGoogleLink(r.url) ? String(r.meta.link || '') : r.url);
+    let f = tk ? fkeys.get(tk) || null : null; if (!f && sk) f = (sfolds.get(sk) || []).find(g => !rd || !g.days.size || g.days.has(rd)) || null;
+    if (!f) { f = { head: r, rows: [], days: new Set() }; folds.push(f); } f.rows.push(r); if (rd) f.days.add(rd);
+    if (tk && !fkeys.has(tk)) fkeys.set(tk, f); if (sk) { const a = sfolds.get(sk) || []; if (a.indexOf(f) < 0) a.push(f); sfolds.set(sk, a); } });
+  const fbTotal = fb => (fb ? (Number(fb.reactions) || 0) + (Number(fb.comments) || 0) + (Number(fb.shares) || 0) : 0); const rk = new Map();
+  // an outlet is counted once by its host or its name, whichever two copies share ("Sydney Morning Herald" and "SMH Federal
+  // Politics" on one site; "Sky News Australia" on two); the stand-in name for an unnamed Google row joins nothing
+  const media = folds.map(f => { const h = f.head, rows = f.rows; const seenKey = new Set(), outlets = [];
+    rows.forEach(r => { const nk = /^an outlet found/.test(r.ol.name) ? 'r:' + r.id : 'n:' + r.ol.name.toLowerCase(); if (!seenKey.has(r.ol.key) && !seenKey.has(nk)) outlets.push(r.ol.name); seenKey.add(r.ol.key); seenKey.add(nk); });
+    // the link: the head's own; for a Google News redirect the publisher's address resolved for it, else a copy's that is not Google
+    const url = link({ url: denGoogleLink(h.url) ? (h.ol.pub || (rows.find(r => /^https?:/i.test(String(r.url || '')) && !denGoogleLink(r.url)) || {}).url || h.url) : h.url }); const uh = denHost(url);
+    // the summary: the first copy with real text once boilerplate is struck (a fragment left beside a notice is not text);
+    // none at all, where a notice was struck or the wall was met, is paywalled: the line says headline only (MCA 2)
+    let sm = null, struck = false; for (const r of rows) { const s = denSummary(r.body); struck = struck || s.struck; if (s.text.length >= (s.struck ? 60 : 1)) { sm = { text: s.text, row: r }; break; } }
+    let summary = sm ? sm.text : ''; if (sm && sm.row.body.length >= 600 && summary.length <= 300 && !DEN_SENT_END.test(summary)) summary = summary.replace(/\s+\S*$/, '') + '...';   // the board reads 600 characters: mid-word there is a cut
+    summary = denCut(summary, 300); const gated = rows.some(r => !!r.meta.gated); const ud = denUrlDate(url) || denUrlDate(h.url); const best = rows.reduce((a, r) => (r.rc < a.rc ? r : a), h);
+    const item = { id: h.id, title: h.title.slice(0, 300), url, outlet: h.ol.name, outlets: outlets.slice(0, 12), n: outlets.length, copies: rows.map(r => r.id).slice(0, 40), ts: h.ts, tier: h.ol.tier, juris: h.meta.juris || '',
+      gated, access: h.meta.access || '', full: !!(h.meta.full || (h.meta.ft && h.meta.ft !== 'none' && h.meta.ft !== 'retry')), fb: (rows.find(r => r.meta.fb) || { meta: {} }).meta.fb || null, issues: Array.from(new Set([].concat(...rows.map(r => r.issues)))), tone: h.tone,
+      pinned: rows.some(r => r.pinned), section: (rows.find(r => r.section) || {}).section || '', summary, claim: h.meta.claim || null,
+      // p71, additive: how it bears on the desk (its closest copy's rel); a link on a host the registry does not give its source
+      // (MCA 16: "skynews" on news24.com.au); a notice where the summary was; an address dated more than a day before the window
+      // opened (it ranks after every fresh story and is dated by its address); the outlet's "Special Report" label (MCA 15)
+      // p71 (ST4): special only where the outlet is one whose "Special Report" marks a piece made with the company it is about
+      // (DEN_SPONSORED_HOSTS), its label read where that outlet writes it (the summary, MCA 15); a wire's investigation headed
+      // "Special Report:", or a summary quoting another body's special report, is the outlet's own reporting. p71 fx2 (D4b):
+      // that outlet's own summary may quote another body's report too, so its label is read as it writes it (DEN_SPONSORED_RX),
+      // or as a headline's opening words in any case
+      // p71 (CO7): urlDated, the head was undated and is dated by the day its address gives: it has no time of its own
+      rel: best.rel, linkHost: uh && h.ol.sites.length && !h.ol.sites.some(s => uh === s || uh.endsWith('.' + s) || s.endsWith('.' + uh)) ? uh : '', paywalled: !summary && !gated && (struck || rows.some(r => !!r.meta.paywall)),
+      stale: !!ud && ud < staleBefore, urlDate: ud, urlDated: !!h.meta.urldate, special: denSponsored(h) && rows.some(r => denSponsored(r) && (/^\s*special report\s*:/i.test(r.title) || DEN_SPONSORED_RX.test(r.title) || DEN_SPONSORED_RX.test(r.body))) };
+    if (opts.keepRows) rows.forEach(r => { r.rec = item; });   // p71 (EV1, ST5): every story's rows carry it, past the Board's 150 too (denEvidence)
+    rk.set(item, { rc: best.rc, bare: item.paywalled ? 1 : 0, off: rows.some(r => r.ol.official) ? 1 : 0, tr: Math.min(...rows.map(r => (DEN_TIER_RANK[r.ol.tier] != null ? DEN_TIER_RANK[r.ol.tier] : 4))) }); return item; })
+    // the Board's order (p71, combined M1): pins; then fresh before stale; then relevance; within it a story with text before a
+    // walled headline (a Google News headline, which never had text, is not put down for it), an official source or a
+    // registered account, the outlet's tier, the outlets that carried it, its reach on Facebook, and the newest
+    .sort((a, b) => { const x = rk.get(a), y = rk.get(b); return (b.pinned - a.pinned) || (a.stale - b.stale) || (x.rc - y.rc) || (x.bare - y.bare) || (y.off - x.off) || (x.tr - y.tr) || (b.n - a.n) || (fbTotal(b.fb) - fbTotal(a.fb)) || (b.ts - a.ts); }).slice(0, 150);
+  // social: what the register's accounts posted and what the terms found; public actors and MPs go to their own table.
+  // p71 (combined M1, AEP M1): pins first and a post resting on a passing word last; between them interactions and views
+  // together, a view a fiftieth of an interaction, so a video watched thousands of times and liked by nobody is not scored nothing
   const soc = live.filter(r => r.kind === 'sig_thread' || r.kind === 'reddit_thread' || r.kind === 'transcript'); const isActor = r => !!(r.meta.actor || r.meta.mp);
-  const pick = soc.slice().sort((a, b) => (b.pinned - a.pinned) || (b.total - a.total) || (b.ts - a.ts)).slice(0, 140);
+  const score = r => (Number(r.total) || 0) + (Number((r.eng || {}).views) || 0) / 50;
+  const pick = soc.slice().sort((a, b) => (b.pinned - a.pinned) || (a.rel.passing - b.rel.passing) || (score(b) - score(a)) || (b.ts - a.ts)).slice(0, 140);
   // growth since yesterday's read, and the tone of the comments held under each
   const prev = new Map(); const keys = pick.filter(r => /^https?:/.test(String(r.url || ''))).map(r => ['x:eng:' + arcHash(r.url) + ':' + auDayKey((Number(r.meta.eng_at) || r.ts) - 86400000), r.id]);
   for (let i = 0; i < keys.length; i += 90) (((await env.MIND_DB.prepare("SELECT url, meta FROM arc_items WHERE kind='sig_eng' AND url IN (" + keys.slice(i, i + 90).map(() => '?').join(',') + ')').bind(...keys.slice(i, i + 90).map(k => k[0])).all()).results) || []).forEach(s => { const k = keys.find(x => x[0] === s.url); const e = (denJ(s.meta, {}).eng) || {}; if (k) prev.set(k[1], (Number(e.likes) || 0) + (Number(e.comments) || 0) + (Number(e.shares) || 0) + (Number(e.reposts) || 0) + (Number(e.replies) || 0) + (Number(e.quotes) || 0)); });
+  // p71 fx5 (R1): AVG(tone) rests only on the comments that carry a tone, so they are counted beside those read (toned), and
+  // a tone resting on fewer than three is not said at all: one comment at -0.6 among ten read was "10 comments read,
+  // strongly negative", on the line and on the card
   const held = new Map(); const tids = pick.map(r => String(r.meta.id || '')).filter(Boolean);
-  for (let i = 0; i < tids.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, AVG(tone) a FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND ts>? AND json_extract(meta,'$.thread') IN (" + tids.slice(i, i + 90).map(() => '?').join(',') + ") GROUP BY t").bind(win.from - 86400000, ...tids.slice(i, i + 90)).all()).results) || []).forEach(h => held.set(String(h.t), { n: h.n, tone: h.a == null ? null : Math.round(h.a * 100) / 100 }));
+  for (let i = 0; i < tids.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, COUNT(tone) k, AVG(tone) a FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND ts>? AND json_extract(meta,'$.thread') IN (" + tids.slice(i, i + 90).map(() => '?').join(',') + ") GROUP BY t").bind(win.from - 86400000, ...tids.slice(i, i + 90)).all()).results) || []).forEach(h => held.set(String(h.t), { n: h.n, toned: h.k, tone: h.a == null || h.k < 3 ? null : Math.round(h.a * 100) / 100 }));
   const socRow = r => ({ id: r.id, platform: r.ch, text: (r.title && r.title !== r.ch + ' post' ? r.title : r.body).slice(0, 280), url: link(r), ts: r.ts, eng: r.eng, total: r.total, eng_at: Number(r.meta.eng_at) || 0, growth: prev.has(r.id) ? r.total - prev.get(r.id) : null,
-    held: held.get(String(r.meta.id || '')) || null, layers: Array.isArray(r.meta.layers) ? r.meta.layers : (r.meta.via === 'reach' ? [2] : []), issues: r.issues, term: r.meta.term || r.meta.q || '', hashtag: r.meta.hashtag || '', registered: !!r.w, pinned: r.pinned, section: r.section || '', sub: r.meta.sub || '' });
+    held: held.get(String(r.meta.id || '')) || null, layers: Array.isArray(r.meta.layers) ? r.meta.layers : (r.meta.via === 'reach' ? [2] : []), issues: r.issues, term: r.meta.term || r.meta.q || '', hashtag: r.meta.hashtag || '', registered: !!r.w, pinned: r.pinned, section: r.section || '', sub: r.meta.sub || '',
+    rel: r.rel, score: Math.round(score(r) * 10) / 10 });   // p71, additive: how it bears on the desk, and what it is ranked by
+  const actorRow = r => Object.assign(socRow(r), r.meta.actor ? { who: String(r.meta.actor.name || '').slice(0, 80), role: String(r.meta.actor.kind || ''), party: '' } : { who: String((r.meta.mp || {}).name || '').slice(0, 80), role: 'mp', party: String((r.meta.mp || {}).party || '').slice(0, 40) });
   const social = pick.filter(r => !isActor(r)).slice(0, 90).map(socRow);
-  const actors = pick.filter(isActor).slice(0, 60).map(r => Object.assign(socRow(r), r.meta.actor ? { who: String(r.meta.actor.name || '').slice(0, 80), role: String(r.meta.actor.kind || ''), party: '' } : { who: String((r.meta.mp || {}).name || '').slice(0, 80), role: 'mp', party: String((r.meta.mp || {}).party || '').slice(0, 40) }));
+  const actors = pick.filter(isActor).slice(0, 60).map(actorRow);
+  // p71 (EV1, ST5): the lists stop at 90 posts and 60 actor posts (of 140 picked), and a post a check or a pin rests on may
+  // sit past them (a first post naming an organisation draws nothing): with keepRows every post carries its record on its
+  // row (rec), built as the lists build theirs, so denEvidence can send it
+  if (opts.keepRows) { const on = new Map(social.concat(actors).map(x => [x.id, x])); soc.forEach(r => { r.rec = on.get(r.id) || (isActor(r) ? actorRow(r) : socRow(r)); }); }
   // key narratives on this desk's issues that gained rows in the window
   let narratives = [];
   try { await ensureNarratives(env);
@@ -8570,7 +9255,7 @@ async function denBoard(env, deskId, opts) {
   } catch (e) { narratives = []; }
   // recorded dates (read from a parliament's own page) lead; a stage row's own sentence is not read again as a guess
   let recorded = []; try { recorded = await processUpcoming(env, mine, now); } catch (e) { recorded = []; }
-  const upcoming = recorded.concat(denUpcoming(live.filter(r => !(r.meta && r.meta.process)), now)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(0, 40);
+  const upcoming = denUpPick(recorded.concat(denUpcoming(live.filter(r => !(r.meta && r.meta.process)), now)), 40);   // p71 fix (review CK3): dated and recorded first
   // p69, additive: absorbed id -> survivor for merges into this board's narratives (a brief or a browser note may hold the old id)
   const aliases = {};
   try { const nids = narratives.map(n => n.id); for (let i = 0; i < nids.length && Object.keys(aliases).length < 200; i += 90) { const part = nids.slice(i, i + 90);
@@ -8623,52 +9308,103 @@ async function denMute(env, b, who) {
   if (!((u && u.meta && u.meta.changes) || 0)) return { ok: false, status: 409, error: 'conflict', detail: 'This desk\'s options changed while you were deciding. Nothing was saved: try again.' };
   return { ok: true, desk: await deskGet(env, desk.id) };
 }
+/* p71 (AEP B1, combined B2): the channels each client's analyst relies on, read from her own reports (DEN.md s.0.3, and the
+ * MCA comparison of 17 November 2026). One of them that delivered nothing is named as not read whatever the watch register
+ * holds: X, Facebook and Instagram carried most of her AEP links, were never named because no account there was registered,
+ * and a draft told the client the conversation was "almost entirely on Bluesky". A desk's options.channels (platform ids,
+ * checked in deskUpdate) replaces its client's list when it names any. */
+const DEN_RELIED = { aep: ['x', 'facebook', 'instagram', 'youtube', 'reddit'], mca: ['x', 'facebook', 'instagram', 'youtube'], guns: ['x', 'facebook', 'instagram', 'youtube'] };
+function denRelied(desk) {
+  const own = desk && desk.options && Array.isArray(desk.options.channels) ? desk.options.channels.map(p => String(p || '').toLowerCase()).filter(p => p !== 'news' && DEN_CH_NAME[p]) : [];
+  return own.length ? own : (DEN_RELIED[desk && desk.ns] || []).slice();
+}
 /** Nothing critical missed: six signals computed from the archive, no model. Each has a stable key, the ids that would
- *  show a brief covered it (cover) and words that would (words), and where its evidence opens. */
+ *  show a brief covered it (cover) and words that would (words), and where its evidence opens. p71: items are the board
+ *  rows behind a check (a news copy as its fold's head), which the evidence puts before any cap so that citing them can
+ *  clear it; fig carries a check's figures for its evidence line. */
 async function denMissed(env, deskId, opts) {
   opts = opts || {}; const board = opts.board || await denBoard(env, deskId, Object.assign({}, opts, { keepRows: true })); if (!board.ok) return board;
   const desk = board.desk, win = board.window, mine = desk.issues.map(i => i.id); const out = []; const rows = board._rows || []; const label = id => (desk.issues.find(i => i.id === id) || {}).label || id;
   const soft = async fn => { try { await fn(); } catch (e) { if (denBusy(e)) throw e; } };   // a busy database is said, never read as nothing found
-  // 1 Sentinel spikes on this desk's issues
+  // p71: a board row as the evidence cites it: a news copy by its fold's head (M:), a public actor's or an MP's post as P:,
+  // any other post as S:; '' for a row no evidence line carries (a petition)
+  const headOf = new Map(); (board.media || []).forEach(m => (Array.isArray(m.copies) && m.copies.length ? m.copies : [m.id]).forEach(c => headOf.set(c, m.id)));
+  // p71 review (ST5): a copy in a fold past the Board's 150 stories by its fold's head too (rec, which denBoard sets with
+  // keepRows): denEvidence sends a story in must wherever the Board's list stops, so its check need not point at nothing
+  const headId = r => headOf.get(r.id) || (r.rec && r.rec.id) || 0;
+  const evOf = r => (r.kind === 'news' ? (headId(r) ? 'M:' + headId(r) : '') : /^(sig_thread|reddit_thread|transcript)$/.test(r.kind) ? (r.meta && (r.meta.actor || r.meta.mp) ? 'P:' : 'S:') + r.id : '');
+  const itemOf = r => (r.kind === 'news' ? headId(r) : r.id);
+  // 1 Sentinel spikes on this desk's issues. p71 (EV6): the Sentinel reads the national wire, so a region desk is told so
   await soft(async () => { await ensureSentinel(env);
     (((await env.MIND_DB.prepare('SELECT id, issue, label, ratio, hot, detected_ts, acked_ts FROM arc_alerts WHERE ns=? AND detected_ts>? AND detected_ts<=? ORDER BY detected_ts DESC LIMIT 20').bind(desk.ns, win.from, win.to).all()).results) || [])
-      .forEach(a => out.push({ sig: 'spike', key: 'A:' + a.id, title: 'Sentinel spike: ' + (a.label || label(a.issue)), detail: a.hot + ' stories in six hours, ' + (Math.round((Number(a.ratio) || 0) * 10) / 10) + ' times this issue\'s own baseline' + (a.acked_ts ? '. Acknowledged.' : '. Not yet acknowledged.'), cover: ['A:' + a.id], words: [], open: { view: 'sentinel' }, at: a.detected_ts })); });
+      .forEach(a => out.push({ sig: 'spike', key: 'A:' + a.id, title: 'Sentinel spike: ' + (a.label || label(a.issue)), detail: a.hot + ' stories in six hours, ' + (Math.round((Number(a.ratio) || 0) * 10) / 10) + ' times this issue\'s own baseline' + (desk.region !== 'au' ? ', counted across Australia' : '') + (a.acked_ts ? '. Acknowledged.' : '. Not yet acknowledged.'), cover: ['A:' + a.id], words: [], open: { view: 'sentinel' }, at: a.detected_ts,
+        fig: { label: a.label || label(a.issue), hot: Number(a.hot) || 0, ratio: Math.round((Number(a.ratio) || 0) * 10) / 10 } })); });
   // 2 narratives that became emerging in the window
   board.narratives.filter(n => n.status === 'emerging' && n.first >= win.from - 48 * 3600000).forEach(n => out.push({ sig: 'emerging', key: 'N:' + n.id, title: 'Emerging narrative' + (n.named === 'auto' ? ' (working title)' : '') + ': ' + n.label, detail: n.n + ' rows, ' + n.n24 + ' in the last day' + (n.side ? ', ' + n.side + ' toward the client' : ''), cover: ['N:' + n.id], words: [], open: { view: 'narratives', params: { id: n.id } }, at: n.first }));
   // 3 first-seen actors: a registered account, or a register entity, on this desk's issues for the first time in fourteen days
   const wIds = Array.from(new Set(rows.filter(r => r.w).map(r => r.w.id)));
   // the slow figures (DEN_SLOW_TTL): counted once for this desk and window, read from the cache until then
-  const wkey = wIds.slice().sort().join(','); const sk = 'den_slow_' + desk.id + '_' + win.hours; const useCache = !opts.to; let slow = null;
-  if (useCache && !opts.fresh) { try { slow = JSON.parse((await kvGet(env.AXIOM_KV, sk)) || 'null'); } catch (e) { slow = null; } if (!slow || !(Number(slow.at) > Date.now() - DEN_SLOW_TTL * 1000) || slow.wkey !== wkey) slow = null; }
-  const cached = !!slow; if (!slow) slow = { at: Date.now(), wkey, failed: 0 };
+  // p71: den_slow2_, since the first-seen list now carries the rows that named each entity; a p70 entry of the old shape is never read
+  // p71 (ST1): the entry is the live strip's. It is read and written only for a window that ends now (within DEN_SLOW_TTL), and
+  // read only when it was counted for a window ending within that of this one (to): a brief of today whose window closed
+  // earlier (a section written again, a filing) read the live window's burst as its own, or wrote its own over the strip's
+  const nowT = Date.now(); const wkey = wIds.slice().sort().join(','); const sk = 'den_slow2_' + desk.id + '_' + win.hours; const useCache = !opts.to && Math.abs(nowT - win.to) <= DEN_SLOW_TTL * 1000; let slow = null;
+  if (useCache && !opts.fresh) { try { slow = JSON.parse((await kvGet(env.AXIOM_KV, sk)) || 'null'); } catch (e) { slow = null; } if (!slow || !(Number(slow.at) > nowT - DEN_SLOW_TTL * 1000) || slow.wkey !== wkey || !(Math.abs(Number(slow.to) - win.to) <= DEN_SLOW_TTL * 1000)) slow = null; }
+  const cached = !!slow; if (!slow) slow = { at: nowT, to: win.to, wkey, failed: 0 };
   const slowly = async (name, fn) => { if (cached) return slow[name]; try { slow[name] = await fn(); } catch (e) { if (denBusy(e)) throw e; slow.failed++; slow[name] = null; } return slow[name]; };
   await soft(async () => { const seenBefore = await slowly('before', async () => { const before = [];
     for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT DISTINCT json_extract(meta,'$.watch') w FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ')').bind(win.from - 14 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => before.push(x.w));
       return before; }); if (!seenBefore) return; const before = new Set(seenBefore);
     wIds.filter(w => !before.has(w)).slice(0, 12).forEach(w => { const mineRows = rows.filter(r => r.w && r.w.id === w); const a = mineRows[0].w; const named = !!a.actor_kind;
-      out.push({ sig: 'first_seen', key: 'W:' + w, title: (named ? (a.name || a.value) : 'A registered ' + (DEN_CH_NAME[a.platform] || a.platform) + ' account') + ' posted on this desk for the first time in fourteen days', detail: mineRows.length + ' post' + (mineRows.length === 1 ? '' : 's') + ' in the window on ' + (DEN_CH_NAME[a.platform] || a.platform) + '.', cover: mineRows.map(r => 'S:' + r.id).concat(mineRows.map(r => 'P:' + r.id)), words: named ? [a.name || a.value] : [], open: { item: mineRows[0].id, url: mineRows[0].url }, at: mineRows[0].ts }); }); });
+      out.push({ sig: 'first_seen', key: 'W:' + w, title: (named ? (a.name || a.value) : 'A registered ' + (DEN_CH_NAME[a.platform] || a.platform) + ' account') + ' posted on this desk for the first time in fourteen days', detail: mineRows.length + ' post' + (mineRows.length === 1 ? '' : 's') + ' in the window on ' + (DEN_CH_NAME[a.platform] || a.platform) + '.', cover: mineRows.map(r => 'S:' + r.id).concat(mineRows.map(r => 'P:' + r.id)), words: named ? [a.name || a.value] : [], open: { item: mineRows[0].id, url: mineRows[0].url }, at: mineRows[0].ts,
+        items: mineRows.slice().sort((x, y) => (y.total - x.total) || (y.ts - x.ts)).map(itemOf).filter(Boolean).slice(0, 3), channel: a.platform, who: named ? String(a.name || a.value || '') : '' }); }); });
   await soft(async () => { const named = await slowly('ents', async () => { await ensureSentiment(env); if (!mine.length) return [];
-    const like = mine.map(() => 'i.issues LIKE ?').join(' OR ');
-    const ents = ((await env.MIND_DB.prepare('SELECT e.entity id, MIN(e.ts) first, COUNT(*) n FROM sent_entities e JOIN sent_items i ON i.item=e.item WHERE e.ts>? AND e.ts<=? AND (' + like + ') GROUP BY e.entity HAVING MIN(e.ts)>? ORDER BY n DESC LIMIT 12').bind(win.from - 14 * 86400000, win.to, ...mine.map(i => '%"' + i + '"%'), win.from).all()).results) || [];
+    const like = mine.map(() => 'i.issues LIKE ?').join(' OR '), lk = mine.map(i => '%"' + i + '"%');
+    const ents = ((await env.MIND_DB.prepare('SELECT e.entity id, MIN(e.ts) first, COUNT(*) n FROM sent_entities e JOIN sent_items i ON i.item=e.item WHERE e.ts>? AND e.ts<=? AND (' + like + ') GROUP BY e.entity HAVING MIN(e.ts)>? ORDER BY n DESC LIMIT 12').bind(win.from - 14 * 86400000, win.to, ...lk, win.from).all()).results) || [];
     if (!ents.length) return [];
     const names = new Map((((await env.MIND_DB.prepare('SELECT id, name, kind FROM entities WHERE id IN (' + ents.map(() => '?').join(',') + ") AND kind IN ('org','person','party')").bind(...ents.map(e => e.id)).all()).results) || []).map(e => [e.id, e]));
-    return ents.filter(e => names.has(e.id)).map(e => ({ id: e.id, first: e.first, n: e.n, name: names.get(e.id).name })); });
-    (named || []).forEach(e => out.push({ sig: 'first_seen', key: 'E:' + e.id, title: e.name + ' named on this desk\'s issues for the first time in fourteen days', detail: e.n + ' judged mention' + (e.n === 1 ? '' : 's') + ' in the window.', cover: [], words: [e.name], open: { view: 'sentiment', params: { id: e.id } }, at: e.first })); });
+    const keep = ents.filter(e => names.has(e.id)); if (!keep.length) return [];
+    // p71 (AEP m6, MCA 2): the rows that named each one in the window, kept with it (bounded), so the check can be cited
+    const said = {}; (((await env.MIND_DB.prepare('SELECT e.entity id, e.item item FROM sent_entities e JOIN sent_items i ON i.item=e.item WHERE e.ts>? AND e.ts<=? AND e.entity IN (' + keep.map(() => '?').join(',') + ') AND (' + like + ') ORDER BY e.ts DESC LIMIT 400').bind(win.from, win.to, ...keep.map(e => e.id), ...lk).all()).results) || [])
+      .forEach(x => { const a = said[x.id] = said[x.id] || []; if (a.length < 40 && a.indexOf(x.item) < 0) a.push(x.item); });
+    return keep.map(e => ({ id: e.id, first: e.first, n: e.n, name: names.get(e.id).name, items: said[e.id] || [] })); });
+    // p71: a mention counts only on this desk's board (a muted, set-aside or other-region row is not this desk's) and only
+    // where the row bears on the issue: a suburb feature naming a company once beside "gas" is a passing mention and raises
+    // nothing (AEP B5, Beach Energy). The cover is the rows that named it, by the ids the evidence gives them, so citing one
+    // clears the check; naming the entity still does too
+    const byId = new Map(rows.map(r => [r.id, r])); const relOf = r => r.rel || denRel(r.title, r.body, r.issues, r.meta);
+    (named || []).forEach(e => { const firm = (Array.isArray(e.items) ? e.items : []).map(id => byId.get(Number(id))).filter(r => r && !relOf(r).passing); if (!firm.length) return;
+      const best = firm.filter(r => evOf(r)).sort((x, y) => (relOf(y).inTitle - relOf(x).inTitle) || (y.total - x.total) || (y.ts - x.ts));
+      out.push({ sig: 'first_seen', key: 'E:' + e.id, title: e.name + ' named on this desk\'s issues for the first time in fourteen days', detail: e.n + ' judged mention' + (e.n === 1 ? '' : 's') + ' in the window.', cover: Array.from(new Set(best.map(evOf))).slice(0, 20), words: [e.name],
+        items: Array.from(new Set(best.map(itemOf).filter(Boolean))).slice(0, 3), open: { view: 'sentiment', params: { id: e.id } }, at: e.first }); }); });
   // 4 an issue running well above its own fourteen-day baseline for a window this long
-  await soft(async () => { ((await slowly('burst', async () => (await overviewIssues(env, win.to, win.hours)).filter(i => i.ns === desk.ns && i.recent >= 3 && (i.ratio === null || i.ratio >= 2.5)).map(i => ({ id: i.id, label: i.label, recent: i.recent, base: i.base, ratio: i.ratio })))) || [])
-    .forEach(i => out.push({ sig: 'burst', key: 'I:' + i.id, title: i.label + ' is running above its baseline', detail: i.recent + ' rows in the window against ' + i.base + ' usual' + (i.ratio ? ' (' + i.ratio + ' times)' : ' (nothing in the fortnight before)') + '. Counted nationally, whatever this desk\'s region.', cover: ['T:' + i.id], words: [i.label], open: { view: 'narratives', params: { issue: i.id } }, at: win.to })); });
-  // 5 a registered account's post drawing several times what its posts usually do
+  // p71 (AEP M4, combined M2): only stating the burst covers it. Its own evidence line (I:) carries the figures; citing the
+  // tone line (T:) or writing the issue's name no longer marks it covered, which let the day's largest movement go unsaid
+  // p71 (CO1): never for an issue tagged as it is now for less than the fortnight before this window's end (denTagSince): its
+  // usual volume was counted under another rule, so MCA mentions read as a burst from nothing and a narrowed matcher as a
+  // fall. Such an issue with posts or stories in the window is named instead (newTags) and the evidence says it is not
+  // compared. The slow figures keep every issue of the desk that has a count, so the rule holds for a cached entry too.
+  const newTags = [];
+  await soft(async () => { const since = await denTagSince(env); ((await slowly('burst', async () => (await overviewIssues(env, win.to, win.hours)).filter(i => i.ns === desk.ns && i.recent > 0).map(i => ({ id: i.id, label: i.label, recent: i.recent, base: i.base, ratio: i.ratio })))) || [])
+    .forEach(i => { const at = Number(since[i.id]) || 0; if (at > win.to - 14 * 86400000) { newTags.push({ id: i.id, label: i.label, since: at }); return; } if (!(i.recent >= 3 && (i.ratio === null || i.ratio >= 2.5))) return;
+      out.push({ sig: 'burst', key: 'I:' + i.id, title: i.label + ' is running above its baseline', detail: i.recent + ' posts, stories and comments in the window against ' + i.base + ' usual' + (i.ratio ? ' (' + i.ratio + ' times)' : ' (nothing in the fortnight before)') + '. Counted nationally, whatever this desk\'s region.', cover: ['I:' + i.id], words: [],
+        fig: { label: i.label, recent: i.recent, base: i.base, ratio: i.ratio }, open: { view: 'narratives', params: { issue: i.id } }, at: win.to }); }); });
+  // 5 a registered account's post drawing several times what its posts usually do. p71 (ST8): its figures are a citable
+  // line of their own (O:, as a spike's A: and a burst's I:), which covers it beside the post's own line: a true sentence
+  // giving the total and the usual was flagged, as the post's line gives likes, reposts and replies apart
   await soft(async () => { if (!wIds.length) return; const usual = await slowly('hist', async () => { const hist = {};
     for (let i = 0; i < wIds.length; i += 90) (((await env.MIND_DB.prepare("SELECT json_extract(meta,'$.watch') w, COALESCE(json_extract(meta,'$.score'),0) + COALESCE(json_extract(meta,'$.comments'),0) s FROM arc_items WHERE kind='sig_thread' AND ts>? AND ts<=? AND json_extract(meta,'$.watch') IN (" + wIds.slice(i, i + 90).map(() => '?').join(',') + ') LIMIT 4000').bind(win.to - 30 * 86400000, win.from, ...wIds.slice(i, i + 90)).all()).results) || []).forEach(x => { (hist[x.w] = hist[x.w] || []).push(Number(x.s) || 0); });
       return hist; }); if (!usual) return; const hist = new Map(Object.keys(usual).map(k => [k, usual[k]]));
     rows.filter(r => r.w && hist.has(r.w.id) && hist.get(r.w.id).length >= 4).forEach(r => { const h = hist.get(r.w.id).slice().sort((a, b) => a - b); const med = h[Math.floor(h.length / 2)]; if (r.total >= Math.max(20, 4 * Math.max(1, med)))
-      out.push({ sig: 'outlier', key: 'S:' + r.id, title: (r.w.actor_kind ? (r.w.name || r.w.value) : 'A registered ' + (DEN_CH_NAME[r.w.platform] || r.w.platform) + ' account') + ': one post is drawing far more than usual', detail: r.total + ' interactions against a usual ' + med + ' (the middle of its last ' + h.length + ' posts).', cover: ['S:' + r.id, 'P:' + r.id], words: [], open: { item: r.id, url: r.url }, at: r.ts }); }); });
+      out.push({ sig: 'outlier', key: 'S:' + r.id, title: (r.w.actor_kind ? (r.w.name || r.w.value) : 'A registered ' + (DEN_CH_NAME[r.w.platform] || r.w.platform) + ' account') + ': one post is drawing far more than usual', detail: r.total + ' interactions against a usual ' + med + ' (the middle of its last ' + h.length + ' posts).', cover: ['O:' + r.id, 'S:' + r.id, 'P:' + r.id], words: [], open: { item: r.id, url: r.url }, at: r.ts,
+        items: [itemOf(r)].filter(Boolean), fig: { total: r.total, usual: med, n: h.length }, who: r.w.actor_kind ? String(r.w.name || r.w.value || '') : '' }); }); });
   // 6 collection gaps: a channel this desk relies on that delivered nothing, with why
   await soft(async () => { const reach = await reachView(env); const act = await denActive(env, desk.ns); const relied = new Set(['news']);
     act.filter(r => r.kind === 'account').forEach(r => relied.add(r.platform));
+    denRelied(desk).forEach(p => relied.add(p));   // p71 (AEP B1): the channels her reports rest on, whatever the register holds
     ((await slowly('relied', async () => (((await env.MIND_DB.prepare("SELECT DISTINCT COALESCE(json_extract(meta,'$.platform'), 'reddit') p FROM arc_items WHERE kind IN ('sig_thread','reddit_thread') AND ts>? AND ts<=? LIMIT 20").bind(win.from - 7 * 86400000, win.from).all()).results) || []).map(x => x.p))) || []).forEach(p => { if (['x', 'facebook', 'instagram', 'youtube', 'reddit', 'bluesky'].indexOf(p) >= 0) relied.add(p); });
-    const NAME = DEN_CH_NAME;
-    Array.from(relied).filter(p => !(board.byChannel[p] > 0) && NAME[p]).forEach(p => { const src = p === 'youtube' ? 'ytsearch' : p; const rp = (reach.platforms || []).find(x => x.source === src) || null; const why = [];
+    const NAME = DEN_CH_NAME; const place = p => { const i = Object.keys(NAME).indexOf(p); return i < 0 ? 99 : i; };   // p71: one order everywhere (News, X, Facebook, Instagram, YouTube, Reddit, ...)
+    Array.from(relied).sort((a, b) => place(a) - place(b)).filter(p => !(board.byChannel[p] > 0) && NAME[p]).forEach(p => { const src = p === 'youtube' ? 'ytsearch' : p; const rp = (reach.platforms || []).find(x => x.source === src) || null; const why = [];
       if (p === 'news') why.push('No story on this desk\'s issues' + (desk.region !== 'au' ? ' in this region' : '') + ' was filed in the window. Check Sources for failing feeds before reading it as a quiet day.');
       else { if (p === 'facebook') why.push(env.META_TOKEN && String(env.META_PUBLIC_PAGES || '') === '1' ? 'The official route is set and returned nothing.' : 'The official route is not granted (Page Public Content Access).');
         if (p === 'instagram') why.push(igConfigured(env) ? 'The official route is set and returned nothing.' : 'The official route is not set (META_IG_USER).');
@@ -8679,7 +9415,36 @@ async function denMissed(env, deskId, opts) {
   const order = { gap: 0, spike: 1, emerging: 2, outlier: 3, first_seen: 4, burst: 5 };
   out.sort((a, b) => (order[a.sig] - order[b.sig]) || (b.at - a.at));
   if (useCache && !cached && !slow.failed) { try { await kvPut(env.AXIOM_KV, sk, JSON.stringify(slow), DEN_SLOW_TTL); } catch (e) {} }
-  return { ok: true, desk: desk.id, window: win, signals: out, counts: out.reduce((a, s) => { a[s.sig] = (a[s.sig] || 0) + 1; return a; }, {}), clear: !out.length, slow: { cached, at: slow.at, every: DEN_SLOW_TTL } };
+  return { ok: true, desk: desk.id, window: win, signals: out, counts: out.reduce((a, s) => { a[s.sig] = (a[s.sig] || 0) + 1; return a; }, {}), clear: !out.length, slow: { cached, at: slow.at, every: DEN_SLOW_TTL }, newTags };
+}
+/* p71 (CO1): when each issue began to be tagged as it is now. A row's tags are written once, at collection (the back-fill
+ * tags again only the core feeds' news of the last week), so an issue added to CLIENT_ISSUES, or one whose matcher or search
+ * terms changed, holds its present tags only from the first run of the build that made it so: a count against the fortnight
+ * before (the burst check) or the window before compares new tags with old ones. Recorded in KV den_tagsince, kept without
+ * expiry: each issue's fingerprint (its tagging matcher and its search terms) and the moment this worker first ran with it.
+ * An issue missing from a record that exists is new, and one whose fingerprint moved has changed: both are marked from now,
+ * so the next issue added is covered too. Gas changed only its tight trigger, which neither comparison counts (and the
+ * Sentinel applies one trigger to both its windows), so its tags are unchanged. A record that cannot be read is not written
+ * over. p71 fx2 (D5): a record begun now gives an issue its full history only when it is tagged as p70 tagged it, by p70's
+ * own fingerprints frozen here (DEN_TAG_P71: MCA mentions is new since, mining and critical minerals were narrowed), and
+ * marks every other issue from now: a list of p71's ids covered only those, so an issue a later build added or re-tagged,
+ * deployed before any record was written or after one was lost, was given its full history. p71 fx3 (F3): the fingerprint is
+ * the matcher and its search terms alone, as in p71's first round. A desk's approved terms tag rows too (issueTag reads
+ * DESK_LEX), but approving, switching off or re-filing one no longer marks its issue from now: fx2 did, which turned off the
+ * issue's burst check and its Overview ratio for a fortnight and its window before for two windows, and terms are approved
+ * while an issue is moving, when the burst check matters most. So den_watch is not read here at all (fx2 read it on every
+ * call, a busy spell included). Whether a term change should restart its issue's comparison is the owner's call. */
+const DEN_TAG_P71 = { ftc: '1tvy3xe', cm: '16nilkp', mining: '7ve43y', gas: 'l8qwn3', gastax: 'w3njqi', gasprojects: 'yhdj77', electrify: '1m5c8g9', energy: '11gzdwu', vicelection: '101zasr', regional: 'ix1yq4', housing: '1qnttsk',
+  construction: '158ngtt', pharmacy: '1ayjj88', firearms: 'rgz3ve', hunting: '11xwetn', col: '14e902t', econ: '1djsda3', gov: '15bm1ed', activism: 'kp0x6u' };   // denTagPrint of each issue at b583915, p70 as deployed
+const denTagPrint = ci => { const x = ci.wide || ci.rx; return arcHash(String(x.source) + '/' + String(x.flags) + '|' + (Array.isArray(ci.q) ? ci.q.join('|') : '')); };
+async function denTagSince(env) {
+  const now = Date.now(); let st = null, readable = !!env.AXIOM_KV;
+  try { const raw = env.AXIOM_KV ? await env.AXIOM_KV.get('den_tagsince') : null; st = raw ? JSON.parse(raw) : null; } catch (e) { readable = false; st = null; }
+  const begun = !st || typeof st !== 'object' || !st.by || typeof st.by !== 'object'; if (begun) st = { begun: now, by: {} }; let dirty = begun;
+  CLIENT_ISSUES.forEach(ci => { const v = denTagPrint(ci), h = st.by[ci.id];
+    if (!h || typeof h !== 'object') { st.by[ci.id] = { v, at: begun && DEN_TAG_P71[ci.id] === v ? 0 : now }; dirty = true; } else if (h.v !== v) { st.by[ci.id] = { v, at: now }; dirty = true; } });
+  if (dirty && readable) { try { await env.AXIOM_KV.put('den_tagsince', JSON.stringify(st)); } catch (e) { /* asked again next time; until then from now */ } }
+  const out = {}; Object.keys(st.by).forEach(k => { out[k] = Number(st.by[k] && st.by[k].at) || 0; }); return out;
 }
 /** The evidence a draft is written from. Every line carries an id; the map says what each id is, for the checks and for
  *  the Source List. A subscriber row gives the model thirty words and no more. */
@@ -8687,97 +9452,557 @@ async function denEvidence(env, desk, board, missed, pins, eo) {
   eo = eo || {};
   const ev = new Map(); const L = []; const when = t => { const d = new Date(t + auOffsetMs(t)); return d.getUTCDate() + ' ' + DEN_MONTHS[d.getUTCMonth()].slice(0, 3) + ' ' + String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); };
   const pinned = new Set((pins || []).map(Number).concat(board.pinned || [])); const one = s => String(s || '').replace(/\s+/g, ' ').trim();
+  // p71: rows that must reach the model before any cap cuts: every pin, and (below, from the strip's signals) the rows that
+  // raised a check, so citing them can clear it. Item ids (numbers), as board rows carry them.
+  const must = new Set(pinned);
   const put = (id, rec, line) => { ev.set(id, Object.assign(rec, { line })); L.push('[' + id + '] ' + line); };
   L.push('DESK: ' + desk.name + ' (' + desk.client + '). REPORTING WINDOW: ' + board.window.label + ', ' + board.window.hours + ' hours. ISSUES: ' + desk.issues.map(i => i.label).join('; ') + '.');
   // p67 (the owner, 15 November 2026): a collection gap is the Collection tab's, never the client's report. The model is
   // told once, in one built line, which channels have rows in this window and which the desk relies on that have none,
   // so it does not read silence as calm; why a channel was not read (collectors, sign-ins, routes) never reaches it.
   const sigs = missed && Array.isArray(missed.signals) ? missed.signals.filter(s => s.sig !== 'gap') : [];
-  const chRead = Object.keys(board.byChannel || {}).filter(k => board.byChannel[k] > 0).map(k => (DEN_CH_NAME[k] || k) + ' (' + board.byChannel[k] + ' row' + (board.byChannel[k] === 1 ? '' : 's') + ')');
+  // p71 (AEP B1, M2): counted as a reader counts (stories and posts, never rows); the channels not read come from the strip's
+  // gaps, which now name the channels her reports rest on (DEN_RELIED), in one order
+  const chRead = Object.keys(board.byChannel || {}).filter(k => board.byChannel[k] > 0).map(k => (DEN_CH_NAME[k] || k) + ' (' + board.byChannel[k] + (k === 'news' ? ' stor' + (board.byChannel[k] === 1 ? 'y' : 'ies') : ' post' + (board.byChannel[k] === 1 ? '' : 's')) + ')');
   const chUnread = missed && Array.isArray(missed.signals) ? Array.from(new Set(missed.signals.filter(s => s.sig === 'gap').map(s => DEN_CH_NAME[s.channel] || s.channel).filter(Boolean))) : [];
   L.push('CHANNELS READ IN THIS WINDOW: ' + (chRead.join(', ') || 'none') + (chUnread.length ? '; not read: ' + chUnread.join(', ') : '') + '.');
-  if (sigs.length) { L.push('', 'SIGNALS NOT TO MISS (computed from the archive)'); sigs.forEach(s => { if (/^A:/.test(s.key)) put(s.key, { k: 'alert', label: s.title, text: one(s.title).slice(0, 160), sub: one(s.detail).slice(0, 120) }, s.title + '. ' + s.detail); else L.push('- ' + s.title + '. ' + s.detail); }); }
-  L.push('', 'KEY NARRATIVES (' + board.narratives.length + ')'); board.narratives.slice(0, 10).forEach(n => put('N:' + n.id, { k: 'narrative', label: n.label, text: (one(n.claim) || one(n.label)).slice(0, 160), sub: (n.n + ' rows, ' + n.n24 + ' in the last day, ' + (n.status || 'steady') + (n.named === 'auto' ? ', working title' : '')).slice(0, 120) },'"' + one(n.label) + '"' + (n.named === 'auto' ? ' | working title, not yet reviewed' : '') + ' | claim: ' + one(n.claim).slice(0, 200) + ' | ' + n.n + ' rows, ' + n.n24 + ' in the last day, ' + (n.status || 'steady') + ' | toward the client: ' + (n.side || 'unknown') + ' | taken up by: ' + (n.spread.join(' > ') || 'unknown')));
-  let gt = {}; const gIds = board.media.filter(m => m.gated).map(m => m.id); if (gIds.length) { try { gt = await gatedTexts(env, gIds.slice(0, 40)); } catch (e) { gt = {}; } }
-  const med = board.media.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
-  L.push('', 'TRADITIONAL MEDIA (' + board.counts.news + ' stories, ' + board.media.length + ' after folding syndicated copies; ' + med.length + ' shown)');
-  // text and sub (p67) are what an evidence card shows: the headline and one line of figures, never a subscriber excerpt
-  med.forEach(m => put('M:' + m.id, { k: 'media', label: m.outlet + ' - ' + m.title, url: m.url, gated: m.gated, item: m.id, text: one(m.title).slice(0, 160),
-    sub: (m.outlet + ', ' + when(m.ts) + (m.n > 1 ? ', carried by ' + m.n + ' outlets' : '') + (m.fb ? ', Facebook ' + ((Number(m.fb.reactions) || 0) + (Number(m.fb.comments) || 0) + (Number(m.fb.shares) || 0)) + ' interactions' : '') + (m.gated ? ', subscriber' : '')).slice(0, 120) },(pinned.has(m.id) ? 'PINNED | ' : '') + m.outlet + (m.tier ? ' (' + m.tier + (m.juris && m.juris !== 'au' ? ', ' + m.juris : '') + ')' : '') + ' | ' + when(m.ts) + ' | ' + one(m.title) + (m.n > 1 ? ' | also carried by ' + (m.n - 1) + ' other outlet' + (m.n === 2 ? '' : 's') : '')
-    + (m.claim ? ' | ' + claimLine(m.claim) : '') + (m.fb ? ' | Facebook: ' + (Number(m.fb.reactions) || 0) + ' reactions, ' + (Number(m.fb.comments) || 0) + ' comments, ' + (Number(m.fb.shares) || 0) + ' shares' : '') + (m.gated ? ' | SUBSCRIBER TEXT, QUOTE AT MOST THIRTY WORDS: ' + gatedExcerpt(gt[m.id] || m.summary) : m.summary ? ' | ' + one(m.summary).slice(0, 220) : '')));
-  const engLine = s => (s.eng ? [['likes', 'likes'], ['comments', 'comments'], ['shares', 'shares'], ['reposts', 'reposts'], ['replies', 'replies'], ['views', 'views']].filter(k => Number(s.eng[k[0]]) > 0).map(k => s.eng[k[0]] + ' ' + k[1]).join(', ') : (s.total ? s.total + ' interactions' : '')) || 'no counts held';
-  const soc = board.social.slice().sort((a, b) => (pinned.has(b.id) - pinned.has(a.id))).slice(0, 30);
-  L.push('', 'SOCIAL (' + board.social.length + ' posts held; ' + soc.length + ' shown; authors are not recorded and must not be guessed)');
+  // p71 (AEP M4, m6; MCA 2): the row behind each of the strip's checks reaches the model before any cap cuts (must), so citing
+  // it can clear the check: its strongest row (the first of items) is enough, and at most thirty, so a strip of first-seen
+  // names cannot fill the media lines by itself. The block's lines are written below, once the media, social and actor lines
+  // hold their ids, and put back here: a line points only at ids the model can cite.
+  let mustN = 0; sigs.forEach(s => { const id = Number((Array.isArray(s.items) ? s.items : [])[0]); if (id > 0 && mustN < 30 && !must.has(id)) { must.add(id); mustN++; } });
+  const sigAt = L.length;
+  // p71 merge: the signals block is built after the media, social and actor lines (so it points only at ids the model holds)
+  // but put in place only after the budget has run, since the budget drops lines by the places they were pushed at and an
+  // insertion above them would move every place; and an id a signal or tone line points at (refs) is never dropped by it
+  let sigLines = null; const refs = new Set();
+  // p71 (AEP M5, MCA 9): each narrative says when it was first seen, whether it is new in this window or building, and what
+  // its posts and stories in the window are made of: one story and its syndicated copies, or one templated text posted by
+  // many accounts, are not a groundswell. Ten narratives at 24 hours, fifteen at 168, linear between; an emerging one is
+  // always in (the strip's check cites it).
+  const nCap = Math.round(10 + 5 * Math.min(1, Math.max(0, (board.window.hours - 24) / 144)));
+  const nEm = board.narratives.filter(n => n.status === 'emerging'); const nRest = board.narratives.filter(n => n.status !== 'emerging').slice(0, Math.max(0, nCap - nEm.length));
+  const nShow = board.narratives.filter(n => nEm.indexOf(n) >= 0 || nRest.indexOf(n) >= 0); const made = {};
+  try { if (nShow.length) { await ensureNarratives(env);   // bounded: at most 150 of each narrative's rows in the window, one round trip
+    const res = await env.MIND_DB.batch(nShow.map(n => env.MIND_DB.prepare('SELECT a.id, a.kind, a.url, a.title, substr(a.body,1,300) body FROM narrative_items ni JOIN arc_items a ON a.id=ni.item WHERE ni.narrative=? AND ni.ts>? AND ni.ts<=? ORDER BY ni.ts DESC LIMIT 150').bind(n.id, board.window.from, board.window.to)));
+    // the account behind a post, from its address (a Bluesky profile, a Mastodon @name, an X handle), only ever counted:
+    // one account posting its own template again and again is not many accounts taking up a text
+    const acct = u => { const x = String(u || '').match(/\/profile\/([^/?#]+)\/post\//) || String(u || '').match(/^https?:\/\/([^/]+\/@[^/?#]+)\//) || String(u || '').match(/\/\/(?:www\.)?(?:x|twitter)\.com\/((?!i\/)[^/?#]+)\/status\//); return x ? x[1].toLowerCase() : ''; };
+    // p71 (EV9): a narrative holds comments too (placement reads SENT_KINDS); a comment is neither a post nor a story, so
+    // they are counted apart, and "most of its posts" is read among its posts alone. A text is templated only when its key is
+    // as long as the social grouping asks (24 characters): four identical short replies are a live thread, not a push
+    nShow.forEach((n, i) => { const rs = ((res && res[i] && res[i].results) || []); if (!rs.length) return; const com = r => /^(sig_comment|reddit_comment|comments)$/.test(String(r.kind || ''));
+      const news = rs.filter(r => r.kind === 'news'), comments = rs.filter(com), posts = rs.filter(r => r.kind !== 'news' && !com(r)); const tk = {};
+      posts.forEach(r => { const t = String(r.title || ''); const k = denTextKey(t && !/^[\w.-]+ post$/i.test(t) && !/^comment on:/i.test(t) ? t : r.body) || 'r' + r.id; (tk[k] = tk[k] || []).push(r); });
+      const topK = Object.keys(tk).filter(k => k.length >= 24).sort((a, b) => tk[b].length - tk[a].length)[0]; const top = topK ? tk[topK].length : 0; const known = topK ? tk[topK].map(r => acct(r.url)).filter(Boolean) : []; const accts = new Set(known).size;
+      const stories = new Set(news.map(r => denFoldKey(r.title) || 'r' + r.id)).size;
+      made[n.id] = { rows: rs.length, capped: rs.length >= 150, news: news.length, posts: posts.length, comments: comments.length, stories, texts: Object.keys(tk).length, top, oneStory: !posts.length && !comments.length && news.length >= 2 && stories === 1, templated: top >= 3 && top * 2 >= posts.length,
+        from: accts >= 3 ? 'one templated text from many accounts' : accts === 2 ? 'one templated text from two accounts' : accts === 1 && known.length === top ? 'one text posted again and again by one account' : 'one templated text, repeated' }; }); } } catch (e) { if (denBusy(e)) throw e; }   // p71 (EV7): a busy database is said, never read as nothing found
+  const dayOf = t => { const d = new Date(t + auOffsetMs(t)); return d.getUTCDate() + ' ' + DEN_MONTHS[d.getUTCMonth()].charAt(0).toUpperCase() + DEN_MONTHS[d.getUTCMonth()].slice(1); };
+  const nPl = (n, a, b) => n + ' ' + (n === 1 ? a : b);
+  if (board.narratives.length) L.push('', 'KEY NARRATIVES (' + (nShow.length < board.narratives.length ? nShow.length + ' shown of ' : '') + board.narratives.length + ' on this desk\'s issues that gained posts, stories or comments in the window)');
+  nShow.forEach(n => { const m = made[n.id]; const first = Number(n.first) || 0; const label = one(n.label);
+    const pace = first >= board.window.from ? 'new in this window' : ({ emerging: 'building', growing: 'building', steady: 'steady', fading: 'fading' })[n.status] || (n.n24 > 0 ? 'building' : 'steady');
+    const parts = ['"' + label + '"'];
+    // a working title is a headline the engine picked, or the words its rows share: neither is a claim anyone made
+    if (n.named === 'auto') parts.push('working title, not yet reviewed: ' + (/^A narrative (on|of) /.test(label) || /: [a-z0-9'$%.-]+(, [a-z0-9'$%.-]+)*$/.test(label) ? 'built from words its posts and stories share' : 'taken from one of its headlines'));
+    parts.push(one(n.claim) ? 'claim: ' + one(n.claim).slice(0, 200) : 'no claim written yet');
+    parts.push((first ? 'first seen ' + dayOf(first) + ', ' : '') + pace);
+    // p71 (EV9): the narrative's count is every item placed in it, comments included, and is called so
+    parts.push(nPl(Number(n.n) || 0, 'post, story or comment', 'posts, stories and comments') + ' in all, ' + (Number(n.n24) || 0) + ' in the last day');
+    if (m) { const bits = [m.news ? nPl(m.news, 'story', 'stories') + (m.oneStory ? ', one story and its syndicated copies' : m.stories < m.news ? ' (' + m.stories + ' once syndicated copies are folded)' : '') : '',
+      m.posts ? nPl(m.posts, 'post', 'posts') + (m.texts < m.posts ? ' (' + nPl(m.texts, 'distinct text', 'distinct texts') + ')' : '') : '', m.comments ? nPl(m.comments, 'comment', 'comments') : ''].filter(Boolean);
+      parts.push('in this window' + (m.capped ? ' (its newest 150)' : '') + ': ' + (bits.length > 1 ? bits.slice(0, -1).join(', ') + ' and ' + bits[bits.length - 1] : bits[0] || '')
+        + (m.templated ? '; most of its posts are ' + m.from + ' (' + m.top + ' of ' + m.posts + ')' : '')); }
+    parts.push('toward ' + desk.short + ': ' + (!n.side || n.side === 'unknown' ? 'not yet assessed' : n.side));
+    // p71 integration (the p72 acceptance run): a narrative's channels are its whole life's, so only those this window read
+    // are named: a channel the CHANNELS line lists as not read must not reach the model as one the narrative was taken up
+    // on (a draft wrote that a narrative was carried on X in a window that read no X)
+    parts.push('taken up on: ' + ((n.spread || []).filter(p => (board.byChannel || {})[p] > 0).map(p => DEN_CH_NAME[p] || p).join(', then ') || 'not recorded'));
+    put('N:' + n.id, { k: 'narrative', label: n.label, text: (one(n.claim) || label).slice(0, 160), sub: (n.n + ' rows, ' + n.n24 + ' in the last day, ' + (n.status || 'steady') + (n.named === 'auto' ? ', working title' : '')).slice(0, 120) }, parts.join(' | ')); });
+  // p71 (combined M1; MCA 2, 13, 15, 16; AEP M8): the stories the model reads, by relevance before syndication and time.
+  // Every row in must first, whatever the caps (a pin, a row the signals lane says a check rests on; a copy in must brings
+  // its story); then, within a cap that grows with the window, a share for each of the desk's issues, a story from each
+  // quarter of the window that has one, and the rest in the Board's order, no outlet holding more than its share of places.
+  // A story that touches the desk only by a passing word in its body is never sent unless it is in must.
+  // p71 (EV1, ST5): a row in must that the Board's lists cut (150 stories, 90 posts, 60 actor posts) is sent all the same, its
+  // record taken from its row (rec, which denBoard sets with keepRows) as the lists build theirs: a check on a first post
+  // that drew nothing pointed at no line, so only naming the organisation, or acknowledging it at filing, could clear it
+  const listed = new Set(board.media.concat(board.social, board.actors));   // a row's rec is the very record a list holds when it is on one
+  const back = { m: [], s: [], p: [] }; (board._rows || []).forEach(r => { if (!must.has(r.id) || !r.rec || listed.has(r.rec)) return; const k = r.kind === 'news' ? 'm' : r.meta && (r.meta.actor || r.meta.mp) ? 'p' : 's'; if (back[k].indexOf(r.rec) < 0) back[k].push(r.rec); });
+  const socialL = board.social.concat(back.s), actorsL = board.actors.concat(back.p);
+  const cap = denEvCap(board.window.hours); const inMust = m => back.m.indexOf(m) >= 0 || must.has(m.id) || (m.copies || []).some(c => must.has(c)); const pinM = m => pinned.has(m.id) || !!m.pinned || (m.copies || []).some(c => pinned.has(c));
+  const med = denPick(board.media.concat(back.m), { cap, per: Math.max(3, Math.ceil(cap / 8)), must: inMust, ok: m => !(m.rel && m.rel.passing), outlet: m => String(m.outlet || '').toLowerCase(), issues: desk.issues.map(i => i.id), from: board.window.from, to: board.window.to });
+  const nPassing = board.media.filter(m => m.rel && m.rel.passing && !inMust(m)).length;
+  let gt = {}; const gIds = med.filter(m => m.gated).map(m => m.id); if (gIds.length) { try { gt = await gatedTexts(env, gIds.slice(0, 40)); } catch (e) { gt = {}; } }
+  L.push(''); const medAt = L.length; L.push(''); const cut = [];   // the header's place, set at the end; and the lines a budget may drop
+  // p71 fx5 (R2): the year too when it is not the window's, so an address from 2019 never reads as this year's day; the
+  // page writes a card's day in these words (docs/den.js addrDay)
+  const winYr = auDayKey(board.window.to).slice(0, 4); const urlDay = d => Number(d.slice(8, 10)) + ' ' + DEN_MON3[Number(d.slice(5, 7)) - 1] + (d.slice(0, 4) !== winYr ? ' ' + d.slice(0, 4) : '');   // p71 merge: urlDay, as the narratives block above has its own dayOf
+  // text and sub (p67) are what an evidence card shows: the headline and one line of figures, never a subscriber excerpt.
+  // ts (p71) dates the Source List entry: a stale story's is the date in its address. also: the copies it stands for.
+  // p71 (CO7): a story dated by its address (urlDated: it came with no date) prints that day and never a time, as a stale one
+  // does: its stamp is the end of the day, a time it never had. p71 (CK10): the line carries the card's figures too (the
+  // outlets in all, the Facebook interactions in all), so a sentence written from the card is found in the line it cites
+  med.forEach(m => { const txt = m.gated ? (gt[m.id] || m.summary) : m.summary; const fbn = m.fb ? (Number(m.fb.reactions) || 0) + (Number(m.fb.comments) || 0) + (Number(m.fb.shares) || 0) : 0; const tier = m.tier && m.tier !== 'sweep' && m.tier !== 'core' ? m.tier : '';
+    const day = m.stale || m.urlDated ? urlDay(m.urlDate || auDayKey(m.ts)) : '';
+    put('M:' + m.id, { k: 'media', label: m.outlet + ' - ' + m.title, url: m.url, gated: m.gated, item: m.id, ts: m.stale ? Date.parse(m.urlDate + 'T02:00:00Z') : m.ts, also: (m.copies || []).filter(c => c !== m.id), text: one(m.title).slice(0, 160),
+      sub: (m.outlet + ', ' + (day || when(m.ts)) + (m.n > 1 ? ', carried by ' + m.n + ' outlets' : '') + (m.fb ? ', Facebook ' + fbn + ' interactions' : '') + (m.gated ? ', subscriber' : '') + (txt ? '' : ', headline only')).slice(0, 120) },
+      (pinM(m) ? 'PINNED | ' : '') + m.outlet + (tier ? ' (' + tier + (m.juris && m.juris !== 'au' ? ', ' + m.juris : '') + ')' : '') + ' | ' + (m.stale ? day + ' (the date in its address, before this window)' : day ? day + ' (the date in its address)' : when(m.ts)) + ' | ' + one(m.title) + (m.n > 1 ? ' | also carried by ' + (m.n - 1) + ' other outlet' + (m.n === 2 ? '' : 's') + ' (' + m.n + ' outlets in all)' : '')
+      // p71 (ST4): the label as the outlet uses it, and no more: who paid is in the piece's own disclosure, which was not read
+      + (m.linkHost ? ' | link on ' + m.linkHost : '') + (m.special ? ' | labelled \'Special Report\', the outlet\'s label for a piece made with the company it is about (its own disclosure was not read)' : '') + (m.claim ? ' | ' + claimLine(m.claim) : '') + (m.fb ? ' | Facebook: ' + (Number(m.fb.reactions) || 0) + ' reactions, ' + (Number(m.fb.comments) || 0) + ' comments, ' + (Number(m.fb.shares) || 0) + ' shares (' + fbn + ' interactions in all)' : '')
+      + (m.gated && txt ? ' | SUBSCRIBER TEXT, QUOTE AT MOST THIRTY WORDS: ' + gatedExcerpt(txt) : txt ? ' | ' + one(txt) : ' | headline only'));
+    cut.push({ at: L.length - 1, id: 'M:' + m.id, must: inMust(m), part: 'm' }); });
+  // p71 (MCA 11): quotes are counted with the rest; a post counted at nothing reads "no interactions". p71 (EV5): a post with
+  // no count at all reads "engagement not recorded", a word the reader rule lets the model write ("held" it may not)
+  // p71 fx2 (D3, the rest of review CO2): "no interactions" only when the main counts were read, a like count and a comment
+  // (or reply) count. A read lacking one gives the counts it read and names the one missing ("0 comments, likes not
+  // recorded": an Instagram account that hides its likes sends no like count; a scrape may find one count alone), so the
+  // model is never told a post drew nothing on half a reading. A count is read when it is a number, as engRow keeps it.
+  const engK = [['likes', 'like'], ['comments', 'comment'], ['shares', 'share'], ['reposts', 'repost'], ['quotes', 'quote'], ['replies', 'reply'], ['views', 'view']];
+  const engRead = (s, ks) => { const e = s.eng && typeof s.eng === 'object' ? s.eng : null; return !!e && ks.some(k => e[k] != null && e[k] !== '' && isFinite(Number(e[k]))); };
+  const engHas = s => engRead(s, engK.map(k => k[0])), engMiss = s => [['likes'], ['comments', 'replies']].filter(ks => !engRead(s, ks)).map(ks => ks[0]);
+  const engLine = s => { const e = s.eng && typeof s.eng === 'object' ? s.eng : null; const K = engK; const t = Number(s.total) || 0;
+    const got = e ? K.filter(k => Number(e[k[0]]) > 0).map(k => e[k[0]] + ' ' + (Number(e[k[0]]) === 1 ? k[1] : k[0])).join(', ') : '';
+    if (got || t || !engHas(s)) return got || (t ? t + ' interaction' + (t === 1 ? '' : 's') : 'engagement not recorded');
+    const miss = engMiss(s); return miss.length ? K.filter(k => engRead(s, [k[0]])).map(k => '0 ' + k[0]).concat(miss.join(' and ') + ' not recorded').join(', ') : 'no interactions'; };
+  // p71 fx5 (R1): the comments read under a post, and their tone only when it rests on three or more of them (denBoard reads
+  // it so), with how many carry one when not all do: "10 comments read (6 with a tone reading), mostly negative". The
+  // post and actor cards say these words (docs/den.js heldSay and the tone chip); an actor's post now says them too
+  const heldLine = s => { const h = s.held; if (!h) return ''; const k = h.toned != null ? h.toned : h.n;
+    return ' | ' + h.n + ' comment' + (h.n === 1 ? '' : 's') + ' read' + (h.tone == null ? '' : (k < h.n ? ' (' + k + ' with a tone reading)' : '') + ', ' + denToneWord(h.tone, k)); };
+  // p71 (AEP M5): three or more posts in the window with one text (denTextKey) are one templated action: one line under the
+  // first post's id saying how many posts, from how many accounts (counted from their addresses, never named), when, and
+  // what they drew between them; it takes one place, and the others ride on its record (also) so citing it covers them
+  const byText = new Map(); socialL.forEach(s => { const k = denTextKey(s.text); if (k.length >= 24) { if (!byText.has(k)) byText.set(k, []); byText.get(k).push(s); } });
+  const units = []; const grouped = new Set();
+  socialL.forEach(s => { const k = denTextKey(s.text); const g = k.length >= 24 && byText.get(k).length >= 3 ? byText.get(k).slice().sort((a, b) => a.ts - b.ts) : null; if (!g) { units.push(s); return; } if (grouped.has(k)) return; grouped.add(k);
+    units.push(Object.assign({}, g[0], { group: g, issues: Array.from(new Set([].concat(...g.map(x => x.issues || [])))), total: g.reduce((a, x) => a + (Number(x.total) || 0), 0), pinned: g.some(x => x.pinned) })); });
+  const inMustS = u => must.has(u.id) || (u.group || []).some(x => must.has(x.id));
+  // the posts the model reads (p71, combined M1 and AEP M1): every post in must first, a place for each channel that has
+  // posts, a share for each issue and each quarter of the window, then the Board's order (interactions and views)
+  const soc = denPick(units, { cap, must: inMustS, ok: () => true, channel: u => u.platform, issues: desk.issues.map(i => i.id), from: board.window.from, to: board.window.to });
+  L.push(''); const socAt = L.length; L.push('');
   // a social row is labelled by its channel only, never by an account or its own words: the label is printed in the
   // brief's Source List and the downloaded document, and a post's words can name a private person. The card reads the
   // post's words from text, which the Source List never prints. Pages up to r52 read the label's first word for the chip.
-  soc.forEach(s => put('S:' + s.id, { k: 'social', label: s.platform + ' post', url: s.url, item: s.id, platform: s.platform, text: one(s.text).slice(0, 160),
-    sub: ((DEN_CH_NAME[s.platform] || s.platform) + (s.sub ? ' r/' + s.sub : '') + ', ' + when(s.ts) + ', ' + engLine(s)).slice(0, 120) },(pinned.has(s.id) ? 'PINNED | ' : '') + s.platform + (s.sub ? ' r/' + s.sub : '') + ' | ' + when(s.ts) + ' | ' + one(s.text).slice(0, 240) + ' | ' + engLine(s) + (s.growth != null && s.growth > 0 ? ' | +' + s.growth + ' since yesterday\'s read' : '') + (s.held ? ' | ' + s.held.n + ' comments held, tone ' + s.held.tone : '')));
-  L.push('', 'INFLUENCER AND POLITICAL (registered public actors and MPs, on their own posts; these may be named)');
-  board.actors.slice(0, 20).forEach(a => put('P:' + a.id, { k: 'actor', label: a.who + ' on ' + a.platform, url: a.url, item: a.id, who: a.who, platform: a.platform, text: one(a.text).slice(0, 160),
-    sub: (a.who + ' on ' + (DEN_CH_NAME[a.platform] || a.platform) + ', ' + when(a.ts) + ', ' + engLine(a)).slice(0, 120) },(pinned.has(a.id) ? 'PINNED | ' : '') + a.who + ' (' + (a.role === 'mp' ? 'MP' + (a.party ? ', ' + a.party : '') : a.role) + ') on ' + a.platform + ' | ' + when(a.ts) + ' | ' + one(a.text).slice(0, 240) + ' | ' + engLine(a)));
-  if (board.upcoming.length) { L.push('', 'UPCOMING (dates as written in the rows; RECORDED marks a date read from a parliament\'s own page)'); board.upcoming.slice(0, 15).forEach((u, i) => put('U:' + (i + 1), { k: 'upcoming', label: u.date + ' ' + u.event, url: u.url, item: u.item, text: one(u.what).slice(0, 160), sub: (u.weekday + ' ' + u.date + ', ' + u.event + (u.recorded ? ', recorded' : '')).slice(0, 120) },u.weekday + ' ' + u.date + ' | ' + (u.recorded ? 'RECORDED | ' : '') + u.event + ' | ' + one(u.what))); }
-  try { await ensureSentiment(env); const mine = desk.issues.map(i => i.id);
-    // only rows a model judged count (p67): a row marked as mentioning nothing (model 'none', tone NULL) is not a judged row
-    for (const id of mine) { const r = await env.MIND_DB.prepare("SELECT COUNT(*) n, AVG(tone) a, SUM(tone<0) neg, SUM(tone>0) pos FROM sent_items WHERE ts>? AND ts<=? AND issues LIKE ? AND COALESCE(model,'')<>'none'").bind(board.window.from, board.window.to, '%"' + id + '"%').first();
-      if (r && r.n) { if (!ev.size || !L.some(x => x === 'TONE (rows a model has judged, by issue)')) L.push('', 'TONE (rows a model has judged, by issue)'); const il = (desk.issues.find(i => i.id === id) || {}).label || id; const tl = r.n + ' rows judged, mean tone ' + (Math.round((Number(r.a) || 0) * 100) / 100) + ', ' + (r.neg || 0) + ' negative, ' + (r.pos || 0) + ' positive';
-        put('T:' + id, { k: 'tone', label: il, text: String(il).slice(0, 160), sub: tl.slice(0, 120) }, il + ': ' + tl); } }
-  } catch (e) {}
+  soc.forEach(s => { const g = s.group; const pin = pinned.has(s.id) || (g || []).some(x => pinned.has(x.id)) ? 'PINNED | ' : ''; const chan = (DEN_CH_NAME[s.platform] || s.platform) + (s.sub ? ' r/' + s.sub : '');
+    if (g) { const ks = g.map(x => denAcct(x.url)); const acc = ks.every(Boolean) ? new Set(ks).size : 0; const a0 = g[0].ts, a1 = g[g.length - 1].ts; const tot = s.total;
+      // p71 (CO4): what they drew, from the posts whose engagement was recorded: none recorded is said so, never "0
+      // interactions in all"; their views are said beside the interactions (a views-only group read 0); some recorded, how many.
+      // p71 fx2 (D3): a post read in part at nought (likes hidden, no comments) is not recorded here, so none reads "no interactions"
+      const known = g.filter(x => Number(x.total) > 0 || Number((x.eng || {}).views) > 0 || (engHas(x) && !engMiss(x).length)), vw = known.reduce((a, x) => a + (Number((x.eng || {}).views) || 0), 0);
+      const span = when(a0) + ' to ' + (auDayKey(a0) === auDayKey(a1) ? when(a1).replace(/^\d+ [a-z]+ /, '') : when(a1));
+      const said = !known.length ? 'engagement not recorded' : (tot || vw ? [tot ? nPl(tot, 'interaction', 'interactions') : '', vw ? nPl(vw, 'view', 'views') : ''].filter(Boolean).join(' and ') + ' in all' : 'no interactions') + (known.length < g.length ? ' (recorded on ' + known.length + ' of the ' + g.length + ' posts)' : '');
+      put('S:' + s.id, { k: 'social', label: s.platform + ' post', url: s.url, item: s.id, platform: s.platform, ts: s.ts, also: g.filter(x => x.id !== s.id).map(x => x.id), text: one(s.text).slice(0, 160), sub: (chan + ', ' + g.length + ' near-identical posts, ' + said).slice(0, 120) },
+        pin + s.platform + (s.sub ? ' r/' + s.sub : '') + ' | ' + g.length + ' near-identical posts' + (acc ? ' from ' + acc + ' account' + (acc === 1 ? '' : 's') : '') + ', ' + span + ', ' + said + ': ' + one(s.text).slice(0, 240)); }
+    // the comments under a post are read, and their tone is said in words (the reader rule, p71)
+    else put('S:' + s.id, { k: 'social', label: s.platform + ' post', url: s.url, item: s.id, platform: s.platform, ts: s.ts, text: one(s.text).slice(0, 160), sub: (chan + ', ' + when(s.ts) + ', ' + engLine(s)).slice(0, 120) },
+      pin + s.platform + (s.sub ? ' r/' + s.sub : '') + ' | ' + when(s.ts) + ' | ' + one(s.text).slice(0, 240) + ' | ' + engLine(s) + (s.growth != null && s.growth > 0 ? ' | +' + s.growth + ' since yesterday\'s read' : '') + heldLine(s));
+    cut.push({ at: L.length - 1, id: 'S:' + s.id, must: inMustS(s), part: 's' }); });
+  // p71 (AEP B1): the header only over lines; an empty one invited "no posts from public actors were supplied", a sentence
+  // about what the model was given rather than what happened
+  if (actorsL.length) L.push('', 'INFLUENCER AND POLITICAL (public figures, organisations and MPs this desk watches, on their own channels; these may be named)');
+  actorsL.slice().sort((a, b) => (must.has(b.id) - must.has(a.id))).filter((a, i) => i < 20 || must.has(a.id)).forEach(a => put('P:' + a.id, { k: 'actor', label: a.who + ' on ' + a.platform, url: a.url, item: a.id, who: a.who, platform: a.platform, ts: a.ts, text: one(a.text).slice(0, 160),
+    sub: (a.who + ' on ' + (DEN_CH_NAME[a.platform] || a.platform) + ', ' + when(a.ts) + ', ' + engLine(a)).slice(0, 120) },(pinned.has(a.id) ? 'PINNED | ' : '') + a.who + ' (' + (a.role === 'mp' ? 'MP' + (a.party ? ', ' + a.party : '') : a.role) + ') on ' + a.platform + ' | ' + when(a.ts) + ' | ' + one(a.text).slice(0, 240) + ' | ' + engLine(a) + heldLine(a)));
+  // p71 fixes (review CK3, EV5): the fifteen dates are dated and recorded ones first, so a town's standing vigils never push
+  // a vote off the list; the header is written for the reader (posts and stories, never rows)
+  if (board.upcoming.length) { L.push('', 'UPCOMING (dates as written in the posts and stories; RECORDED marks a date read from a parliament\'s own page; RECURRING marks the next day of a standing weekly schedule, not a new event)'); denUpPick(board.upcoming, 15).forEach((u, i) => put('U:' + (i + 1), { k: 'upcoming', label: u.date + ' ' + u.event, url: u.url, item: u.item, fold: u.fold || '', process: u.process || '', text: one(u.what).slice(0, 160), sub: (u.weekday + ' ' + u.date + ', ' + u.event + (u.recorded ? ', recorded' : u.recurring ? ', recurring (' + one(u.schedule) + ')' : '')).slice(0, 120) },u.weekday + ' ' + u.date + ' | ' + (u.recorded ? 'RECORDED | ' : u.recurring ? 'RECURRING (' + one(u.schedule) + ') | ' : '') + u.event + ' | ' + one(u.what))); }   // p71 (AEP m2): RECURRING (the schedule as written) is a standing vigil, not a new event; the label stays date and event, as the page finds a card's id by it; p71 fix after the third review (K1, K3): the line also keeps its entry's fold (a key no newer telling moves) and a recorded date's process, so the page cites a card by its own line, and two recorded dates with one label stay apart
+  // p71 (AEP M4, m6; combined M2): the strip's checks as the model reads them, put back where the block belongs (sigAt). A
+  // spike, a burst and (p71 review, ST8) an outlier are citable lines carrying their figures, so a sentence stating one can
+  // be checked and clears its check; every other check points at the lines that carry it, by the ids the model was given.
+  // Gaps stay off: the CHANNELS line names them once (p67).
+  // p71 (EV4, ST6): a line that stands for other rows (a templated action's other posts, a story's copies: its also) is where a
+  // check or a tone count resting on any of them points: a check on the second of three templated posts pointed at nothing,
+  // since the line carries the first post's id. evId gives the id the model holds for a row's id, or ''.
+  const via = new Map(); ev.forEach((v, k) => { if (Array.isArray(v.also)) v.also.forEach(a => { const x = k.slice(0, 2) + a; if (!ev.has(x) && !via.has(x)) via.set(x, k); }); });
+  const evId = x => (ev.has(x) ? x : via.has(x) && ev.has(via.get(x)) ? via.get(x) : '');
+  // p71 (CO1): issues tagged as they are now for less than the fortnight before (denMissed's newTags) are said not compared
+  const newTags = missed && Array.isArray(missed.newTags) ? missed.newTags : [];
+  if (sigs.length || newTags.length) { const S = ['', 'SIGNALS NOT TO MISS (computed from the archive)']; const across = desk.region !== 'au' ? ', counted across Australia, not this region alone' : '';
+    const at = ids => { const c = Array.from(new Set((ids || []).map(evId).filter(Boolean))); c.forEach(x => refs.add(x)); return c.length ? ' (' + c.map(x => '[' + x + ']').join(' ') + ')' : ''; };
+    const line = (id, rec, text) => { ev.set(id, Object.assign(rec, { line: text })); S.push('[' + id + '] ' + text); };
+    sigs.forEach(s => { const f = s.fig || null;
+      // p71 (EV6): a spike is read from the national wire, so a region desk's line says so, as the burst's does
+      if (s.sig === 'spike') line(s.key, { k: 'alert', label: s.title, text: one(s.title).slice(0, 160), sub: one(s.detail).slice(0, 120) }, f ? 'A spike in news on ' + f.label + ': ' + f.hot + ' stories in six hours, ' + f.ratio + ' times its usual volume for six hours' + across : s.title + '. ' + s.detail);
+      else if (s.sig === 'burst') { const t = f ? (f.ratio ? f.label + ' ran at ' + f.ratio + ' times its usual volume: ' + f.recent + ' posts, stories and comments in this window against ' + f.base + ' usual for a window this long' : f.label + ' ran well above its usual volume: ' + f.recent + ' posts, stories and comments in this window, against none in the fortnight before') + across : s.title + '. ' + s.detail;
+        line(s.key, { k: 'measure', label: (f ? f.label : s.title) + ': above its usual volume', text: t.slice(0, 160), sub: (f ? f.recent + ' in the window against ' + f.base + ' usual' + (f.ratio ? ', ' + f.ratio + ' times' : '') : one(s.detail)).slice(0, 120) }, t); }
+      else if (s.sig === 'emerging') { const n = board.narratives.find(x => 'N:' + x.id === s.key); S.push('- A narrative is emerging on these issues: "' + one(n ? n.label : s.title.replace(/^Emerging narrative[^:]*: /, '')) + '"' + at(s.cover) + '.'); }
+      else if (s.sig === 'first_seen' && /^E:/.test(s.key)) S.push('- ' + one(s.words[0] || s.title) + ' is named on these issues for the first time in fourteen days' + at(s.cover) + '.');
+      else if (s.sig === 'first_seen') S.push('- ' + (s.who ? one(s.who) : 'An account this desk watches' + (s.channel ? ' on ' + (DEN_CH_NAME[s.channel] || s.channel) : '')) + ' posted on these issues for the first time in fourteen days' + at(s.cover) + '.');
+      // p71 (ST8): an outlier's figures are a citable line (O:), which points at the post's own line
+      else if (s.sig === 'outlier' && f) { const oid = 'O:' + String(s.key).replace(/^[A-Z]:/, ''); const who = s.who ? one(s.who) : 'an account this desk watches';
+        const t = 'A post by ' + who + ' drew ' + nPl(Number(f.total) || 0, 'interaction', 'interactions') + ', against a usual ' + f.usual + ' for that account\'s posts' + (f.n ? ' (the middle of its last ' + f.n + ')' : '');
+        line(oid, { k: 'measure', label: 'A post by ' + who + ': far above its usual', text: t.slice(0, 160), sub: (f.total + ' interactions against a usual ' + f.usual).slice(0, 120) }, t + at((s.cover || []).filter(c => c !== oid))); }
+      else if (s.sig === 'outlier') S.push('- A post by ' + (s.who ? one(s.who) : 'an account this desk watches') + ' drew far more than that account\'s posts usually do' + at(s.cover) + '.');
+      else S.push('- ' + one(s.title) + '.'); });
+    newTags.forEach(t => S.push('- ' + one(t.label) + ' is not set against its usual volume: the fortnight before was not counted the same way (this issue has been tagged as it is now only since ' + when(Number(t.since) || 0) + ').'));
+    sigLines = S; }
+  // p71 (combined B7, AEP B5, MCA 5): tone, one judgement per story. Only rows on this desk's board count (a muted or
+  // other-region row is not this desk's), never a passing mention, and copies fold: a news row into its story, a post into
+  // its text (one templated post from many accounts is one). A fold is one judgement, the mean of its rows' tones. The line
+  // gives the tone in words, what it rests on and the ids behind the negative and the positive counts, so a draft can say
+  // which coverage was negative; no score (the card's figures keep it). Only rows a model judged (p67): never model 'none'.
+  // p71 review: only the board's kinds are read (EV8: judged comments, which the board never holds, filled the newest-first
+  // cap and pushed a week's older stories out of the line unsaid); a story its outlet labels "Special Report" is the
+  // company's own material, which denSys says is never press tone, so it is left out of the counts and the line says so
+  // (ST7), by the Board's flag alone (p71 fx2, D4: a headline test of the block's own also left a wire's investigation out of
+  // press tone); a row riding on a templated line is cited by that line (EV4); a busy database is said (EV7)
+  try { await ensureSentiment(env); const mine = desk.issues.map(i => i.id); const live = new Map((board._rows || []).map(r => [r.id, r]));
+    if (mine.length && live.size) {
+      const tr = ((await env.MIND_DB.prepare("SELECT item, tone, issues FROM sent_items WHERE ts>? AND ts<=? AND kind IN (" + DEN_BOARD_KINDS.map(() => '?').join(',') + ") AND tone IS NOT NULL AND COALESCE(model,'')<>'none' AND (" + mine.map(() => 'issues LIKE ?').join(' OR ') + ') ORDER BY ts DESC LIMIT 3000').bind(board.window.from, board.window.to, ...DEN_BOARD_KINDS, ...mine.map(i => '%"' + i + '"%')).all()).results) || [];
+      // a story is the Board's fold where it has one of several copies, else the title key the Board folds on (a desk that
+      // shows copies apart still has one story in each)
+      const headOf = new Map(), foldOf = new Map(), special = new Set(); board.media.forEach(m => { const cs = Array.isArray(m.copies) && m.copies.length ? m.copies : [m.id]; cs.forEach(c => { headOf.set(c, m.id); if (cs.length > 1) foldOf.set(c, 'M' + m.id); if (m.special) special.add(c); }); }); const folds = new Map();
+      tr.forEach(x => { const r = live.get(x.item); const tone = Number(x.tone); if (!r || !Number.isFinite(tone) || (r.rel || denRel(r.title, r.body, r.issues, r.meta)).passing) return;
+        const news = r.kind === 'news', text = String(r.title || ''), m = r.meta || {};
+        const key = news ? foldOf.get(r.id) || 'f' + (denFoldKey(r.title) || r.id) : 't' + (denTextKey(text && !/^[\w.-]+ post$/i.test(text) ? text : r.body) || r.id);
+        const cite = news ? 'M:' + (headOf.get(r.id) || r.id) : (m.actor || m.mp ? 'P:' : 'S:') + r.id;
+        const f = folds.get(key) || { story: news, tones: [], issues: new Set(), cites: [], special: false }; folds.set(key, f); f.tones.push(tone); if (cite && f.cites.indexOf(cite) < 0) f.cites.push(cite);
+        if (news && (special.has(r.id) || !!(r.rec && r.rec.special))) f.special = true;   // a story past the Board's 150 by its row's record (rec)
+        const is = denJ(x.issues, []); (Array.isArray(is) ? is : []).forEach(i => { if (mine.indexOf(i) >= 0) f.issues.add(i); }); });
+      const out = [];
+      mine.forEach(id => { const all = Array.from(folds.values()).filter(f => f.issues.has(id)); const nSp = all.filter(f => f.special).length;
+        const fs = all.filter(f => !f.special).map(f => ({ f, m: f.tones.reduce((a, b) => a + b, 0) / f.tones.length })); if (!fs.length) return;
+        const neg = fs.filter(x => x.m < 0), pos = fs.filter(x => x.m > 0), neu = fs.length - neg.length - pos.length, mean = fs.reduce((a, x) => a + x.m, 0) / fs.length;
+        const stories = fs.filter(x => x.f.story).length, posts = fs.length - stories, nRows = fs.reduce((a, x) => a + x.f.tones.length, 0);
+        const ids = (arr, dir) => arr.slice().sort((a, b) => dir * (a.m - b.m)).map(x => x.f.cites.map(evId).find(Boolean)).filter(Boolean).slice(0, 5); const negIds = ids(neg, 1), posIds = ids(pos, -1); negIds.concat(posIds).forEach(x => refs.add(x));
+        const il = (desk.issues.find(i => i.id === id) || {}).label || id;
+        const sp = nSp ? '; ' + (nSp === 1 ? '1 story labelled \'Special Report\' by its outlet is' : nSp + ' stories labelled \'Special Report\' by their outlets are') + ' left out' : '';
+        out.push(['T:' + id, { k: 'tone', label: il, text: String(il).slice(0, 160), sub: (nPl(nRows, 'row', 'rows') + ' judged, ' + fs.length + ' once copies are folded; mean tone ' + (Math.round(mean * 100) / 100) + '; ' + neg.length + ' negative, ' + pos.length + ' positive' + (nSp ? '; ' + nSp + ' Special Report left out' : '')).slice(0, 120) },
+          il + ': ' + denToneWord(mean, fs.length) + ', across ' + [stories ? nPl(stories, 'story', 'stories') : '', posts ? nPl(posts, 'post', 'posts') : ''].filter(Boolean).join(' and ') + ' with a tone reading (syndicated copies and repeated posts counted once' + sp + '): '
+          + neg.length + ' negative, ' + pos.length + ' positive, ' + neu + ' neutral' + (negIds.length ? '. Negative: ' + negIds.map(c => '[' + c + ']').join(' ') : '') + (posIds.length ? '. Positive: ' + posIds.map(c => '[' + c + ']').join(' ') : '')]); });
+      if (out.length) { L.push('', 'TONE BY ISSUE (each story or post with a tone reading counted once; passing mentions left out)'); out.forEach(x => put(x[0], x[1], x[2])); } }
+  } catch (e) { if (denBusy(e)) throw e; }
+  // p71 (combined M2; the 59-to-206 comparison of the MCA review): each issue's posts and stories in this window and in the
+  // window of the same length just before it, counted the same way (the board's kinds, the issue's own tag), so a momentum
+  // rating can rest on a figure. p71 (EV2): both are counted as the Board counts, this window from the board's own rows and
+  // the window before by a count-only pass of the board (denBoard countOnly), so what the desk muted or set aside, posts under
+  // its minimum engagement and another region's rows are in neither: forty stories from a muted site read as a ninefold rise.
+  // Each read is the board's, bounded by DEN_BOARD_ROWS ("at least" when it was cut). p71 (CO1): an issue tagged as it is now
+  // for less than both windows (denTagSince) is given this window's count alone, with why. A busy database is said (EV7).
+  try { const mine = desk.issues.map(i => i.id); const W = board.window, len = W.to - W.from;
+    if (mine.length && len > 0) { const cur = {}; let curCap = !!board.capped;
+      if (Array.isArray(board._rows)) board._rows.forEach(r => (r.issues || []).forEach(i => { cur[i] = (cur[i] || 0) + 1; }));
+      else { const c = await denBoard(env, desk, { hours: W.hours, to: W.to, countOnly: true }); if (c && c.ok) { Object.assign(cur, c.byIssue); curCap = !!c.capped; } }
+      const pb = await denBoard(env, desk, { hours: W.hours, to: W.from, countOnly: true }); const before = (pb && pb.ok && pb.byIssue) || {}, prevCap = !!(pb && pb.capped); const since = await denTagSince(env);
+      const prev = W.hours === 24 ? 'the day before' : W.hours === 168 ? 'the week before' : W.hours % 24 === 0 ? 'the ' + (W.hours / 24) + ' days before' : 'the ' + W.hours + ' hours before'; const out = [];
+      mine.forEach(id => { const a = Number(cur[id]) || 0, b = Number(before[id]) || 0, at = Number(since[id]) || 0, fresh = at > W.from - len; if (fresh ? !a : !a && !b) return; const il = (desk.issues.find(x => x.id === id) || {}).label || id;
+        const A = (curCap ? 'at least ' : '') + nPl(a, 'post or story', 'posts and stories'), B = (prevCap ? 'at least ' : '') + b, was = 'this issue has been tagged as it is now only since ' + when(at);
+        const t = il + ': ' + A + ' in this window' + (fresh ? '; ' + prev + ' was not counted the same way (' + was + '), so the two are not compared' : ', ' + B + ' in ' + prev);
+        out.push(['C:' + id, { k: 'measure', label: il + ': this window against ' + prev, text: t.slice(0, 160), sub: ((curCap ? 'at least ' : '') + a + ' in this window, ' + (fresh ? prev + ' not comparable (tagged as now since ' + when(at) + ')' : B + ' in ' + prev) + '; posts and stories as the Board counts them').slice(0, 120) }, t]); });
+      if (out.length) { L.push('', 'THE WINDOW BEFORE (' + (desk.region !== 'au' ? 'this region\'s ' : '') + 'posts and stories tagged with each issue, in this window and in the window of the same length just before it, counted the same way, without what this desk has muted or set aside)'); out.forEach(x => put(x[0], x[1], x[2])); } }
+  } catch (e) { if (denBusy(e)) throw e; }
+  // p71 (AEP m10): a memory line says what it is and where it came from: the hit's title, source and passage sit in its
+  // metadata (mindRetrieve answers { ns, score, meta }), which this read missed, so each line was stored as "memory" with no
+  // words and nothing a reviewer could read back
   if (eo.memory !== false) try { const hits = await mindRetrieve(env, desk.ns, desk.issues.map(i => i.label).join(', ') + ' activist campaign', 4);
-    if (hits && hits.length) { L.push('', 'BACKGROUND FROM THE AGENCY\'S MEMORY (context, not today\'s evidence)'); hits.slice(0, 4).forEach((h, i) => put('K:' + (i + 1), { k: 'memory', label: String(h.title || h.source || 'memory').slice(0, 80), text: one(h.title || h.source || 'memory').slice(0, 160), sub: 'Agency memory: context, not this window\'s evidence' },one(h.text || h.chunk || '').slice(0, 300))); } } catch (e) {}
+    if (hits && hits.length) { L.push('', 'BACKGROUND FROM THE AGENCY\'S MEMORY (context, not today\'s evidence)'); hits.slice(0, 4).forEach((h, i) => { const m = (h && h.meta) || {}; const title = one(m.title || h.title || ''), src = one(m.source || h.source || ''), said = one(m.snippet || m.text || m.chunk || h.text || h.chunk || '');
+      put('K:' + (i + 1), { k: 'memory', label: (title || src || 'Agency memory').slice(0, 80), text: ((title || src || 'Agency memory') + (said ? ': ' + said : '')).slice(0, 160), sub: ('Agency memory' + (src ? ', from ' + src : '') + ': context, not this window\'s evidence').slice(0, 120) },
+        (title ? title + ' | ' : '') + (src ? 'from ' + src + ' | ' : '') + said.slice(0, 300)); }); } } catch (e) {}
   try { const y = await env.MIND_DB.prepare("SELECT day, sections FROM den_briefs WHERE desk=? AND status='filed' AND day<? ORDER BY day DESC LIMIT 1").bind(desk.id, board.window.day).first();
     if (y) { const ys = denJ(y.sections, {}); const bl = desk.sections.find(s => s.kind === 'bottom'); const t = bl && ys[bl.id] ? one(ys[bl.id].text).replace(/\[[A-Z]:[^\]]+\]/g, '').slice(0, 500) : ''; if (t) L.push('', 'THE LAST FILED BRIEF\'S BOTTOM LINE (' + y.day + ', for continuity; say what changed): ' + t); } } catch (e) {}
-  return { text: L.join('\n').slice(0, 60000), ids: ev };
+  // p71 (combined M1): the budget. Over DEN_EVIDENCE_MAX (eo.max for a harness) the lowest-ranked stories and posts not in
+  // must are dropped, the longer list first, each taking its id with it. The header, the channels line, the signals,
+  // narratives, actors, upcoming dates, tone, memory and the last filed bottom line are never cut: a cut at 60,000
+  // characters used to lose the tail, which is the tone and the bottom line.
+  const max = Number(eo.max) > 0 ? Number(eo.max) : DEN_EVIDENCE_MAX; const kept = { m: med.length, s: soc.length };
+  // p71 fx2 (D2): the posts the lines are chosen from, a check's post past the Board's lists included (socialL): the Board's
+  // list alone read "0 posts; 1 shown" when every post it picked was an MP's or a public actor's
+  // p71 fx3 (E9): every count with its word ("14 stories after folding", "10 stories shown"), so a sentence restating one
+  // holds by the word it shares (a line with no id clears no bare count, E1)
+  const heads = () => { L[medAt] = 'TRADITIONAL MEDIA (' + nPl(board.counts.news, 'story', 'stories') + ', ' + nPl(board.media.length, 'story', 'stories') + ' after folding syndicated copies; ' + nPl(kept.m, 'story', 'stories') + ' shown, the most relevant first' + (nPassing ? '; ' + nPl(nPassing, 'story that mentions an issue only in passing is', 'stories that mention an issue only in passing are') + ' left out' : '') + ')';
+    L[socAt] = 'SOCIAL (' + nPl(socialL.length, 'post', 'posts') + '; ' + nPl(kept.s, 'post', 'posts') + ' shown, the most relevant first' + (soc.some(s => s.group && ev.has('S:' + s.id)) ? '; near-identical posts are shown once, with their count' : '') + '; authors are not recorded and must not be guessed)'; };
+  const size = () => L.reduce((a, x) => a + (x == null ? 0 : x.length + 1), -1) + (sigLines ? sigLines.reduce((a, x) => a + x.length + 1, 0) : 0);
+  const dm = cut.filter(c => c.part === 'm' && !c.must && !refs.has(c.id)), ds = cut.filter(c => c.part === 's' && !c.must && !refs.has(c.id));
+  for (heads(); size() > max && (dm.length || ds.length); heads()) { const c = (dm.length >= ds.length ? dm : ds).pop(); L[c.at] = null; ev.delete(c.id); kept[c.part]--; }
+  if (sigLines) L.splice(sigAt, 0, ...sigLines);   // p71 merge: in place now that no line is dropped by its place
+  const fin = L.filter(x => x != null); return { text: fin.join('\n'), ids: ev, context: denCtx(fin.filter(l => !/^\[[A-Z]:[^\]\s]+\] /.test(l))) };   // p71 fix (review CK2): the lines with no id, for the figure check
 }
-const DEN_KIND_GUIDE = { summary: 'four to six sentences: the day in order of importance, each with its evidence', judgement: 'one paragraph: the single most important judgement today and why', developments: 'the developments that matter, each a short paragraph with its evidence',
-  narratives: 'each narrative that matters: what is being claimed, by whom in general terms, how fast it moves, and how it treats the client', media: 'what the press ran: volume, the outlets that led, how far it was carried, what was said', social: 'what moved on social channels: where, how much, in what register',
-  actors: 'what registered organisations, officials and MPs said on their own channels', sentiment: 'the tone of the coverage and the conversation, from the judged rows and the comments held', momentum: 'whether activity is building, steady or fading, and the evidence for that', risks: 'the risks to the client by type (reputational, media, political, regulatory, social, campaign escalation), each tied to evidence',
-  implications: 'what this means for the client, concretely', bottom: 'two or three sentences a director can repeat', posture: 'one paragraph on what the client should do now, opening with the client\'s name' };
+/* Each kind's guide, in the analyst's own form (p71, the real-data check of 17 November 2026): the summary leads with what
+ * activists did, in order of risk to the client (AEP M4); momentum states its level and the figures under it (AEP M4, M5);
+ * risks are her eight types in her order (DEN.md s.0.2), the unsupported ones left out, not declared absent; actors
+ * include what was reported, and never "none posted" (AEP M10); the posture is her monitoring paragraph, never a side the
+ * evidence does not give the client (AEP B2, MCA 3). Each carries a length in words: her reports run to 3,300-5,000 and
+ * the drafts ran about 1,500 (AEP M10). Filled in denSys: {short} the client's own short name, {per} day or week and {now}
+ * today or this week by the desk's cadence (MCA 17), {title} the report's name (denTitle). */
+const DEN_KIND_GUIDE = { summary: '300 to 450 words, the opening of the {title}: what activists, NGOs, the Greens and aligned commentators did in the {per} and how far it travelled, in order of risk to {short}, with government and parliament as the context they react to',
+  judgement: '150 to 250 words in one paragraph: the single most important judgement {now}, and why', developments: '800 to 1,200 words: the developments that matter {now}, each a short paragraph with its citations',
+  narratives: '550 to 850 words: each narrative that matters, a paragraph each: what is being claimed, by whom in general terms, how fast it moves and how it treats {short}; one story and its copies, or one templated post from many accounts, counts once',
+  media: '500 to 800 words: what the press ran: the stories that matter to {short}, the outlets that led, how far each was carried and what was said', social: '400 to 650 words: what moved on social media: the posts that matter to {short}, what they say, how far they reached and in what tone',
+  actors: '300 to 550 words: what organisations, officials, MPs and influencers said or did, on their own channels or as reported; never remark that none posted',
+  sentiment: '250 to 400 words: the tone of the coverage and the conversation, issue by issue and in words; say which coverage was negative or positive only from the ids the tone lines list',
+  momentum: '200 to 350 words: the level and the trend, then the one or two figures they rest on: an issue running above its own baseline, with its figures in numerals exactly as its line gives them (such as "3.2 times its usual volume"), never rounded or written out in words; the change from the window before; narratives building or fading; never a rating the evidence does not show',   // p71 fix (review CK5): the figure check reads numerals only, so "four times" went unchecked and "about 21 times" was flagged
+  risks: '500 to 800 words: the risks to {short} by type, in this order: Reputational; Media; Political; Policy or regulatory; Social media; Campaign escalation or community campaign; Industry influence; Direct targeting of {short}. Write each type the evidence supports as a short paragraph opening with its name, and leave the others out rather than declaring them absent',
+  implications: '300 to 500 words: what this means for {short}, concretely', bottom: '50 to 100 words in two or three sentences a director can repeat; compare with an earlier period only from THE LAST FILED BRIEF\'S BOTTOM LINE',
+  posture: '120 to 220 words in one paragraph opening "{short} should continue monitoring ...": what to watch and what to have ready; never a position the evidence does not give {short}' };
+/** The system prompt of a draft, or of one section written again (only). p71 adds the rules the real-data check found
+ *  missing: the reader (the drafts wrote "rows" and "the client", never "AEP"), platforms (a Bluesky-only window read as
+ *  "the conversation was on Bluesky"), continuity ("remains small-scale" with nothing to compare), positions (a side on a
+ *  bill, another client's gas agenda), names as rule D1 (an NGO spokesperson, two business figures from one post),
+ *  measure words, sponsored pieces, and length; the brief is named by denTitle and its period by the cadence. A section's
+ *  own guide (deskUpdate, plain text) is used in place of its kind's. */
 function denSys(desk, only) {
   const secs = desk.sections.filter(s => s.kind !== 'sources' && desk.options.hidden.indexOf(s.id) < 0 && (!only || s.id === only));
-  return 'You are a senior monitoring analyst at an Australian public affairs agency, writing the ' + desk.cadence + ' activist-activity brief for ' + desk.client + ' (' + desk.name + '). You are given the reporting window\'s evidence. Every line of evidence has an id in square brackets.\n\n'
+  const sh = desk.short || denShort(desk.ns, desk.client); const wk = desk.cadence === 'weekly'; const title = denTitle(desk);
+  // replaced by a function, so a "$" in a title a person typed is never read as a replacement pattern
+  const fill = g => String(g).replace(/\{short\}/g, () => sh).replace(/\{per\}/g, wk ? 'week' : 'day').replace(/\{now\}/g, wk ? 'this week' : 'today').replace(/\{title\}/g, () => title);
+  const guide = s => (typeof s.guide === 'string' && s.guide.trim() ? s.guide.replace(/\s+/g, ' ').trim().slice(0, 400) : DEN_KIND_GUIDE[s.kind] ? fill(DEN_KIND_GUIDE[s.kind]) : 'as its title says');
+  return 'You are a senior monitoring analyst at an Australian public affairs agency, writing the ' + title + ' for ' + desk.client + ' (' + desk.name + '): a ' + (wk ? 'weekly' : 'daily') + ' report for ' + sh + '\'s communications team. You are given the reporting window\'s evidence. Every line of evidence has an id in square brackets.\n\n'
     + 'RULES\n- Write only from the evidence. After every factual sentence put the id or ids it rests on, in square brackets exactly as given, e.g. [M:1234] or [S:88][N:abc]. Never invent an id.\n- Every figure you write must be in the evidence line you cite.\n'
-    + '- Name a person or an organisation only when the evidence line names them. Social posts carry no author: never guess one, and never name a private individual.\n- A line marked SUBSCRIBER TEXT may be quoted for at most thirty words.\n- A line marked PINNED must be covered.\n'
-    + '- Never describe a channel that was not read as quiet or calm, and draw nothing from its absence: the CHANNELS line says what this brief rests on and is not itself news. Never write about collection, collectors, sign-ins, feeds or repairs, and never recommend fixing them.\n- Plain, exact Australian English. No headings inside a section, no bullet symbols, no markdown. Separate paragraphs with a blank line.\n\n'
-    + 'SECTIONS (use these ids as the keys)\n' + secs.map(s => '- ' + s.id + ' ("' + s.title + '"): ' + (DEN_KIND_GUIDE[s.kind] || 'as its title says')).join('\n') + '\n\n'
-    + (only ? '' : 'RATINGS\n' + desk.ratings.items.map(i => '- ' + i.id + ' ("' + i.label + '"): level is one of ' + desk.ratings.levels.join(' | ') + (i.trend ? '; trend is one of ' + desk.ratings.trends.join(' | ') : '')).join('\n') + '\n\n')
+    + '- The reader: write for ' + sh + '\'s communications team and call the client ' + sh + '. Never write "rows", "ids", "evidence", "supplied", "held", "judged", "registered", "pinned", "working title" or "the client", and never describe what you were given or what it lacks: say what happened. Give counts as plain quantities (posts, stories, comments) and tone in words, never as a score. Where the stance toward ' + sh + ' is unknown, judge it from the claim or leave it out.\n'
+    // D1 (prompts/annes-den.md, DEN.md s.0.7): registered public actors (an organisation's own account, an elected official)
+    // are named on their own posts; individual campaigners, commenters, repliers and anyone not in the register stay
+    // anonymous. The model cannot see the register, whose people are the elected officials, so a person in a story is named
+    // only when they sit in a parliament. Organisations stay as the cited line names them until the owner decides whether
+    // names stop at the register (AEP B4, MCA 4).
+    + '- Names: name a person only when the cited line names them and they sit in a parliament (a minister, an MP, a senator), or when they post on their own account in the INFLUENCER AND POLITICAL lines. Everyone else stays unnamed even when a line names them: give a campaigner, a spokesperson, a commenter, a journalist, a business leader or any other public figure by role and organisation instead. Social posts carry no author: never guess one, and never name a private individual. Organisations and outlets may be named when the cited line names them.\n'
+    + '- Positions: never give ' + sh + ' a position on a bill, a party, a policy or another organisation\'s issue that the evidence does not state as ' + sh + '\'s own, and never present another organisation\'s agenda as ' + sh + '\'s. Never write "industry" where a reader could take it to mean ' + sh + ': name who. Something targets ' + sh + ' only when it names ' + sh + ': criticism of an industry, a company or its project is hostility to them, not an attack on ' + sh + '.\n'
+    + '- Continuity: write "remains", "still", "continues", "again" or "no longer" only when THE LAST FILED BRIEF\'S BOTTOM LINE is in the evidence and supports the comparison; otherwise describe this window alone, and compare it with an earlier period only through figures the evidence gives for that period.\n'
+    + '- Measures: a measure or trend word (small, low, stable, growing, escalating, weightiest) rests on a cited line that shows it; without one, leave the word out.\n'
+    + '- Platforms: never say which platform the conversation was on, and never compare platforms by volume; say what moved, what it says and how far it reached. Write nothing about a channel the CHANNELS line lists as not read: not what was or was not posted there, not by whom. Never describe a channel that was not read as quiet or calm, and draw nothing from its absence: the CHANNELS line says what this brief rests on and is not itself news. Never write about collection, collectors, sign-ins, feeds or repairs, and never recommend fixing them.\n'
+    + '- Sponsored pieces: where a story\'s line calls "Special Report" the outlet\'s label for a piece made with the company it is about, that "Special Report" is the company\'s own material: attribute it to the company, as carried by the outlet under that label, never call it sponsored or paid for (its own disclosure was not read), and never count it as the outlet\'s reporting, in press tone or as favourable coverage. A story whose headline merely says "Special Report" is the outlet\'s own reporting.\n'
+    + '- A line marked SUBSCRIBER TEXT may be quoted for at most thirty words.\n- A line marked PINNED must be covered.\n'
+    + '- Length: each section\'s guide gives its length in words. Write toward it as far as the evidence carries; never pad, and never stretch one item across several sections to reach it.\n'
+    + '- Plain, exact Australian English. No headings inside a section, no bullet symbols, no markdown. Separate paragraphs with a blank line.\n\n'
+    + 'SECTIONS (use these ids as the keys)\n' + secs.map(s => '- ' + s.id + ' ("' + s.title + '"): ' + guide(s)).join('\n') + '\n\n'
+    + (only ? '' : 'RATINGS (each from the evidence, and the same reading the text gives)\n' + desk.ratings.items.map(i => '- ' + i.id + ' ("' + i.label + '"): level is one of ' + desk.ratings.levels.join(' | ') + (i.trend ? '; trend is one of ' + desk.ratings.trends.join(' | ') : '')).join('\n') + '\n\n')
     + 'Answer with strict JSON only: {"sections":{' + secs.map(s => '"' + s.id + '":"..."').join(',') + '}' + (only ? '' : ',"ratings":{' + desk.ratings.items.map(i => '"' + i.id + '":{"level":""' + (i.trend ? ',"trend":""' : '') + '}').join(',') + '}') + '}';
 }
-/** One section's text against the evidence: unknown ids out (their sentence marked uncited), figures the cited lines do
- *  not carry flagged, a quotation from a subscriber row cut at thirty words. Flagged, never silently dropped. */
-function denCleanText(text, ids) {
+/** The figures in a text, for the check on a draft (p71: combined M3, AEP M3, MCA 12). A figure is a whole number, so the
+ *  "57" of a sentence is never the 57 in 1957, 13:57, 0.57 or 157; it keeps its sign and the count words after it ("9
+ *  negative", "41 judged rows", "1 like"), and "50%", "50 per cent" and "50 percent" are one figure. Clock times, the
+ *  worker's own stamp on a line ("16 nov 13:57"), the days of a written date ("16 November", "16-17 November", "November
+ *  16"), ordinals and codes ("G20") are not figures. sentence: a draft's sentence, where the year of a day-month date is
+ *  not a figure either (a line keeps it, so "in 2026" can still be found), a sign may be said in words ("minus 0.17",
+ *  "positive, at 0.17"), and only what is worth checking is kept: two digits or more, years included, or one digit with
+ *  a count word, a sign or a currency mark, or in a count or a tone ("4 of 45 rows", "7 in the last day", "4 were
+ *  negative", "3 and 2 rows", "a mean tone of 0"). dur marks a span of time ("24 hours"), unit a measure rather than a
+ *  count ("$5million", "3.5km"). Written numbers ("two") are not read. p71 fixes after review: count words joined in a
+ *  list are one set ("41 stories and posts" is the line's "41 posts and stories", CK6); in "30 of 41 were negative" the
+ *  tone is the 30's, never the 41's (CK7); one digit with a magnitude or a measure ("5 million tonnes", "6km") is
+ *  checked, and "$US3bn" is currency (CK8); adv marks a span shaped like the window or advice ("within 48 hours", "in
+ *  the past 24 hours"), never "a 15-year deal" (CK8); a day led by its weekday ("Tuesday 17"), days in a list ("17, 20 and
+ *  24 November") and a numeric date ("17/11") are not figures (CK9). p71 fixes after the second review: a weekday never
+ *  masks the figure after it ("On Saturday, 2,000 people", "On Tuesday 12 MPs", A1); one digit with its unit of time ("over
+ *  9 years") is read in a cited sentence (span1 marks it, A5); a figure carries its magnitude or measure (mk), its unit of
+ *  time (du) and whether it counts the others or the whole (oth: "6 other outlets", "7 outlets in all"), for the check to
+ *  compare (A4, A5); "30 of its 41" is "30 of the 41" (A6); per is a span's length in hours when it is phrased as a window
+ *  ("in the 24 hours to Monday", "over 24 hours"), so the check can tell the desk's own window from a claim (A3). After the
+ *  third review: pw marks a window phrased beyond doubt, with an article or "past" (E5); yr a year as written (E1); "Mt",
+ *  "Mtpa", "ML", "MWh" and "yr" are the measures and units they stand for, and a line's spelled span ("a two-day strike") is
+ *  read (E4); a weekday's day before a clause that opens with a name, and a month in capitals, are a date (E8). */
+const DEN_FIG_WORDS = new Set(['row', 'story', 'post', 'like', 'repost', 'reply', 'comment', 'share', 'view', 'quote', 'outlet', 'account', 'item', 'narrative', 'negative', 'positive', 'neutral', 'time', 'reaction', 'interaction']);
+const DEN_FIG_SKIP = new Set(['other', 'more', 'judged', 'new', 'separate', 'further', 'additional', 'total', 'recent']);
+// p71 fix (review CK8): a magnitude or a measure after a figure, spaced, hyphened or attached ("6 million", "6-million", "6km")
+const DEN_FIG_MAG = /^(?:\s+|-)?(?:million|billion|thousand|trillion|bn|mn|m|k|km|kg|kilograms?|tonnes?|tons?|kilometres?|kilometers?|metres?|meters?|hectares?|ha|litres?|liters?|megalitres?|megaliters?|gigalitres?|gigaliters?|ml|gl|megawatt[\s-]+hours?|gigawatt[\s-]+hours?|megawatts?|gigawatts?|mw|gw|mwh|gwh|petajoules?|pj|megatonnes?|mtpa|mt)\b/i;
+// p71 fix after the second review (A5): one magnitude or measure however it is written ("bn" is billion, "tons" tonnes).
+// p71 fx3 (E4): "Mt" and "Mtpa" are millions of tonnes, as "6 million tonnes a year" writes them; "ML" and "GL" are mega- and
+// gigalitres; a "megawatt hour" is the "MWh" (and never the "MW", a power, not an energy)
+const DEN_FIG_SAME = { mn: 'million', bn: 'billion', k: 'thousand', ton: 'tonne', kilometre: 'km', kilometer: 'km', kilogram: 'kg', meter: 'metre', hectare: 'ha', liter: 'litre', megawatt: 'mw', gigawatt: 'gw', petajoule: 'pj', mt: 'million', mtpa: 'million', megatonne: 'million', ml: 'megalitre', gl: 'gigalitre', megaliter: 'megalitre', gigaliter: 'gigalitre', 'megawatt hour': 'mwh', 'gigawatt hour': 'gwh' };
+const denFigUnit = u => { u = String(u || '').toLowerCase().replace(/^[\s-]+/, '').replace(/[\s-]+/g, ' '); if (u.length > 3) u = u.replace(/s$/, ''); return DEN_FIG_SAME[u] || u; };
+const denFigWord = w => { w = String(w || '').toLowerCase(); return w === 'replies' ? 'reply' : w === 'stories' ? 'story' : /[^s]s$/.test(w) ? w.slice(0, -1) : w; };
+function denFigs(text, sentence) {
+  const src = String(text || ''); const D = x => x.replace(/\d/g, '\x01');   // a masked figure keeps its length, so every offset holds
+  // CK8: "$US3bn", "$A2bn" are currency as "US$3bn" and "A$2bn" are; the letters are blanked (same length) so the figure is read
+  const SGN = new RegExp('(?:^|[^A-Za-z0-9_\\x01.,])([+\\-\\u2212\\u2013])$'), CUR = new RegExp('(?:\\b(?:US|AU|NZ|A))?\\$ *$|(?:\\xa3|\\u20ac|\\bAUD|\\bUSD) *$');
+  // "march" and "may" in lower case are verbs; p71 fx3 (E8): a month in capitals ("17 NOVEMBER") is a month
+  const MON = '(?:[Jj]an(?:uary)?|[Ff]eb(?:ruary)?|Mar(?:ch)?|[Aa]pr(?:il)?|May|[Jj]une?|[Jj]uly?|[Aa]ug(?:ust)?|[Ss]ept?(?:ember)?|[Oo]ct(?:ober)?|[Nn]ov(?:ember)?|[Dd]ec(?:ember)?|JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUNE?|JULY?|AUG(?:UST)?|SEPT?(?:EMBER)?|OCT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?)\\.?(?![A-Za-z])';
+  // CK9: a list of days too ("17, 20 and 24 November"), never a count after a date ("November 3, 41 posts")
+  const DAY = '\\d{1,2}(?:st|nd|rd|th)?(?!\\d)', RNG = '(?:\\s*(?:,|-|\\u2013|\\u2014|to|and|or|&)\\s*(?:(?:and|or)\\s+)?' + DAY + '(?!\\s+(?!(?:and|or|to)\\b|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\b)[a-z]))*';
+  // CK9: a day led by its weekday ("Tuesday 17 and Friday 20 November"), unless a count word follows it ("on Tuesday 12 posts");
+  // p71 fix after the second review (A1): nor when the digits begin a figure ("On Saturday, 2,000 people", "By Friday 3.5
+  // million", "On Saturday 47% of them") or a capital follows them ("On Tuesday 12 MPs": a month there was masked above).
+  // p71 fx3 (E8): a capital after the day still ends a date when it opens the next clause, a name that is not a plural
+  // followed by its verb ("On Friday 20 Parliament sits", "On Tuesday 17 AEP will speak"); "12 MPs will vote", "20 Labor
+  // senators" and "12 Greens" stay counts
+  const WKD = new RegExp('\\b(?:[Mm]on|[Tt]ues|[Ww]ednes|[Tt]hurs|[Ff]ri|[Ss]atur|[Ss]un)day,?\\s+(?:the\\s+)?' + DAY + RNG + '(?![.,]\\d|\\s*[%/])(?=\\s*(?:$|\\n|[^\\sA-Za-z0-9]|(?:and|or|to|at|in|on|from|until|till|through|by|for|with|the|then|when|while|outside|near)\\b'
+    + '|[A-Z][A-Za-z.&\'\\u2019-]*(?:\\s+[A-Z][A-Za-z.&\'\\u2019-]*){0,2}(?<![A-Za-z]s)\\s+(?:will|would|shall|should|can|could|may|might|must|is|are|was|were|has|have|had|does|did|sits|meets|votes|rises|resumes|returns|opens|closes|begins|starts|ends|hears|hosts|holds|debates|decides|considers|launches|releases|announces|announced|publishes|tables|delivers|reports|says|said|tells|told|warns|warned|confirms|confirmed)\\b))', 'g');
+  const keepYear = a => { const y = /(\d{4})$/.exec(a); return y && !sentence ? D(a.slice(0, -4)) + y[1] : D(a); };   // a line keeps a date's year; a draft's is not a figure
+  const t = src.replace(/\$(?:US|AU|NZ|A)(?=\s?\d)/g, x => '$' + ' '.repeat(x.length - 1))
+    .replace(/\b\d{1,2} (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec) \d{1,2}:\d{2}\b/g, D).replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]\.?m\b\.?)?|\b\d{1,2}(?:\.\d{2})?\s*[ap]\.?m\b\.?/g, D)
+    .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (a, y, m, d) => (sentence ? D(y) : y) + '-' + D(m) + '-' + D(d))
+    .replace(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?\b/g, (a, d, mo, y) => (+d >= 1 && +d <= 31 && +mo >= 1 && +mo <= 12 ? D(d) + '/' + D(mo) + (y ? '/' + (y.length === 4 && !sentence ? y : D(y)) : '') : a))   // CK9: "17/11", "17/11/2026"
+    .replace(new RegExp('\\b' + DAY + RNG + '\\s+(?:of\\s+)?' + MON + '(?:,?\\s+\\d{4}(?!\\d))?', 'g'), keepYear).replace(new RegExp('\\b' + MON + '\\s+' + DAY + RNG + '(?:,?\\s+\\d{4}(?!\\d))?', 'g'), keepYear)
+    .replace(WKD, D).replace(/\b\d+(?:st|nd|rd|th)\b/g, D);
+  const out = []; const NUM = /(?<![A-Za-z0-9_\x01]|\d[.,])(\d{1,3}(?:,\d{3})+(?!\d)|\d+)(\.\d+)?/g; let m;
+  while ((m = NUM.exec(t))) {
+    const at = m.index, end = at + m[0].length, before = t.slice(Math.max(0, at - 48), at), after = t.slice(end, end + 64); const v = Number(m[1].replace(/,/g, '') + (m[2] || ''));
+    const sg = SGN.exec(before);   // a sign is the mark directly before the figure, never a hyphen (COVID-19) or a range (16-17)
+    let sign = sg ? (sg[1] === '+' ? 1 : -1) : /\bminus\s+$/i.test(before) ? -1 : 0;
+    const pm = /^\s*(?:%|per\s*cent\b|percent\b)/i.exec(after); const words = []; let nw = 0, oth = '';
+    if (pm) words.push('%'); else { const w = /^[ \xa0]+([A-Za-z]+)(?:[ \xa0]+([A-Za-z]+))?(?:[ \xa0]+([A-Za-z]+))?/.exec(after) || []; const a = denFigWord(w[1]), b = denFigWord(w[2]), c = denFigWord(w[3]); const tone = x => /^(?:negative|positive|neutral)$/.test(x); let nm;
+      if (DEN_FIG_WORDS.has(a)) { words.push(a); nw = 1; if (tone(a) && DEN_FIG_WORDS.has(b)) { words.push(b); nw = 2; } } else if (DEN_FIG_SKIP.has(a) && DEN_FIG_WORDS.has(b)) { words.push(b); nw = 2; oth = a === 'other' ? 'other' : a === 'total' ? 'all' : ''; if (tone(b) && DEN_FIG_WORDS.has(c)) { words.push(c); nw = 3; } }   // A4: "6 other outlets" counts the others
+      // CK7: in "30 of 41 were negative" the 41 is the whole; the tone belongs to the 30 (read below), so the 41 takes no word
+      // (A6 after the second review: "30 of its 41", as "30 of the 41")
+      else if (/^(?:were|was|are|is)$/.test(a) && tone(b) && !/\d\s+(?:out\s+)?of\s+(?:the\s+|its\s+|their\s+|these\s+|those\s+)?$/i.test(before)) { words.push(b); nw = 2; } else if (a === 'of' && b === 'them' && tone(c)) { words.push(c); nw = 3; }   // "4 were negative", "24 of them negative"
+      else if ((a === 'of' || (a === 'out' && b === 'of')) && (nm = /^\s+(?:out\s+)?of\s+(?:the\s+|its\s+|their\s+|these\s+|those\s+)?\d[\d,]*(?:\.\d+)?(?:[ \xa0]+[A-Za-z]+)?[ \xa0]+(?:were|was|are|is)[ \xa0]+(negative|positive|neutral)\b/i.exec(after))) words.push(nm[1].toLowerCase());
+      else { const im = /^\s+(?:and|or|to)\s+\d[\d,]*(?:\.\d+)?[ \xa0]+([A-Za-z]+)(?:[ \xa0]+([A-Za-z]+))?/.exec(after); const a2 = im ? denFigWord(im[1]) : '';   // "3 and 2 rows": the 3 are rows too
+        if (DEN_FIG_WORDS.has(a2)) words.push(a2); else if (im && DEN_FIG_SKIP.has(a2) && DEN_FIG_WORDS.has(denFigWord(im[2]))) words.push(denFigWord(im[2])); }
+      // CK6: count words in a list are one set, in any order ("posts and stories", "posts, stories and comments")
+      let rest = nw ? after.slice((new RegExp('^(?:[ \\u00a0]+[A-Za-z]+){' + nw + '}').exec(after) || [''])[0].length) : '', lm;
+      if (nw && !tone(words[words.length - 1])) while ((lm = /^(?:[ \xa0]*,[ \xa0]*(?:(?:and|or)[ \xa0]+)?|[ \xa0]+(?:and|or)[ \xa0]+)([A-Za-z]+)/.exec(rest)) && DEN_FIG_WORDS.has(denFigWord(lm[1])) && !tone(denFigWord(lm[1]))) { words.push(denFigWord(lm[1])); rest = rest.slice(lm[0].length); }
+      // A4 (after the second review): "7 outlets in all" and "a total of 7 outlets" count the whole
+      if (nw && !oth && (/^[ \xa0]+(?:in[ \xa0]+all|in[ \xa0]+total|altogether|all[ \xa0]+told)\b/i.test(rest) || /\btotal\s+of\s+$/i.test(before))) oth = 'all'; }
+    // "4 of 45 rows" and "7 in the last day" are counts, and "a mean tone of 0" a tone, though no count word follows them
+    const cnt = /^\s+of\s+(?:its\s+|the\s+|them\s+|their\s+|these\s+|those\s+)?[+-]?\d/i.test(after) || /^\s+in\s+the\s+(?:last|past)\s+(?:day|24\s+hours|week)\b/i.test(after), mean = /\b(?:mean|averag\w*|tone)(?:\s+(?:tone|of|at|was|is))*\s+$/i.test(before);
+    // a tone's sign said in words ("positive, at 0.17", "negative, with a mean of 0.2"): only for a tone-sized figure, never a count ("negative and 7 positive")
+    const sw = sentence && !sign && v && v <= 1 && !words.length && !cnt ? /\b(positive|negative)\b(?:\s+[A-Za-z]+)?,?\s+(?:at|of|on|around|about|near|averaging|averaged|(?:with\s+)?(?:a\s+)?mean(?:\s+tone)?(?:\s+of)?)\s+$/i.exec(before) : null; if (sw) sign = /^p/i.test(sw[1]) ? 1 : -1;
+    const digits = (m[1] + (m[2] || '')).replace(/\D/g, '').length, cm = CUR.exec(before), cur = !!cm, mag = DEN_FIG_MAG.test(after);
+    // p71 fx3 (E4): a unit of time however it is shortened ("a 10-yr deal" is "a 10-year deal")
+    const dm = /^(?:\s+|-)?(hours?|hrs?|days?|weeks?|wks?|months?|mths?|years?|yrs?)\b/i.exec(after), dur = !!dm, du0 = dm ? dm[1].toLowerCase().replace(/s$/, '') : '', du = ({ hr: 'hour', wk: 'week', mth: 'month', yr: 'year' })[du0] || du0;
+    // CK8: the window or advice: "within 48 hours", "in the past 24 hours", "over the next 7 days", "in 48 hours"; never a span a row would carry ("a 15-year deal", "over 8 years")
+    const adv = dur && !/^-/.test(after) && (/\bwithin\s+(?:the\s+)?(?:next\s+|first\s+)?$/i.test(before) || /\b(?:past|last|next|coming|previous|following|first)\s+$/i.test(before) || (/\b(?:in|for|every)\s+$/i.test(before) && /^\s+(?:hours?|hrs?|days?)\b/i.test(after)));
+    // A3 (after the second review): a span phrased as a window ("in the 24 hours to Monday", "over 24 hours", "this 24-hour
+    // window"), as hours; never one held for a while ("held for 24 hours") or a compound a row would carry ("a 24-hour strike").
+    // p71 fx3 (E5): phrased beyond doubt, with an article or "past" ("in the 24 hours to Monday", "over the past 24 hours",
+    // "this 24-hour reporting window"), it is the window in any sentence (pw); bare ("over 24 hours", "in 24 hours") only in
+    // one that cites nothing, since a cited one may be the row's own claim ("5,000 signed in 24 hours"); "within 24 hours" is
+    // a deadline, and "over" after a span's verb is "more than" ("lasted over 24 hours", "for over 24 hours"), never the window
+    const pd = /^-\w+\s+(?:(?:reporting|monitoring)\s+)?(?:window|period)\b/i.test(after) || (!/^-/.test(after) && (/\b(?:in|over|across|during|within|throughout|through)\s+(?:(?:the|this|these|that)\s+(?:(?:past|last|previous|latest|same|reporting|full|whole|entire)\s+)?|(?:past|last|previous|latest)\s+)$/i.test(before) || /\b(?:for|of)\s+the\s+(?:(?:past|last|previous|same|reporting|full|whole|entire)\s+)?$/i.test(before) || (/(?:^|\b(?:the|this|these)\s+)$/i.test(before) && /^\s+\w+\s+(?:to|since|before|until|till|ending|up\s+to)\b/i.test(after))));
+    // p71 fx6 (S6): "stretched over" and "unfolded over" tell how long the thing itself went on, as "lasted over" does.
+    // p71 fx7 (T6): only beside a cited line that gives a span (pv, read in denCleanText); in a sentence that cites nothing,
+    // "played out over 24 hours" and "extended over 24 hours" are the window, as any bare window phrase there is
+    const pb = !pd && !/^-/.test(after) && /\b(?:in|over|across|during|throughout|through)\s+$/i.test(before) && !/\b(?:last\w*|took|takes?|taking|ran|runs?|running|went\s+on|goes\s+on|continu\w*|held|holds?|stay\w*|remain\w*|for|just|well|nearly|almost|some)\s+over\s+$/i.test(before);
+    const pv = pb && /\b(?:stretch\w*|unfold\w*|spann\w*|spans?|extend\w*|dragg\w*|drags?|play\w*\s+out)\s+over\s+$/i.test(before);
+    const per = dur && (pd || pb) ? v * ({ hour: 1, day: 24, week: 168 }[du] || 0) : 0, pw = !!per && pd;
+    const keep = digits >= 2 || words.length || sign || cur || cnt || mean || mag;
+    if (sentence && !keep && !(dur && !adv)) continue;   // A5: one digit with its unit of time ("over 9 years") is a span worth checking
+    // shown: the figure as the sentence writes it, with its sign or currency mark and its count words or attached unit ("$4million")
+    const span = pm ? pm[0] : nw ? (new RegExp('^(?:[ \\u00a0]+[A-Za-z]+){' + nw + '}').exec(after) || [''])[0] : mag ? DEN_FIG_MAG.exec(after)[0] : dm && !keep ? dm[0] : (/^[A-Za-z]+/.exec(after) || [''])[0];   // CK8: "5 million"
+    // yr (p71 fx3, E1): a year as written ("in 2026"), which a line with no id may clear on its number alone
+    out.push({ v, sign, words, dur, adv, unit: cur || mag || /^[A-Za-z]/.test(after), mk: mag ? denFigUnit(DEN_FIG_MAG.exec(after)[0]) : '', du, oth, per, pw, pv, yr: digits === 4 && !m[2] && m[1].indexOf(',') < 0 && v >= 1900 && v <= 2100 && !words.length && !sign && !cur && !mag && !dur && !/^[A-Za-z]/.test(after), span1: !!sentence && !keep, shown: src.slice(sg ? at - 1 : cm ? at - cm[0].length : at, end + span.length).slice(0, 40) });
+  }
+  // p71 fx3 (E4): a line may spell a span's number ("a two-day strike"); it is read there, so "a 2-day strike" holds against
+  // it. A draft's sentence still reads numerals only
+  if (!sentence) { const NW = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']; const rx = /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s+|-)(hours?|hrs?|days?|weeks?|wks?|months?|mths?|years?|yrs?)\b/gi; let sp;
+    while ((sp = rx.exec(t))) { const d0 = sp[2].toLowerCase().replace(/s$/, ''); out.push({ v: NW.indexOf(sp[1].toLowerCase()) + 1, sign: 0, words: [], dur: true, adv: false, unit: false, mk: '', du: ({ hr: 'hour', wk: 'week', mth: 'month', yr: 'year' })[d0] || d0, oth: '', per: 0, pw: false, pv: false, yr: false, span1: false, shown: src.slice(sp.index, sp.index + sp[0].length).slice(0, 40) }); } }
+  return out;
+}
+/** The lines of a draft's evidence that carry no id but do carry figures (p71 fix, review CK2): the desk line's window and
+ *  year, the channels line, each block's counts, an outlier's total and usual, the last filed bottom line. The model
+ *  reads them and cannot cite them, so the figure check reads them as well, and the brief stores them for a later save.
+ *  Citation marks inside a line are struck (an id is not a figure); each line once, at most DEN_CTX_LINES of 600
+ *  characters. */
+const DEN_CTX_LINES = 40;
+function denCtx(lines) { const out = []; for (const l0 of Array.isArray(lines) ? lines : []) { if (out.length >= DEN_CTX_LINES) break; const l = String(l0 == null ? '' : l0).replace(/\[[A-Z]:[^\]\s]{1,40}\]/g, '').replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').replace(/ ([.,;:])/g, '$1').trim().slice(0, 600); if (l && /\d/.test(l) && out.indexOf(l) < 0) out.push(l); } return out; }
+/** The evidence lines a figure is checked against, read once: their figures and every word they use (p71). */
+function denFigSrc(lines) { const txt = (lines || []).map(l => String(l || '')).join(' \n '); return { toks: denFigs(txt, false), words: new Set((txt.toLowerCase().match(/[a-z]+/g) || []).map(denFigWord).concat(/%|per\s*cent|percent/i.test(txt) ? ['%'] : [])) }; }
+/** A draft's figure is in the lines (p71) when they carry the same number, with the same sign when the sentence gives one
+ *  (a signed value is never a count: "a comment at +1" is not the line's "1 comments held, tone -1"), and, when the lines
+ *  use its count word at all, carry it with that word or as a bare number: "9 negative" is not the line's "24 negative"
+ *  nor its "9 rows", "5 outlets" is not its "$5million", while "7 rows in the last day" is its "60 rows, 7 in the last
+ *  day" (a line may write a count without its word; reading it strictly would flag what the line says another way).
+ *  p71 fixes after the second review: what a figure is besides its number agrees with the line's (denFigKind): its
+ *  magnitude or measure ("6 billion tonnes" is not "6 million tonnes"; "m" may be million or metres), its unit of time
+ *  ("9 years" is not "9 days", nor "24 posts" the window's "24 hours"), and whether it counts the others or the whole ("7
+ *  other outlets" is not "7 outlets in all", nor "6 outlets in all" the line's "6 other outlets"; a count that says
+ *  neither may be either, as before). */
+const denFigKind = (f, x) => (f.mk === x.mk || (f.mk === 'm' ? x.mk === 'million' || x.mk === 'metre' : x.mk === 'm' && (f.mk === 'million' || f.mk === 'metre'))) && f.du === x.du && (f.oth !== 'other' || x.oth === 'other') && (f.oth !== 'all' || x.oth !== 'other');
+const denFigFound = (f, src) => { const act = f.words.filter(w => src.words.has(w));
+  return src.toks.some(x => x.v === f.v && (!f.sign || !f.v || ((f.sign > 0 ? x.sign >= 0 : x.sign < 0) && (f.words.length > 0 || !x.words.length))) && (!act.length || x.words.some(w => act.indexOf(w) >= 0) || (!x.words.length && !x.unit)) && denFigKind(f, x)); };
+/** One section's text against the evidence: unknown ids out (their sentence marked uncited), figures the evidence does
+ *  not carry flagged, a quotation from a subscriber row cut at thirty words. Flagged, never silently dropped. p71: a
+ *  cited sentence's figures are checked against the lines it cites, and a sentence with no citation (or none valid)
+ *  against every line in the evidence, so a figure found nowhere is flagged too; uncited still lists only the sentences
+ *  whose ids were all invalid (flagging the rest waits on the owner, DK7). p71 fixes after review: context is the
+ *  evidence's lines that carry no id (denCtx), which the model read and could not cite, so a figure found in one of them
+ *  holds whatever the sentence cites (CK2); a flag on a sentence that cites nothing says bare: true, so the page can say
+ *  the figure is not in the evidence rather than not in the row it cites, and a sentence listed as uncited is not
+ *  listed again for its figures (CK11). After the second review: a line with no id clears a figure only on a count word
+ *  or a unit it shares, never as a bare number (A2); hours, the brief's window (else the desk line's): a span phrased as
+ *  that window is not a claim, with or without stored context (A3). After the third review: a figure with no count word is
+ *  cleared by a line with no id only when it is a year, and a span only by being the window (E1); in a sentence that
+ *  cites a line, only a window phrased beyond doubt is the window (E5). After the fifth round: a bare window phrase in a
+ *  cited sentence is the window too, unless a line it cites carries a span so phrased (P5). After the sixth: nor when the
+ *  sentence restates another figure of a cited line that does not count in the window, and "stretched over" or "unfolded
+ *  over" is a duration (S6). After the seventh: a bare window phrase in a cited sentence is a claim only when a line it
+ *  cites gives a span itself, and in a sentence that cites nothing any bare window phrase is the window (T6). */
+function denCleanText(text, ids, context, hours) {
   let t = String(text == null ? '' : text).replace(/\r/g, '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, DEN_SECTION_MAX);
   const cites = new Set(), dropped = new Set(), uncited = [], unverified = [], trimmed = [];
+  // the flagged sentence is written as the page reads it (no space before a stop), so the page marks it where it stands;
+  // a sentence that cites nothing is not held to a span shaped like the window or advice ("within 24 hours", "in the past
+  // week"), which no row carries; a span a row would carry ("a 15-year deal") is checked (CK8)
+  let every = null, ctx = null; const everyLine = () => every || (every = denFigSrc(Array.from(ids.values()).map(v => (v && v.line) || '')));
+  // CK2: the lines with no id are read apart, so they only ever find a figure, never make a cited line's check stricter;
+  // A2 (after the second review): one clears a figure only on a count word or a unit it shares, never as a bare number, so
+  // the desk line's "24 hours" and a header's "30 shown" are not "24 comments" nor "30 likes". p71 fx3 (E1): a figure with no
+  // count word is cleared by one only when it is a year ("in 2026"), so the headers' "12" is not "12 MPs" and the desk line's
+  // "24 hours" is not a "24-hour strike" nor a strike "held for 24 hours"; a span holds only by being the window (per, below)
+  const ctxLines = denCtx(context); const ctxFound = f => ctxLines.length > 0 && (ctx || (ctx = denFigSrc(ctxLines))).toks.some(x => x.v === f.v && (!f.sign || !f.v || ((f.sign > 0 ? x.sign >= 0 : x.sign < 0) && (f.words.length > 0 || !x.words.length))) && denFigKind(f, x) && !x.unit === !f.unit && (f.words.length ? x.words.some(w => f.words.indexOf(w) >= 0) : f.yr && x.yr));
+  // A3: the window's hours: the board's in a draft (p71 fx3, E1: passed in, never read from the desk line), the brief's as
+  // stored on a save or a section written again; the desk line only for a brief stored without them. A span phrased as the
+  // window is skipped when it says so beyond doubt (pw) or the sentence cites nothing (E5). A one-digit span (span1) is read
+  // only in a sentence that cites a line (A5), as before in one that cites nothing
+  const win = Number(hours) > 0 ? Number(hours) : Number((ctxLines.map(l => /\bREPORTING WINDOW: [^\n]*?, (\d+) hours\b/.exec(l)).find(Boolean) || [])[1]) || 0;
+  // p71 fx5 (P5): a bare window phrase in a cited sentence ("drew 59 posts and stories in 24 hours", "Over 24 hours, ...",
+  // "stayed high over 24 hours") is the window too, unless a line it cites carries a span so phrased itself, which the
+  // sentence may be restating ("5,000 signed in 48 hours"); a deadline ("within 24 hours") and "over" after a span's verb
+  // ("lasted over 24 hours") are never the window (denFigs). p71 fx6 (S6): nor is one in a sentence that restates another
+  // figure of the line it cites, which then gives that figure's span ("5,000 names in 24 hours" against "5,000 names within
+  // 48 hours", "in its first 48 hours" or "over two days"), unless that line counts in the window itself ("59 posts and
+  // stories in this window"). p71 fx7 (T6): a bare window phrase in a cited sentence is a claim only when a line it cites
+  // gives a span itself (hours, days, within, first, over N days: a figure with its unit of time); beside a line that gives
+  // none it is the window, whatever figure it restates ("Over 24 hours, the post drew 450 interactions" against "450
+  // interactions, 12 reposts"); beside one that gives a span, it is a claim when that line phrases its span so, when the
+  // sentence restates another of its figures, or when the phrase tells how long the thing went on ("stretched over", pv)
+  const figCheck = (plain, lines, bare) => { let src = null; const L = () => src || (src = lines()); const f0 = denFigs(plain, true);
+    const fs = f0.filter(f => !(bare && (f.adv || f.span1)) && !(win && f.per === win && (bare || f.pw || !L().toks.some(x => x.dur) || (!f.pv && !L().toks.some(x => x.per > 0) && (L().words.has('window') || !f0.some(g => g !== f && !g.per && denFigFound(g, L()))))))); if (!fs.length) return; const miss = [];
+    fs.forEach(f => { if (!denFigFound(f, L()) && !ctxFound(f) && miss.indexOf(f.shown) < 0) miss.push(f.shown); });
+    if (miss.length) unverified.push(Object.assign({ sentence: plain.replace(/\s+([.,;:])/g, '$1').replace(/ {2,}/g, ' ').trim().slice(0, 200), figures: miss.slice(0, 5) }, bare ? { bare: true } : {})); };
   const paras = t.split(/\n\n+/).map(p => p.split(/(?<=[.!?\]])\s+(?=[A-Z"'\[])/).map(s => {
-    const found = s.match(/\[[A-Z]:[A-Za-z0-9_.-]{1,40}\]/g) || []; if (!found.length) return s;
+    const found = s.match(/\[[A-Z]:[A-Za-z0-9_.-]{1,40}\]/g) || []; if (!found.length) { if (s.trim()) figCheck(s.trim(), everyLine, true); return s; }
     const good = found.map(x => x.slice(1, -1)).filter(id => ids.has(id)); const bad = found.map(x => x.slice(1, -1)).filter(id => !ids.has(id));
     bad.forEach(id => { dropped.add(id); s = s.split('[' + id + ']').join(''); }); s = s.replace(/\s+([.,;:])/g, '$1').replace(/ {2,}/g, ' ').trim();
     good.forEach(id => cites.add(id));
     const plain = s.replace(/\[[A-Z]:[^\]]+\]/g, '').trim();
-    if (!good.length) { if (plain) uncited.push(plain.slice(0, 240)); return s; }
-    const src = good.map(id => ids.get(id).line || '').join(' ');
-    const figs = (plain.match(/(?<![A-Za-z0-9])\d[\d.,]*%?/g) || []).map(f => f.replace(/[.,]+$/, '')).filter(f => f.replace(/[^0-9]/g, '').length >= 2 && !/^(19|20)\d\d$/.test(f));
-    const miss = figs.filter(f => src.replace(/,/g, '').indexOf(f.replace(/,/g, '').replace(/%$/, '')) < 0); if (miss.length) unverified.push({ sentence: plain.slice(0, 200), figures: miss.slice(0, 5) });
+    if (!good.length) { if (plain) uncited.push(plain.slice(0, 240)); return s; }   // CK11: "needs a source" says it once; its figures are not listed again
+    figCheck(plain, () => denFigSrc(good.map(id => ids.get(id).line || '')));
     if (good.some(id => ids.get(id).gated)) s = s.replace(/"([^"]{20,})"/g, (all, q) => { const w = q.trim().split(/\s+/); if (w.length <= GATED_QUOTE_WORDS) return all; trimmed.push(q.slice(0, 80)); return '"' + w.slice(0, GATED_QUOTE_WORDS).join(' ') + ' ..."'; });
     return s;
   }).filter(Boolean).join(' ')).filter(Boolean);
   return { text: paras.join('\n\n'), cites: Array.from(cites), dropped: Array.from(dropped), uncited: uncited.slice(0, 20), unverified: unverified.slice(0, 20), trimmed };
 }
-/** The Source List, in the report's own form, from the rows the brief actually cites: never from the model. */
-function denSourceList(sections, ids) {
-  const cited = new Set(); Object.keys(sections).forEach(k => (sections[k].cites || []).forEach(c => cited.add(c)));
-  const groups = [['media', 'Traditional media'], ['social', 'Social media'], ['actor', 'Influencer and political'], ['upcoming', 'Upcoming']]; const seen = new Set();
-  return groups.map(g => ({ group: g[1], items: Array.from(cited).map(id => Object.assign({ id }, ids.get(id) || {})).filter(r => r.k === g[0] && r.url && !seen.has(r.url) && seen.add(r.url)).map(r => ({ id: r.id, label: String(r.label || '').slice(0, 200), url: r.url })) })).filter(g => g.items.length);
+/** The Source List, in the report's own form, from the rows the brief actually cites: never from the model.
+ *  p71 (AEP B3, M8; combined B5, M6): one numbering for the text and the list. Before p71 the document numbered its marks in one
+ *  running sequence while this list started again at 1 in each group, so from [5] on a mark led to the wrong source or to none.
+ *  Every cited source is numbered once, in the order it first appears in the text (sections in the desk's order, `order`),
+ *  keyed by its address as a reader opens it (denCleanUrl): two ids with one address share a number, and the entry is the one
+ *  of the earliest group (a story over the date read from it). n is carried on each item; the groups keep the report's order,
+ *  each in number order. Every address is a clean one, for briefs stored before p71 too; a Google redirect with no better
+ *  address stays as it is. date: the day of the row (the evidence record's ts, p71), "16 November 2026", when it has one. */
+const DEN_SRC_GROUPS = [['media', 'Traditional media'], ['social', 'Social media'], ['actor', 'Influencer and political'], ['upcoming', 'Upcoming']];
+function denDayWords(t) { t = Number(t) || 0; if (!(t > 0)) return ''; const d = new Date(t + auOffsetMs(t)); return d.getUTCDate() + ' ' + DEN_MONTHS[d.getUTCMonth()].charAt(0).toUpperCase() + DEN_MONTHS[d.getUTCMonth()].slice(1) + ' ' + d.getUTCFullYear(); }
+function denSourceList(sections, ids, order) {
+  sections = sections || {}; ids = ids || new Map(); const ord = Array.isArray(order) ? order.filter(k => sections[k]) : [];
+  const keys = ord.concat(Object.keys(sections).filter(k => ord.indexOf(k) < 0)); const rank = k => DEN_SRC_GROUPS.findIndex(g => g[0] === k);
+  const byUrl = new Map(); let n = 0;
+  const take = id => { const e = ids.get(id); if (!e || rank(e.k) < 0) return; const u = denCleanUrl(e.url); if (!u) return; const h = byUrl.get(u);
+    if (!h) byUrl.set(u, { n: ++n, id, e }); else if (rank(e.k) < rank(h.e.k)) { h.id = id; h.e = e; } };
+  keys.forEach(k => (String((sections[k] || {}).text || '').match(/\[[A-Z]:[A-Za-z0-9_.-]{1,40}\]/g) || []).forEach(x => take(x.slice(1, -1))));
+  keys.forEach(k => ((sections[k] || {}).cites || []).forEach(take));   // a cite the text does not show (not expected) is numbered after
+  // a social row is printed as "<Platform> post", whatever an older label held (never a post's words or handle), and an actor as
+  // "<who> on <Platform>": the channel by its own name, as the page's citation chips say it
+  const label = e => { const l = String(e.label || ''); const ch = p => DEN_CH_NAME[String(p || '').toLowerCase()] || String(p || '');
+    return (e.k === 'social' ? (ch(e.platform || l.split(/[\s:|]/)[0]) || 'Social') + ' post' : e.k === 'actor' ? l.replace(/ on ([A-Za-z]+)$/, (a, p) => ' on ' + ch(p)) : l).slice(0, 200); };
+  const all = Array.from(byUrl.entries()).map(([u, h]) => Object.assign({ id: h.id, n: h.n, label: label(h.e), url: u, k: h.e.k }, Number(h.e.ts) > 0 ? { date: denDayWords(h.e.ts), ts: Number(h.e.ts) } : {}));
+  return DEN_SRC_GROUPS.map(g => ({ group: g[1], items: all.filter(i => i.k === g[0]).sort((a, b) => a.n - b.n).map(i => { const o = Object.assign({}, i); delete o.k; return o; }) })).filter(g => g.items.length);
 }
-function denClean(desk, j, ids) {
+function denClean(desk, j, ids, context, hours) {   // context: the evidence's lines with no id (p71 fix, review CK2); hours: the board's window (p71 fx3, E1)
   j = (j && typeof j === 'object') ? j : {}; const src = (j.sections && typeof j.sections === 'object') ? j.sections : {}; const out = {}; const dropped = new Set();
-  desk.sections.filter(s => s.kind !== 'sources').forEach(s => { const raw = src[s.id]; if (raw == null || desk.options.hidden.indexOf(s.id) >= 0) return; const c = denCleanText(typeof raw === 'string' ? raw : (raw && raw.text) || '', ids); c.dropped.forEach(d => dropped.add(d)); out[s.id] = { text: c.text, cites: c.cites, uncited: c.uncited, unverified: c.unverified, trimmed: c.trimmed, edited: false, by: 'model' }; });
+  desk.sections.filter(s => s.kind !== 'sources').forEach(s => { const raw = src[s.id]; if (raw == null || desk.options.hidden.indexOf(s.id) >= 0) return; const c = denCleanText(typeof raw === 'string' ? raw : (raw && raw.text) || '', ids, context, hours); c.dropped.forEach(d => dropped.add(d)); out[s.id] = { text: c.text, cites: c.cites, uncited: c.uncited, unverified: c.unverified, trimmed: c.trimmed, edited: false, by: 'model' }; });
   const rj = (j.ratings && typeof j.ratings === 'object') ? j.ratings : {}; const ratings = {};
   desk.ratings.items.forEach(i => { const r = rj[i.id] || {}; const lv = desk.ratings.levels.find(x => x.toLowerCase() === String(r.level || '').trim().toLowerCase()) || ''; const tr = i.trend ? (desk.ratings.trends.find(x => x.toLowerCase() === String(r.trend || '').trim().toLowerCase()) || '') : ''; ratings[i.id] = { level: lv, trend: tr }; });
   return { sections: out, ratings, dropped: Array.from(dropped) };
 }
-const denIdsJson = ids => { const o = {}; ids.forEach((v, k) => { o[k] = { k: v.k, label: String(v.label || '').slice(0, 160), url: v.url || '', gated: v.gated ? 1 : 0, item: v.item || 0, line: String(v.line || '').slice(0, 420) };
-  if (v.text) o[k].text = String(v.text).slice(0, 160); if (v.sub) o[k].sub = String(v.sub).slice(0, 120); if (v.platform) o[k].platform = String(v.platform).slice(0, 20); }); return o; };
+const denIdsJson = ids => { const o = {}; ids.forEach((v, k) => { o[k] = { k: v.k, label: String(v.label || '').slice(0, 160), url: v.url || '', gated: v.gated ? 1 : 0, item: v.item || 0, line: String(v.line || '').slice(0, 900) };   // p71 merge: 900 (420 before), as a story's line now runs to about 700 and a later save checks figures against the stored line
+  if (v.text) o[k].text = String(v.text).slice(0, 160); if (v.sub) o[k].sub = String(v.sub).slice(0, 120); if (v.platform) o[k].platform = String(v.platform).slice(0, 20);
+  // p71, additive: when the row was published (the export dates a Source List entry by it), and the rows a line stands for
+  // besides its own (a story's syndicated copies, a templated action's other posts), so citing the line can cover them
+  if (Number(v.ts) > 0) o[k].ts = Number(v.ts); if (Array.isArray(v.also) && v.also.length) o[k].also = v.also.map(Number).filter(n => n > 0).slice(0, 100);
+  // p71 fix after the third review (K1, K3), additive: a date line's fold and a recorded date's process, which the page cites it by
+  if (v.fold) o[k].fold = String(v.fold).slice(0, 80); if (v.process != null && v.process !== '') o[k].process = String(v.process).slice(0, 80); }); return o; };
 const denIdsMap = o => new Map(Object.keys(o || {}).map(k => [k, o[k]]));
 /** The strip's slow figures are cached for today's window only: a brief for an earlier day passes its own end (p67), so it
  *  neither reads nor writes today's den_slow_ entry. */
@@ -8804,24 +10029,42 @@ function denEvCard(e) {
 }
 function denBriefView(r, desk) {
   if (!r) return null; const sections = denJ(r.sections, {}); const evidence = denJ(r.evidence, {}); const ids = denIdsMap(evidence.ids || {});
-  return { id: r.id, desk: r.desk, day: r.day, window: { from: r.from_ts, to: r.to_ts, hours: r.window_h, label: evidence.label || '' }, status: r.status, revision: r.revision, sections, ratings: denJ(r.ratings, {}), sourceList: denSourceList(sections, ids),
-    // the line stays on the worker; text and sub (p67, additive) are what a card shows
-    evidence: Object.keys(evidence.ids || {}).reduce((a, k) => { const e = evidence.ids[k] || {}; const c = denEvCard(e); a[k] = { k: e.k, label: e.label, url: e.url, gated: e.gated, item: e.item };
-      if (c.text) a[k].text = c.text; if (c.sub) a[k].sub = c.sub; if (e.platform) a[k].platform = e.platform; return a; }, {}), missed: evidence.missed || [], dropped: evidence.dropped || [],
+  return { id: r.id, desk: r.desk, day: r.day, window: { from: r.from_ts, to: r.to_ts, hours: r.window_h, label: evidence.label || '' }, status: r.status, revision: r.revision, sections, ratings: denJ(r.ratings, {}), sourceList: denSourceList(sections, ids, desk ? desk.sections.map(s => s.id) : null),   // p71: numbered in the desk's section order
+    // the line stays on the worker; text and sub (p67, additive) are what a card shows. p71 (EX5): the address as a reader opens
+    // it (denCleanUrl), as the Source List and the documents give it: a card's Open link for a row the Board no longer shows
+    // kept a stored feed's &amp; (so a parameter after it was lost) and its tracking query
+    evidence: Object.keys(evidence.ids || {}).reduce((a, k) => { const e = evidence.ids[k] || {}; const c = denEvCard(e); a[k] = { k: e.k, label: e.label, url: denCleanUrl(e.url) || e.url, gated: e.gated, item: e.item };
+      if (c.text) a[k].text = c.text; if (c.sub) a[k].sub = c.sub; if (e.platform) a[k].platform = e.platform; /* p71 (K1, K3) */ if (e.fold) a[k].fold = e.fold; if (e.process) a[k].process = e.process; return a; }, {}), missed: evidence.missed || [], dropped: evidence.dropped || [],
     model: r.model, by: r.by, filed_by: r.filed_by, filed_at: r.filed_at, acknowledged: denJ(r.acknowledged, []), created: r.created, updated: r.updated, order: desk ? desk.sections.map(s => ({ id: s.id, kind: s.kind, title: s.title })) : [] };
 }
 const denBriefId = () => { const a = new Uint8Array(8); crypto.getRandomValues(a); return 'b' + Array.from(a).map(b => b.toString(16).padStart(2, '0')).join(''); };
-async function denModelCall(env, desk, sys, user, maxTok) {
-  const model = env.DEN_MODEL || env.BRIEF_MODEL || env.NARRATIVE_MODEL || env.SENTIMENT_MODEL || 'claude-opus-5-5'; let j = null, err = '', raw = '';
+// p71: the time allowed grows with the output asked for (25 ms a token, never under the 230 seconds before), so a draft
+// of her length (up to 16,000 tokens) is not cut off mid-answer and asked for again
+const denModelMs = maxTok => Math.max(230000, (Number(maxTok) || 0) * 25);
+// p71 (ST3): an attempt that a deadline leaves less than two minutes for is not sent: it would be cut off and still be paid for
+const DEN_ATTEMPT_MIN_MS = 120000;
+async function denModelCall(env, desk, sys, user, maxTok, until) {
+  const model = env.DEN_MODEL || env.BRIEF_MODEL || env.NARRATIVE_MODEL || env.SENTIMENT_MODEL || 'claude-opus-5-5'; let j = null, err = '', raw = '', cut = false, busy = false;
+  const ms = denModelMs(maxTok);
   for (let attempt = 0; attempt < 2 && !j; attempt++) {
-    try { raw = await claudeMsg(env, sys, user + (attempt ? '\n\nYour previous answer was not valid JSON in the shape asked for. Reply with the JSON object only.' : ''), maxTok, 230000, model, { scope: 'den', retry: attempt > 0 }); j = relJson(raw); if (j && !j.sections) j = null; if (!j) err = 'the model answered without the JSON asked for: ' + llmExcerpt(raw); }
-    catch (e) { err = String((e && e.message) || e).slice(0, 240); if (/budget_exhausted|usage limit|spend limit|regain access|credit balance|billing|\b401\b|authentication/i.test(err)) break; }   // a refusal is not retried
+    // p71 (ST3): until (the morning cron's deadline) bounds each attempt; cut says the deadline, not the model, ended the call
+    const t = until ? Math.min(ms, Number(until) - Date.now()) : ms;
+    if (t < DEN_ATTEMPT_MIN_MS) { cut = true; if (!err) err = 'the morning run had too little of its time left to send it'; break; }
+    try { raw = await claudeMsg(env, sys, user + (attempt ? '\n\nYour previous answer was not valid JSON in the shape asked for. Reply with the JSON object only.' : ''), maxTok, t, model, { scope: 'den', retry: attempt > 0 }); j = relJson(raw); if (j && !j.sections) j = null; if (!j) { err = 'the model answered without the JSON asked for: ' + llmExcerpt(raw); busy = false; } }
+    // p71 fix after the third review (K5): busy says the attempt failed on a busy database (the call's reservation or its
+    // settling), read from the thrown error itself and never from the model's words: a refusal is the one error claudeMsg
+    // throws that quotes them
+    catch (e) { err = String((e && e.message) || e).slice(0, 240); busy = denBusy(e) && !/^refusal:/i.test(err); if (t < ms && ((e && e.name === 'TimeoutError') || /timed? ?out|aborted/i.test(err))) { cut = true; break; }
+      if (/budget_exhausted|usage limit|spend limit|regain access|credit balance|billing|\b401\b|authentication/i.test(err)) break; }   // a refusal is not retried
   }
-  return { j, err, model };
+  return { j, err, model, cut, busy };
 }
-/** Draft a desk's brief for its window. One model call (a second only when the first answer was not JSON). */
-async function denBriefDraft(env, b, who) {
-  b = b || {}; const desk = await deskGet(env, b.desk); if (!desk) return DESK_UNKNOWN;
+/** Draft a desk's brief for its window. One model call (a second only when the first answer was not JSON).
+ *  o (p71, ST3; the morning cron's, never a request's): until, a deadline the model call must end by; ready, called when the
+ *  evidence is built and the call is about to be sent (the cron starts the next desk's evidence then). */
+const DEN_EVIDENCE_MS = 180000;   // p71 (ST2): what the draft's hold allows for building the evidence, before the model call
+async function denBriefDraft(env, b, who, o) {
+  b = b || {}; o = o || {}; const desk = await deskGet(env, b.desk); if (!desk) return DESK_UNKNOWN;
   if (!env.ANTHROPIC_API_KEY) return { ok: false, status: 501, error: 'claude_not_configured', detail: 'Drafting needs the worker secret ANTHROPIC_API_KEY. The board, the strip and the editor work without it: a brief can be written by hand.' };
   const board = await denBoard(env, desk, { hours: b.hours, to: b.to, keepRows: true }); if (!board.ok) return board;
   const old = await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE desk=? AND day=?').bind(desk.id, board.window.day).first();
@@ -8829,20 +10072,35 @@ async function denBriefDraft(env, b, who) {
   if (old && !b.replace && Object.keys(denJ(old.sections, {})).some(k => denJ(old.sections, {})[k].edited)) return { ok: false, status: 409, error: 'edited_brief', detail: 'This draft has sections a person has edited. Drafting again would replace them: regenerate one section instead, or send replace to start over.', brief: denBriefView(old, desk) };
   if (!board.counts.rows && !board.narratives.length) return { ok: false, status: 409, error: 'no_evidence', detail: 'Nothing on this desk was collected in the window, so there is nothing to draft from. The Collection tab says which channels delivered and why not.' };
   const budget = await denBudget(env); if (budget.left <= 0) return { ok: false, status: 429, error: 'budget_exhausted', detail: 'Today\'s ' + budget.cap + ' Den model calls are used (DEN_DAILY_CALLS). Nothing was sent.' };
-  // one draft at a time for a desk's day: a second press, or a second person, does not pay for the same brief twice
+  // one draft at a time for a desk's day: a second press, or a second person, does not pay for the same brief twice.
+  // p71 (ST2): the hold lasts as long as the draft may: the evidence, then both attempts of the model call (400 seconds each
+  // at 16,000 tokens), renewed when the call is sent, and never past the morning cron's deadline. It was five minutes, so a
+  // long draft's hold lapsed while it was still being written and a second press paid for a second draft.
+  const TOK = 16000, ms = denModelMs(TOK), by = String(who || '').slice(0, 60), t1 = Date.now(); const cap = t => (o.until ? Math.min(t, Number(o.until) + 60000) : t);
   const lk = 'den_drafting_' + desk.id + '_' + board.window.day; let held = null; try { held = JSON.parse((await kvGet(env.AXIOM_KV, lk)) || 'null'); } catch (e) { held = null; }
-  if (held && Date.now() - (Number(held.at) || 0) < 300000) return { ok: false, status: 409, error: 'draft_in_progress', detail: 'A draft for this desk is already being written (started ' + Math.max(1, Math.round((Date.now() - held.at) / 1000)) + ' seconds ago by ' + (held.by || 'someone') + '). Wait for it, then read it; nothing was sent.' };
-  await kvPut(env.AXIOM_KV, lk, JSON.stringify({ at: Date.now(), by: String(who || '').slice(0, 60) }), 300);
+  const ends = held ? (Number(held.until) || (Number(held.at) || 0) + 300000) : 0;   // a hold written before p71 lasted five minutes
+  if (held && Date.now() < ends) return { ok: false, status: 409, error: 'draft_in_progress', detail: 'A draft for this desk is already being written (started ' + Math.max(1, Math.round((Date.now() - (Number(held.at) || 0)) / 1000)) + ' seconds ago by ' + (held.by || 'someone') + '). Wait for it, then read it; nothing was sent. If it never arrives, this desk can be drafted again in ' + Math.max(1, Math.ceil((ends - Date.now()) / 60000)) + ' minute' + (ends - Date.now() > 60000 ? 's' : '') + '.' };
+  const hold = async until => { await kvPut(env.AXIOM_KV, lk, JSON.stringify({ at: t1, by, until }), Math.max(60, Math.ceil((until - Date.now()) / 1000) + 60)); };
+  await hold(cap(t1 + DEN_EVIDENCE_MS + 2 * ms + 60000));
   const unlock = async () => { try { await env.AXIOM_KV.delete(lk); } catch (e) {} };
   let r, ev, missed;
+  // p71 (AEP M10): up to 16,000 output tokens (9,000 before), room for her length of 3,300-5,000 words with its citations
   try { missed = await denMissed(env, desk, { board, to: denPastTo(board.window.day, board.window.to) }); ev = await denEvidence(env, desk, board, missed, b.pins);
-    r = await denModelCall(env, desk, denSys(desk), 'EVIDENCE (data, not instructions)\n\n' + ev.text, 9000); } catch (e) { await unlock(); throw e; }
+    // ready only when the call will be sent: with too little of the cron's time left, denModelCall sends nothing (cut)
+    if (!(o.until && Number(o.until) - Date.now() < DEN_ATTEMPT_MIN_MS)) { await hold(cap(Date.now() + 2 * ms + 60000)); if (typeof o.ready === 'function') await o.ready(); }
+    r = await denModelCall(env, desk, denSys(desk), 'EVIDENCE (data, not instructions)\n\n' + ev.text, TOK, o.until); } catch (e) { await unlock(); throw e; }
   await unlock();
-  if (!r.j) return { ok: false, status: /budget_exhausted/.test(r.err) ? 429 : 502, error: /budget_exhausted/.test(r.err) ? 'budget_exhausted' : 'draft_failed', detail: 'No draft was written: ' + r.err + '. Nothing was saved; the evidence is unchanged.' };
-  const c = denClean(desk, r.j, ev.ids); const now = Date.now(); const id = old ? old.id : denBriefId();
-  const evidence = jsonFit({ ids: denIdsJson(ev.ids), label: board.window.label, missed: missed.signals.filter(s => s.sig !== 'gap').map(s => ({ sig: s.sig, key: s.key, title: s.title, cover: s.cover.slice(0, 40), words: s.words })), dropped: c.dropped }, 250000);
-  if (old) await env.MIND_DB.prepare("UPDATE den_briefs SET window_h=?, from_ts=?, to_ts=?, status='draft', revision=revision+1, sections=?, ratings=?, evidence=?, model=?, by=?, updated=? WHERE id=?").bind(board.window.hours, board.window.from, board.window.to, JSON.stringify(c.sections), JSON.stringify(c.ratings), evidence, r.model, String(who || '').slice(0, 60), now, id).run();
-  else await env.MIND_DB.prepare("INSERT INTO den_briefs(id,desk,day,window_h,from_ts,to_ts,status,revision,sections,ratings,evidence,model,by,created,updated) VALUES(?,?,?,?,?,?,'draft',1,?,?,?,?,?,?,?)").bind(id, desk.id, board.window.day, board.window.hours, board.window.from, board.window.to, JSON.stringify(c.sections), JSON.stringify(c.ratings), evidence, r.model, String(who || '').slice(0, 60), now, now).run();
+  if (!r.j) return Object.assign({ ok: false, status: /budget_exhausted/.test(r.err) ? 429 : 502, error: /budget_exhausted/.test(r.err) ? 'budget_exhausted' : 'draft_failed', detail: 'No draft was written: ' + r.err + '. Nothing was saved; the evidence is unchanged.' }, r.cut ? { cut: true } : {}, r.busy ? { busy: true } : {});   // busy (p71, K5): the morning cron keeps such a desk for a later tick
+  const c = denClean(desk, r.j, ev.ids, ev.context, board.window.hours); const now = Date.now(); const id = old ? old.id : denBriefId();
+  // p71 fix (review CK2): the lines with no id are stored (denCtx caps them), so a later save checks figures as the draft was checked
+  const evidence = jsonFit({ ids: denIdsJson(ev.ids), label: board.window.label, missed: missed.signals.filter(s => s.sig !== 'gap').map(s => ({ sig: s.sig, key: s.key, title: s.title, cover: s.cover.slice(0, 40), words: s.words })), dropped: c.dropped, context: denCtx(ev.context) }, 250000);
+  // p71 (ST2): the write is guarded. The brief read before the draft must still be at its revision, and a day with none must
+  // still have none: a person's edit, a filing, a brief started by hand or another draft that landed meanwhile is never
+  // written over (the insert used to fail on the day's unique index after its call was spent, and the update to replace them)
+  const wr = old ? await env.MIND_DB.prepare("UPDATE den_briefs SET window_h=?, from_ts=?, to_ts=?, status='draft', revision=revision+1, sections=?, ratings=?, evidence=?, model=?, by=?, updated=? WHERE id=? AND revision=?").bind(board.window.hours, board.window.from, board.window.to, JSON.stringify(c.sections), JSON.stringify(c.ratings), evidence, r.model, by, now, id, old.revision).run()
+    : await env.MIND_DB.prepare("INSERT OR IGNORE INTO den_briefs(id,desk,day,window_h,from_ts,to_ts,status,revision,sections,ratings,evidence,model,by,created,updated) VALUES(?,?,?,?,?,?,'draft',1,?,?,?,?,?,?,?)").bind(id, desk.id, board.window.day, board.window.hours, board.window.from, board.window.to, JSON.stringify(c.sections), JSON.stringify(c.ratings), evidence, r.model, by, now, now).run();
+  if (!((wr && wr.meta && wr.meta.changes) || 0)) { const there = await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE desk=? AND day=?').bind(desk.id, board.window.day).first();
+    return { ok: false, status: 409, error: 'brief_changed', detail: 'While this draft was being written, the brief for ' + board.window.day + ' was ' + (there && there.status === 'filed' ? 'filed' : 'saved') + ' (an edit, a filing or another draft got there first). This draft was not saved over it, so nothing was lost: read the brief that is there, and draft again to replace it.', brief: there ? denBriefView(there, desk) : null, calls: 1, budget: await denBudget(env) }; }
   const row = await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE id=?').bind(id).first();
   await denRevision(env, row, who, 'drafted from ' + ev.ids.size + ' evidence rows');
   return { ok: true, brief: denBriefView(row, desk), calls: 1, dropped: c.dropped, budget: await denBudget(env) };
@@ -8860,7 +10118,7 @@ const denStale = (row, desk) => ({ ok: false, status: 409, error: 'conflict', de
 async function denWindowIds(env, desk, o) {
   try { const board = await denBoard(env, desk, Object.assign({}, o, { keepRows: true })); if (!board.ok) return null;
     const missed = await denMissed(env, desk, { board, to: denPastTo(board.window.day, o && o.to) }); const ev = await denEvidence(env, desk, board, missed && missed.ok ? missed : null, [], { memory: false });
-    return { ids: ev.ids, label: board.window.label, missed: (missed && missed.ok ? missed.signals : []).filter(s => s.sig !== 'gap').map(s => ({ sig: s.sig, key: s.key, title: s.title, cover: s.cover.slice(0, 40), words: s.words })) };
+    return { ids: ev.ids, label: board.window.label, missed: (missed && missed.ok ? missed.signals : []).filter(s => s.sig !== 'gap').map(s => ({ sig: s.sig, key: s.key, title: s.title, cover: s.cover.slice(0, 40), words: s.words })), context: ev.context || [] };   // p71 fix (review CK2): the lines with no id
   } catch (e) { if (denBusy(e)) throw e; return null; }
 }
 /** A person's edit. Compare-and-swap on revision; every changed section is checked again and marked as edited. A brief
@@ -8871,7 +10129,7 @@ async function denBriefSave(env, b, who) {
     row = await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE desk=? AND day=?').bind(desk.id, win.day).first();
     // started by hand (p67): it holds the window's evidence from the start, built as a draft builds it, with no model call
     if (!row) { const id = denBriefId(); const now = Date.now(); const fresh = await denWindowIds(env, desk, { hours: win.hours });
-      const evj = fresh ? { ids: denIdsJson(fresh.ids), label: fresh.label || win.label, missed: fresh.missed } : { ids: {}, label: win.label, missed: [] };
+      const evj = fresh ? { ids: denIdsJson(fresh.ids), label: fresh.label || win.label, missed: fresh.missed, context: denCtx(fresh.context) } : { ids: {}, label: win.label, missed: [] };   // p71 fix (review CK2): context
       await env.MIND_DB.prepare("INSERT OR IGNORE INTO den_briefs(id,desk,day,window_h,from_ts,to_ts,status,revision,sections,ratings,evidence,model,by,created,updated) VALUES(?,?,?,?,?,?,'draft',1,'{}','{}',?,'',?,?,?)").bind(id, desk.id, win.day, win.hours, win.from, win.to, jsonFit(evj, 250000), String(who || '').slice(0, 60), now, now).run(); row = await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE desk=? AND day=?').bind(desk.id, win.day).first(); b = Object.assign({}, b, { revision: row.revision }); }
     else if (b.revision == null) b = Object.assign({}, b, { revision: row.revision });   // opening today's brief by its desk: whatever is there
   } else { const x = await denBriefRow(env, b.id); row = x.row; desk = x.desk; }
@@ -8879,22 +10137,25 @@ async function denBriefSave(env, b, who) {
   if (row.status === 'filed') return { ok: false, status: 409, error: 'brief_filed', detail: 'This brief is filed. Reopen it before changing it.', brief: denBriefView(row, desk) };
   if (Number(b.revision) !== Number(row.revision)) return denStale(row, desk);
   let ids = denIdsMap(denJ(row.evidence, {}).ids || {}); const sections = denJ(row.sections, {}); const sent = (b.sections && typeof b.sections === 'object') ? b.sections : {}; const changed = [];
+  let ctx = denCtx(denJ(row.evidence, {}).context);   // p71 fix (review CK2): the draft's lines with no id, read back for the check
   // a citation of a row the brief's evidence does not hold yet (collected since the draft, or a brief started by hand
   // before p67): the rows the desk's board holds now are merged first, so a card offered on the page is not dropped on
   // save. Built only when such an id is sent; an id no board holds is still taken out by the check below.
   let evNew = null; const asked = new Set(); Object.keys(sent).forEach(k => (String(sent[k] == null ? '' : sent[k]).match(/\[[A-Z]:[A-Za-z0-9_.-]{1,40}\]/g) || []).forEach(x => { if (!ids.has(x.slice(1, -1))) asked.add(x.slice(1, -1)); }));
   if (asked.size) { const fresh = await denWindowIds(env, desk, { hours: row.window_h, to: denPastTo(row.day, row.to_ts) });
-    if (fresh && Array.from(asked).some(k => fresh.ids.has(k))) { const m = new Map(ids); fresh.ids.forEach((v, k) => { if (!m.has(k)) m.set(k, v); }); ids = m; evNew = denJ(row.evidence, {}); evNew.ids = denIdsJson(ids); } }
+    if (fresh && Array.from(asked).some(k => fresh.ids.has(k))) { const m = new Map(ids); fresh.ids.forEach((v, k) => { if (!m.has(k)) m.set(k, v); }); ids = m; evNew = denJ(row.evidence, {}); evNew.ids = denIdsJson(ids); ctx = denCtx(ctx.concat(fresh.context || [])); evNew.context = ctx; } }
   for (const s of desk.sections.filter(x => x.kind !== 'sources')) { if (sent[s.id] == null) continue; const text = String(sent[s.id]);
     if (text.length > DEN_SECTION_MAX) return { ok: false, status: 413, error: 'section_too_long', detail: '"' + s.title + '" is ' + text.length + ' characters; a section holds at most ' + DEN_SECTION_MAX + '. Nothing was saved.' };
     if (sections[s.id] && sections[s.id].text === text.replace(/\r/g, '').trim()) continue;
-    const c = denCleanText(text, ids);
+    const c = denCleanText(text, ids, ctx, row.window_h);   // p71 fix after the second review (A3): the brief's window, stored context or none
     // a flag the draft raised ("needs a source") survives a save while its sentence is still there, word for word, and
     // still cites nothing; it clears only when the sentence goes or gains a citation (release review: a one-word edit
     // elsewhere in the section used to wipe every flag in it)
     const carried = ((sections[s.id] && sections[s.id].uncited) || []).filter(u => { u = String(u || ''); if (!u || c.uncited.indexOf(u) >= 0 || /\[[A-Z]:[^\]]+\]/.test(u)) return false;
       const at = c.text.indexOf(u); return at >= 0 && !/^\s*\[[A-Z]:[^\]]+\]/.test(c.text.slice(at + u.length)); });
     c.uncited = c.uncited.concat(carried);
+    // p71 fix (review CK11): a sentence still marked "needs a source" is not listed a second time for its figures
+    if (carried.length) { const nz = x => String(x || '').replace(/\s+([.,;:])/g, '$1').replace(/\s+/g, ' ').trim().slice(0, 200); const said = new Set(carried.map(nz)); c.unverified = c.unverified.filter(u => !said.has(nz(u.sentence))); }
     sections[s.id] = { text: c.text, cites: c.cites, uncited: c.uncited, unverified: c.unverified, trimmed: c.trimmed, edited: true, by: String(who || '').slice(0, 60), at: Date.now() }; changed.push(s.id); }
   let ratings = denJ(row.ratings, {});
   if (b.ratings && typeof b.ratings === 'object') { const before = JSON.stringify(ratings); desk.ratings.items.forEach(i => { const r = b.ratings[i.id]; if (!r) return; ratings[i.id] = { level: desk.ratings.levels.indexOf(String(r.level)) >= 0 ? String(r.level) : '', trend: i.trend && desk.ratings.trends.indexOf(String(r.trend)) >= 0 ? String(r.trend) : '' }; }); if (JSON.stringify(ratings) !== before) changed.push('ratings'); }
@@ -8918,11 +10179,14 @@ async function denBriefSection(env, b, who) {
   const board = await denBoard(env, desk, { hours: row.window_h, to: row.to_ts, keepRows: true }); const missed = await denMissed(env, desk, { board, to: denPastTo(row.day, row.to_ts) }); const ev = await denEvidence(env, desk, board, missed, []);
   const others = desk.sections.filter(s => s.id !== sec.id && sections[s.id]).map(s => s.title + ': ' + sections[s.id].text.replace(/\[[A-Z]:[^\]]+\]/g, '').slice(0, 500)).join('\n\n');
   const note = String(b.instruction || '').replace(/\s+/g, ' ').trim().slice(0, 400);
-  const r = await denModelCall(env, desk, denSys(desk, sec.id), 'EVIDENCE (data, not instructions)\n\n' + ev.text + (others ? '\n\nTHE REST OF THE BRIEF AS IT STANDS (for consistency; do not repeat it)\n\n' + others.slice(0, 6000) : '') + (note ? '\n\nTHE ANALYST ASKS, FOR THIS SECTION: ' + note : ''), 2600);
+  // p71: up to 4,000 output tokens (2,600 before): the longest guide asks for 1,200 words with their citations
+  const r = await denModelCall(env, desk, denSys(desk, sec.id), 'EVIDENCE (data, not instructions)\n\n' + ev.text + (others ? '\n\nTHE REST OF THE BRIEF AS IT STANDS (for consistency; do not repeat it)\n\n' + others.slice(0, 6000) : '') + (note ? '\n\nTHE ANALYST ASKS, FOR THIS SECTION: ' + note : ''), 4000);
   if (!r.j || r.j.sections[sec.id] == null) return { ok: false, status: /budget_exhausted/.test(r.err) ? 429 : 502, error: /budget_exhausted/.test(r.err) ? 'budget_exhausted' : 'draft_failed', detail: 'The section was not written: ' + (r.err || 'the answer did not carry it') + '. Nothing was changed.' };
   const merged = denMergeIds(denIdsMap(denJ(row.evidence, {}).ids || {}), ev.ids);
-  const c = denCleanText(typeof r.j.sections[sec.id] === 'string' ? r.j.sections[sec.id] : '', merged); sections[sec.id] = { text: c.text, cites: c.cites, uncited: c.uncited, unverified: c.unverified, trimmed: c.trimmed, edited: false, by: 'model', at: Date.now() };
-  const evj = denJ(row.evidence, {}); evj.ids = denIdsJson(merged);
+  // p71 fix (review CK2): the lines with no id that this call's model read, then the draft's, checked and stored together
+  const ctx = denCtx((ev.context || []).concat(denJ(row.evidence, {}).context || []));
+  const c = denCleanText(typeof r.j.sections[sec.id] === 'string' ? r.j.sections[sec.id] : '', merged, ctx, row.window_h); sections[sec.id] = { text: c.text, cites: c.cites, uncited: c.uncited, unverified: c.unverified, trimmed: c.trimmed, edited: false, by: 'model', at: Date.now() };
+  const evj = denJ(row.evidence, {}); evj.ids = denIdsJson(merged); evj.context = ctx;
   const u = await env.MIND_DB.prepare('UPDATE den_briefs SET sections=?, evidence=?, revision=revision+1, updated=? WHERE id=? AND revision=?').bind(JSON.stringify(sections), jsonFit(evj, 250000), Date.now(), row.id, row.revision).run();
   if (!((u && u.meta && u.meta.changes) || 0)) return denStale(await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE id=?').bind(row.id).first(), desk);
   const fresh = await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE id=?').bind(row.id).first(); await denRevision(env, fresh, who, 'section written again: ' + sec.id);
@@ -8937,6 +10201,9 @@ async function denBriefFile(env, b, who) {
   if (Number(b.revision) !== Number(row.revision)) return denStale(row, desk);
   const sections = denJ(row.sections, {}); const body = Object.keys(sections).map(k => sections[k].text).join('\n'); if (body.replace(/\s/g, '').length < 200) return { ok: false, status: 409, error: 'brief_empty', detail: 'There is too little written to file. Draft it or write it first.' };
   const cites = new Set(); Object.keys(sections).forEach(k => (sections[k].cites || []).forEach(c => cites.add(c))); const low = body.toLowerCase();
+  // p71: a line that stands for other rows (a story's syndicated copies, a templated action's other posts: its stored also)
+  // covers a check resting on any of them, as citing one copy of a story is citing the story
+  { const evIds = denJ(row.evidence, {}).ids || {}; Array.from(cites).forEach(c => { const e = evIds[c]; const p = c.slice(0, 2); if (e && Array.isArray(e.also)) e.also.forEach(a => { cites.add(p + a); if (p === 'S:') cites.add('P:' + a); }); }); }
   const board = await denBoard(env, desk, { hours: row.window_h, to: row.to_ts, keepRows: true }); const missed = await denMissed(env, desk, { board, to: denPastTo(row.day, row.to_ts) });
   // p69: a cited narrative merged since the draft. A person's merge (every hop in the chain a person's) says the two are one
   // story, so the cite covers the survivor; an automatic one does not decide that for the person filing: the survivor's
@@ -8954,23 +10221,54 @@ async function denBriefFile(env, b, who) {
   const fresh = await env.MIND_DB.prepare('SELECT * FROM den_briefs WHERE id=?').bind(row.id).first(); await denRevision(env, fresh, who, 'filed' + (open.length ? ' with ' + open.length + ' signal' + (open.length === 1 ? '' : 's') + ' acknowledged as not covered' : '') + (unread.length ? '; not read in this window: ' + unread.join(', ') : ''));
   return { ok: true, brief: denBriefView(fresh, desk), filed: true, acknowledged: open.map(s => s.key) };
 }
-/** The brief as a document. Citations become numbered links to the rows; the Source List is the cited rows. */
+/** The brief as a document. Citations become numbered links to the rows; the Source List is the cited rows.
+ *  p71 (AEP B3, M8, M10; combined B5, M5, M6; compare-mca 8.7):
+ *  - one numbering: a mark prints the number its address carries in the Source List (denSourceList), so every [n] leads to
+ *    entry n with the same address; marks side by side that share an address print it once; a citation of a row with no
+ *    address still prints nothing. The list writes each number as text ("[7] Outlet - Headline, 16 November 2026 - address"),
+ *    never as an auto-numbered list, which renumbers on paste and in a Markdown reader;
+ *  - every printed address is a clean one (denCleanUrl), for briefs stored before p71 too;
+ *  - her header: the report's name (denTitle), the client, "Date: <the brief's day> | Reporting window: <the window>" with an
+ *    en dash between its days, and DRAFT on its own line until the brief is filed; the html title and the Slack summary's
+ *    first line say the same;
+ *  - a rating prints under the desk's section whose id is its own when that section is a rating's home (a momentum or a
+ *    sentiment section), else under its first momentum section, else after its summary, else after the header: the weekly
+ *    MCA desk's "Overall assessment" belongs under "Overall sentiment rating", not under "Week-on-week comparison".
+ *    Fixes (EX1, EX6): the Firearms desk's "Media risk" shares its id with "News environment", a content section, and went
+ *    there; her format puts all three ratings in the momentum assessment (DEN.md s.0.2), as p70 printed them. A section
+ *    hidden in Options is no rating's home (the page shows such a rating in its top bar). A rating whose place was not
+ *    written this time falls to the next place down that was, instead of being left out of the document;
+ *  - the Source List is headed with the desk's own title for it ("Sources" on the weekly MCA desk), as the page heads it (EX4). */
 function denBriefDoc(v, desk, fmt) {
-  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); const order = []; const num = id => { let i = order.indexOf(id); if (i < 0) { order.push(id); i = order.length - 1; } return i + 1; };
-  const safeUrl = u => (/^https?:\/\//i.test(String(u || '')) ? String(u) : '');
-  const cite = (t, html) => String(t || '').replace(/\[([A-Z]:[A-Za-z0-9_.-]{1,40})\]/g, (all, id) => { const e = v.evidence[id]; if (!e || !safeUrl(e.url)) return ''; return html ? '<sup><a href="' + esc(safeUrl(e.url)) + '">[' + num(id) + ']</a></sup>' : ' [[' + num(id) + '](' + safeUrl(e.url) + ')]'; }).replace(/ +([.,;:])/g, '$1');
-  const rat = desk.ratings.items.map(i => ({ label: i.label, r: v.ratings[i.id] || {} })).filter(x => x.r.level);
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const list = Array.isArray(v.sourceList) ? v.sourceList : []; const numBy = new Map(); list.forEach(g => (g.items || []).forEach(i => { if (i.url && i.n && !numBy.has(i.url)) numBy.set(i.url, i.n); }));
+  const numOf = id => { const e = v.evidence[id]; const u = e ? denCleanUrl(e.url) : ''; return u && numBy.has(u) ? [numBy.get(u), u] : null; };
+  const cite = (t, html) => String(t || '').replace(/(?:[ \t]*\[[A-Z]:[A-Za-z0-9_.-]{1,40}\])+/g, (run, off) => { const got = [];
+    (run.match(/\[[A-Z]:[A-Za-z0-9_.-]{1,40}\]/g) || []).forEach(x => { const c = numOf(x.slice(1, -1)); if (c && !got.some(g => g[0] === c[0])) got.push(c); });
+    return got.length ? (off ? ' ' : '') + got.map(c => html ? '<sup><a href="' + esc(c[1]) + '">[' + c[0] + ']</a></sup>' : '[[' + c[0] + '](' + c[1] + ')]').join(html ? '' : ' ') : ''; }).replace(/ +([.,;:])/g, '$1');
+  const rat = desk.ratings.items.map(i => ({ id: i.id, label: i.label, r: v.ratings[i.id] || {} })).filter(x => x.r.level);
   const secs = desk.sections.filter(s => s.kind !== 'sources' && v.sections[s.id] && v.sections[s.id].text);
-  const head = desk.client + ' - ' + desk.name; const sub = 'Reporting window: ' + (v.window.label || v.day) + (v.status === 'filed' ? '' : ' - DRAFT');
+  // where a rating belongs is read from the desk's sections that show (p71, EX6: never a hidden one): its own section when that
+  // is a momentum or sentiment one, the first momentum section, after the summary, the header; the first of these written (EX1)
+  const hid = (desk.options && Array.isArray(desk.options.hidden)) ? desk.options.hidden : []; const dsec = desk.sections.filter(s => s.kind !== 'sources' && hid.indexOf(s.id) < 0); const under = {}, after = {}, top = [];
+  const done = s => !!s && secs.indexOf(s) >= 0; const mom = dsec.find(s => s.kind === 'momentum'), sum = dsec.find(s => s.kind === 'summary');
+  rat.forEach(x => { const own = [dsec.find(s => s.id === x.id && (s.kind === 'momentum' || s.kind === 'sentiment')), mom].find(done);
+    if (own) (under[own.id] = under[own.id] || []).push(x); else if (done(sum)) (after[sum.id] = after[sum.id] || []).push(x); else top.push(x); });
+  const srcTitle = ((desk.sections.find(s => s.kind === 'sources') || {}).title) || 'Source List';
+  const filed = v.status === 'filed'; const M = i => DEN_MONTHS[i].charAt(0).toUpperCase() + DEN_MONTHS[i].slice(1);
+  const dm = /^(\d{4})-(\d\d)-(\d\d)$/.exec(String(v.day || '')); const day = dm ? Number(dm[3]) + ' ' + M(Number(dm[2]) - 1) + ' ' + dm[1] : String(v.day || '');
+  const title = denTitle(desk), client = String(desk.client || ''); const when = 'Date: ' + day + ' | Reporting window: ' + String(v.window.label || day).replace(/([0-9a-z])-([0-9])/gi, '$1' + String.fromCharCode(8211) + '$2');   // an en dash between the days (the worker source stays ASCII)
+  const rline = (xs, html) => xs.map(x => html ? '<strong>' + esc(x.label) + ':</strong> ' + esc(x.r.level) + (x.r.trend ? ', ' + esc(x.r.trend) : '') : '**' + x.label + ':** ' + x.r.level + (x.r.trend ? ', ' + x.r.trend : '')).join(html ? '<br>' : '  \n');
+  const entry = i => '[' + i.n + '] ' + i.label + (i.date ? ', ' + i.date : '') + ' - ';
   if (fmt === 'slack') { const g = k => { const s = desk.sections.find(x => x.kind === k); return s && v.sections[s.id] ? v.sections[s.id].text.replace(/\[[A-Z]:[^\]]+\]/g, '').replace(/ +([.,;:])/g, '$1').trim() : ''; };
-    return ['*' + head + '* - ' + (v.window.label || v.day) + (v.status === 'filed' ? '' : ' (draft)'), g('summary') || g('judgement'), rat.length ? rat.map(x => '*' + x.label + ':* ' + x.r.level + (x.r.trend ? ', ' + x.r.trend : '')).join('  |  ') : '', g('bottom') ? '*Bottom line:* ' + g('bottom') : ''].filter(Boolean).join('\n\n'); }
+    return ['*' + title + '* - ' + client + ' | ' + when + (filed ? '' : ' (draft)'), g('summary') || g('judgement'), rat.length ? rat.map(x => '*' + x.label + ':* ' + x.r.level + (x.r.trend ? ', ' + x.r.trend : '')).join('  |  ') : '', g('bottom') ? '*Bottom line:* ' + g('bottom') : ''].filter(Boolean).join('\n\n'); }
   if (fmt === 'html') {
-    const body = secs.map(s => '<h2>' + esc(s.title) + '</h2>' + (s.kind === 'momentum' && rat.length ? '<p>' + rat.map(x => '<strong>' + esc(x.label) + ':</strong> ' + esc(x.r.level) + (x.r.trend ? ', ' + esc(x.r.trend) : '')).join('<br>') + '</p>' : '') + v.sections[s.id].text.split(/\n\n+/).map(p => '<p>' + cite(esc(p), true) + '</p>').join('')).join('');
-    const src = v.sourceList.length ? '<h2>Source List</h2>' + v.sourceList.map(g => '<h3>' + esc(g.group) + '</h3><ol>' + g.items.map(i => '<li>' + esc(i.label) + ' - <a href="' + esc(safeUrl(i.url)) + '">' + esc(i.url) + '</a></li>').join('') + '</ol>').join('') : '';
-    return '<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><title>' + esc(head + ' - ' + v.day) + '</title><style>body{font:15px/1.55 Georgia,serif;max-width:46em;margin:2em auto;padding:0 1em;color:#111}h1{font-size:1.5em;margin-bottom:.1em}h2{font-size:1.15em;margin-top:1.6em}h3{font-size:1em}sup a{text-decoration:none}.sub{color:#555}</style></head><body><h1>' + esc(head) + '</h1><p class="sub">' + esc(sub) + '</p>' + body + src + '</body></html>';
+    const body = secs.map(s => '<h2>' + esc(s.title) + '</h2>' + (under[s.id] ? '<p>' + rline(under[s.id], true) + '</p>' : '') + v.sections[s.id].text.split(/\n\n+/).map(p => '<p>' + cite(esc(p), true) + '</p>').join('') + (after[s.id] ? '<p>' + rline(after[s.id], true) + '</p>' : '')).join('');
+    const src = list.length ? '<h2>' + esc(srcTitle) + '</h2>' + list.map(g => '<h3>' + esc(g.group) + '</h3>' + g.items.map(i => '<p class="src">' + esc(entry(i)) + '<a href="' + esc(i.url) + '">' + esc(i.url) + '</a></p>').join('')).join('') : '';
+    return '<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><title>' + esc(title + ' - ' + client + ' - ' + day + (filed ? '' : ' - DRAFT')) + '</title><style>body{font:15px/1.55 Georgia,serif;max-width:46em;margin:2em auto;padding:0 1em;color:#111}h1{font-size:1.5em;margin-bottom:.1em}h2{font-size:1.15em;margin-top:1.6em}h3{font-size:1em}sup a{text-decoration:none}.client{margin:.2em 0;font-size:1.1em}.sub{color:#555;margin:.2em 0}.draft{font-weight:bold;letter-spacing:.08em;margin:.2em 0}.src{margin:.3em 0}</style></head><body><h1>' + esc(title) + '</h1><p class="client">' + esc(client) + '</p><p class="sub">' + esc(when) + '</p>' + (filed ? '' : '<p class="draft">DRAFT</p>') + (top.length ? '<p>' + rline(top, true) + '</p>' : '') + body + src + '</body></html>';
   }
-  const md = ['# ' + head, '', sub, ''].concat(secs.map(s => '## ' + s.title + '\n\n' + (s.kind === 'momentum' && rat.length ? rat.map(x => '**' + x.label + ':** ' + x.r.level + (x.r.trend ? ', ' + x.r.trend : '')).join('  \n') + '\n\n' : '') + v.sections[s.id].text.split(/\n\n+/).map(p => cite(p, false)).join('\n\n') + '\n'));
-  if (v.sourceList.length) md.push('## Source List\n\n' + v.sourceList.map(g => '### ' + g.group + '\n\n' + g.items.map((i, n) => (n + 1) + '. ' + i.label + ' - ' + i.url).join('\n')).join('\n\n') + '\n');
+  const md = ['# ' + title, '', client, '', when, ''].concat(filed ? [] : ['DRAFT', '']).concat(top.length ? [rline(top, false), ''] : []).concat(secs.map(s => '## ' + s.title + '\n\n' + (under[s.id] ? rline(under[s.id], false) + '\n\n' : '') + v.sections[s.id].text.split(/\n\n+/).map(p => cite(p, false)).join('\n\n') + '\n' + (after[s.id] ? '\n' + rline(after[s.id], false) + '\n' : '')));
+  if (list.length) md.push('## ' + srcTitle + '\n\n' + list.map(g => '### ' + g.group + '\n\n' + g.items.map(i => entry(i) + i.url).join('\n\n')).join('\n\n') + '\n');
   return md.join('\n');
 }
 /* p67: how far the analysis is behind collection, for the Collection tab. Every read names its kinds and its window and is
@@ -9036,15 +10334,40 @@ async function denCollect(env, b, who, ctx) {
   if (job.local && ctx) ctx.waitUntil(jobRunLocal(env, { id: job.id, source, params }));
   return { ok: true, id: job.id, source, where: job.local ? 'worker' : 'desktop', note: job.local ? 'Running in the worker.' : 'Queued for the Mac collector. If none is connected the job says so after three minutes.' };
 }
-/** For the recall measure: which of these addresses the archive holds, and when each was first seen. Read-only. */
+/** For the recall measure: which of these addresses the archive holds, and when each was first seen. Read-only.
+ *  p71 (AEP M9, item 14): a story AXIOM held was counted as missed when its row was stored under the feed's XML escape (&amp;,
+ *  &#038;), with the feed's tracking query after the address (?ref=rss&utm_...), with a trailing slash the report's link lacks
+ *  (or the reverse), or as a Google News redirect. Each is now a way to be held: the escaped forms and the slash variants among
+ *  the exact candidates; for a news link, the report's link plus a query string (a range on the (kind, url) index, never a
+ *  scan) and the Google rows resolved to it (arc_links). The earliest sighting among them is the one that counts. */
 async function denHeld(env, urls) {
   await ensureArchive(env); const want = (Array.isArray(urls) ? urls : []).map(u => String(u || '').slice(0, 700)).filter(u => /^https?:\/\//i.test(u)).slice(0, 40); const out = [];
+  let links = false; try { links = await ensureArcLinks(env); } catch (e) { if (denBusy(e)) throw e; links = false; }
+  const slash = s => { const m = /^([^?#]*?)\/?([?#][\s\S]*)?$/.exec(s); return m ? [m[1] + (m[2] || ''), m[1] + '/' + (m[2] || '')] : [s]; };   // the path without and with its trailing slash
+  const seenOf = r => Number(r.seen) || Number(r.ts) || 0; const Q = 'SELECT id, kind, seen, ts, meta FROM arc_items WHERE ';
+  // every kind the archive holds but engagement snapshots, read off the (kind, ...) index a kind at a time: "url IN (...)" with no
+  // kind was a scan of the whole archive for every link (p71); with the kinds named it is a lookup on the (kind, url) index
+  let kinds = null; try { kinds = ((((await env.MIND_DB.prepare('WITH RECURSIVE k(kind) AS (SELECT MIN(kind) FROM arc_items UNION ALL SELECT (SELECT MIN(kind) FROM arc_items WHERE kind>k.kind) FROM k WHERE k.kind IS NOT NULL) SELECT kind FROM k WHERE kind IS NOT NULL LIMIT 400').all()).results) || []).map(x => String(x.kind)).filter(k => k !== 'sig_eng')); }
+  catch (e) { if (denBusy(e)) throw e; kinds = null; }   // a database that will not walk it: the lookup by address alone, as before p71
   for (const u of want) { const x = denUrl(u); const host = x ? x.hostname.toLowerCase().replace(/^www\.|^m\.|^mobile\./, '') : '';
     const pf = /(^|\.)(facebook|fb)\.com$/.test(host) ? 'facebook' : /instagram\.com$/.test(host) ? 'instagram' : /(^|\.)(x|twitter)\.com$/.test(host) ? 'x' : /youtu\.?be/.test(host) ? 'youtube' : /reddit\.com$/.test(host) ? 'reddit' : /linkedin\.com$/.test(host) ? 'linkedin' : /tiktok\.com$/.test(host) ? 'tiktok' : /threads\.(net|com)$/.test(host) ? 'threads' : 'news';
-    const canon = canonPermalink(pf, u) || u; const cands = Array.from(new Set([canon, u, u.replace(/[?#].*$/, ''), u.replace(/[?#].*$/, '').replace(/\/$/, '')]));
-    const r = await env.MIND_DB.prepare('SELECT id, kind, seen, ts, meta FROM arc_items WHERE url IN (' + cands.map(() => '?').join(',') + ") AND kind NOT IN ('sig_eng') ORDER BY seen ASC LIMIT 1").bind(...cands).first();
-    const m = r ? denJ(r.meta, {}) : {};
-    out.push({ url: u, channel: pf, held: !!r, seen: r ? (Number(r.seen) || Number(r.ts) || 0) : 0, layers: r ? (Array.isArray(m.layers) ? m.layers : (m.via === 'reach' ? [2] : m.reg ? [3] : [])) : [], kind: r ? r.kind : '' }); }
+    const d = feedLink(u); const canon = canonPermalink(pf, d) || d; const clean = denCleanUrl(d).replace(/#.*$/, ''); const forms = new Set();
+    [u, d, canon, clean, d.replace(/[?#].*$/, '')].filter(Boolean).forEach(s => slash(s).forEach(v => forms.add(v)));
+    Array.from(forms).forEach(s => { if (s.indexOf('&') >= 0) { forms.add(s.replace(/&/g, '&amp;')); forms.add(s.replace(/&/g, '&#038;')); } });   // (a) as a feed escaped it
+    const cands = Array.from(new Set(Array.from(forms).filter(s => /^https?:\/\//i.test(s)).map(s => s.slice(0, 700)))).slice(0, 60); const hits = [];
+    if (!kinds) { const r0 = await env.MIND_DB.prepare(Q + 'url IN (' + cands.map(() => '?').join(',') + ") AND kind NOT IN ('sig_eng') ORDER BY seen ASC LIMIT 1").bind(...cands).first(); if (r0) hits.push(r0); }
+    else for (let i = 0, K = Math.max(1, 95 - cands.length); i < kinds.length; i += K) { const ks = kinds.slice(i, i + K);   // at most 95 values bound a statement
+      const r0 = await env.MIND_DB.prepare(Q + 'kind IN (' + ks.map(() => '?').join(',') + ') AND url IN (' + cands.map(() => '?').join(',') + ') ORDER BY seen ASC LIMIT 1').bind(...ks, ...cands).first(); if (r0) hits.push(r0); }
+    if (pf === 'news') {
+      // (b) the report's link plus a query string: a link with none matches "link?..." (with or without its slash); one with a query, "link&..."
+      const pre = new Set(); [clean, d.replace(/#.*$/, '')].filter(Boolean).forEach(s => { if (s.indexOf('?') >= 0) pre.add(s + '&'); else slash(s).forEach(v => pre.add(v + '?')); });
+      for (const p of pre) { const r1 = await env.MIND_DB.prepare(Q + "kind='news' AND url>=? AND url<? ORDER BY seen ASC LIMIT 1").bind(p.slice(0, 700), p.slice(0, 700) + String.fromCharCode(65535)).first(); if (r1) hits.push(r1); }   // up to the last character a url can hold
+      // (d) a Google News row whose resolved publisher address is the link
+      const lk = clean ? Array.from(new Set(slash(clean).map(s => s.slice(0, 700)))) : [];
+      if (links && lk.length) { const r2 = await env.MIND_DB.prepare('SELECT a.id id, a.kind kind, a.seen seen, a.ts ts, a.meta meta FROM arc_links l JOIN arc_items a ON a.id=l.item WHERE l.url IN (' + lk.map(() => '?').join(',') + ') ORDER BY a.seen ASC LIMIT 1').bind(...lk).first(); if (r2) hits.push(r2); }
+    }
+    const r = hits.sort((a, b) => seenOf(a) - seenOf(b))[0] || null; const m = r ? denJ(r.meta, {}) : {};
+    out.push({ url: u, channel: pf, held: !!r, seen: r ? seenOf(r) : 0, layers: r ? (Array.isArray(m.layers) ? m.layers : (m.via === 'reach' ? [2] : m.reg ? [3] : [])) : [], kind: r ? r.kind : '' }); }
   return { ok: true, results: out };
 }
 async function denBacktestSave(env, b, who) {
@@ -9061,14 +10384,71 @@ const DEN_REPORT_DAY = 1;
 function denReportDay(desk) { const n = desk && desk.options ? desk.options.weekday : null; return Number.isInteger(n) && n >= 0 && n <= 6 ? n : DEN_REPORT_DAY; }
 /** The morning draft, for a desk that asked for it (off by default), inside the day's one window for automated model work.
  *  p70: a daily desk is drafted every morning, as before; a weekly desk only on its report day, read on the Sydney calendar
- *  (the day of its window's end). `waiting` names each weekly desk left for its day, with the day. */
-async function denBriefCron(env) {
-  if (!env.MIND_DB || !env.ANTHROPIC_API_KEY || !(await ensureDesks(env))) return { ok: false };
-  const desks = ((await env.MIND_DB.prepare('SELECT id FROM den_desks WHERE auto_draft=1 LIMIT 20').all()).results) || []; const out = { ok: true, drafted: [], held: [], waiting: [] };
-  for (const d of desks) { const desk = await deskGet(env, d.id); const day = denWindow(desk, {}, Date.now()).day;
-    if (desk.cadence === 'weekly') { const rd = denReportDay(desk); if (new Date(day + 'T00:00:00Z').getUTCDay() !== rd) { out.waiting.push(desk.id + ': ' + DEN_DAYS[rd]); continue; } }
-    if (await env.MIND_DB.prepare('SELECT 1 x FROM den_briefs WHERE desk=? AND day=?').bind(desk.id, day).first()) continue;
-    const r = await denBriefDraft(env, { desk: desk.id }, 'morning draft'); if (r.ok) out.drafted.push(desk.id); else { out.held.push(desk.id + ': ' + r.error); if (r.error === 'budget_exhausted') break; } }
+ *  (the day of its window's end). `waiting` names each weekly desk left for its day, with the day.
+ *  p71 (ST3): the drafts get a share of the tick, not all of it. The cron's wall clock is fifteen minutes, and the drafts
+ *  run after the collectors, the narratives (up to eight minutes) and the Studio's jobs (two), with the daily brief and
+ *  topic research after them; drafted one after another with no deadline, a second draft of her length ran past the wall,
+ *  its call spent, its hold standing and the report day lost (a cut tick is never run again). Now: the drafts end two
+ *  minutes before the wall, counted from the tick's start (o.t0); a desk's draft starts only with four minutes left, and its
+ *  model call is given no longer than what is left; the desks' evidence is built one at a time, as before, while their
+ *  model calls overlap; one desk's failure is its own. What the tick could not start, or what its deadline cut off, is
+ *  kept for the day (den_cron_left_<day>) and drafted by a later tick of the same Sydney day (o.window false: the held
+ *  ticks of AI_AUTOMATION=daily), which drafts nothing else; a desk is tried at most twice a morning.
+ *  p71 fixes (review C1, C1b, C3): a try is counted when a desk's draft starts, not when its call is sent. A draft that threw
+ *  before its call (a busy read in the evidence, EV7) counted none and was built again on every later tick, without end and
+ *  unlogged; so was a draft the platform ended mid-build. Now a throw, or a draft that failed on a busy database (its call's
+ *  reservation, say), is kept for a later tick while it has a try left: one busy read never loses the morning, and no desk is
+ *  tried more than twice. The Den keeps its own once-a-day marker (den_cron_day, the day its morning pass last ran): a held
+ *  tick of a day whose window tick never reached the Den (the platform ended it during the collectors, the narratives or the
+ *  Studio's jobs, with ai_cron_day already set) runs the morning pass itself, within the same tries and the Den's daily calls.
+ *  p71 fixes after the third review (K2, K5): a draft the deadline cut before its call was sent gives its try back (the try
+ *  still counts at the start, so a platform kill mid-build stays counted); busy is the failure's own flag, never a phrase in
+ *  its detail, which may quote the model. */
+const DEN_TICK_MS = 15 * 60000, DEN_TICK_AFTER_MS = 2 * 60000, DEN_CRON_START_MS = 4 * 60000, DEN_CRON_TRIES = 2;
+async function denBriefCron(env, o) {
+  o = o || {}; if (!env.MIND_DB || !env.ANTHROPIC_API_KEY) return { ok: false };
+  const until = (Number(o.t0) || Date.now()) + DEN_TICK_MS - DEN_TICK_AFTER_MS; const out = { ok: true, drafted: [], held: [], waiting: [], left: [] };
+  // the morning's drafts not yet made, by desk, with the tries each has had (a null-prototype map: a desk id is only a key)
+  const today = auDayKey(Date.now()), lk = 'den_cron_left_' + today; const left = Object.create(null); try { const j = JSON.parse((await kvGet(env.AXIOM_KV, lk)) || '{}'); if (j && typeof j === 'object') Object.keys(j).forEach(k => { left[k] = Number(j[k]) || 0; }); } catch (e) {}
+  const keep = async () => { if (Object.keys(left).length) await kvPut(env.AXIOM_KV, lk, JSON.stringify(left), 86400); else { try { await env.AXIOM_KV.delete(lk); } catch (e) {} } };
+  // p71 fix (C3): a held tick runs the morning pass when the Den's own marker says it has not run today
+  const ran = String((await kvGet(env.AXIOM_KV, 'den_cron_day')) || ''), full = o.window !== false || ran !== today;
+  if (!full && !Object.keys(left).length) return out;   // a later tick with nothing left over reads nothing more
+  if (!(await ensureDesks(env))) return { ok: false };
+  const desks = ((await env.MIND_DB.prepare('SELECT id FROM den_desks WHERE auto_draft=1 LIMIT 20').all()).results) || []; const due = [];
+  Object.keys(left).forEach(k => { if (!desks.some(d => d.id === k)) delete left[k]; });   // a desk no longer drafted each morning is not left over
+  for (const d of desks) { if (!full && !(d.id in left)) continue; const desk = await deskGet(env, d.id); if (!desk) continue; const day = denWindow(desk, {}, Date.now()).day;
+    if (desk.cadence === 'weekly') { const rd = denReportDay(desk); if (new Date(day + 'T00:00:00Z').getUTCDay() !== rd) { out.waiting.push(desk.id + ': ' + DEN_DAYS[rd]); delete left[desk.id]; continue; } }
+    if (await env.MIND_DB.prepare('SELECT 1 x FROM den_briefs WHERE desk=? AND day=?').bind(desk.id, day).first()) { delete left[desk.id]; continue; }
+    if ((Number(left[desk.id]) || 0) >= DEN_CRON_TRIES) { out.held.push(desk.id + ': not drafted after ' + DEN_CRON_TRIES + ' tries this morning'); delete left[desk.id]; continue; }
+    left[desk.id] = Number(left[desk.id]) || 0; due.push(desk); }
+  await keep();   // written before any draft starts: a tick cut short still leaves the rest to the next one
+  if (full && ran !== today) await kvPut(env.AXIOM_KV, 'den_cron_day', today, 2 * 86400);   // the morning pass has run (C3): its desks are kept
+  let gate = Promise.resolve(), spent = false;
+  const jobs = due.map(desk => { const prev = gate; let open = () => {}; gate = new Promise(res => { open = res; });
+    return (async () => { try { await prev;
+      if (spent) return { desk, r: { ok: false, error: 'budget_exhausted' } };
+      if (until - Date.now() < DEN_CRON_START_MS) return { desk, wait: true };
+      left[desk.id] = (Number(left[desk.id]) || 0) + 1; await keep();   // p71 fix (C1): the try counts as the draft starts, whatever ends it (a platform kill mid-build included)
+      let sent = false; const r = await denBriefDraft(env, { desk: desk.id }, 'morning draft', { until, ready: async () => { sent = true; open(); } });
+      if (r && r.error === 'budget_exhausted') spent = true; return { desk, r, sent };
+    } catch (e) { return { desk, e }; } finally { open(); } })(); });
+  for (const x of await Promise.all(jobs)) { const id = x.desk.id;
+    if (x.wait) out.left.push(id);   // not started, so no try is counted
+    else if (x.e) out.held.push(id + ': ' + String((x.e && x.e.message) || x.e).slice(0, 120));   // its try counted: kept for a later tick while it has one left
+    else if (x.r.ok) { out.drafted.push(id); delete left[id]; }
+    // p71 fix after the third review (K2): a draft the deadline cut before its ready hook ran sent no call (its evidence was
+    // built with under two minutes left), so its try is given back, as a draft not started counts none: two late ticks no
+    // longer close a desk's morning with no call ever sent. A cut after the call was sent keeps its try.
+    else if (x.r.cut && !x.sent) { left[id] = Math.max(0, (Number(left[id]) || 0) - 1); out.held.push(id + ': ' + x.r.error + ' (the tick\'s time ran out before its call was sent; no try counted)'); out.left.push(id); }
+    else if (x.r.cut) { out.held.push(id + ': ' + x.r.error + ' (the tick\'s time ran out)'); out.left.push(id); }
+    // p71 fix after the third review (K5): busy is read from where the failure came from (the call's reservation or its
+    // settling threw a busy database: r.busy, set by denModelCall on the thrown error itself), never from the composed
+    // detail, which for a draft_failed quotes the model's own words ("database is locked" in an answer that was not JSON
+    // was kept and paid for twice more)
+    else if (x.r.busy || x.r.error === 'db_busy') out.held.push(id + ': ' + x.r.error + ' (the database was busy)');   // p71 fix (C1): kept, as a throw is
+    else { out.held.push(id + ': ' + x.r.error); delete left[id]; } }
+  await keep();
   return out;
 }
 /** A long answer that keeps its connection: the work starts at once; if it is still running after fifteen seconds the
@@ -11919,19 +13299,27 @@ async function narrNearPost(env, b, who) {
 const OVERVIEW_KINDS = ['news', 'reddit_thread', 'sig_thread', 'reddit_comment', 'sig_comment', 'comments'];
 const OVERVIEW_LATEST_KINDS = ['news', 'reddit_thread', 'sig_thread'];
 /** Rows tagged with each client issue in the window against that issue's own
- *  average for the same window length over the rest of the last fourteen days. */
-async function overviewIssues(env, now, hours) {
+ *  average for the same window length over the rest of the last fourteen days. o.tags (the Overview): an issue tagged as
+ *  it is now for less than the fortnight before now is set against no usual (p71 fx2, D5). */
+async function overviewIssues(env, now, hours, o) {
   const marks = OVERVIEW_KINDS.map(() => '?').join(',');
   const since14 = now - 14 * 86400000, sinceH = now - hours * 3600000;
-  const rows = (await env.MIND_DB.prepare("SELECT je.value id, SUM(a.ts>?) recent, COUNT(*) n14, SUM(a.ts>? AND a.kind='news') news_recent FROM arc_items a, json_each(json_extract(a.meta,'$.issues')) je WHERE a.ts>? AND a.kind IN (" + marks + ') GROUP BY je.value').bind(sinceH, sinceH, since14, ...OVERVIEW_KINDS).all()).results || [];
+  // p71 (ST1): bounded above by now as well. The Den's burst check passes a brief's window end, and a window that closed
+  // before now counted every row filed since as its own ("32 in this window" beside a window that held 2)
+  const rows = (await env.MIND_DB.prepare("SELECT je.value id, SUM(a.ts>?) recent, COUNT(*) n14, SUM(a.ts>? AND a.kind='news') news_recent FROM arc_items a, json_each(json_extract(a.meta,'$.issues')) je WHERE a.ts>? AND a.ts<=? AND a.kind IN (" + marks + ') GROUP BY je.value').bind(sinceH, sinceH, since14, now, ...OVERVIEW_KINDS).all()).results || [];
   const byId = {}; rows.forEach(r => { byId[r.id] = r; });
   const windows = Math.max(1, (14 * 24 - hours) / hours);
+  // p71 fx2 (D5): the record the Den's burst check reads (denTagSince). Its fortnight was counted under another rule, so the
+  // Overview read MCA mentions as new coverage and narrowed mining as a fall: no usual and no ratio, and since when. The
+  // burst check asks for the figures as they are and says why itself (denMissed's newTags). p71 fx3 (F2): such an issue keeps
+  // the place its figures as they are give it: its missing usual sorted as nothing, so a narrowed issue led the table as new
+  const since = o && o.tags ? await denTagSince(env) : {}; const asIs = new Map();
   return CLIENT_ISSUES.map(ci => {
     const r = byId[ci.id] || {}; const recent = Number(r.recent) || 0; const n14 = Number(r.n14) || 0;
     const base = Math.round(((n14 - recent) / windows) * 10) / 10;
-    const ratio = base > 0 ? Math.round((recent / base) * 10) / 10 : (recent ? null : 0);
-    return { id: ci.id, label: ci.label, client: ci.client, ns: ci.ns, recent, news: Number(r.news_recent) || 0, base, ratio, n14 };
-  }).sort((a, b) => ((b.recent - b.base) - (a.recent - a.base)) || (b.recent - a.recent));
+    const ratio = base > 0 ? Math.round((recent / base) * 10) / 10 : (recent ? null : 0); const at = Number(since[ci.id]) || 0, fresh = at > now - 14 * 86400000;
+    const i = { id: ci.id, label: ci.label, client: ci.client, ns: ci.ns, recent, news: Number(r.news_recent) || 0, base: fresh ? null : base, ratio: fresh ? null : ratio, n14, since: fresh ? at : undefined }; asIs.set(i, base); return i;
+  }).sort((a, b) => ((b.recent - asIs.get(b)) - (a.recent - asIs.get(a))) || (b.recent - a.recent));
 }
 /** The newest rows on any client issue: a headline, a thread, a post. */
 async function overviewLatest(env, now, hours, limit) {
@@ -11959,7 +13347,7 @@ async function overview(env, opts) {
     soft(() => sentimentStatus(env), {}),
     soft(() => narrativesStatus(env), {}),
     soft(async () => ({ rows: (await env.MIND_DB.prepare('SELECT * FROM arc_alerts WHERE detected_ts>? ORDER BY detected_ts DESC LIMIT 30').bind(now - 7 * 86400000).all()).results || [] }), { rows: [] }),
-    soft(() => overviewIssues(env, now, hours), []),
+    soft(() => overviewIssues(env, now, hours, { tags: true }), []),
     soft(() => overviewLatest(env, now, hours, 30), []),
     soft(() => sourcesList(env, {}), { summary: {} }),
     soft(async () => (await env.MIND_DB.prepare("SELECT COUNT(*) n, SUM(kind='news') news FROM arc_items WHERE ts>? AND kind IN (" + OVERVIEW_KINDS.map(() => '?').join(',') + ") AND json_array_length(COALESCE(json_extract(meta,'$.issues'),'[]'))>0").bind(now - hours * 3600000, ...OVERVIEW_KINDS).first()) || {}, {}),
@@ -12006,9 +13394,16 @@ const BRIEF_DAYS_KEPT = 120;
 const BRIEF_HOUR = 7;                 // Sydney hour after which the cron writes the day's brief
 function auDayKey(at) { at = at || Date.now(); return new Date(at + auOffsetMs(at)).toISOString().slice(0, 10); }
 /* Automated model spend. The cron's Claude work - sentiment verdicts, narrative naming and alerts, topic research, the
- * Sentinel's drafted angles, the daily brief - is gated by the var AI_AUTOMATION: 'always' (every tick, as before 5 October
- * 2026), 'daily' (one window a day: the first tick at or after 07:00 Sydney, each module running one tick's worth; KV
- * ai_cron_day remembers the day) or 'off' (none until a person asks). The default is daily, set to save credits. Collection
+ * Sentinel's drafted angles, the daily brief, the Den's morning drafts - is gated by the var AI_AUTOMATION: 'always' (every
+ * tick, as before 5 October 2026), 'daily' (one window a day: the first tick at or after 07:00 Sydney, each module running
+ * one tick's worth; KV ai_cron_day remembers the day) or 'off' (none until a person asks). The default is daily, set to save
+ * credits. p71 fix (review C2): under daily the Den may finish its morning drafts on later ticks the same day, at most two
+ * tries a desk and within its daily calls (denBriefCron). What a later tick takes up (p71 fix after the third review, K6,
+ * said exactly): a desk the window's tick could not start, or whose draft its deadline cut off; a draft that threw (a busy
+ * read in its evidence, say) or whose call met a busy database; and every auto-draft desk when that tick never reached the
+ * Den. A draft whose call failed otherwise (no JSON twice, a refusal, an error from the model's service), or one refused (no
+ * evidence, the day's calls spent, a draft already being written, a brief that appeared meanwhile), is not tried again that
+ * day. Collection
  * (news, sources, full text, social, Reddit, Meta, forums, petitions), Sentinel detection and Slack alerts (without an angle),
  * narrative placement (Workers AI, not the model account) and the Creative Studio's own jobs (a person's commands, finished by
  * the tick when a tab closed) are never gated. */
@@ -12026,7 +13421,7 @@ async function aiAutomationGate(env, now) {
 }
 async function aiAutomationStatus(env, now) {
   now = now || Date.now(); const mode = aiAutomationMode(env); let last = null; try { last = env.AXIOM_KV ? await env.AXIOM_KV.get('ai_cron_day') : null; } catch (e) {}
-  return { mode, lastDay: last, today: auDayKey(now), text: mode === 'always' ? 'Automated model work runs every tick.' : mode === 'off' ? 'Automated model work is off; on-demand actions and the Studio run as asked.' : 'Automated model work runs once a day, the first tick at or after 07:00 Sydney' + (last === auDayKey(now) ? ' (ran today).' : last ? ' (last ran ' + last + ').' : ' (not yet run).') };
+  return { mode, lastDay: last, today: auDayKey(now), text: mode === 'always' ? 'Automated model work runs every tick.' : mode === 'off' ? 'Automated model work is off; on-demand actions and the Studio run as asked.' : 'Automated model work runs once a day, the first tick at or after 07:00 Sydney' + (last === auDayKey(now) ? ' (ran today).' : last ? ' (last ran ' + last + ').' : ' (not yet run).') + ' The Den may finish its morning drafts on later ticks the same day, at most two tries per desk.' };
 }
 function auHour(at) { at = at || Date.now(); return new Date(at + auOffsetMs(at)).getUTCHours(); }
 const BRIEF_SYS = 'You are the senior analyst at Curious Minds, an Australian public affairs agency, writing the daily intelligence brief that the managing director reads first thing and presents to clients. You are given the day\'s evidence: Sentinel alerts (spikes on client issues), the narratives the public conversation is telling (each a cluster of rows across news, Reddit, X, Bluesky, YouTube and the clients\' own pages, with its claim, counter-claim and stance toward the client), stances toward parties, people, organisations and topics with their change against the window before, every client issue against its own fourteen-day baseline, tone by issue, the newest headlines, and what the collection covered. Write for a director: what changed, why it matters and to which client, what to do about it. Concrete and plain, Australian spelling, no hype, no filler, no restating the data as a list of numbers. Every point cites its evidence by the ids given, in square brackets: [N:<id>] a narrative, [E:<id>] an entity, [I:<id>] an issue, [A:<id>] an alert, [L:<id>] a headline. Never invent a figure, a name, a quote or an event that is not in the evidence; where the evidence is thin, say so under gaps. Reply with strict JSON only, no prose outside it: {"headline":"one line of at most fourteen words","summary":"three to five sentences a director could read aloud","changed":[{"what":"one sentence","why":"one sentence on who it matters to and how","evidence":["N:abc","I:ftc"]}],"clients":[{"ns":"mca","client":"Minerals Council of Australia","read":"two or three sentences on the day for this client","watch":["a narrative or shift to watch"],"risks":["a risk"],"openings":["an opening"],"actions":["a concrete action for the team"],"evidence":["N:abc","E:mca"]}],"narratives":[{"id":"abc","why":"one sentence on what it means and where it is heading","stance":"hostile|supportive|mixed|unknown"}],"sentiment":[{"id":"albanese","direction":"more critical|warmer|steady","why":"one sentence"}],"risks":["..."],"actions":["..."],"gaps":["what the evidence cannot say yet"]}. Cover every client namespace given, most change first; a client with nothing today gets a one-sentence read saying so and empty lists. At most six items in changed, five narratives, six sentiment lines, four risks, five actions, three gaps. Use only narrative and entity ids that appear in the evidence.';
@@ -12052,7 +13447,7 @@ function briefEvidence(g) {
   const al = ov.alerts || {}; const alerts = (al.open || []).concat((al.recent || []).filter(a => !a.open)).slice(0, 8);
   L.push('SENTINEL ALERTS (coverage of a client issue spiked against its own fourteen-day baseline):' + (alerts.length ? '\n' + alerts.map(a => '[A:' + a.id + '] ' + a.label + ' (' + (a.client || a.ns) + ') ' + a.ratio + 'x baseline, ' + a.hot + ' stories from ' + a.srcs + ' outlets, ' + (a.open ? 'awaiting a response' : a.drafted ? 'drafted' : 'acknowledged') + ', detected ' + iso(a.detected)).join('\n') : ' none in the last seven days'));
   const iss = (ov.issues || []).filter(i => i.recent || i.base);
-  L.push('ISSUES AGAINST THEIR OWN BASELINE (rows in the window against the usual for a window this long):\n' + (iss.length ? iss.map(i => '[I:' + i.id + '] ' + i.label + ' (' + i.ns + ') ' + i.recent + ' rows, ' + i.news + ' of them news, usual ' + i.base + (i.ratio != null ? ', ' + i.ratio + 'x' : i.recent ? ', new' : '')).join('\n') : 'nothing tagged'));
+  L.push('ISSUES AGAINST THEIR OWN BASELINE (rows in the window against the usual for a window this long):\n' + (iss.length ? iss.map(i => '[I:' + i.id + '] ' + i.label + ' (' + i.ns + ') ' + i.recent + ' rows, ' + i.news + ' of them news, ' + (i.since ? 'not compared with its usual (tagged as it is now only since ' + iso(i.since) + ' UTC)' : 'usual ' + i.base + (i.ratio != null ? ', ' + i.ratio + 'x' : i.recent ? ', new' : ''))).join('\n') : 'nothing tagged'));   // p71 fx2 (D5): overviewIssues' since
   const full = {}; ((g.narr || {}).narratives || []).forEach(n => { full[n.id] = n; });
   const seen = new Set(); const narrs = [];
   ((ov.narratives || {}).moving || []).forEach(n => { if (!seen.has(n.id)) { seen.add(n.id); narrs.push(Object.assign({}, full[n.id] || {}, n, { moving: true })); } });
@@ -12188,7 +13583,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-17.studio-p70';
+const AXIOM_BUILD = '2026-11-17.studio-p71';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -19501,16 +20896,76 @@ const CLIENT_ISSUES = [
     rx: /fuel tax credit|diesel rebate|diesel fuel rebate|fuel excise credit/i,
     wide: /fuel tax credits?|fuel tax|diesel (fuel )?rebate|fuel excise|excise credit|hands off our fuel|\bhoof\b|off-?road diesel|diesel (tax|price|cost|subsid)|fuel (levy|subsid)/i,
     q: ['fuel tax credit', 'diesel rebate', 'fuel excise', 'hands off our fuel'] },
+  // p71: a deals-feed post for lithium coin batteries (a price, "(S&S)", "+ Delivery" and an "@ store" suffix) put critical
+  // minerals on the MCA desk of 17 November 2026. The metals a shop sells by name (lithium, nickel, cobalt, graphite, tungsten)
+  // do not count in a text that reads as a deal: an "@ store" suffix, priced or not (review CO10: "free lithium batteries with
+  // any purchase @ <store>" carried no price), "(S&S)", "+ delivery" or free shipping, words no mining, refining or market story
+  // uses; a handle (@name, no space after the @) is not a store. "battery", "deal" and "sale" are not the test: a lithium
+  // offtake deal, an asset sale and battery demand are mining news. Review B2: what follows the @ in a market story is a price
+  // ("lithium @ 850 a tonne", "@ US$10,500/t", "@ USD 33,000", a forum's "@ 2.50"), not a store. Review H4: a price is a number,
+  // with or without a currency mark or code of these (US$, A$, AU$, NZ$, $, USD, AUD, NZD) and a unit after it (a tonne, /t, per
+  // tonne, a pound, c); a store whose name is short ("@ IGA $12", "@ JB $99") or starts with a digit ("@ 7-Eleven", "@ 99 Bikes")
+  // is still a store (round 2 read three letters before a price as a currency, and any digit as a price). A whole number of one
+  // or two digits is a price only before a mark, the end, a unit or a word a quote runs on with ("@ 45 as lithium rallies"), as
+  // a short number begins a store's name; one of three digits or more is a price ("@ 850 as demand slows"); a time ("@ 3pm") is
+  // neither. Any other word after the @ is still a store ("@ record lows", "@ approx US$10,500/t"), as on every build since CO10.
   { ns: 'mca', client: 'Minerals Council of Australia', id: 'cm', label: 'Critical minerals', map: 'i_cm',
     rx: /critical minerals?|rare earths?|gallium|antimony|strategic reserve/i,
-    wide: /critical minerals?|rare earths?|gallium|antimony|\blithium\b|\bnickel\b|\bcobalt\b|graphite|vanadium|\btungsten\b|strategic reserve|minerals? (strategy|processing|refinery|reserve|facility)|downstream processing|\blynas\b|\biluka\b|arafura|pilgangoora/i,
+    wide: /critical minerals?|rare earths?|gallium|antimony|^(?![\s\S]*(\s@\s+(?!(?:(?:us|au?|nz)?\$|usd|aud|nzd)\s?\.?\d|(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d*\.\d+)(?:[ck]|(?:\s?\/\s?(?:t|tonne|lb|kg|oz)\b|\s+(?:a|per)\s+(?:tonne|ton|pound|lb|kg|ounce|oz|share)\b))?(?![\w%]|-\D)|\d+(?:[ck]\b|(?:\s?\/\s?(?:t|tonne|lb|kg|oz)\b|\s+(?:a|per)\s+(?:tonne|ton|pound|lb|kg|ounce|oz|share)\b))|\d{3,}(?![\w%]|-\D|[.,]\d)|\d{1,2}(?![\w%]|-\D|[.,]\d)(?=\s*(?:[^\w\s]|$)|\s+(?:as|after|amid|and|at|but|down|from|in|now|on|since|then|to|today|up|while|with|usd|aud|nzd|each|ea)\b)|\d{1,2}(?:[:.]\d{2})?\s?[ap]\.?m\b)\w|\(s&s\)|\+ ?delivery\b|free (shipping|delivery)\b))[\s\S]*?\b(lithium|nickel|cobalt|graphite|tungsten)\b|vanadium|strategic reserve|minerals? (strategy|processing|refinery|reserve|facility)|downstream processing|\blynas\b|\biluka\b|arafura|pilgangoora/i,
     q: ['critical minerals', 'rare earths', 'lithium mine', 'nickel industry', 'critical minerals strategic reserve'] },
+  // p71 (the MCA real-data check of 17 November 2026, finding 14): "Pilbara" alone, "miner" or "miners" alone and "resources
+  // minister" alone put three stories that were not about mining (a state politician's own affairs, a history feature and a
+  // gas story) on the MCA desk and in its tone counts. Each now counts only beside a mining word, a mineral or a miner's name in the same
+  // sentence, within 80 characters either way ("gold miners", "a Pilbara lithium mine", "the Resources Minister on critical
+  // minerals"); what names mining itself (BHP, Rio Tinto, Fortescue, iron ore, royalties, a mine approval, mining) is unchanged.
+  // Tagging happens at collection: rows filed before this keep their tags, except the core feeds' rows of the last week, which
+  // the back-fill (arcTagFill) tags again because the lexicon's version changes with this matcher. Review CO9: "exploration"
+  // is not a mining word beside the Resources Minister, and a gas word (gas, LNG, petroleum, offshore) between the minister and
+  // the mining word, or joined to the mining word ("gas and minerals", "minerals, oil and gas"), voids it: the minister's
+  // offshore gas permits and "gas and minerals exports" were tagging AEP's gas stories as MCA's mining. Review B3: only there,
+  // not the whole sentence: a title with no full stop runs into its description, so a gas permit in the description (or a gas
+  // headline over a minister's mine) voided a mining story. Review H2: joined is any coordination, not one word beside it: and,
+  // or, nor, plus, as well as, a comma, "&", "/" or "+", with up to two words before the gas word ("minerals and natural gas",
+  // "copper and liquefied natural gas") and through a list ("coal, minerals, and gas"); a contrast is no join ("gold, not gas").
+  // No lookbehind (the page and the Mac compile this too), so before a mining word its four words are read, or all of them at
+  // the start of the text: a gas word with a coordinator straight after it, running on to the mining word within three more
+  // words, joins them ("Gas and critical minerals exports", "Gas/minerals", "LNG, coal and gold"). A gas word with no coordinator
+  // after it ("gas prices fell and gold rose") or further back than that is no join, as a separate clause or a run-on title is.
   { ns: 'mca', client: 'Minerals Council of Australia', id: 'mining', label: 'Mining and resources',
     rx: /mining (tax|royalt|approval|jobs)|resources (sector|industry|policy)|royalties/i,
-    wide: /\bmining\b|\bminers?\b|minerals council|iron ore|coal (mine|mining|export|industry|seam)|royalt(y|ies)|resources (sector|industry|policy|tax|minister|company|state)|\bbhp\b|rio tinto|fortescue|glencore|whitehaven|yancoal|\bpilbara\b|bowen basin|hunter valley (coal|mine)|super ?profits tax|minerals? tax|mine (approval|closure|rehabilitation|site|worker)|same job,? same pay|nature positive|\bepbc\b|uranium|\bfifo\b|smelter|alumina|refinery closure/i,
+    wide: /\bmining\b|minerals council|iron ore|coal (mine|mining|export|industry|seam)|royalt(y|ies)|resources (sector|industry|policy|tax|company|state)|\bbhp\b|rio tinto|fortescue|glencore|whitehaven|yancoal|bowen basin|hunter valley (coal|mine)|super ?profits tax|minerals? tax|mine (approval|closure|rehabilitation|site|worker)|same job,? same pay|nature positive|\bepbc\b|uranium|\bfifo\b|smelter|alumina|refinery closure|\bminers?\b[^.]{0,80}\b(mines?|ore|coal|gold|lithium|nickel|copper|zinc|bauxite|rare earths?|minerals?|exploration|underground|asx|stocks?|diesel|fuel tax|tax(es)?|kalgoorlie|mount isa|broken hill)\b|\b(mines?|ore|coal|gold|lithium|nickel|copper|zinc|bauxite|rare earths?|minerals?|exploration|underground|asx|stocks?|diesel|fuel tax|tax(es)?|kalgoorlie|mount isa|broken hill)\b[^.]{0,80}\bminers?\b|\bpilbara\b[^.]{0,80}\b(mines?|miners?|ore|lithium|gold|copper|manganese|minerals?|exploration|tenements?|hancock|roy hill)\b|\b(mines?|miners?|ore|lithium|gold|copper|manganese|minerals?|exploration|tenements?|hancock|roy hill)\b[^.]{0,80}\bpilbara\b|resources minister(?:(?!\b(?:gas|lng|petroleum|offshore)\b)[^.?!]){0,80}?\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b(?!(?:\s*(?:[,&\/+]|(?:and|or|nor|plus)\b|as\s+well\s+as\b)(?:\s+(?!(?:and|or|nor|plus|as|gas|lng|petroleum|offshore|not|than|rather|instead|unlike|except|but|while|whereas|versus|vs|without|no)\b)[a-z][\w'-]*(?![\w'-])){0,2})+?\s*\b(?:gas|lng|petroleum|offshore)\b)|(?:^\s*(?!(?:\S+\s+){0,3}\S*?\b(?:gas|lng|petroleum|offshore)\b\s*(?:,\s*(?:and|or)\b|[,&\/+]|(?:and|or|nor|plus)\b|as\s+well\s+as\b)(?:\s*(?!(?:not|than|rather|instead|unlike|except|but|while|whereas|versus|vs|without|no)\b)[^\s.?!]+){0,3}?\s*[^\s\w]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b)(?:\S+\s+){0,4}|\s(?=(?:\S+\s+){4}[^\s\w,&\/+]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b)(?!(?:\S+\s+){0,3}\S*?\b(?:gas|lng|petroleum|offshore)\b\s*(?:,\s*(?:and|or)\b|[,&\/+]|(?:and|or|nor|plus)\b|as\s+well\s+as\b)(?:\s*(?!(?:not|than|rather|instead|unlike|except|but|while|whereas|versus|vs|without|no)\b)[^\s.?!]+){0,3}?\s*[^\s\w]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b)(?:\S+\s+){4})[^\s\w,&\/+]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b(?:(?!\b(?:gas|lng|petroleum|offshore)\b)[^.?!]){0,80}?resources minister/i,
     q: ['mining royalties', 'iron ore', 'coal mine approval', 'minerals council', 'nature positive laws', 'same job same pay mining'] },
+  // p71 (compare-mca s.8.3): the analyst's weekly MCA report counts the posts that name the Minerals Council or its chief
+  // executive, and no issue caught them. A row is an MCA mention when it names the organisation ("Minerals Council of
+  // Australia", or "the Minerals Council"), its newsroom's address, or its chief executive by the full name the register holds.
+  // Never "MCA" alone (a museum, a council, a certificate), and never the bodies that share the words: the NSW, Tasmanian and
+  // Queensland minerals councils, however written (review CO11: "NSW's", "the N.S.W." and "the Minerals Council of NSW" were
+  // counted, as the word before had to be the state itself), or Minerals Council South Africa, which a mining wire carries
+  // often. What may stand before "minerals council": the start, a mark that is not a full stop, the end of a sentence (two
+  // characters that are not a stop, so not N.S.W.), an ellipsis, a word that is not a state nor the s of a possessive, or a
+  // possessive that is not a state's ("Australia's", with either apostrophe: \W, as the worker stays ASCII); the word or the
+  // possessive begins the text or follows a space, a mark, an ellipsis or a full stop that ends a word of two characters or
+  // more, never the stop after an initial (review B4: the W of "N.S.W" was a word, and an ellipsis had stopped counting; review
+  // H3: a page's paragraphs joined by stripHtml read "rose.The Minerals Council", and an ellipsis runs on as "rose...the").
+  // After it, never a state, also in brackets or after a comma, when the state ends the name: a mark follows it that is not an
+  // apostrophe nor a joined hyphen, or the end ("Minerals Council (NSW)", "Minerals Council, NSW, said"); a list goes on ("the
+  // Minerals Council, NSW Farmers and ...", "the Minerals Council, NSW's farmers and ...", "the Minerals Council, Queensland's
+  // biggest employer group", review H3). Two dots stand for an ellipsis of any length (a long run of dots was quadratic). No
+  // social handle: neither the register nor the watch seed records one. No lookbehind, so the page (AX_ISSUES) and the Mac
+  // collector (Python) compile the same matcher (tools/lexicon-sync.mjs). Listed last of MCA's issues, so a desk's first issue
+  // is fuel tax credits.
+  { ns: 'mca', client: 'Minerals Council of Australia', id: 'mcamentions', label: 'MCA mentions',
+    rx: /minerals council of australia|(^|[^a-z\s.]\s*|[^\s.]{2}\.\s*|\.\.\s*|(?:^|[^\w.]|[^\s.]{2}\.|\.\.)(?!(nsw|wales|tasmanian?|queensland|s)\b)[a-z]+\s+|(?:^|[^\w.]|[^\s.]{2}\.|\.\.)(?!(nsw|wales|tasmanian?|queensland)\b)[a-z]+\Ws\s+)minerals council\b(?! (of )?(south africa|tasmania|nsw|new south wales|n\.s\.w|queensland)\b|\s*[(,]\s*(of\s+)?(south africa|tasmania|nsw|new south wales|n\.s\.w\.?|queensland)(?:\s*(?:[^\s\w'\u2019-]|$)|\s+-))|minerals\.org\.au|tania constable/i,
+    wide: /minerals council of australia|(^|[^a-z\s.]\s*|[^\s.]{2}\.\s*|\.\.\s*|(?:^|[^\w.]|[^\s.]{2}\.|\.\.)(?!(nsw|wales|tasmanian?|queensland|s)\b)[a-z]+\s+|(?:^|[^\w.]|[^\s.]{2}\.|\.\.)(?!(nsw|wales|tasmanian?|queensland)\b)[a-z]+\Ws\s+)minerals council\b(?! (of )?(south africa|tasmania|nsw|new south wales|n\.s\.w|queensland)\b|\s*[(,]\s*(of\s+)?(south africa|tasmania|nsw|new south wales|n\.s\.w\.?|queensland)(?:\s*(?:[^\s\w'\u2019-]|$)|\s+-))|minerals\.org\.au|tania constable/i,
+    q: ['minerals council of australia', 'tania constable'] },
+  // p71 (the rank lane's rebuild of the AEP board of 16-17 November 2026): headlines on the gas reservation bill missed this
+  // tight trigger, written as "gas reserves", "gas reform", "gas plan", "gas vote" or "east coast gas scheme", so the bill's own
+  // coverage ranked as passing. "gas" stays next to each word, so the Reserve Bank and petrol are not caught; "plan", "vote" and
+  // "scheme" are singular and whole words, so a gas plant and a company's "gas plans" for a field are not; a reservation bill,
+  // scheme or policy counts with "gas" in the same sentence (review CO8: bare, a campsite, a seat or a land reservation scheme
+  // counted toward the Sentinel's spike on gas and could start a narrative).
   { ns: 'aep', client: 'Australian Energy Producers', id: 'gas', label: 'Gas supply and reservation',
-    rx: /gas (supply|reservation|shortfall|market|price)|domestic gas|\blng\b/i,
+    rx: /gas (supply|reserv(e|es|ation)|reforms?|shortfall|market|price|plan\b|vote\b|scheme\b)|domestic gas|\blng\b|reservation (bill|scheme|policy)[^.]{0,80}\bgas\b|\bgas\b[^.]{0,80}reservation (bill|scheme|policy)/i,
     wide: /\bgas\b|\blng\b|gas (supply|reservation|shortfall|market|price|field|project|export|import|ban|connection|network|plant)|domestic gas|east coast gas|\bsantos\b|woodside|beach energy|\bshell\b|petroleum|offshore (gas|drilling|exploration)|north ?west shelf|scarborough (gas|project|field|lng)|barossa (gas|project|field|pipeline)|narrabri|beetaloo|browse basin|\baemo\b|gas-?fired|fracking|coal seam gas|\bcsg\b/i,
     q: ['gas reservation', 'gas prices', 'north west shelf', 'offshore gas project', 'gas shortfall', 'fracking beetaloo', 'domestic gas reservation bill'] },
   // Gas taxation is the campaign the activist reports lead with. It is an issue of its own so it has its own baseline, its own
@@ -20182,6 +21637,30 @@ async function integrityReport(env, limit) {
 export const __test = { sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve, narrCleanTitle, narrAutoLabel, narrTemplate, narrPersonish, narrNamed, narrRow, narrLabelQueue, narrClaim, narrativesCron, narrativesRun, narrAutoTick, narrAutoMode, narrMergeScan, narrMergeApply, narrMergeUndo, narrMergePass, narrAlias, narrAliasMany, narrHeadCover, narrLeaseTake, narrMergeMode, narrNearMode, narrOpposite: narrOppositeOf, narrRefresh, arcNewsSnap, arcCoreRow, coreNewsTick, arcTagFill, buildAllNews, bskySearch, bskyCronQueries, deskIssueIds, socialSummary, tickClock, tickSave, denPipeline, lexIssueQueries };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
+// p71 (DEN.md s.10.13): the Den's helpers and stages a harness reads directly. Each lane of the p71 build adds any further
+// name on its own line below, never to the line above, so the lanes merge without touching one another.
+Object.assign(__test, { denShort, denTitle, DEN_CLIENT_SHORT, denCleanUrl, denGoogleLink, denTextKey, denToneWord, denRel, denSourceList, denSys, DEN_KIND_GUIDE, denHeld, parseFeedXml, deskUpdate, deskView, denEvCard, denBriefView, denFoldKey, engRow, sourceRows, denIdsJson, denMergeIds, denBriefDraft, overviewIssues, entityMatcher });
+// lane rank (evidence selection):
+Object.assign(__test, { DEN_EVIDENCE_MAX, DEN_BOILER_RX, denSlugKey, denUrlDate, denSummary, denCut, denRegEntry, denRegistry, denOutlet, denEvCap, denPick, denAcct });
+Object.assign(__test, { DEN_SPONSORED_HOSTS, denSponsored });   // p71 review, lane evidence (ST4): a harness adds an invented outlet to its own module's list
+Object.assign(__test, { DEN_SPONSORED_RX });   // p71 fx3, lane evidence (F1): the label read on its own, both lists
+
+// lane signals (strip, tone, narratives, momentum):
+Object.assign(__test, { DEN_RELIED, denRelied });
+// lane strip (p71 review fixes: the strip, tone, narratives and the window before):
+Object.assign(__test, { denTagSince, DEN_TAG_P71 });
+
+// lane prompt (rules, guides, desk options):
+
+// lane export (document, Source List, recall, feed links):
+Object.assign(__test, { denBriefDoc, feedLink, feedUrlDate, parseSitemap, arcCoreRow, arcEscUnheld, arcLinksFill, fulltextCron });
+// lane checker (figure check, upcoming):
+Object.assign(__test, { denFigs, denFigSrc, denFigFound });
+Object.assign(__test, { denCtx, DEN_CTX_LINES, denUpPick });   // p71 fixes after review (CK2, CK3)
+
+// lane sources (registry, matchers):
+Object.assign(__test, { sourceSeed, sourcesSeed, arcLexVersion, denNsIssues });
+
 
 // Text that may reach a log line or an error answer: provider keys travel in URLs (?key=) and headers, so they are
 // struck out before anything is written. Secrets are never logged on purpose; this catches the accidental case.
@@ -22844,6 +24323,7 @@ const AXIOM_WORKER = {
     //    POST /sources/add {id?,name,tier,juris,issues,urls:{rss,wp,json,sitemap,home,site,gnews,podcast},methods?,schedule?,note?}   (full)
     //    POST /sources/update {id, ...patch}  POST /sources/delete {id}  POST /sources/import {sources:[...]}   (full)
     //    POST /sources/sweep {ids?|all}                    a few ids run inline; more become a job the console tails (full)
+    //    POST /sources/report {id,ok,method,n,added,ms,detail}   a desktop collector's probe; /sources/listing {id,ok,method,items,ms,detail} files its links too (full) -> {added, rows, baseline}
     if (path === '/sources' || path.startsWith('/sources/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let sb = {}; if (req.method === 'POST') { try { sb = await req.json(); } catch (e) { sb = {}; } }
@@ -22928,20 +24408,31 @@ const AXIOM_WORKER = {
           }
           return jsonResp(out);
         }
-        if (path === '/sources/report') {
-          // a desktop collector reports a probe it ran with a real browser
+        if (path === '/sources/report' || path === '/sources/listing') {
+          // a desktop collector reports a probe it ran with a real browser. p71 (review B6): /sources/listing brings the links it
+          // read on a listing page too (items: title and link), filed here through sourceRows before the run is recorded, as the
+          // worker's own render job files them: a page read for the first time is a baseline, a day in an address dates its
+          // link, and the tags are the worker's. The Mac filed every link as found, so its first render of a newsroom put the
+          // client's old releases on the Board (review CO3 by another route). A person asked for this read (review H1): a later
+          // probe files what the archive does not hold as found, however long since the last (sourceRows, hit.asked), and the
+          // answer says whether the read was a baseline, for the job's log. A write that fails records nothing, so the next read
+          // is still a first one. A collector from before p71 files through /archive/add and reports here.
           const id = sourceIdClean(sb.id);
           const s = id ? await sourceGet(env, id) : null;
           if (!s) return jsonResp({ error: 'unknown_source' }, 404);
-          const method = SOURCE_METHODS.indexOf(sb.method) >= 0 ? sb.method : 'render';
-          const n = Math.max(0, parseInt(sb.n, 10) || 0);
+          const method = SOURCE_METHODS.indexOf(sb.method) >= 0 ? sb.method : 'render'; const now = Date.now();
+          const items = path === '/sources/listing' ? (Array.isArray(sb.items) ? sb.items : []).slice(0, 200).map(i => ({ title: String((i && i.title) || ''), link: String((i && i.link) || ''), date: '' })) : null;
+          const n = items ? items.length : Math.max(0, parseInt(sb.n, 10) || 0); let added = parseInt(sb.added, 10) || 0, rows = null;
+          if (items) { rows = sourceRows(s, { items, method, undated: true, asked: true }, now); rows.forEach(r => { r.meta.via = 'reach'; }); added = 0; for (let i = 0; i < rows.length; i += 150) added += await archiveItems(env, 'news', rows.slice(i, i + 150), true); }
           const run = { src: s, ok: !!sb.ok && n > 0, method, items: [], tried: [{ method, ok: !!sb.ok && n > 0, n, ms: parseInt(sb.ms, 10) || 0, status: 0, skipped: false, detail: String(sb.detail || '').slice(0, 160) }] };
-          await env.MIND_DB.batch(sourceStmts(env, run, parseInt(sb.added, 10) || 0, Date.now()));
-          return jsonResp({ ok: true, source: await sourceGet(env, id) });
+          await env.MIND_DB.batch(sourceStmts(env, run, added, now));
+          return jsonResp(Object.assign({ ok: true, source: await sourceGet(env, id) }, rows ? { added, rows: rows.length, baseline: rows.some(r => r.meta.baseline === 1) } : {}));
         }
         if (path === '/sources/sweep') {
           const ids = (Array.isArray(sb.ids) ? sb.ids : (sb.id ? [sb.id] : [])).map(sourceIdClean).filter(Boolean);
-          if (ids.length && ids.length <= 5) return jsonResp(await sourceSweep(env, { ids, detail: true }));
+          // the Sources drawer's Sweep on a source is a person asking what is there now: one button, one answer with Probe
+          // (sourceRows, hit.asked); "sweep what is due" and "every source" run as a job and keep the schedule's rule
+          if (ids.length && ids.length <= 5) return jsonResp(await sourceSweep(env, { ids, detail: true, asked: true }));
           const params = { ids, all: !!sb.all || !ids.length, where: 'worker' };
           const job = await jobCreate(env, 'sources', params, auth.name);
           ctx.waitUntil(jobRunLocal(env, { id: job.id, source: 'sources', params }));
@@ -24990,7 +26481,11 @@ async function handleScheduled(env) {
   try { const rp = await mindRetractPending(env, 20); if (rp.tried) console.log('Retractions:', rp.done, 'of', rp.tried, 'finished'); } catch (e) { console.log('retraction retry failed', String(e).slice(0, 120)); }
   // The daily brief: written once after 7am Sydney from what the modules above keep; rewritten on demand from the app or tools/daily-brief.py.
   // (already once a day by its own guard; held only when automated model work is off)
-  if (ai.run) { try { const dn = await denBriefCron(env); if (dn && dn.drafted && dn.drafted.length) console.log('Den morning drafts:', dn.drafted.join(', ')); } catch (e) { console.log('den brief cron failed', String(e).slice(0, 120)); } }
+  // p71 (ST3): the Den's morning drafts end before the tick's wall clock, counted from its start; a held tick later the same
+  // day (AI_AUTOMATION=daily, the window already run) drafts only what the window's tick left for lack of time, nothing else.
+  // p71 fixes (C1, C3): and a desk whose draft failed, while it has a try left; and the whole morning when the window's tick
+  // never reached the Den (its own marker, den_cron_day). Every desk not drafted is logged by name with why
+  if (ai.run || (ai.mode === 'daily' && ai.last === ai.day)) { try { const dn = await denBriefCron(env, { t0: clk.t0, window: !!ai.run }); if (dn && dn.drafted && dn.drafted.length) console.log('Den morning drafts:', dn.drafted.join(', ')); if (dn && dn.held && dn.held.length) console.log('Den morning drafts not made:', dn.held.join('; ')); if (dn && dn.left && dn.left.length) console.log('Den morning drafts left for a later tick (time ran out):', dn.left.join(', ')); } catch (e) { console.log('den brief cron failed', String(e).slice(0, 120)); } }
   if (ai.mode !== 'off') { try { const br = await briefCron(env); if (br && br.ok && br.brief) console.log('Brief:', br.day, br.brief.headline); } catch (e) { console.log('brief cron failed', String(e).slice(0, 120)); } }
   clk.mark('briefs');
   // Topics: SIFA's keyword list hourly (no model), then the two stalest topics researched (a model call each: the day's window).

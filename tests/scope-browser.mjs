@@ -76,7 +76,7 @@ await t('a client narrows the front page to that client\'s alerts, narratives, i
   eq((await texts(page, '#overview-root .ov-issues tbody tr')).length, 1);
   eq((await texts(page, '#overview-root .ov-row')).length, 1);
   ok(/scoped to Minerals Council of Australia/.test(await page.textContent('#overview-root .ov-head')));
-  const iss = await texts(page, S + 'select[aria-label="Client issue"] option'); ok(iss.length >= 2 && iss.every(o => /Every issue|Fuel tax|Critical minerals|Mining/i.test(o)), iss.join(','));
+  const iss = await texts(page, S + 'select[aria-label="Client issue"] option'); ok(iss.length >= 2 && iss.every(o => /Every issue|Fuel tax|Critical minerals|Mining|MCA mentions/i.test(o)), iss.join(','));
   ok(/Clear 1 filter/.test(await page.textContent(S + '.scope-clear')));
   ok(await page.$(S + 'select[aria-label="Client"].on'), 'an active control is marked');
 });

@@ -165,7 +165,10 @@ D1 registered public actors named on their own posts only; D2 at most eight live
 refused by the licence);
 D3 layer 1 worker route built behind configuration; D4 one stated model call per draft, `DEN_DAILY_CALLS` 20, the
 morning draft off (amended 16 November 2026, the owner: narrative naming is automatic within `NARRATIVE_DAILY_CALLS`
-and every narrative has a computed working title; a draft is still one call a person starts, s.10.5); D5 copy as rich text, `.md`, `.html`, Slack summary; D6 read role reads, full role drafts and
+and every narrative has a computed working title; a draft is still one call a person starts, s.10.5; the morning draft is
+each desk's own choice in Options, off unless set: on 17 November 2026 it is on for MCA national, daily at 07:00 Sydney,
+and for MCA national weekly, on Mondays, s.10.12, at the owner's request that the analyst keep daily reports as well as
+the weekly ones); D5 copy as rich text, `.md`, `.html`, Slack summary; D6 read role reads, full role drafts and
 approves; D7 every reach channel built switched off, started only by a person signing in on the Mac; D8 subscriber
 outlets only through the agency's own subscription and only once clearance is recorded on the source; D9 the
 monitoring-export importer built.
@@ -1794,3 +1797,148 @@ mornings), all three failing on 26d3753; `tests/den-worker.mjs` (22), `den-relea
 `2026-11-17.studio-p70`, then on each weekly desk set Cadence Weekly, Reporting window 168 and Draft each morning Yes in
 Options, and post the report day if it is not Monday. Not verified: the live cron on a real desk; the first report-day
 morning of a weekly desk after the deploy shows it.
+
+**Deployed.** Merged to `main` as b583915 and pushed; the owner deployed it on 17 November 2026 at 00:35 UTC (deploy
+token `caf9abf1726d7f5b`), and `/engine/status` answered `2026-11-17.studio-p70`. The same day, through
+`POST /den/desk/update` (full key), a weekly desk was created in the analyst's weekly MCA format: **MCA national weekly**
+(`mca_mca_national_weekly`), cadence weekly, a 168-hour window, her thirteen sections in her order (critics' and
+supporters' narratives, emerging risks and positive opportunities as sections of their own, since a section holds no
+headings), one rating item "Overall assessment" on her six-level sentiment scale (Negative to Positive; "Neutral to
+mixed leaning negative" without its comma, because Options splits levels on commas) with Improving, Stable or
+Deteriorating; then, after the deploy, `auto_draft` on with report day Monday. Its first morning draft is due on
+Monday 23 November 2026. The daily MCA national desk (`mca_au`) is unchanged and drafts at 07:00 every day (D4).
+
+### 10.13 The real-data fixes (build p71)
+
+Branch `claude/den-p71`, cut from `main` at b583915 (the live p70). On 17 November 2026 the owner asked for every fix the
+real-data check called for that needs no decision of theirs ("Yes, start them"). The check set the first live drafts on
+`aep_au` and `mca_au` beside the analyst's own reports for the same windows; its notes quote client material and stay out
+of this repository, so this record names their findings by id (AEP B1-B5, M1-M10, m1-m10; MCA 1-17; combined B1-B7,
+M1-M8). Six lanes were built in parallel from a shared base (a2222eb: the client's short name, the report's title, a link
+cleaner, a text key, tone in words, how a row bears on the desk's issues, the set of rows a draft must be given) and merged
+by hand. A review in five dimensions then confirmed 44 findings; they were fixed in five lanes, each checked by a skeptic
+who tried to break the fix, and what the skeptics found in those fixes went through six more rounds the same way, until
+the last checks found nothing worse than the build before. Where a part kept trading one edge case for another (how
+upcoming dates are read, the figure check, the sponsored label), every sentence any reviewer had listed went into one
+table with its expected result, decided by two rules (keep a real event rather than drop it; keep two different events
+apart rather than fold them into one), and every row must pass.
+
+**What the draft is told** (denSys, DEN_KIND_GUIDE). It writes for the client's communications team and calls the client
+by its short name (AEP, MCA), never "rows", "evidence", "supplied", "held", "judged", "registered", "pinned", "working
+title" or "the client"; counts are plain quantities and tone is in words, never a score (combined M4, AEP M2). It never
+says which platform a conversation was on, never compares platforms by volume, and writes nothing about a channel the
+CHANNELS line lists as not read (combined B2, AEP B1). "Remains", "still", "continues", "again" and "no longer" are used
+only against the last filed bottom line (combined B4, MCA 1). It gives the client no position the evidence does not give
+it, names who "industry" means, and treats criticism of a company as no attack on the client (combined B3, AEP B2, MCA
+3). People are named as rule D1 says (AEP B4, MCA 4). A measure word rests on a cited line (MCA 6). A "Special Report"
+an outlet labels as a piece made with the company is the company's material, never the outlet's reporting (MCA 15). The
+guides follow her format and lengths (3,300-5,000 words a brief; a draft may now run to 16,000 output tokens), the brief
+carries its own title (`options.title`, else by cadence), and a desk names the channels its reports rest on
+(`options.channels`; AEP M4, M5, M10, MCA 17).
+
+**Which evidence reaches it.** Rows are chosen by how they bear on the desk's issues, not by syndication and time
+(combined M1): every row a check or a pin rests on first, wherever the Board's own lists stop (review EV1, ST5), then a
+cap of 30 to 60 lines by window with a place for each channel, a share for each issue and a quarter of the window, no
+more than an eighth of the stories from one outlet, and a story that only mentions an issue in passing left out. Stories
+fold by headline or by their address's own slug, keeping a day's live pages apart (EV3); an outlet is printed by its
+registry name, never a key (AEP M8); a link is the publisher's address, decoded and stripped of tracking (MCA 16); paywall
+and feed boilerplate are struck, and a story dated only by its address says its day, with the year when it is not the
+window's (CO7, R2). Three or more posts of one text are one templated line that stands for the rest (AEP M5), and citing
+it covers a check resting on any of them. Engagement reads as the platform gave it: "engagement not recorded" when no
+count was read, "no interactions" only when likes and comments were both read at nothing, else the counts read and the
+ones not recorded ("0 comments, likes not recorded"; EV5, CO2, D3). The comments read under a post are counted, and their
+tone said only when three or more carry one (R1). A narrative is said to be taken up only on the channels this window read
+(found by the p72 acceptance run: a draft had written that a narrative was carried on a channel the window never read).
+The sponsored label is read only for the outlets in `DEN_SPONSORED_HOSTS` (Stockhead, per MCA 15), by what stands before
+it on its own line (ST4, D4b, F1, Q1; a 129-row table in the rank harness).
+
+**The strip, tone, narratives and the window before.** A burst is a citable line I:<issue> carrying its figures, bounded by
+the window (AEP M4, m6; ST1); a first-seen name's check rests on the rows that named it, and only a row that bears on the
+desk (MCA 2). Tone is one judgement per story or templated text, in words, with the stories behind each count (combined B7,
+AEP B5, MCA 5; ST7 leaves the listed outlet's sponsored pieces out of press tone). Each issue's posts and stories are set
+against the window of the same length before (C:<issue>), counted as the Board counts them (combined M2; EV2). An issue
+whose matcher changed in p71 (critical minerals, mining, MCA mentions) is compared only from the moment it changed:
+`DEN_TAG_P71` freezes p70's matchers and `den_tagsince` (KV) records when each changed, so no false burst or rise follows
+the deploy (CO1, D5). The Overview shows such an issue as "tagged as it is now since <day>" in its raw place for a
+fortnight (F2). Whether approving a desk's lexicon term should restart its issue's comparison is the owner's call; p71
+does not (F3).
+
+**The figure check and upcoming dates.** The figure check reads whole numbers with their sign, count words, magnitudes and
+units (Mt, ML, yr), years, "other" against "in all", and lists and tones (combined M3, AEP M3, MCA 12; CK2-CK9, A1-A6,
+E1-E9, P5, S6). A line with no id clears a figure only on a count word or unit they share, or a year; the window's own
+span is not a claim, a different span is. A sentence that cites nothing is checked against every line, and its flag says
+"is not in the evidence". denUpcoming reads standing schedules ("every Tuesday and Friday") as recurring, one entry each,
+never past their end, folds one event told by many stories, keeps two events apart, keeps next year's dates, and drops
+what has ended (AEP m2; CK3, CK4, A7-A10, E2-E8, P1-P4, S1-S5); the Board keeps 40 and the draft 15, schedules keeping
+three places. `tests/den-p71-checker-worker.mjs` CK36 holds the table: 171 upcoming and 101 figure rows.
+
+**The document a client receives.** One numbering for the text and the Source List, keyed by the clean address, written as
+text (AEP B3, combined B5); her header and date (AEP M10, combined M5); a rating under its own section, else its first
+momentum section, else after the summary (compare-mca 8.7, EX1); the list headed "Sources" (EX6); clean links in every
+evidence card (EX5). The page reads the measure lines (EX3), words a figure flag by where it was looked for (CK11), and a
+card says what its evidence line says (CO5, C6, C8, G1-G3, R1, R2); measure chips name their measure (C5); an upcoming card
+is keyed and cited by its row, and a recorded date by its record (C7, K3).
+
+**Collection.** Five sources added to `SOURCE_SEED_EXT`, read openly (ABC News Environment, ABC News Top Stories, Region
+Canberra's own feed, the AEP newsroom's listing, MCA's releases; combined item 3). An MCA mentions issue (combined item 7),
+a narrower mining matcher (MCA 14), the gas trigger's bill wordings, and a critical-minerals guard against deal posts; the
+lexicon copies in `docs/index.html` and `tools/reach-reddit.py` are regenerated (`node tools/lexicon-sync.mjs`). Counts a
+collector did not give stay absent (MCA 11; CO2). A listing's first read is a baseline, filed before every window, on
+every route (CO3, B6); a read a person asks for (Probe with a browser, the drawer's Sweep of a source, the worker's render
+job) files what is new as found, however long since the last (H1, SR29); a scheduled sweep keeps its 72-hour window. Every
+feed escape of "&" is looked up before filing (CO6, B5). An undated feed item takes its address's day: the time it was
+found if found that day, else the day's end (B1). New: `POST /sources/listing` (full key), where the Mac agent's render
+job files its links; `tools/reach-agent.py` posts there and falls back to the old route on a worker before p71. The mining
+matcher's join check runs in linear time (SR28: one list of ", and" items had made it exponential).
+
+**The morning draft.** A draft's hold lasts as long as the draft may and its write is guarded, so a second press, an edit
+or a filing meanwhile is never written over (ST2: 409 `draft_in_progress`, 409 `brief_changed` with the brief that is
+there). The morning cron has a deadline from the tick's start, drafts desks one after another within it, catches each
+desk's failure, and keeps a desk it could not finish (a deadline, a throw, a busy database) in `den_cron_left_<day>` for a
+later tick the same day, at most two tries a desk (ST3, C1, K2, K5). The Den keeps its own once-a-day marker
+(`den_cron_day`), so a window tick cut before the Den's stage is made up by a later tick (C3). Under `AI_AUTOMATION=daily`
+this means a later tick the same day may send a Den call; the gate's comment and status text say so (C2, K6). Each desk not
+drafted is logged ("Den morning drafts not made: <desk>: <why>").
+
+**Tests.** Seven new harnesses: `den-p71-prompt-worker` (14), `den-p71-signals-worker` (20), `den-p71-checker-worker`
+(41), `den-p71-rank-worker` (19), `den-p71-export-worker` (25), `den-p71-sources-worker` (29) and
+`den-p71-merge-worker` (4); each case fails on the build before it. Changed expectations, each because the behaviour was
+meant to change: den-worker DK2, DK6, DK8, DK12, DK21; den-release-worker DR2, DR4; collect-hardening CH11, CH12;
+social-worker's Bluesky row; sources-worker's listing baseline and registry count; overview-worker (a fresh issue's place);
+den-browser, den-editor-browser and scope-browser where card words changed; tests/den-fixture.mjs registers its invented
+outlets. Final runs on 1366760, 18 November 2026: `node tests/run.mjs check` 30 of 30; backend 117 of 117 (four bind a local port
+and pass with the sandbox off; `workerd-deploy-test` skips its miniflare part, as before); browser 75 of 75 (three studio
+harnesses skip parts they skipped before: fonts not installed, and no second Chromium for the cross-browser runs). The browser harness den-browser's
+strip case ("the strip says what should not be missed ...") fails now and then on an Escape-focus check and passes when run
+alone; it did the same before p71.
+
+**Known limits, left on purpose.** An upcoming card whose entry a newer, fuller telling takes over can read "new since the
+draft" and not be citable until the next draft (round 4's attempt to key it by its earliest telling let a card be cited by
+another town's line, which is worse; p72's merge on save covers it). The upcoming reader and the label rule are heuristics:
+their tables hold every case found; a new wording can still misread. Left from the last review: a levy and a tax with no other word in common stay two entries ("the levy" and "the gas tax" on one
+day); a hike, increase or cut on two measures of one kind folds them; a weekday comma, a noun in -ing or "in response to"
+after a begun verb can give a past day as next year's; a postponement word elsewhere in a clause can keep an ended event;
+a cited sentence restating a span the line does not give passes. A manual probe after a month away files that month's
+undated releases as today's news, as p70 did. A sitemap whose dated entries go stale falls back to undated ones and stamps
+them as found within 72 hours of its last read, as before.
+
+**Not verified here.** The five new sources' addresses (unverified until a live sweep); a real draft under the new rules at
+her length; the cron's deadline and make-up ticks on the live platform; the Mac agent against the live worker; the frozen
+matcher table against the live `den_tagsince`.
+
+**The owner's steps.**
+1. Merge the squashed branch `claude/den-p71-release` (one commit on `main`; the working branch's history holds strings
+   copied from client data in two harnesses, rewritten since, and must not reach `main`): `git merge --ff-only
+   claude/den-p71-release`, then push.
+2. Deploy the worker: `tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh`; confirm `/engine/status` answers
+   `2026-11-17.studio-p71`.
+3. GitHub Pages serves the page from `main` (den.js r58, den-brief.js r6, overview.js r2, index.html's lexicon).
+4. Restart the Mac agent (launchd) so `tools/reach-agent.py` posts renders to `/sources/listing`.
+5. After the first sweeps, read Collection for the five new sources; a source that fails its address is the owner's to
+   correct or remove. When `p71_region` (Region Canberra's own feed) delivers, `region_au` can be switched off.
+
+**Asked for and not built, with the reason (each the owner's decision).** Reading X, Facebook, Instagram and YouTube and
+registering her voices; subscriber outlets (D8); the note on client positions; the evidence pane's line words (s.10.3);
+flagging sentences with no source (DK7); printing narrative and tone sources; register fixes (who leads the Opposition,
+title aliases); the window's end hour; bullets (deferred); whether approving a term restarts a comparison (F3); adding
+outlets to `DEN_SPONSORED_HOSTS`.
