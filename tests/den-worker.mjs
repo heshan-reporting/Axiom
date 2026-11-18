@@ -225,8 +225,12 @@ await S.t('DK10 the budget and the refusals', async () => {
 
 await S.t('DK11 saving', async () => {
   const w = await mk({ ANTHROPIC_API_KEY: 'test-anthropic' }); await seedDay(w); const calls = model(w); const br = (await F(w, 'POST', '/den/brief', { desk: 'aep_au' })).body.brief; const cite = '[' + br.sections.summary.cites[0] + ']';
-  const s1 = await F(w, 'POST', '/den/brief/save', { id: br.id, revision: 1, sections: { summary: 'Anne\'s own words ' + cite + '. And an invented one [M:31337].' }, ratings: { momentum: { level: 'High', trend: 'Escalating' } } });
-  eq([s1.status, s1.body.brief.revision, s1.body.changed], [200, 2, ['summary', 'ratings']]); const sm = s1.body.brief.sections.summary; eq([sm.edited, sm.by, sm.cites.length, sm.uncited], [true, 'Anne', 1, ['And an invented one.']], 'a hand edit is checked the same way'); eq(s1.body.brief.ratings.momentum, { level: 'High', trend: 'Escalating' });
+  // p72 (BRIEF-P72 "Text paths"): an id the window does not hold is refused in words, the ids named and nothing saved; it
+  // was struck before p72 and its sentence listed as needing a source, which a person never saw happen
+  const no = await F(w, 'POST', '/den/brief/save', { id: br.id, revision: 1, sections: { summary: 'Anne\'s own words ' + cite + '. And an invented one [M:31337].' }, ratings: { momentum: { level: 'High', trend: 'Escalating' } } });
+  eq([no.status, no.body.error, no.body.ids], [409, 'cannot_cite', ['M:31337']]); ok(/\[M:31337\]/.test(no.body.detail) && /Nothing was saved/.test(no.body.detail), no.body.detail);
+  const s1 = await F(w, 'POST', '/den/brief/save', { id: br.id, revision: 1, sections: { summary: 'Anne\'s own words ' + cite + '. And an invented one.' }, ratings: { momentum: { level: 'High', trend: 'Escalating' } } });
+  eq([s1.status, s1.body.brief.revision, s1.body.changed], [200, 2, ['summary', 'ratings']]); const sm = s1.body.brief.sections.summary; eq([sm.edited, sm.by, sm.cites.length, sm.uncited], [true, 'Anne', 1, []], 'a hand edit is checked the same way'); eq(s1.body.brief.ratings.momentum, { level: 'High', trend: 'Escalating' });
   const stale = await F(w, 'POST', '/den/brief/save', { id: br.id, revision: 1, sections: { bottom: 'Kai\'s bottom line.' } }, 'other-key'); eq([stale.status, stale.body.error, stale.body.brief.revision], [409, 'conflict', 2]); ok(/keep yours, or take theirs/.test(stale.body.detail) && /Anne's own words/.test(stale.body.brief.sections.summary.text), 'theirs comes back with the refusal');
   eq((await F(w, 'POST', '/den/brief/save', { id: br.id, revision: 2, sections: { summary: sm.text } })).body.unchanged, true, 'the same words are not a new revision');
   eq((await F(w, 'POST', '/den/brief/save', { id: br.id, revision: 2, sections: { summary: 'x'.repeat(20001) } })).body.error, 'section_too_long'); eq((await F(w, 'POST', '/den/brief/save', { id: 'nope', revision: 1, sections: {} })).status, 404);

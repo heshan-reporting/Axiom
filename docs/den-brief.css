@@ -150,6 +150,37 @@
 .den-briefwrap .den-pull-t .den-t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font:600 var(--dn-fs-md)/1.35 var(--dn-text)}
 .den-briefwrap .den-pull-t .den-sub{margin:0;color:var(--dn-ink-3)}
 
+/* p72 lane pane: the Sources pane (spec v3 Part A, Part D's words). Every list is the evidence card above; a correction's
+   choices open under its card; what a correction did is said under the heading, what failed under its card */
+.den-briefwrap .den-foldwrap{margin-top:var(--dn-sp-5)}
+.den-briefwrap .den-pane .den-why{display:block;margin-top:2px;font:600 var(--dn-fs-xs)/1.3 var(--dn-text);color:var(--dn-accent-text)}
+.den-briefwrap .den-pane .den-evwho{display:block;font-size:var(--dn-fs-xs);color:var(--dn-ink-3)}
+.den-briefwrap .den-pane .den-must{border-color:var(--dn-warn);color:var(--dn-warn-ink)}
+.den-briefwrap .den-panenote{margin:var(--dn-sp-2) 0 0;padding:var(--dn-sp-2) var(--dn-sp-3);border-radius:var(--dn-r-sm);background:var(--dn-pos-dim);color:var(--dn-ink-0);font-size:var(--dn-fs-sm)}
+.den-briefwrap .den-evfail{margin:var(--dn-sp-2) 0 0;padding:var(--dn-sp-2) var(--dn-sp-3);border-radius:var(--dn-r-sm);background:var(--dn-neg-dim);color:var(--dn-ink-0);font-size:var(--dn-fs-sm);line-height:1.45}
+.den-briefwrap .den-evitem>.den-evfail{margin:0 var(--dn-sp-3) var(--dn-sp-3)}
+.den-briefwrap .den-evitem[data-busy="1"]{opacity:.7}
+.den-briefwrap .den-offer{display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:var(--dn-sp-3) var(--dn-sp-4);border-top:1px solid var(--dn-line);background:var(--dn-s1);font-size:var(--dn-fs-sm);color:var(--dn-ink-1)}
+.den-briefwrap .den-offer p{margin:0;line-height:1.45}
+.den-briefwrap .den-offer-sec{margin-top:var(--dn-sp-1);font:600 var(--dn-fs-xs)/1.2 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-ink-2)}
+.den-briefwrap .den-offer-s{display:flex;flex-direction:column;gap:var(--dn-sp-1);margin:0;padding:var(--dn-sp-2) var(--dn-sp-3);border:1px solid var(--dn-line);border-radius:var(--dn-r-sm);background:var(--dn-s2)}
+.den-briefwrap .den-offer-s legend{padding:0 var(--dn-sp-1);font-style:italic;color:var(--dn-ink-0);line-height:1.45}
+.den-briefwrap .den-offer-s label{display:flex;align-items:center;gap:var(--dn-sp-2);min-height:var(--dn-hit);cursor:pointer}
+.den-briefwrap .den-findbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--dn-sp-2) var(--dn-sp-3);margin:var(--dn-sp-2) 0}
+.den-briefwrap .den-checkline{display:flex;align-items:center;gap:var(--dn-sp-2);min-height:var(--dn-hit);font-size:var(--dn-fs-sm);color:var(--dn-ink-1)}
+.den-briefwrap .den-pulllist li{flex-wrap:wrap}
+.den-briefwrap .den-pull-act{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-2);margin-left:auto}
+.den-briefwrap .den-pulllist .den-evfail{flex:1 1 100%}
+.den-briefwrap .den-more{margin:var(--dn-sp-1) 2px 0}
+.den-briefwrap .den-addbox{display:flex;flex-direction:column;gap:var(--dn-sp-3);margin-top:var(--dn-sp-2)}
+.den-briefwrap .den-addta{min-height:72px;resize:vertical}
+.den-briefwrap .den-addlist{display:flex;flex-direction:column;gap:var(--dn-sp-2);margin:0;padding:0;list-style:none}
+.den-briefwrap .den-addlist li{display:flex;flex-direction:column;gap:var(--dn-sp-1);padding:var(--dn-sp-2) var(--dn-sp-3);border:1px solid var(--dn-line);border-radius:var(--dn-r-md);background:var(--dn-s2)}
+.den-briefwrap .den-addurl{overflow-wrap:anywhere;color:var(--dn-ink-3);font-size:var(--dn-fs-xs)}
+.den-briefwrap .den-addf{display:flex;flex-wrap:wrap;gap:var(--dn-sp-2)}
+.den-droppv ul,.den-dropnote ul{margin:var(--dn-sp-1) 0 var(--dn-sp-2);padding-left:var(--dn-sp-5)}
+.den-droppv p{margin:var(--dn-sp-2) 0 0}
+
 /* ------------------------------------------------------------------------------------------ around the page */
 .den-filedband{display:flex;align-items:center;gap:var(--dn-sp-3);padding:10px var(--dn-sp-4);border-bottom:1px solid var(--dn-line);background:var(--dn-pos-dim);color:var(--dn-ink-0);font-size:var(--dn-fs-md);animation:den-b-fade var(--dn-dur-2) var(--dn-ease)}
 .den-filedband>.den-ic{color:var(--dn-pos-ink)}

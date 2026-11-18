@@ -618,7 +618,8 @@ def main(argv=None):
             st = rs.status(c)
             print('%-10s %s%s' % (c, 'usable, %d of %d reads today' % (st['reads_today'], st['per_day']) if st['usable'] else (st['status'] or 'not installed'), ('  - ' + st['why']) if st.get('why') else '') + (('\n             ' + st['native_hint']) if st.get('native_hint') else '') + ((' (read through %s)' % st['backend']) if st.get('backend') and st['usable'] else ''))
         return 0
-    if not a.key: sys.exit('need --key or AXIOM_KEY (export it in ~/.zshrc so the background agent can find it)')
+    # the background agent runs under launchd as a login shell (zsh -lc), which reads ~/.zprofile and never ~/.zshrc
+    if not a.key: sys.exit('need --key or AXIOM_KEY (export it in ~/.zprofile: the background agent starts as a login shell, which does not read ~/.zshrc)')
     say = (lambda *x: None) if a.quiet else print
     fixed = [s.strip() for s in a.sources.split(',') if s.strip()]
     try:

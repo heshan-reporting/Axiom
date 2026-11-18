@@ -71,8 +71,9 @@ await t('nothing is uncovered before a brief; a check the brief misses is a quie
   const s1 = await w2.F('POST', '/den/brief/save', { id: s0.id, revision: s0.revision, sections: { summary: words + words, media: words + words, bottom: words, posture: words } }); eq(s1.status, 200, 'a hand brief is saved: ' + s1.text.slice(0, 200));
   p = await open(w2); await p.waitForSelector(CARD('media')); await p.waitForFunction(() => /not in the brief/.test((document.querySelector('.den-strip-h') || {}).textContent || ''), null, { timeout: 15000 }).catch(() => {});
   ok(/not in the brief/.test(await txt(p, '.den-strip-h')), 'the rail counts what the brief does not hold: ' + await txt(p, '.den-strip-h'));
-  let q = await quiet(p); const todo = q.filter(x => /not in the brief yet/.test(x[1])); ok(todo.length >= 1, 'a column says a check is not in the brief yet: ' + JSON.stringify(q));
-  ok(todo.every(x => !/\b(neg|warn)\b/.test(x[0])), 'and says it quietly, not in red: ' + JSON.stringify(todo)); ok(!q.some(x => /uncovered/.test(x[1])), 'the word "uncovered" is gone'); await p.context().close();
+  // p72 (lane P2): a column's state is the one count of Check before you send, checks included ("N to check"), not a second chip of its own
+  let q = await quiet(p); const todo = q.filter(x => /^\d+ to check$/.test(x[1])); ok(todo.length >= 1, 'a column counts what is still to check: ' + JSON.stringify(q));
+  ok(todo.every(x => !/\bneg\b/.test(x[0])) && !q.some(x => /not in the brief yet/.test(x[1])), 'never in red, and one count, not two: ' + JSON.stringify(todo)); ok(!q.some(x => /uncovered/.test(x[1])), 'the word "uncovered" is gone'); await p.context().close();
   const f = await w2.F('POST', '/den/brief/file', { id: s0.id, revision: s1.body.brief.revision, acknowledge: true }); eq([f.status, f.body.brief && f.body.brief.status], [200, 'filed'], 'filed with the checks acknowledged: ' + f.text.slice(0, 200));
   p = await open(w2); await p.waitForSelector(CARD('media')); await p.waitForFunction(() => /acknowledged/.test((document.querySelector('.den-strip-h') || {}).textContent || ''), null, { timeout: 15000 }).catch(() => {});
   ok(/acknowledged/.test(await txt(p, '.den-strip-h')) && !/not in the brief/.test(await txt(p, '.den-strip-h')), 'filed, the rail reads acknowledged: ' + await txt(p, '.den-strip-h'));
@@ -95,7 +96,8 @@ await t('Refresh on a tab other than the Board still asks for the checks', async
   for (const name of ['watch', 'brief', 'options']) {
     await tab(p, name); await p.waitForSelector('.den-strip li'); p.served.length = 0; await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click();
     for (let i = 0; i < 50 && !p.served.some(x => /^GET \/den\/missed/.test(x)); i++) await new Promise(r => setTimeout(r, 100));
-    ok(p.served.some(x => /^GET \/den\/missed/.test(x)), name + ': Refresh asked for the checks: ' + p.served.join(' | ')); await p.waitForSelector('.den-strip li');
+    // p72 (lane P2, G2 E2): on the Brief the window is read again with its checks (missed=1) and handed to the rail: one read, not two
+    ok(p.served.some(x => /^GET \/den\/missed/.test(x)) || (name === 'brief' && p.served.some(x => /^GET \/den\/board\?.*missed=1/.test(x))), name + ': Refresh asked for the checks: ' + p.served.join(' | ')); await p.waitForSelector('.den-strip li');
   }
   eq(p.errors, []); await p.context().close();
 });
@@ -103,11 +105,11 @@ await t('icons sit beside the words, hidden from a screen reader: Back, Refresh,
   const w3 = await world(); const p = await open(w3); await p.waitForSelector(CARD('media'));
   const ic = async (loc, what) => { ok(await loc.locator('svg.den-ic[aria-hidden="true"]').count() >= 1, what + ' has an icon'); };
   await ic(p.getByRole('button', { name: 'Back to AXIOM', exact: true }), 'Back'); await ic(p.getByRole('button', { name: 'Refresh', exact: true }), 'Refresh'); await ic(p.getByRole('button', { name: 'Keyboard shortcuts', exact: true }), 'the shortcuts button');
-  const row = cards(p, 'media').filter({ hasText: 'Producers answer' }); await ic(row.getByRole('button', { name: 'Pin', exact: true }), 'Pin'); await ic(row.getByRole('button', { name: 'Set aside', exact: true }), 'Set aside'); await ic(row.locator('.den-card-act a.den-link'), 'Open');
+  const row = cards(p, 'media').filter({ hasText: 'Producers answer' }); await ic(row.getByRole('button', { name: 'Must mention', exact: true }), 'Must mention'); await ic(row.getByRole('button', { name: 'Set aside', exact: true }), 'Set aside'); await ic(row.locator('.den-card-act a.den-link'), 'Open');
   await ic(p.locator('.den-col[data-sec="summary"] button[data-tour="col-write"]'), 'Write'); eq(await p.locator('.den-col[data-sec="summary"] button[data-tour="col-write"]').textContent().then(s => s.trim()), 'Write', 'and the word is unchanged');
-  await row.getByRole('button', { name: 'Pin', exact: true }).click(); await p.waitForSelector(CARD('media') + '.pinned');
-  const mark = p.locator(CARD('media') + '.pinned .den-pinmark'); ok(await mark.locator('svg.den-ic').count() === 1 && /^Pinned$/.test((await mark.locator('.den-sr').textContent()).trim()), 'the mark is an icon with the word for a screen reader');
-  ok(/^Pinned\. /.test(await p.getAttribute(CARD('media') + '.pinned', 'aria-label')), 'and the card still says it is pinned');
+  await row.getByRole('button', { name: 'Must mention', exact: true }).click(); await p.waitForSelector(CARD('media') + '.pinned');
+  const mark = p.locator(CARD('media') + '.pinned .den-pinmark'); ok(await mark.locator('svg.den-ic').count() === 1 && /^Must mention$/.test((await mark.locator('.den-sr').textContent()).trim()), 'the mark is an icon with the word for a screen reader');
+  ok(/^Must mention\. /.test(await p.getAttribute(CARD('media') + '.pinned', 'aria-label')), 'and the card still says it is must mention');
   ok((await p.$$eval('#den-root svg.den-ic', a => a.every(s => s.getAttribute('aria-hidden') === 'true' && s.getAttribute('focusable') === 'false'))), 'no icon is read out or takes the focus');
   eq(p.errors, []); await p.context().close();
 });
@@ -134,7 +136,7 @@ await t('the Board loads as column ghosts; a write is said in a live line beside
   const w4 = await world(); let slow = true; w4.hooks = [async (route, r, path) => { if (slow && /^\/den\/board/.test(path)) await new Promise(res => setTimeout(res, 1500)); return false; }];
   const p = await open(w4); await p.waitForSelector('.den-loading.board', { timeout: 5000 }); eq(await p.locator('.den-loading.board .den-skelcol').count(), 5, 'the skeleton is shaped like the columns'); slow = false;
   await p.waitForSelector(CARD('media')); const story = cards(p, 'media').filter({ hasText: 'Harbour levy' });
-  await story.getByRole('button', { name: 'Pin', exact: true }).click(); await p.waitForFunction(() => /^Pinned: Harbour levy/.test((document.querySelector('.den-col-tools [role="status"]') || {}).textContent || ''));
+  await story.getByRole('button', { name: 'Must mention', exact: true }).click(); await p.waitForFunction(() => /^Must mention: Harbour levy/.test((document.querySelector('.den-col-tools [role="status"]') || {}).textContent || ''));
   const key = await story.getAttribute('data-key'); await story.focus(); await p.keyboard.press('3'); const filed = p.locator('.den-col[data-sec="media"] .den-row[data-key="' + key + '"]'); await filed.waitFor();
   eq(await filed.locator('select.den-file').evaluate(s => s.options[s.selectedIndex].textContent), 'Move...', 'a filed card offers to move, not the name of where it is');
   ok(await filed.locator('select.den-file option[value="media"]').evaluate(o => o.disabled && /filed here/.test(o.textContent)), 'the column it sits in is marked, and not offered again');
@@ -143,8 +145,9 @@ await t('the Board loads as column ghosts; a write is said in a live line beside
 await t('Refresh on the Brief tab reads the window again for its evidence; on Watch it reads only the checks', async () => {
   const p = await open(w); await p.waitForSelector(CARD('media')); await tab(p, 'brief'); await p.waitForSelector('.den-briefhost .den-brief, .den-briefhost .den-state', { state: 'attached' });
   const wait = async rx => { for (let i = 0; i < 50 && !p.served.some(x => rx.test(x)); i++) await new Promise(r => setTimeout(r, 100)); };
-  p.served.length = 0; await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click(); await wait(/^GET \/den\/board/); await wait(/^GET \/den\/missed/);
-  ok(p.served.some(x => /^GET \/den\/board\?/.test(x)) && p.served.some(x => /^GET \/den\/missed/.test(x)), 'on Brief both are read: ' + p.served.join(' | '));
+  p.served.length = 0; await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click(); await wait(/^GET \/den\/board/); await new Promise(r => setTimeout(r, 400));
+  // p72 (lane P2, G2 E2): one read of the window with its checks (missed=1), handed to the rail; the rail does not ask again
+  ok(p.served.some(x => /^GET \/den\/board\?.*missed=1/.test(x)) && !p.served.some(x => /^GET \/den\/missed/.test(x)), 'on Brief the board is read with its checks, once: ' + p.served.join(' | '));
   await tab(p, 'watch'); await p.waitForSelector('#den-tabpanel section.den-panel:visible'); p.served.length = 0; await p.locator('#den-app .den-head button', { hasText: 'Refresh' }).click(); await wait(/^GET \/den\/missed/); await new Promise(r => setTimeout(r, 400));
   ok(p.served.some(x => /^GET \/den\/missed/.test(x)) && !p.served.some(x => /^GET \/den\/board/.test(x)), 'on Watch only the checks: ' + p.served.join(' | ')); eq(p.errors, []); await p.context().close();
 });

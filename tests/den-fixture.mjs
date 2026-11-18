@@ -41,13 +41,28 @@ export async function world(env) {
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(j) }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 50 } }), { status: 200, headers: { 'Content-Type': 'application/json' } }); });
   return Object.assign(w, { F, push, calls });
 }
+/* p72 lane P3: the Next path needs a second report of the same client on the day. vicBrief(w) writes one for aep_vic by hand
+ * through POST /den/brief/save (no model call), every sentence invented; answers the brief. */
+export async function vicBrief(w, key) {
+  const k = key || 'full-key'; const s0 = await w.call('POST', '/den/brief/save', { desk: 'aep_vic' }, k); if (s0.status !== 200) throw new Error('vic start ' + s0.text.slice(0, 160));
+  const b = s0.body.brief; const r = await w.call('POST', '/den/brief/save', { id: b.id, revision: b.revision, sections: {
+    summary: 'Victorian coverage of the harbour levy stayed quiet through the reporting period, with two regional outlets reporting the Geelong port council\'s concerns about shipping moving north.',
+    media: 'Regional outlets carried the port council\'s statement and a short report on the committee hearing timetable, with no new angle on the levy itself.',
+    bottom: 'Activity in Victoria is low and steady, and the client is not named in any of it.' } }, k);
+  if (r.status !== 200) throw new Error('vic save ' + r.text.slice(0, 160)); return r.body.brief;
+}
 export const browser = await chromium.launch();
 export async function open(w, key, o) {
   o = o || {}; const ctx = await browser.newContext(Object.assign({ viewport: { width: o.width || 1440, height: o.height || 900 }, acceptDownloads: true }, o.reducedMotion ? { reducedMotion: 'reduce' } : {})); await ctx.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
   const page = await ctx.newPage(); page.errors = []; page.on('pageerror', e => { page.errors.push(e.message); console.log('  [pageerror] ' + e.message.slice(0, 200)); });
   // The guided tour (docs/den-tour.js) opens by itself on a first visit; every case but the tour's own starts with it already
   // seen and never asked again, so nothing covers the page. open(w, key, { tour: true }) leaves the tour's record alone.
-  await page.addInitScript(({ W, key, tour }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', key); window.confirm = () => true; if (!tour) localStorage.setItem('ax_den_tour', JSON.stringify({ v: 1, status: 'done', ask: 'never' })); }, { W, key: key || 'full-key', tour: !!o.tour });
+  // p72 lane P3 (UX-SPEC s.14, the fixture option): every harness opens where it did before p72 (the workbench's Board, the
+  // introduction seen) unless it sets ax_den_tab itself; { room: 'today' } opens Today's report with the introduction seen;
+  // { room: 'fresh' } leaves the Den's store clean (the first open after p72: Today, and the introduction offered).
+  await page.addInitScript(({ W, key, tour, room }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', key); window.confirm = () => true; if (!tour) localStorage.setItem('ax_den_tour', JSON.stringify({ v: 1, status: 'done', ask: 'never' }));
+    if (room === 'fresh') return; localStorage.setItem('ax_den_p72', '1'); if (localStorage.getItem('ax_den_intro') == null) localStorage.setItem('ax_den_intro', JSON.stringify('seen'));
+    if (localStorage.getItem('ax_den_tab') == null) localStorage.setItem('ax_den_tab', JSON.stringify(room === 'today' ? 'report' : 'today')); }, { W, key: key || 'full-key', tour: !!o.tour, room: o.room || '' });
   await page.route(/^https:\/\/(?!newsaus\.)[^/]+\//, route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   w.hooks = w.hooks || []; page.served = [];
   await page.route(W + '/**', async route => { const r = route.request(); const u = new URL(r.url()); const path = u.pathname + u.search; page.served.push(r.method() + ' ' + path);
@@ -56,7 +71,7 @@ export async function open(w, key, o) {
     catch (e) { await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'fixture_failed', detail: String(e.message) }) }); } });
   await page.goto('http://127.0.0.1:' + PORT + '/index.html#v=' + (o.view || 'den'), { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof go === 'function' && typeof denInit === 'function', null, { timeout: 20000 });
-  if (!o.view) { await page.evaluate(() => go('den')); await page.waitForSelector('#den-app', { timeout: 20000 }); await page.waitForSelector('.den-strip ul, .den-strip .den-state', { timeout: 20000 }); }
+  if (!o.view) { await page.evaluate(() => go('den')); await page.waitForSelector('#den-app', { timeout: 20000 }); await page.waitForSelector(o.room ? '.dt-room, .den-strip ul, .den-strip .den-state, #den-shell .den-state' : '.den-strip ul, .den-strip .den-state', { timeout: 20000 }); }
   return page;
 }
 let pass = 0, fail = 0; const failures = [];

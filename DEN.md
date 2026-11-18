@@ -1951,3 +1951,129 @@ registering her voices; subscriber outlets (D8); the note on client positions; t
 flagging sentences with no source (DK7); printing narrative and tone sources; register fixes (who leads the Opposition,
 title aliases); the window's end hour; bullets (deferred); whether approving a term restarts a comparison (F3); adding
 outlets to `DEN_SPONSORED_HOSTS`.
+
+## 11. Release 9 - Today's report (18 November 2026; build `2026-11-18.studio-p72`, page `den.js?v=r63`, `den-brief.js?v=r11`, `den-desk.js?v=r3`, `den-tour.js?v=r2`, new `den-flags.js?v=r3`, `den-today.js?v=r2`)
+
+Branch `claude/den-p72`, cut from p70 with the final p71 merged in (a3db965, the tree `main` carries as 5f8ceee), then
+`main` merged in (c242fc3) so the deploy record rides along. On 17 November the owner asked for something automatic "without
+the Board in the section"; the same day the analyst said in Slack that the Den looked intimidating, with too many steps,
+and asked for the daily AEP report to be as automatic as it can be. The owner approved a report-first design (the UX
+spec, Part D, with a mockup driven at 1366x768 and 390 wide) and the recommended answer to each of its nine decisions
+("Yes, build it"). The spec, the decisions and the acceptance run sit in the build's scratchpad; this record holds what
+was built.
+
+### 11.1 What she sees
+
+**Today's report** is a new room and the Den's front door (tab id `report`, Alt+0). The first open after p72 lands there
+once (`ax_den_p72`, which also writes `ax_den_tab = report`, so a p71-era stored tab cannot send her to the workbench on
+day two); after that the Den opens on the tab last chosen in the workbench's row or by Alt+0, and on Today it opens the
+first of her reports not yet sent today. Visits (More tools, Alt+1 to 5 from Today, the drawer's links) never move the
+remembered tab.
+
+- **Your reports** (`ax_den_mine`, seeded with the desks of the same client, kept 14 days; at most three in the bar,
+  More tools > Other reports lists every desk) each with its state today: not written, being written, written with N to
+  check, sent by whom and when. Refreshed every 60 seconds, after a send and after a draft, from `GET /den/desks?day=`;
+  a busy database's plain list keeps the day fields already held.
+- **The report as it will be pasted**: her header (from `head`), the sections in the desk's order, ratings in words where
+  the export puts them, source numbers equal to the export's, a Source List with View source links. A sentence to check is
+  marked and numbered. Each section has a menu: Edit, Rewrite this section... (uses 1 AI draft), Sources for this section,
+  Open in Sections and sources.
+- **Check before you send**: one list and one count of everything to look at (a sentence that lost its source, an alert
+  not covered, an empty section, a Den word in client text, a figure the evidence does not hold), each with its fix in
+  place. Go to the first walks them; the next opens by itself after each fix; Leave it out takes a reason and is recorded.
+- **Copy for Google Docs** (no DRAFT line; unsaved words saved first) and **Mark as sent** (one press when nothing is
+  open; otherwise an inline box with Go to the first and Send anyway). D2: when every open alert was left out with a
+  reason, it files without a second ask. Then **Next: <report>**, or "All your reports are sent for today." With nothing
+  to check, both AEP reports take five presses (Copy, Mark as sent, Next, Copy, Mark as sent), measured.
+- **The Sources drawer** (the pane in its Today form): stories, posts and her added links only, each with Use here and
+  View source; Use here puts the number at her cursor, else at the end of the sentence the drawer was opened for, and
+  saves.
+- Three intro cards on the first visit (they write nothing), D3's one line "Not read today: <channels>", Help (Show me
+  how, What the checks mean, Keyboard shortcuts, Full guided tour, Show the tips again) and More tools (the workbench's
+  tabs, Other reports, Other formats). One polite and one alert region; under 1200 px a bottom bar carries the count and
+  the send buttons with their feedback; under 900 px the switcher folds and targets are 44 px.
+
+**The workbench** keeps its rooms. Each section page now has the pane beside it (Part A: used, suggested with reasons,
+new since it was written, Find and Add, Use here / Not for this section / Not for this report, Add a new source by
+pasting links) and the same Check before you send list (Part B). Its words follow D8: Mark as sent, Send anyway, Write it
+now, Write it myself, Rewrite this section, Rewrite the whole report, AI drafts left today, Sections and sources (the
+Brief tab's label, D1), Must mention, Change the sent report, Sent by, Alerts (a visible label on the rail). The filing
+dialog is "Before you send" with Go back to them as the focused primary; it lists the alerts she left out with their
+reasons. The Board's, Watch's, Collection's and Options' own words stay.
+
+**Help and tour.** The Den no longer offers the tour on open (the "Want a guided tour" prompt and its checkboxes are
+gone; a person who left mid-step in the same session is still asked to carry on). The tour opens from Guide, Help or the
+Keyboard sheet; its welcome says it is a tour of the tools behind the report, about 15 minutes, not needed for the report
+itself. Started from Today it visits the workbench and finishes with Back to Today's report. Every Sections-and-sources
+step offers a sample, so following it never writes into the real report. The Keyboard sheet lists Alt+0 and the Board's
+renamed keys under "On the Board".
+
+### 11.2 The worker
+
+- **The review column** (`den_briefs.review`, `review_rev`; `den_brief_review_log`; added by the idempotent schema step,
+  no migration to run). One writer, `POST /den/brief/review {id, ops}` (full key): `add|remove|unremove` a source for a
+  section, `leave|unleave` a flag or check with a note. A compare-and-set on `review_rev` (four tries, then 409
+  `review_busy`); 60 ids a list, 200 shown marks (hidden marks are kept and the oldest pruned past 400); a filed brief 409.
+- **Flags** on the brief's JSON answers (`flags`, `covers`, `review`): figure, figure_bare, dropped and trimmed always;
+  denwords on by default; compare, unread, mark and rating off behind `options.flags` (the acceptance run's decisions: of
+  104 Den-word hits on four real drafts, 81 and 84 by two lenses sat on sentences the real-data check rewrote; the other
+  four kinds could not show a majority). Keys are FNV hashes of a sentence's plain form; a check's mark uses the bare
+  signal key. One sentence splitter (never after a title or abbreviation) shared by the flags and the cover rule.
+- **The save** takes `sources` (H: cards from pasted links), `sources_remove` (409 naming the sections while cited) and
+  `nosource` (a sentence kept without a source; `not_kept` for one that matched nothing; the section is not marked edited
+  for it). A cited id the evidence lacks is merged by item or refused with 409 `cannot_cite`.
+- **Filing**: checks a person left are answered in `left`, not `signals`; `acknowledge: 'left'` files only when every open
+  check is a left one; `acknowledged` entries are objects `{key, how, at, fig}`. The filing write is guarded on
+  `review_rev`, so a colleague's unleave during the check is never lost.
+- **The day fields** on `GET /den/desks?day=`: `head`, `today`, `drafting`, `morning`. Upcoming `U:` ids are hashes
+  stable across a redraft (ties broken on process, then the earliest telling); a replace draft re-matches or names each
+  pick in `review_dropped`. `format=html|md&nodraft=1` copies without the DRAFT line.
+- **Names**: no person's name reaches a guest or public reader in the brief, Board, desks, briefs, history, missed or the
+  write answers (`denNoNames`). Section ids `__proto__`, `constructor` and `prototype` are refused; notes, source lines
+  and kept sentences are cut to 2,000 characters before any pattern runs.
+
+### 11.3 How it was built and checked
+
+Three worker lanes (review, text, today) and five page lanes (P1 the pane, P2 the flags, P3 Today, P4 help, P5 the
+workbench's words), each in its own worktree from a shared base (831a454), merged by hand. Three reviews then read the
+whole build: the worker (7 findings), the page (12) and the room against the spec and the mockup, driven at 1366, 1100
+and 390 wide (14). All 33 were fixed in two lanes, each serious one with a case that fails before its fix (den-today
+T17-T31, den-p72-fix PF1-PF7). The most important: under 1200 px the send feedback and two intro cards were hidden;
+the drawer offered alerts and figures as sources and showed Den words; leaving a flag during a save could put an older
+copy on screen; Write a sentence for it closed its editor at once; a p71-era stored tab sent her to the workbench from
+day two; Today waited forever for alerts when the Board's answer carried none.
+
+New harnesses: `den-p72-base` (3), `den-auto` (13), `den-auto-save` (12), `den-today` (10), `den-p72-fix` (7);
+`den-pane-browser` (17), `den-auto-browser` (21), `den-today-browser` (31). Changed expectations are listed case by case
+in the lane commits (words, the tour, the release prompt that no longer appears).
+
+### 11.4 Known limits
+
+- After a person's replace draft, `today.at` is the first write's time while `today.by` is that person; a remap that could
+  not run answers `review_dropped: []`.
+- `morning.state` reads `due` after the cron gave up on a desk, with automation off, or for desks past the cron's 20.
+- Text the worker writes (alert titles and details, history notes) keeps its own words; the drawer leaves alerts out, the
+  workbench shows them as before. Names are not yet stripped for guests on `/den/collection`, `/den/watch`,
+  `/den/process` and `/den/lexicon` (as before p72).
+- Send anyway records only the alerts; on Today the box says so ("The other N are not recorded").
+- The weekly not-due state cannot name the due weekday; Compare shows the last sent report's text, not a word diff; the
+  workbench's Copy does not save first and its Try again shows only for a failed first draft; the Alerts label is styled
+  inline.
+- Not covered by a test: the being-written-elsewhere polling, the rewrite-whole-report dialog on Today, Safari's
+  ClipboardItem, and the lower-severity review fixes (the switcher preferring the newer state, an edit fix waiting for an
+  in-flight save, the send count read after its save, an alert first met at filing joining the list, menu focus, the
+  enlarged targets, "1 AI draft was used").
+
+### 11.5 The owner's steps
+
+1. Merge the squashed branch `claude/den-p72-release` (one commit on `main`; the working branch's history carries p71's,
+   which holds strings copied from client data and must not reach `main`): `git merge --ff-only claude/den-p72-release`,
+   then push.
+2. Deploy the worker: `tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh`; confirm `/engine/status` answers
+   `2026-11-18.studio-p72`. The schema step adds the review columns and log table on first use.
+3. GitHub Pages serves the page from `main`. The first open after the deploy lands on Today's report.
+4. Go through it together (her request; about 15 minutes, on a morning the AEP draft is already written): bookmark
+   `#v=den`, Show me how, National for real from Go to the first to Mark as sent, Next for Victoria, then open More tools
+   once. Ask her D4: her Source List's form, the sub-headings, Recommended Posture's place, source numbers in the pasted
+   text.
+5. D7: read the first post-p71 AEP drafts for Den words; if the draft still writes them, the prompt is the next fix.

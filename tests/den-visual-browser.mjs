@@ -61,7 +61,7 @@ await t('V5 card actions are 28px ghosts, quiet until hover, never hidden, press
   ok(st.disp !== 'none' && st.vis === 'visible' && st.pe !== 'none', 'the row is drawn and takes the pointer: ' + JSON.stringify(st));
   ok(st.op >= 0.6 && st.op <= 0.8, 'quiet at rest: ' + st.op); eq(st.bg, CLEAR, 'a ghost, not a boxed button'); ok(st.mh >= 28 && st.link >= 28, 'hit areas are 28px: ' + JSON.stringify(st));
   await c.hover(); await page.waitForTimeout(260); eq(+(await c.evaluate(e => getComputedStyle(e.querySelector('.den-card-act')).opacity)), 1, 'full on hover');
-  await page.mouse.move(2, 2); await c.getByRole('button', { name: /^Pin/ }).click({ trial: true, timeout: 3000 });
+  await page.mouse.move(2, 2); await c.getByRole('button', { name: /^Must mention/ }).click({ trial: true, timeout: 3000 });
   const w3 = await c.evaluate(e => { e.classList.remove('w1', 'w2'); e.classList.add('w3'); const b = getComputedStyle(e.querySelector('.den-w')).backgroundColor; e.classList.remove('w3'); return b; });
   ok(w3 !== await rgb(page, '--dn-ink-0'), 'the top weight badge is no longer the loudest pixel on the Board');
 });
@@ -95,7 +95,9 @@ await t('V8 field boundaries read at 3:1 (--dn-line-3); neutral facts are quiet 
   const l3 = await rgb(page, '--dn-line-3');
   for (const s of ['.den-unsorted .den-search input', '.den-desk select', '.den-daypick input']) eq(await cs(page, s, 'border-top-color'), l3, s);
   const empty = await page.$$eval('.den-col.empty .den-col-meta .den-chip', cs => cs.filter(c => c.textContent.trim() === 'Empty').map(c => ({ bg: getComputedStyle(c).backgroundColor, col: getComputedStyle(c).color })));
-  ok(empty.length, 'an Empty chip'); eq(empty[0].bg, CLEAR, '"Empty" is a quiet tag'); eq(empty[0].col, await rgb(page, '--dn-ink-3'));
+  // p72 (lane P2): with a brief, an empty section is a thing to check, so its column's state is the one count ("1 to check", filled); "Empty" stays a quiet tag where it is drawn
+  const tocheck = await page.$$eval('.den-col.empty .den-col-meta .den-chip', cs => cs.filter(c => /^\d+ to check$/.test(c.textContent.trim())).map(c => getComputedStyle(c).backgroundColor));
+  ok(empty.length || tocheck.length, 'an Empty chip, or an empty section counted'); if (empty.length) { eq(empty[0].bg, CLEAR, '"Empty" is a quiet tag'); eq(empty[0].col, await rgb(page, '--dn-ink-3')); } else ok(tocheck[0] !== CLEAR, 'the count is a filled state');
   const drafted = await page.$$eval('.den-col-meta .den-chip.acc', cs => cs.map(c => getComputedStyle(c).backgroundColor)); ok(drafted.length && drafted[0] !== CLEAR, 'a state chip stays filled');
 });
 

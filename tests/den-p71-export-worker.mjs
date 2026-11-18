@@ -44,7 +44,7 @@
  *   EX17 (C8) a story dated by its address shows its day on its Board card in the evidence line's words, never a time;
  *       since p71 fx5 (R2) word for word ("16 nov"), the Board handing each card its window's year
  *   EX18 (C4) a draft refused with 409 brief_changed shows the brief the worker sent back at once, and its note says the
- *       brief changed while the draft was written, never that no draft was written or that nothing here changed
+ *       report was changed while it was being written (p72's words, with no worker sentence), never that nothing here changed
  *   The third review round (page lane: the page; each fails on 2ca1637):
  *   EX19 (G1, D3) a post read in part says on its card what its evidence line says: each count it read at nought, then
  *       the main ones not recorded ("0 comments, likes not recorded": an Instagram account that hides its likes; "0 views,
@@ -303,7 +303,8 @@ await S.t('EX6 feed links decoded at collection, no second copy, undated items d
 await S.t('EX7 copy for the document as plain text: the body only, blocks apart, no tag or entity', async () => {
   const src = fs.readFileSync(new URL('../docs/den-brief.js', import.meta.url), 'utf8'); const m = src.match(/^ *function denDocPlain\(h\) \{.*\}$/m);
   ok(m, 'docs/den-brief.js has one conversion, denDocPlain'); const plain = new Function('return ' + m[0].trim())();
-  ok((src.match(/denDocPlain\(t\)/g) || []).length === 2 && !/t\.replace\(\/<\[\^>\]\+>\/g, ' '\)/.test(src), 'both the text/plain item and the fallback use it');
+  // p72 P5: the copy converts once, in plain(), which both the text/plain item and the plain-text fallback call
+  ok((src.match(/denDocPlain\(t\)/g) || []).length === 1 && /const plain = \(\) => denDocPlain\(t\)/.test(src) && /new Blob\(\[plain\(\)\]/.test(src) && /writeText\(rich \? plain\(\) : t\)/.test(src) && !/t\.replace\(\/<\[\^>\]\+>\/g, ' '\)/.test(src), 'both the text/plain item and the fallback use it');
   const w = await mk(); await store(w, { id: 'bx7', ids: EX1_IDS, sections: EX1_SECTIONS }); const htm = (await doc(w, 'bx7', 'html')).text; const p = plain(htm);
   ok(!/<[a-z\/!]/i.test(p) && !/&(amp|lt|gt|quot|#0*39);/.test(p), 'no tag and no entity: ' + (p.match(/.{0,30}(<[a-z\/!]|&(amp|lt|gt|quot|#0*39);).{0,30}/i) || [''])[0]);
   ok(!/font:15px|max-width|\{/.test(p) && p.indexOf('17 November 2026 - DRAFT') < 0, 'never the stylesheet or the title');
@@ -533,10 +534,11 @@ await S.t('EX18 (C4) a draft refused with 409 brief_changed shows the brief the 
   eq((await run(err(null))).L, [['reload']], 'with no brief sent back, the brief is read again');
   eq((await run(Object.assign(new Error('No draft was written: the model failed.'), { code: 'draft_failed', status: 502, body: {} }))).fail.what, 'draft', 'another refusal is a failed draft, as before');
   // the note's words, read through a stand-in for htm: what happened, and that the brief there is shown
-  const note = f => { const h = (s, ...v) => s.reduce((t, x, i) => t + x + (i < v.length && v[i] != null && typeof v[i] !== 'function' ? String(v[i]) : ''), ''); return new Function('fail', 'html', 'setFail', 'return ' + pageLine(PAGE, 'failNote'))(f, h, () => {}).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(); };
-  const said = note(a.fail); ok(said.indexOf('The brief changed while this draft was written. ' + DETAIL + ' The brief that is there is shown now.') === 0, said);
-  ok(!/No draft was written|Nothing that was already here changed/.test(said), 'never "No draft was written" nor "Nothing that was already here changed": ' + said);
-  ok(/^No draft was written\. .* Nothing that was already here changed\./.test(note({ what: 'draft', msg: 'The model failed.' })), 'a failed draft is said as before');
+  const note = f => { const h = (s, ...v) => s.reduce((t, x, i) => t + x + (i < v.length && v[i] != null && typeof v[i] !== 'function' ? String(v[i]) : ''), ''); return new Function('fail', 'html', 'setFail', 'brief', 'canWrite', 'return ' + pageLine(PAGE, 'failNote'))(f, h, () => {}, {}, true).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(); };
+  // p72 (UX-SPEC s.6.3, P5): the page's own words; the worker's sentence ("the brief", "draft again") is not shown, in the workbench as on Today
+  const said = note(a.fail); ok(said.indexOf('Someone changed this report while it was being written, so the new version wasn\'t saved. Theirs is shown.') === 0, said);
+  ok(!/\bbrief\b|draft again|Nothing that was already here changed|Couldn't be written/i.test(said), 'no Den word, nor the failed-draft words: ' + said);
+  ok(/^Couldn't be written: The model failed\. Nothing that was already here changed\./.test(note({ what: 'draft', msg: 'The model failed.' })), 'a failed draft is said as such: ' + note({ what: 'draft', msg: 'The model failed.' }));
 });
 
 // ---- the third review round (page lane): a card says what its evidence line says (each fails on 2ca1637)

@@ -191,9 +191,10 @@ await S.t('CK7 the draft\'s evidence says RECURRING with the schedule', async ()
   const seed = await F(w, 'POST', '/archive/add', { kind: 'news', rows: [news('Harbour Watch holds a vigil every Tuesday and Friday at the Point office over the gas export tax', 'https://harbourwire.example.com.au/vigil'), news('Campaigners plan a rally on ' + when + ' against the gas export tax', 'https://harbourwire.example.com.au/rally')] }); eq(seed.status, 200, seed.text.slice(0, 200));
   const r = await F(w, 'POST', '/den/brief', { desk: 'aep_au' }); eq(r.status, 200, r.text.slice(0, 200)); const ev = calls[0].messages[0].content;
   ok(/^UPCOMING \(.*RECURRING marks the next day of a standing weekly schedule, not a new event\)$/m.test(ev), 'the block says what RECURRING means');
-  // p71 fix (review CK3): one line for the schedule, at the next of its days; the schedule in brackets names both
-  const rec = ev.match(/^\[U:\d+\] (?:Tuesday|Friday) \d{4}-\d{2}-\d{2} \| RECURRING \(every Tuesday and Friday\) \| vigil \| Harbour Watch holds a vigil every Tuesday and Friday/gm) || []; eq(rec.length, 1, 'the schedule has one line: ' + ev.split('\n').filter(l => /^\[U:/.test(l)).join(' // '));
-  ok(/^\[U:\d+\] \w+ \d{4}-\d{2}-\d{2} \| rally \| Campaigners plan a rally/m.test(ev), 'a one-off date\'s line says nothing of a schedule');
+  // p71 fix (review CK3): one line for the schedule, at the next of its days; the schedule in brackets names both.
+  // p72: an upcoming id is U: and eight hex digits (FNV-1a 32 of its date and event), no longer its place in the list
+  const rec = ev.match(/^\[U:[0-9a-f]+\] (?:Tuesday|Friday) \d{4}-\d{2}-\d{2} \| RECURRING \(every Tuesday and Friday\) \| vigil \| Harbour Watch holds a vigil every Tuesday and Friday/gm) || []; eq(rec.length, 1, 'the schedule has one line: ' + ev.split('\n').filter(l => /^\[U:/.test(l)).join(' // '));
+  ok(/^\[U:[0-9a-f]+\] \w+ \d{4}-\d{2}-\d{2} \| rally \| Campaigners plan a rally/m.test(ev), 'a one-off date\'s line says nothing of a schedule');
   const cards = Object.keys(r.body.brief.evidence).filter(k => /^U:/.test(k)).map(k => r.body.brief.evidence[k]).filter(e => e.label && / vigil$/.test(e.label));
   eq(cards.length, 1); ok(cards.every(e => /^\d{4}-\d{2}-\d{2} vigil$/.test(e.label) && /, vigil, recurring \(every Tuesday and Friday\)$/.test(e.sub)), 'the card keeps its label (the page finds its id by it) and its figures line says recurring: ' + JSON.stringify(cards));
   ok(cards.every(e => { const d = new Date(e.label.slice(0, 10) + 'T00:00:00Z'); return [2, 5].indexOf(d.getUTCDay()) >= 0 && d.getTime() - (NOW - 86400000) < 8 * 86400000; }), 'on a Tuesday or a Friday within the week ahead');

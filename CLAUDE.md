@@ -71,7 +71,7 @@ notified -> acked -> drafted. Routes: `/sentinel/alerts|scan|ack|metrics`.
 In-app: the Sentinel view (nav badge counts what is unactioned) with
 Acknowledge (stops the clock) and Draft in Ad Lab (seeds the brief).
 
-## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 8 built and live; release 8 live since 16 November 2026, page `den.js?v=r52`; worker p71 since 18 November 2026 (Sydney))
+## The monitoring desk and Anne's Den (`DEN.md`, `prompts/annes-den.md`; releases 1 to 8 built and live; release 8 live since 16 November 2026, page `den.js?v=r52`; worker p71 since 18 November 2026 (Sydney); release 9, Today's report, built as p72 and awaiting the owner's merge and deploy)
 
 The agency's monitoring analyst files daily and weekly activist-activity briefs per client. `DEN.md` holds what her
 reports are made of (counts and public names only: the reports themselves are client material and never enter the
@@ -430,6 +430,15 @@ verifies each, and what was asked for and not built.
     Mac agent), and the morning draft (a guarded write, a deadline, make-up ticks within two tries a desk: KV
     `den_cron_left_<day>`, `den_cron_day`). Seven harnesses: `den-p71-prompt` (14), `-signals` (20), `-checker` (41),
     `-rank` (19), `-export` (25), `-sources` (29), `-merge` (4). Page den.js r58, den-brief.js r6, overview.js r2.
+  - **Today's report (build p72, release 9; `DEN.md` s.11).** A report-first room for the analyst (tab id `report`, Alt+0):
+    Your reports with their state today (`GET /den/desks?day=` head, today, drafting, morning), the report as it will be
+    pasted, Check before you send (one list, one count, each fix in place; `docs/den-flags.js`), Copy for Google Docs
+    (`nodraft=1`) and Mark as sent (D2 `acknowledge:'left'`), Next, a Sources drawer (stories, posts and added links only).
+    The workbench's section page gains the pane (Part A) and the same list; its words follow D8 (Mark as sent, Send anyway,
+    AI drafts, Sections and sources, Must mention, Alerts). The worker adds the review column (`POST /den/brief/review`,
+    `review_rev`), flags with FNV keys (denwords on, compare/unread/mark/rating off behind `options.flags`), H: added
+    sources, nosource, filing's `left`, hash `U:` ids, and no names for guest readers. The tour is no longer offered on
+    open. Page `den.js` r63, `den-brief.js` r11, `den-desk.js` r3, `den-tour.js` r2, `den-flags.js` r3, `den-today.js` r2.
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -

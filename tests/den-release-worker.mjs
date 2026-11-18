@@ -102,7 +102,8 @@ await S.t('DR5 a brief started by hand can cite', async () => {
   await push(w, 'news', [news({ title: 'A late story on the windfall tax', url: 'https://pointpost.example.com.au/late', ts: NOW - 0.5 * H })]); const late = 'M:' + itemBy(w, 'https://pointpost.example.com.au/late');
   const s2 = await F(w, 'POST', '/den/brief/save', { id: h.id, revision: 2, sections: { bottom: 'A later story added to it [' + late + '].' } }); eq([s2.status, s2.body.brief.sections.bottom.cites], [200, [late]], 'a row collected since the start is merged on save: ' + s2.text.slice(0, 200));
   ok(s2.body.brief.evidence[late] && /A late story/.test(s2.body.brief.evidence[late].text));
-  const s3 = await F(w, 'POST', '/den/brief/save', { id: h.id, revision: 3, sections: { posture: 'An invented one [M:31337].' } }); eq(s3.body.brief.sections.posture.cites, [], 'an id no board holds is still taken out');
+  // p72 (BRIEF-P72 "Text paths"): an id no board holds is refused in words, the ids named and nothing saved; it was struck before
+  const s3 = await F(w, 'POST', '/den/brief/save', { id: h.id, revision: 3, sections: { posture: 'An invented one [M:31337].' } }); eq([s3.status, s3.body.error, s3.body.ids], [409, 'cannot_cite', ['M:31337']], 'an id no board holds is refused, never struck: ' + s3.text.slice(0, 200));
   eq(w.outbound.filter(o => /anthropic/.test(o.url)).length, before, 'no model call');
 });
 

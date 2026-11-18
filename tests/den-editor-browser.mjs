@@ -28,7 +28,7 @@ await t('reading is the default: one text, no raw citation mark in sight, and th
   eq(await page.locator(S + ' input').count(), 0, 'no input in the section at rest');
   eq(await page.locator(S + ' .den-modes button').evaluateAll(b => b.map(x => x.textContent.trim() + ':' + x.getAttribute('aria-pressed'))), ['Read:true', 'Edit:false']);
   eq(await page.locator(S + ' .den-eyebrow .den-chip:not(.warn)').count(), 0, 'the eyebrow does not repeat the state the title carries; only a flag count is said there');
-  ok(/1 flag/.test(await txt(page, S + ' .den-eyebrow')) && /drafted/.test(await txt(page, S + ' h4')), 'one state by the title, the flag count above it');
+  ok(/1 to check/.test(await txt(page, S + ' .den-eyebrow')) && /drafted/.test(await txt(page, S + ' h4')), 'one state by the title, the one count above it (p72 lane P2: "N to check")');
   const nums = await page.$$eval('.den-outline [data-goto]:not(.den-out-src) .den-outn', els => els.map(e => e.textContent.trim()));
   eq(nums, nums.map((x, i) => String(i + 1)), 'the outline numbers its sections 1 to n (a tenth reads 10, not a key cap 0)');
   eq(page.errors, []);
@@ -53,7 +53,7 @@ await t('leaving without typing sends nothing; leaving after typing saves once a
   await page.locator(S + ' textarea').evaluate(e => e.setSelectionRange(e.value.length, e.value.length)); await page.keyboard.type(' Anne added this.');   // End would stop at the end of a wrapped line
   ok(/not saved/.test(await txt(page, S + ' h4')), 'the title says the words are not saved: ' + await txt(page, S + ' h4'));
   await page.locator('.den-outline-h').click(); await page.waitForSelector(S + '[data-mode="read"]');
-  await page.waitForFunction(() => /Saved, revision 2/.test(document.querySelector('.den-bar[role="status"]').textContent));
+  await page.waitForFunction(() => /All changes saved/.test(document.querySelector('.den-bar[role="status"]').textContent));
   eq(saves(page), before + 1, 'one save, on leaving'); ok(/edited by Anne/.test(await txt(page, S + ' h4')), 'marked as a person\'s edit');
   ok(/Anne added this\./.test(await page.locator(S + ' .den-reads').innerText()), 'the reading view shows the saved words');
   const saved = (await w.F('GET', '/den/brief?desk=aep_au')).body.brief.sections.summary.text; ok(/Anne added this\.$/.test(saved), 'the worker holds them: ' + saved.slice(-60));
@@ -63,12 +63,12 @@ await t('a card pressed while editing cites at the cursor, keeps the editor open
   const b0 = (await w.F('GET', '/den/brief?desk=aep_au')).body.brief; const before = saves(page);
   const ta = page.locator(S + ' textarea'); await ta.evaluate(e => { e.focus(); e.setSelectionRange(8, 8); }); await page.waitForSelector(S + '[data-mode="edit"]');
   const cardsHere = page.locator('.den-evpane .den-evlist .den-evcard:not([disabled])'); ok(await cardsHere.count() >= 2, 'the section has cards to cite');
-  const ids = []; for (const i of [0, 1]) { const c = cardsHere.nth(i); ids.push((/^Cite ([A-Z]:[A-Za-z0-9_.-]+):/.exec(await c.getAttribute('aria-label')) || [])[1]); await c.click();
+  const ids = []; for (const i of [0, 1]) { const c = cardsHere.nth(i); ids.push((/^Use here, ([A-Z]:[A-Za-z0-9_.-]+):/.exec(await c.getAttribute('aria-label')) || [])[1]); /* p72 lane pane: Part D's "Use here" (was "Cite") */ await c.click();
     eq(await mode(page), 'edit', 'the editor stays open after a card'); await page.waitForFunction(() => document.activeElement && document.activeElement.tagName === 'TEXTAREA'); }
   const v = await ta.inputValue(); ok(v.indexOf('[' + ids[0] + ']') >= 0 && v.indexOf('[' + ids[1] + ']') > v.indexOf('[' + ids[0] + ']'), 'both marks went in, in order: ' + v.slice(0, 80));
-  eq(saves(page), before, 'no save per card'); ok(/Unsaved changes/.test(await txt(page, '.den-bar[role="status"]')));
+  eq(saves(page), before, 'no save per card'); ok(/Not saved yet/.test(await txt(page, '.den-bar[role="status"]')));
   await page.keyboard.press('Escape'); await page.waitForSelector(S + '[data-mode="read"]');
-  await page.waitForFunction(r => new RegExp('Saved, revision ' + r).test(document.querySelector('.den-bar[role="status"]').textContent), b0.revision + 1);
+  await page.waitForFunction(() => /All changes saved/.test(document.querySelector('.den-bar[role="status"]').textContent));
   eq(saves(page), before + 1, 'one save for the whole edit'); eq((await w.F('GET', '/den/brief?desk=aep_au')).body.brief.revision, b0.revision + 1, 'one revision, not one per card');
   eq(page.errors, []); await page.context().close();
 });
@@ -94,8 +94,8 @@ const p2 = await brief(await open(w2));
 await t('an evidence card is headed by its source in words; a row the Board has not read shows its words when the worker sends them, and its label when it does not', async () => {
   const card = id => p2.locator('.den-evpane li[data-cite="' + id + '"]');
   const a = card('S:777777'); await a.waitFor();
-  eq(await a.locator('.den-evsrc').innerText(), 'Mastodon post'); ok(/windfall tax on gas is overdue/.test(await a.locator('.den-t').innerText())); ok(/55 interactions/.test(await a.locator('.den-sub').innerText()));
-  ok(/^Cite S:777777: /.test(await a.locator('.den-evcard').getAttribute('aria-label')), 'the id stays in the accessible name'); eq(await a.locator('.den-evcode').count(), 0, 'and nowhere on the card face (release review)'); ok(!/S:777777/.test(await a.innerText()), 'no raw id printed on the card');
+  eq(await a.locator('.den-evsrc').innerText(), 'Mastodon post'); ok(/windfall tax on gas is overdue/.test(await a.locator('.den-t').innerText())); ok(/55 engagements/.test(await a.locator('.den-sub').innerText()), 'p72 lane pane: a post\'s figures are engagements (Part D s.6.3)');
+  ok(/^Use here, S:777777: /.test(await a.locator('.den-evcard').getAttribute('aria-label')), 'the id stays in the accessible name'); eq(await a.locator('.den-evcode').count(), 0, 'and nowhere on the card face (release review)'); ok(!/S:777777/.test(await a.innerText()), 'no raw id printed on the card');
   ok(!/^[A-Z]:\d+/.test((await a.locator('.den-evcard').innerText()).trim()), 'the card does not lead with an id');
   const b = card('S:777778'); eq(await b.locator('.den-evsrc').innerText(), 'Bluesky post'); ok(!/S:777778/.test(await b.locator('.den-evcard').innerText()), 'no raw id on the face of a label-only card');
   ok((await b.locator('.den-t').innerText()).length > 10, 'a label-only post still says something in words');
@@ -103,7 +103,7 @@ await t('an evidence card is headed by its source in words; a row the Board has 
   const heads = await p2.$$eval('.den-evpane .den-evcard', els => els.map(e => e.innerText.trim().split('\n')[0])); ok(heads.length >= 6 && heads.every(h => !/^[A-Z]:[A-Za-z0-9_.-]+$/.test(h)), JSON.stringify(heads));
   // a board card cited here is headed by its outlet and says what it is
   const m = p2.locator('.den-evpane li[data-kind="media"]').first(); ok(/The Point Post/.test(await m.locator('.den-evsrc').innerText()) && /Harbour levy/.test(await m.locator('.den-t').innerText()));
-  ok(await m.locator('.den-evact a.den-link', { hasText: 'Open' }).count() === 1, 'Open is inside the card');
+  ok(await m.locator('.den-evact a.den-link', { hasText: 'View source' }).count() === 1, 'View source (p72: was Open) is inside the card');
   eq(p2.errors, []);
 });
 
@@ -116,7 +116,7 @@ await t('a tone figure, a Sentinel alert and agency memory say nothing about fil
   const ns = await p2.$$eval(S + ' .den-cites .den-cite[data-n]', els => els.map(e => [e.getAttribute('data-n'), (/^\[?([A-Z]:[A-Za-z0-9_.-]+)/.exec(e.title) || [])[1]]));
   ok(ns.length >= 7 && ns.every((x, i, a) => +x[0] >= 1 && (i === 0 || +x[0] >= +a[i - 1][0])), 'chips are numbered in order: ' + JSON.stringify(ns));
   const [n, id] = ns.find(x => x[1] === 'S:777777'); eq((await p2.locator('.den-evpane li[data-cite="' + id + '"] .den-evnum').innerText()).trim(), n, 'the card carries the chip\'s number');
-  ok(/Cited here, filed elsewhere/.test(await txt(p2, '.den-evpane')), 'the group still says what it is to a screen reader');
+  ok(/Used in this section/.test(await txt(p2, '.den-evpane')), 'the group says what it is (p72 lane pane: Used in this section, Part D s.6.3)');
   eq(p2.errors, []); await p2.context().close();
 });
 
@@ -154,7 +154,7 @@ const fileWorld = async list => { const wf = await world(); await wf.F('POST', '
 
 await t('a filing whose only open item is a collection gap files in one press, with no dialog, and records it as acknowledged', async () => {
   const { wf, sent, p } = await fileWorld([GAP]);
-  await p.getByRole('button', { name: 'Mark as filed' }).click(); await p.waitForFunction(() => /Filed by Anne/.test(document.querySelector('#den-tabpanel section.den-panel header').textContent));
+  await p.getByRole('button', { name: 'Mark as sent' }).click(); await p.waitForFunction(() => /Sent by Anne/.test(document.querySelector('#den-tabpanel section.den-panel header').textContent));
   eq(await p.locator('[role="dialog"]').count(), 0, 'no dialog for a collection gap'); eq(sent.map(b => !!b.acknowledge), [false, true], 'asked once, then filed acknowledging');
   eq((await wf.F('GET', '/den/brief?desk=aep_au')).body.brief.status, 'filed'); ok(!/delivered nothing/.test(await p.locator('#den-tabpanel').innerText()), 'and the Brief never said it');
   eq(p.errors, []); await p.context().close();
@@ -162,10 +162,10 @@ await t('a filing whose only open item is a collection gap files in one press, w
 
 await t('a filing with a gap and a check lists the check only; the gap is never in the dialog', async () => {
   const { sent, p } = await fileWorld([GAP, SPIKE]);
-  await p.getByRole('button', { name: 'Mark as filed' }).click(); await p.waitForSelector('[role="dialog"][aria-label="Before it is filed"]');
-  const d = await txt(p, '[role="dialog"]'); ok(/Sentinel spike: Gas taxation/.test(d) && !/Facebook delivered nothing/.test(d) && /^One thing|One thing/.test(d), d.slice(0, 200));
-  await p.getByRole('button', { name: 'Go back and cover them' }).click(); eq(sent.length, 1, 'going back sends nothing more');
-  await p.getByRole('button', { name: 'Mark as filed' }).click(); await p.getByRole('button', { name: 'File anyway' }).click(); await p.waitForFunction(() => /Filed by Anne/.test(document.querySelector('#den-tabpanel section.den-panel header').textContent));
+  await p.getByRole('button', { name: 'Mark as sent' }).click(); await p.waitForSelector('[role="dialog"][aria-label="Before you send"]');
+  const d = await txt(p, '[role="dialog"]'); ok(/Sentinel spike: Gas taxation/.test(d) && !/Facebook delivered nothing/.test(d) && /1 thing is still to check/.test(d), d.slice(0, 200));
+  await p.getByRole('button', { name: 'Go back to them' }).click(); eq(sent.length, 1, 'going back sends nothing more');
+  await p.getByRole('button', { name: 'Mark as sent' }).click(); await p.getByRole('button', { name: 'Send anyway' }).click(); await p.waitForFunction(() => /Sent by Anne/.test(document.querySelector('#den-tabpanel section.den-panel header').textContent));
   eq(sent.map(b => !!b.acknowledge), [false, false, true]);
   // a filed brief reads: no editor, no add to this section, the pull list's button is there and cannot be pressed
   eq(await mode(p), 'read'); eq(await p.locator(S + ' .den-modes').count(), 0); eq(await p.locator(S + ' textarea').getAttribute('tabindex'), '-1');
@@ -174,7 +174,7 @@ await t('a filing with a gap and a check lists the check only; the gap is never 
 });
 
 await t('a brief started by hand says plainly whether its cards can be cited, and offers no paid redraft as the only way on', async () => {
-  const wh = await world(); const p = await open(wh); await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state'); await p.getByRole('button', { name: 'Write it by hand' }).click();
+  const wh = await world(); const p = await open(wh); await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state'); await p.getByRole('button', { name: 'Write it myself' }).click();
   await p.waitForSelector(S + ' textarea', { state: 'attached' }); eq(wh.calls.length, 0, 'nothing was spent');
   eq(await mode(p), 'edit', 'an empty section opens as the editor: the placeholder is the invitation'); ok(/Click a card on the right to cite it/.test(await p.getAttribute(S + ' textarea', 'placeholder')));
   // under worker p66 a hand-started brief holds no evidence and the pane says so; from p67 the worker fills the window's
@@ -182,7 +182,7 @@ await t('a brief started by hand says plainly whether its cards can be cited, an
   const got = await wh.F('GET', '/den/brief?desk=aep_au'); const held = Object.keys(((got.body || {}).brief || {}).evidence || {}).length; const head = await txt(p, '.den-evhead');
   if (!held) ok(/started by hand/.test(head), 'with nothing citable the pane says why: ' + head);
   else {
-    ok(!/started by hand/.test(head) && /Click a card to cite it/.test(head), 'evidence is held, so the pane invites a cite: ' + head);
+    ok(!/started by hand/.test(head) && /Press a story or post to use it where your cursor is/.test(head), 'evidence is held, so the pane invites a cite (p72 lane pane words): ' + head);
     const pull = p.locator('.den-evpane [data-tour="pull"]'); if (await pull.count() && (await pull.getAttribute('aria-expanded')) !== 'true') await pull.click();
     await p.waitForSelector('.den-evpane [data-tour="pull-file"]'); ok(await p.locator('.den-evpane [data-tour="pull-file"]').count() > 0, 'the window\'s rows are there to file here and cite');
   }

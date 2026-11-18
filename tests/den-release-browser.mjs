@@ -7,9 +7,9 @@
  *   RB4 Regenerate pressed where the button takes no focus (Safari and Firefox on macOS): one press opens its choices
  *   RB5 the editor's Escape lands on the section's Edit button; the rewrite form takes the focus and Cancel gives it back;
  *       the history drawer takes the focus, closes on Escape and gives it back to History
- *   RB6 the guide: Back from "Start the brief" stays on "Open the brief"; the Keyboard sheet's tour keeps the focus in the
- *       guide menu; the menu's Escape gives the focus back to Guide; the welcome modal holds the Den's own keys; somebody
- *       who never started the guide is not asked "again"
+ *   RB6 the guide: Back from "Start the report" stays on "Open Sections and sources"; the Keyboard sheet's tour keeps the
+ *       focus in the guide; its Escape gives the focus back to Guide; the welcome modal holds the Den's own keys; p72 (UX-SPEC
+ *       s.8.1, s.15.2): the "Want a guided tour" prompt no longer appears on any open
  *   RB7 Watch: Enter pressed twice in the Add box sends one add
  * Run: node --experimental-sqlite tests/den-release-browser.mjs (binds a local port: sandbox off) */
 import { world, open, t, ok, eq, txt, tab, finish, sec } from './den-fixture.mjs';
@@ -26,11 +26,11 @@ const brief = async () => { const w = await world(); await w.F('POST', '/den/bri
 await t('RB1 a rating changed, then a section written again: the rating survives', async () => {
   const { p } = await brief(); await sec(p, 'momentum'); const sel = p.locator('.den-sec[data-section="momentum"] .den-bar select').first();
   const before = await sel.inputValue(); const pick = (await sel.locator('option').evaluateAll(o => o.map(x => x.value).filter(Boolean))).find(v => v !== before);
-  await sel.selectOption(pick); ok(/Unsaved changes/.test(await status(p)), await status(p));
+  await sel.selectOption(pick); ok(/Not saved yet/.test(await status(p)), await status(p));
   await sec(p, 'bottom'); await p.locator(B + ' [data-tour="regen"]').click(); await p.locator(B + ' [data-tour="regen-go"]').click();
   await p.waitForFunction(() => !document.querySelector('[data-tour="progress"]'), null, { timeout: 15000 }); await p.waitForTimeout(500);
   await sec(p, 'momentum'); eq(await p.locator('.den-sec[data-section="momentum"] .den-bar select').first().inputValue(), pick, 'the rating the person picked is kept');
-  ok(!(await notices(p)).some(n => /saved this brief after you opened it/.test(n)), 'no conflict for the person\'s own rewrite'); eq(p.errors, []); await p.context().close();
+  ok(!(await notices(p)).some(n => /changed this report after you opened it/.test(n)), 'no conflict for the person\'s own rewrite'); eq(p.errors, []); await p.context().close();
 });
 
 await t('RB2 a save that failed, then a section written again: no false conflict, and the words are saved first', async () => {
@@ -39,7 +39,7 @@ await t('RB2 a save that failed, then a section written again: no false conflict
   await editAt(p, S); await p.keyboard.type(' Kept words.'); await p.keyboard.press('Escape'); await p.waitForTimeout(400); ok(/Not saved/.test(await status(p)), await status(p));
   await sec(p, 'bottom'); await p.locator(B + ' [data-tour="regen"]').click(); await p.waitForSelector(B + ' [data-tour="regen-form"]');
   await p.locator(B + ' [data-tour="regen-go"]').click(); await p.waitForFunction(() => !document.querySelector('[data-tour="progress"]'), null, { timeout: 15000 }); await p.waitForTimeout(500);
-  ok(!(await notices(p)).some(n => /saved this brief after you opened it/.test(n)), JSON.stringify(await notices(p)));
+  ok(!(await notices(p)).some(n => /changed this report after you opened it/.test(n)), JSON.stringify(await notices(p)));
   ok(/Kept words\.$/.test((await w.F('GET', '/den/brief?desk=aep_au')).body.brief.sections.summary.text), 'the kept words reached the worker before the rewrite'); await p.context().close();
 });
 
@@ -50,7 +50,7 @@ await t('RB3 leaving the editor while the previous save is in flight: the later 
   await p.waitForTimeout(150); await editAt(p, S); await p.keyboard.type(' Second words.'); await p.keyboard.press('Escape');
   await p.waitForTimeout(4000); slow = 0;
   ok(/First words\. Second words\.$/.test((await w.F('GET', '/den/brief?desk=aep_au')).body.brief.sections.summary.text), 'both leaves were saved: ' + saves(p) + ' saves, ' + await status(p));
-  ok(/^Saved/.test(await status(p)), await status(p)); await p.context().close();
+  ok(/^All changes saved/.test(await status(p)), await status(p)); await p.context().close();
 });
 
 await t('RB4 Regenerate pressed where the button takes no focus: one press opens its choices', async () => {
@@ -69,12 +69,12 @@ await t('RB5 focus after Escape, around the rewrite form and the history drawer'
   ok(/^INPUT/.test(await who(p)), 'the form takes the focus: ' + await who(p));
   await p.focus(S + ' [data-tour="regen-cancel"]'); await p.keyboard.press('Enter'); await p.waitForTimeout(150); ok(/^BUTTON\[regen\]/.test(await who(p)), 'Cancel gives it back to Regenerate: ' + await who(p));
   await p.focus('[data-tour="history"]'); await p.keyboard.press('Enter'); await p.waitForSelector('.den-drawer'); await p.waitForTimeout(200);
-  ok(/Close the history/.test(await who(p)), 'the drawer takes the focus: ' + await who(p));
+  ok(/Close the earlier versions/.test(await who(p)), 'the drawer takes the focus: ' + await who(p));
   await p.keyboard.press('Escape'); await p.waitForTimeout(200); eq(await p.locator('.den-drawer').count(), 0, 'Escape closes it'); ok(/^BUTTON\[history\]/.test(await who(p)), 'and the focus is back on History: ' + await who(p));
   eq(p.errors, []); await p.context().close();
 });
 
-await t('RB6 the guide: Back stays, the sheet\'s tour and the menu keep the focus, the welcome holds the keys, "again" only after a run', async () => {
+await t('RB6 the guide: Back stays, the sheet\'s tour and the menu keep the focus, the welcome holds the keys, nothing is offered on open', async () => {
   const w = await world(); await w.F('POST', '/den/brief', { desk: 'aep_au' });
   const p = await open(w, null, { tour: true }); await p.evaluate(() => localStorage.setItem('ax_den_tour', JSON.stringify({ v: 1, status: 'done', ask: 'never' })));
   await tab(p, 'brief'); await p.waitForSelector(S + ' textarea');
@@ -84,16 +84,18 @@ await t('RB6 the guide: Back stays, the sheet\'s tour and the menu keep the focu
   ok(seen.every(s => s === 'write'), 'Back landed on "Open the brief" and stayed: ' + seen.join(' '));
   await p.evaluate(() => window.DenTour.stop());
   await p.locator('[data-tour="help"]').click(); await p.locator('[data-tour="replay"]').click(); await p.waitForTimeout(400);
-  ok(await p.evaluate(() => !!document.activeElement.closest('#den-tour')), 'the Keyboard sheet\'s tour leaves the focus in the guide menu: ' + await who(p));
+  ok(await p.evaluate(() => !!document.activeElement.closest('#den-tour')), 'the Keyboard sheet\'s tour leaves the focus in the guide: ' + await who(p));
   await p.keyboard.press('Escape'); await p.waitForTimeout(200); ok(/^BUTTON\[(guide|help)\]/.test(await who(p)), 'the menu\'s Escape gives the focus back where it was (the ? button it was opened from), never the body: ' + await who(p));
   await p.context().close();
-  const q = await open(w, null, { tour: true }); await q.waitForSelector('#den-tour [role="dialog"]', { timeout: 20000 });
+  const q = await open(w, null, { tour: true }); await q.waitForTimeout(2500); eq(await q.locator('#den-tour .dt-prompt, #den-tour [role="dialog"]').count(), 0, 'a first visit offers nothing');
+  await q.locator('[data-tour="guide"]').click(); await q.waitForSelector('#den-tour [role="dialog"]', { timeout: 20000 });
   const before = await q.evaluate(() => document.querySelector('#den-tab-brief').getAttribute('aria-selected')); await q.keyboard.press('Alt+2'); await q.keyboard.press('?'); await q.waitForTimeout(300);
   eq(await q.evaluate(() => document.querySelector('#den-tab-brief').getAttribute('aria-selected')), before, 'Alt+2 does not switch the tab behind the welcome');
   eq(await q.locator('#den-root [role="dialog"]').count(), 0, '? opens no Den dialog behind it'); ok(await q.evaluate(() => !!document.activeElement.closest('#den-tour')), 'the focus stays in the welcome');
   await q.locator('#den-tour').getByRole('button', { name: 'I\'ll do it later' }).click();
   await q.reload(); await q.waitForFunction(() => typeof go === 'function' && typeof denInit === 'function'); await q.evaluate(() => go('den'));
-  await q.waitForSelector('#den-tour .dt-prompt', { timeout: 20000 }); ok(/Want a guided tour of the Den\?/.test(await txt(q, '#den-tour .dt-prompt')) && !/again/.test(await txt(q, '#den-tour .dt-prompt h2')), 'never started: ' + await txt(q, '#den-tour .dt-prompt h2'));
+  await q.waitForSelector('#den-app', { timeout: 20000 }); await q.waitForTimeout(3500);
+  eq(await q.locator('#den-tour .dt-prompt, #den-tour [role="dialog"]').count(), 0, 'the "Want a guided tour" prompt no longer appears on open'); ok(!/Want a guided tour|Want the guide again/.test(await q.evaluate(() => document.body.textContent)), 'nowhere on the page');
   await q.context().close();
 });
 
