@@ -95,7 +95,7 @@ const browser = await chromium.launch();
 async function open(role) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } }); await studioAskBridge(page);
   page.on('pageerror', e => console.log('  [pageerror] ' + String(e.stack || e.message).split('\n').slice(0, 3).join(' | ').slice(0, 400)));
-  await page.addInitScript(({ W, role }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', role === 'read' ? 'read-key' : 'full-key'); if (role) window.AX_ROLE = role; }, { W, role });
+  await page.addInitScript(({ W, role }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', role === 'read' ? 'read-key' : 'full-key'); if (role) window.AX_ROLE = role; if (!localStorage.getItem('ax_studio_build')) localStorage.setItem('ax_studio_build', 'detailed');   /* the wizard's first question, answered as last time */ }, { W, role });
   // the page's worker calls go to the module in this process; other hosts (fonts, charts) are dropped
   await page.route(/^https:\/\/(?!127\.0\.0\.1)[^/]+\//, async route => {
     const rq = route.request(); const u = rq.url();

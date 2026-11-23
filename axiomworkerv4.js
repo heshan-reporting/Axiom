@@ -10091,7 +10091,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-12.studio-p65';
+const AXIOM_BUILD = '2026-11-23.studio-p66';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -10480,7 +10480,7 @@ async function stList(env, f) {
       const rs = (await env.MIND_DB.prepare('SELECT id, project, chosen, data FROM studio_directions WHERE project IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results || [];
       rs.forEach(r => { (dirs[r.project] = dirs[r.project] || []).push(Object.assign({ id: r.id, chosen: !!r.chosen }, pjs(r.data, {}))); });
     }
-    g.forEach(p => { try { p.phase = stListPhase(p, dirs[p.id] || []); } catch (e) {} });
+    g.forEach(p => { try { p.phase = stListPhase(p, dirs[p.id] || []); p.build = stWfExpress(p) ? 'express' : 'detailed'; } catch (e) {} });
   } catch (e) {}
   const legacy = f.legacy === false ? [] : await stLegacyList(env, ns, projects);
   return { ok: true, ns, projects, legacy };
@@ -12823,6 +12823,11 @@ const ST_WF_STEPS = ['brief', 'objectives', 'strategy', 'directions', 'copy', 'd
 const ST_WF_TYPES = { campaign: 'Campaign creative', response: 'Response creative', social: 'Social content', paid: 'Paid advertisement', announcement: 'Announcement', news_response: 'News response', explainer: 'Explainer', brand: 'Brand content', reactive: 'Reactive content', other: 'Other' };
 const ST_STRAT_WORD = { direct: 'Direct response', indirect: 'Indirect response', evidence: 'Evidence-led', values: 'Values-based', rapid: 'Rapid reaction', education: 'Education', campaign: 'Campaign integration', none: 'Do not respond' };
 function stWfOn(p) { return Number(((p && p.brief) || {}).workflow) >= 2; }
+/** The Express build (23 November 2026): a guided project whose team chose three stages over seven steps. The record and the
+ *  seven steps are the same, so every rule that reads them holds; what changes is how much a person is asked: one confirmation
+ *  of the plan (stWfConfirm step 'plan'), and no "ready for design" tick between the words and the canvas - the words are
+ *  approved with the design, in Review, by a person. */
+function stWfExpress(p) { return stWfOn(p) && ((p && p.brief) || {}).build === 'express'; }
 /** What the work downstream is built on: the analysis and the objective, key message and strategy chosen from it. */
 function stWfBasis(p) {
   const b = (p && p.brief) || {}; const i = b.intel && typeof b.intel === 'object' ? b.intel : {}; const sel = i.selected || {};
@@ -12872,7 +12877,7 @@ function stWfValid(a) {
 function stWfHasImagery(a) { const v = stWfVer(a); if (!v) return false; return !!(v.image && v.image.key) || ((v.layout || {}).layers || []).some(l => l && l.type === 'img' && l.region && l.src); }
 /** Where every step of the project stands, worked out from the project view (stGet): the island and the gates read the same answer. */
 function stWorkflow(p) {
-  const on = stWfOn(p); const b = p.brief || {}; const i0 = b.intel && typeof b.intel === 'object' ? b.intel : {};
+  const on = stWfOn(p); const express = stWfExpress(p); const b = p.brief || {}; const i0 = b.intel && typeof b.intel === 'object' ? b.intel : {};
   const jobs = Array.isArray(p.jobs) ? p.jobs : []; const dirs = Array.isArray(p.directions) ? p.directions : []; const assets = Array.isArray(p.assets) ? p.assets : [];
   const live = stages => jobs.find(j => stages.indexOf(j.stage) >= 0 && (j.state === 'queued' || j.state === 'running')) || null;
   const lastOf = stages => jobs.filter(j => stages.indexOf(j.stage) >= 0).sort((x, y) => (y.created || 0) - (x.created || 0))[0] || null;
@@ -12916,7 +12921,7 @@ function stWorkflow(p) {
   const chosen = dirs.find(d => d.chosen) || null; const chosenCur = !!chosen && (!on || (chosen.basis ? stWfItemCurrent(p, chosen, chosen.basis) : false));
   const dRun = live(['direct']);
   if (on && steps.strategy.noResponse) steps.directions = lock('The team decided not to respond. Choose "Respond after all" in Strategy to continue.');
-  else if (on && !stratOk) steps.directions = lock('Complete Strategy Selection to continue.');
+  else if (on && !stratOk) steps.directions = lock(express ? 'Confirm the plan in the Brief to continue.' : 'Complete Strategy Selection to continue.');
   else if (dRun) steps.directions = S('processing', { job: dRun.id, note: 'building creative directions' });
   else if (chosenCur) steps.directions = S('complete', { note: chosen.title || '', chosen: chosen.id });
   else if (chosen && on) steps.directions = S('needs_review', { why: 'chosen_earlier', chosen: chosen.id, note: 'the chosen direction was built on an earlier objective, message or strategy' });
@@ -12935,6 +12940,8 @@ function stWorkflow(p) {
   else if (staleAssets.length) steps.copy = S('needs_review', { why: 'earlier_choice', stale: staleAssets, note: staleAssets.length + ' piece' + (staleAssets.length === 1 ? ' was' : 's were') + ' written on an earlier choice' });
   else if (otherDir.length) steps.copy = S('needs_review', { why: 'other_direction', stale: otherDir, note: otherDir.length + ' piece' + (otherDir.length === 1 ? ' was' : 's were') + ' written from a direction other than "' + stStr(chosen.title, 60) + '": rewrite from it, or keep ' + (otherDir.length === 1 ? 'it' : 'them') });
   else if (ready.length === assets.length) steps.copy = S('complete', { note: 'all ' + assets.length + ' ready for design' });
+  // express: the words are written and go straight to the canvas; a person approves them with the design, in Review
+  else if (express) steps.copy = S('complete', { note: assets.length + ' piece' + (assets.length === 1 ? '' : 's') + ' written' + (ready.length ? ', ' + ready.length + ' approved' : '; the words are approved with the design') });
   else steps.copy = S('in_progress', { note: ready.length + ' of ' + assets.length + ' ready for design' });
   // DESIGN: the production mode, the imagery, the canvas; every visual validated at its output size
   const visual = assets.filter(a => { const v = stWfVer(a); return v && v.mode !== 'copy'; });
@@ -12942,16 +12949,18 @@ function stWorkflow(p) {
   if (assets.length && !visual.length) steps.design = S('skipped', { note: 'copy only: nothing to design' });
   // the gate keeps design from starting before the words are settled; once something has been produced, a later word change
   // sends that piece back to Copy for review but never locks the canvas away from the work already on it
-  else if (on && !ready.length && !b.production && !visual.some(stWfHasImagery)) steps.design = lock(assets.length ? 'Mark at least one piece of copy ready for design to continue.' : 'Generate the copy to continue.');
+  // (express: no ready tick between the words and the canvas, so the canvas waits only for the copy to exist)
+  else if (on && (express ? !assets.length : (!ready.length && !b.production && !visual.some(stWfHasImagery)))) steps.design = lock(assets.length ? 'Mark at least one piece of copy ready for design to continue.' : express ? 'Choose a direction to continue: it writes the copy and opens the canvas.' : 'Generate the copy to continue.');
   else if (!assets.length) steps.design = S('not_started', { note: 'write the copy first' });
   else if (rRun) steps.design = S('processing', { job: rRun.id, note: rRun.stage === 'render' ? 'generating imagery' : rRun.stage === 'inspect' ? 'the Creative Director is reviewing' : 'proposing art directions' });
   else { const ok = visual.filter(stWfValid).length; steps.design = S(ok === visual.length ? 'complete' : on && !b.production && !visual.some(stWfHasImagery) ? 'not_started' : 'in_progress', { note: ok + ' of ' + visual.length + ' validated' + (on && !b.production && !visual.some(stWfHasImagery) ? '; choose the production mode' : '') }); }
   // REVIEW: the preflight, the approvals, the client, the export
-  const reviewReady = assets.filter(a => a.approvals && a.approvals.copy && stWfValid(a));
+  // express: Review opens on a piece that passes its checks; its words and its design are approved there, by a person
+  const reviewReady = assets.filter(a => (express || (a.approvals && a.approvals.copy)) && stWfValid(a));
   const approved = assets.filter(a => a.approvals && a.approvals.copy && (a.approvals.design || (stWfVer(a) || {}).mode === 'copy'));
   const exported = (p.thread || []).some(e => e.kind === 'export');
   const onlyFinished = visual.length && visual.every(a => (stWfVer(a) || {}).mode === 'finished');
-  if (on && !reviewReady.length) steps.review = lock(!assets.length ? 'Complete a creative in Design to continue.' : onlyFinished ? 'Have the Creative Director read the painted words and the mark back (Review in Design) for at least one finished creative, with its copy marked ready, to continue.' : visual.length ? 'Validate at least one creative in Design, with its copy marked ready, to continue.' : 'Mark at least one piece of copy ready to continue.');
+  if (on && !reviewReady.length) steps.review = lock(!assets.length ? 'Complete a creative in Design to continue.' : onlyFinished ? 'Have the Creative Director read the painted words and the mark back (Review in Design) for at least one finished creative, with its copy marked ready, to continue.' : visual.length ? (express ? 'Get at least one creative passing its checks on the canvas to continue.' : 'Validate at least one creative in Design, with its copy marked ready, to continue.') : 'Mark at least one piece of copy ready to continue.');
   else if (!assets.length) steps.review = S('not_started', { note: 'nothing made yet' });
   else if (approved.length === assets.length) steps.review = S('complete', { note: exported ? 'approved and exported' : 'every piece approved; export when ready', exported });
   else steps.review = S(approved.length ? 'in_progress' : 'not_started', { note: approved.length + ' of ' + assets.length + ' approved', exported });
@@ -12960,7 +12969,7 @@ function stWorkflow(p) {
   const onCur = curDirs.filter(d => d.basis);
   const builtAssets = on ? assets.filter(a => { const bs = stWfAssetBasis(a); return bs && stWfItemCurrent(p, a, bs); }) : [];
   const impact = { directions: onCur.length, chosen: !!(chosen && chosen.basis && chosenCur), assets: builtAssets.length, approvals: builtAssets.filter(a => a.approvals && (a.approvals.copy || a.approvals.design)).length, any: onCur.length + builtAssets.length > 0 };
-  return { v: on ? 2 : 1, enforced: on, steps, order: ST_WF_STEPS, current, basis, key: stWfKey(basis), kept: Array.isArray(i0.kept) ? i0.kept : [], earlier: { directions: earlier.map(d => d.id), assets: staleAssets, otherDirection: otherDir }, impact, type: b.projectType || '', production: b.production || null };
+  return { v: on ? 2 : 1, enforced: on, build: express ? 'express' : 'detailed', steps, order: ST_WF_STEPS, current, basis, key: stWfKey(basis), kept: Array.isArray(i0.kept) ? i0.kept : [], earlier: { directions: earlier.map(d => d.id), assets: staleAssets, otherDirection: otherDir }, impact, type: b.projectType || '', production: b.production || null };
 }
 /** A light project view for the gates: the brief and the directions are enough to judge every step up to Copy. */
 async function stWfView(env, p, withAssets) {
@@ -13032,7 +13041,8 @@ async function stWfConfirm(env, p, sb, who) {
     await stEvent(env, p.id, 'workflow', { step, text: 'Kept ' + what + ' built on an earlier choice under the current objective, message and strategy. Nothing was regenerated.' }, who);
     return { ok: true, step, kept: ids, keptAssets: na, keptDirections: nd };
   }
-  if (step !== 'objectives' && step !== 'strategy') return { error: 'bad_step', status: 400, detail: 'step is brief, objectives, strategy or keep' };
+  if (step === 'plan') return stWfConfirmPlan(env, p, sb, who, it, wf);
+  if (step !== 'objectives' && step !== 'strategy') return { error: 'bad_step', status: 400, detail: 'step is brief, objectives, strategy, plan or keep' };
   const gate = await stWfGate(env, p, step); if (gate) return gate;
   const basis0 = stWfBasis(p); const next = Object.assign({}, basis0, { intel: it.id });
   let obj = null, msg = null, strat = null;
@@ -13079,6 +13089,44 @@ async function stWfConfirm(env, p, sb, who) {
   if (changes && ack) await stIntelLog(env, p.ns, p.id, ack === 'keep' ? 'kept_downstream' : 'updated_downstream', step, (ack === 'keep' ? 'kept ' : 'set aside for new work ') + [wf.impact.directions ? wf.impact.directions + ' directions' : '', wf.impact.assets ? wf.impact.assets + ' pieces' : ''].filter(Boolean).join(' and ') + ' when the ' + step + ' changed', who);
   await stEvent(env, p.id, 'workflow', { step, text: (step === 'objectives' ? 'Confirmed objective ' + obj.id + ' ("' + stStr(obj.title, 70) + '") with key message ' + msg.id + (topics.length ? ' and ' + topics.length + ' topic' + (topics.length === 1 ? '' : 's') : '') + '.' : 'Confirmed the ' + strat.kind + ' response strategy (' + strat.id + ')' + (changed.indexOf('campaign') >= 0 ? ' and the campaign ' + (kitSlug(sb.campaign || '') || 'standalone') : '') + '.') + (changes && ack === 'keep' ? ' The existing work was kept under the new choice.' : changes && ack === 'update' ? ' The existing work stays, marked as built on the earlier choice.' : ''), acknowledge: ack || undefined }, who);
   return { ok: true, step, changed: Array.from(new Set(changed)), acknowledged: ack || undefined };
+}
+/** One confirmation of the plan (23 November 2026, the Express build): the reading reviewed, and the objective with its key
+ *  message and the response strategy confirmed, by one person in one request. What the person did not choose is Axiom's own
+ *  recommendation from the reading (the first key message under the objective when it recommends none; the topics it judged
+ *  highly relevant). Every part is checked before any part is written - an unknown pick, a campaign still undecided, a strategy
+ *  that is "do not respond" (a decision with its reason, recorded apart), work downstream that the change would leave on an
+ *  earlier choice - so a refusal confirms nothing. `upto: 'objectives'` stops before the strategy, for the team that will record
+ *  a decision not to respond. Each part is then written by the code a single confirmation uses, and logged the same way. */
+async function stWfConfirmPlan(env, p, sb, who, it, wf) {
+  const rec = it.recommendation || {}; const upto = sb.upto === 'objectives' ? 'objectives' : 'strategy';
+  const ack = sb.acknowledge === 'keep' || sb.acknowledge === 'update' ? sb.acknowledge : '';
+  const objs = it.objectives || [];
+  const obj = sb.objective ? objs.find(o => o.id === sb.objective) : (objs.find(o => o.id === rec.objective) || objs[0]);
+  if (!obj) return { error: 'unknown_objective', status: 400, detail: sb.objective ? 'Choose one of the objectives Axiom proposed. Nothing was confirmed.' : 'The analysis proposed no objective: analyse again with more of the brief. Nothing was confirmed.' };
+  const msgs = obj.messages || [];
+  const msg = sb.message ? msgs.find(m => m.id === sb.message) : (msgs.find(m => m.id === rec.message) || msgs[0]);
+  if (!msg) return { error: 'message_not_under_objective', status: 400, detail: 'Choose a key message under ' + obj.id + '. Nothing was confirmed.' };
+  let strat = null;
+  if (upto === 'strategy') {
+    const strats = it.strategies || [];
+    strat = sb.strategy ? strats.find(s => s.id === sb.strategy) : (strats.find(s => s.id === rec.strategy) || strats.find(s => s.recommended) || strats.find(s => s.kind !== 'none'));
+    if (!strat) return { error: 'unknown_strategy', status: 400, detail: 'Choose one of the response strategies. Nothing was confirmed.' };
+    if (strat.kind === 'none') return { error: 'use_decision', status: 400, detail: (sb.strategy ? 'Not responding' : 'Axiom recommends not responding, and that') + ' is recorded as a decision with its reason (POST /studio/intel/decision kind no_response), never confirmed as a strategy: choose a response strategy to go on, or record the decision. Nothing was confirmed.' };
+    if (sb.campaign !== undefined && kitSlug(sb.campaign || '')) { const cid0 = kitSlug(sb.campaign); const kit0 = (await brandKit(env, p.ns)) || {}; if (!(kit0.campaigns || []).some(c => c.id === cid0)) return { error: 'unknown_campaign', status: 400, detail: 'The kit has no campaign "' + cid0 + '". Nothing was confirmed.' }; }
+    if (sb.campaign === undefined && !(p.campaign || '') && !(p.brief || {}).campaignConfirmed) {
+      const chk = await stBriefCheck(env, p).catch(() => null); const g = chk && (chk.gaps || []).find(x => x.code === 'campaign_unconfirmed' && x.level === 'mandatory');
+      if (g) return { error: 'campaign_required', status: 409, detail: 'Choose the campaign, or keep this standalone, with the plan: ' + (g.text || 'the kit has more than one campaign and none is chosen') + '. Nothing was confirmed.' };
+    }
+  }
+  const basis0 = stWfBasis(p); const next = { intel: it.id, objective: obj.id, message: msg.id, strategy: strat ? strat.id : basis0.strategy };
+  if (stWfKey(next) !== stWfKey(basis0) && wf.impact.any && !ack) return { error: 'affects_downstream', status: 409, step: 'plan', impact: wf.impact, detail: 'Changing the plan may affect your current work: ' + [wf.impact.directions ? wf.impact.directions + ' creative direction' + (wf.impact.directions === 1 ? '' : 's') + (wf.impact.chosen ? ' (one chosen)' : '') : '', wf.impact.assets ? wf.impact.assets + ' piece' + (wf.impact.assets === 1 ? '' : 's') + ' of copy and design' + (wf.impact.approvals ? ', ' + wf.impact.approvals + ' with an approval' : '') : ''].filter(Boolean).join(' and ') + '. Update them (they stay, marked as built on the earlier choice) or keep them under the new choice. Nothing was confirmed.' };
+  const topics = Array.isArray(sb.topics) ? sb.topics : (it.topics || []).filter(t => t.relevance === 'high').map(t => t.name);
+  const done = []; let r = await stWfConfirm(env, p, { step: 'brief' }, who); if (r.error) return r; done.push('brief');
+  r = await stWfConfirm(env, await stProject(env, p.id), Object.assign({ step: 'objectives', objective: obj.id, message: msg.id, topics }, ack ? { acknowledge: ack } : {}), who); if (r.error) return Object.assign(r, { confirmed: done }); done.push('objectives');
+  if (strat) { r = await stWfConfirm(env, await stProject(env, p.id), Object.assign({ step: 'strategy', strategy: strat.id }, ack ? { acknowledge: ack } : {}, sb.campaign !== undefined ? { campaign: sb.campaign } : {}), who); if (r.error) return Object.assign(r, { confirmed: done }); done.push('strategy'); }
+  const own = [sb.objective ? 'objective' : '', sb.message ? 'key message' : '', strat && sb.strategy ? 'strategy' : ''].filter(Boolean);
+  await stEvent(env, p.id, 'workflow', { step: 'plan', text: 'One confirmation covered the reading, objective ' + obj.id + ' with key message ' + msg.id + (strat ? ' and the ' + strat.kind + ' strategy (' + strat.id + ')' : '') + ': ' + (own.length ? 'the ' + own.join(', ') + ' chosen by ' + stStr(who, 40) + ', the rest Axiom\'s recommendation' : 'Axiom\'s recommendation, accepted as it stood') + '.' + (strat ? ' Directions are open.' : ' The strategy is still to decide.') }, who);
+  return { ok: true, step: 'plan', confirmed: done, recommended: { objective: !sb.objective, message: !sb.message, strategy: !!strat && !sb.strategy } };
 }
 /** S17: resize a composition to other platform formats. Each format becomes a new asset in the same family, built from the
  *  composition as it stands - its words, every element's own position read back as a plan and moved to the new stage, the
@@ -13455,7 +13503,8 @@ async function stProduction(env, p, sb, who) {
     const cur = await stCurrent(env, a); const skip = (why, code) => skipped.push({ asset: a.id, title: a.title, why, code: code || '' });
     if (!cur) { skip('it has no version'); continue; }
     if (cur.mode === 'copy') { skip('copy only: nothing to design', 'copy_only'); continue; }
-    if (guided) { const st0 = await stStanding(env, a); if (!st0.copy) { skip('its copy is not marked ready for design yet', 'copy_not_ready'); continue; } }
+    // (an express project has no ready tick: the render is still asked for by a person, with its cost, and the words are approved in Review)
+    if (guided && !stWfExpress(p)) { const st0 = await stStanding(env, a); if (!st0.copy) { skip('its copy is not marked ready for design yet', 'copy_not_ready'); continue; } }
     if (mode === 'editable' || cur.mode === 'finished') {
       if (mode === 'editable' && cur.mode === 'finished') { skip('it is already a finished creative: derive an editable copy of it instead', 'is_finished'); continue; }
       const r = await stImageryQueue(env, p, a, { size }, who);
@@ -13639,6 +13688,10 @@ function stBriefNorm(b) {
   // S17: the guided workflow's own fields: the version of the workflow, the project type, how the campaign was settled, the
   // topics in play and the production mode chosen in Design
   if (b.workflow != null) out.workflow = Number(b.workflow) >= 2 ? 2 : 1;
+  // how the project is built (23 November 2026), asked first in the wizard: 'express' (three stages: one confirmation of the
+  // plan, the canvas without a ready tick) or 'detailed' (the seven steps). An unknown value is the seven steps, the route every
+  // rule was written for; a project made before the question keeps no answer and is read as detailed.
+  if (b.build != null) out.build = b.build === 'express' ? 'express' : 'detailed';
   if (b.projectType != null) out.projectType = ST_WF_TYPES[b.projectType] ? b.projectType : 'other';
   if (b.campaignMode != null) out.campaignMode = ['existing', 'new', 'standalone', 'detect'].indexOf(b.campaignMode) >= 0 ? b.campaignMode : 'existing';
   if (b.topics != null) out.topics = (Array.isArray(b.topics) ? b.topics : []).map(t => stStr(t, 100)).filter(Boolean).slice(0, 12);
@@ -16181,7 +16234,7 @@ async function stImageryQueue(env, p, a, body, who) {
   if (v.mode === 'copy' || !(L.layers || L.regions || finished)) return { error: 'copy_only', status: 409, detail: 'A copy-only asset has no imagery to make.' };
   if (!env.GEMINI_KEY) return { error: 'gemini_not_configured', status: 409, detail: 'Image generation is not configured on the worker (GEMINI_KEY).' };
   // S17: in a guided project no render is spent on words that may still change: the piece's copy is marked ready for design first
-  if (stWfOn(p)) { const st0 = await stStanding(env, a); if (!st0.copy) return { error: 'copy_not_ready', status: 409, detail: 'Mark this piece\'s copy ready for design first: no render is spent on words that may still change.' }; }
+  if (stWfOn(p) && !stWfExpress(p)) { const st0 = await stStanding(env, a); if (!st0.copy) return { error: 'copy_not_ready', status: 409, detail: 'Mark this piece\'s copy ready for design first: no render is spent on words that may still change.' }; }
   if ((v.context || {}).imagery === 'none' && !body.again) return { error: 'no_imagery_by_choice', status: 409, detail: 'This version was made with no imagery on purpose (type only). Ask for imagery as a new direction instead.' };
   const hasImage = !!(v.image && v.image.key) || (L.layers || []).some(l => l.type === 'img' && l.region && l.src);
   if (hasImage && !body.again) return { error: 'has_imagery', status: 409, detail: 'This version already has its imagery. Re-render from the Art direction area, which says what it changes.' };

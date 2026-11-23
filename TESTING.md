@@ -2,7 +2,7 @@
 
 This page is for the people running the team's test round of the AXIOM Creative Studio, and for the testers themselves. It
 says how the release goes live, who can do what, where to test, what to try, what costs money, what is known not to work yet,
-and how to report a problem. Release candidate: worker build `2026-11-12.studio-p65`, page release `?v=r45` (`den.js?v=r48`). The findings and
+and how to report a problem. Release candidate: worker build `2026-11-23.studio-p66`, page release `?v=r46` (`den.js?v=r48`). The findings and
 the evidence behind it are in `CREATIVE-STUDIO.md` s.54 to s.58 (s.56 the p46 audit fixed, s.57 the p47 audit fixed, s.58 the UI
 debt closed); the round's
 cases for people are Part B of `prompts/studio-rc-team-test.md`. Build ids carry the date the build was made; p46 and p47 were
@@ -96,6 +96,16 @@ Two briefs to paste (synthetic):
    with a pin, approve with a name. Check: the agency's thread says "through the review link ... name as given, not verified".
 6. **A guest link on a live client.** With a tester link, open an MCA project. Check: "read-only for a guest link"; nothing
    can be written there.
+7. **Express build end to end** (new in p66; paid, about the same model requests as journey 4, no images): New project. The
+   first question is *How do you want to build this?* - choose **Express build**, Harbourline, paste a brief, and name the
+   campaign in the wizard. Check: the header shows three stages (Brief, Make, Ship); the Brief shows one plan with Axiom's picks
+   marked, and "Confirm and propose directions" confirms it in one press; "Use this and write the copy" on a direction writes
+   the words and opens the canvas with no "ready for design" tick; in Ship one "Approve words and design" asks for one reason,
+   and a tile with no passing measurement cannot be approved and says why. Then make a second project and choose **Detailed
+   build**: it is the seven stages as before. Tell us which you would use for which kind of job, and where Express still asks
+   for more than it should.
+
+The seeded projects above were parked as detailed builds; the Express build is tested from a new project.
 
 ## What costs money
 

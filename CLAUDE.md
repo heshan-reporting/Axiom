@@ -3447,6 +3447,28 @@ animating stylesheet without a reduced-motion rule. Not yet built: curved text, 
 one-click background removal (each needs the RULES block and the validation contract). Harnesses: `tests/studio-p52-worker.mjs`
 (6), `tests/studio-r6-browser.mjs` (6), `tests/studio-tokens-test.mjs` (4).
 
+**Two ways to build: Express and Detailed (build `2026-11-23.studio-p66`, page `?v=r46`; `CREATIVE-STUDIO.md` s.62).** The
+team's complaint was the number of steps (about a dozen decisions across eight screens before a tile could be downloaded). The
+wizard now asks first, before the client and the brief: **Express build** (three stages) or **Detailed build** (the seven
+steps, unchanged). Nothing is assumed for a first project; afterwards the last answer is offered selected (localStorage
+`ax_studio_build`). The answer is `brief.build` (`stBriefNorm`: `express` | `detailed`; unknown is detailed; none is read as
+detailed), on `workflow.build` and on `/studio/list` rows. **An express project keeps the same record and the same seven worker
+steps** and groups them (`PHASES_X`, `phasesFor(build)`, `phaseOf(id, build)` in `docs/studio.js`; Alt+1..3): **Brief** - the
+material, the reading and the plan on one page (`ExpressPlan` in `docs/studio-guided.js`: objective, key message, strategy and
+campaign, Axiom's recommendation selected and marked) confirmed in ONE request, `POST /studio/workflow/confirm {step: 'plan',
+objective?, message?, strategy?, campaign?, topics?, upto?, acknowledge?}` (`stWfConfirmPlan`: every part checked before any is
+written, so a refusal confirms nothing - `campaign_required`, `use_decision`, `affects_downstream`; `upto: 'objectives'` for the
+team recording a decision not to respond), then the directions (one model call, stated on the button); **Make** - Direction,
+Words, Canvas: "Use this and write the copy" selects the direction, writes the copy (one model call, no image) and opens the
+canvas (`chooseExpress`), with **no "ready for design" tick** (`stWfExpress(p)`: the canvas opens once the copy exists;
+`/studio/imagery` and `/studio/production` do not answer `copy_not_ready`); **Ship** - Approve and Deliver: Review opens on a
+piece that passes its checks and **one approval** covers the words and the design of exactly that version (`approveBoth`: copy
+first with the short reason `with design`, then design with the person's reason). Not relaxed in express: approval is a
+person's, the campaign is asked for when open, not responding needs a reason, a paid render states its cost, validation and the
+campaign walls. An express page moves on only where the pressed button said it would. `PAGE_NEEDS_BUILD` is 66. The harnesses
+written for the seven steps start as a person who chose Detailed last time (the fixtures seed `ax_studio_build`;
+`wizardCreate(page, {build})`). Harnesses: `tests/studio-express-worker.mjs` (8), `tests/studio-express-browser.mjs` (6).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

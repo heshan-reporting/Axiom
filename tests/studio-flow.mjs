@@ -59,6 +59,9 @@ export async function wizardCreate(page, o) {
   const nw = page.locator(R + 'button:has-text("New project")');
   if (!(await page.$(R + '.st-wiz'))) { await nw.first().click(); }
   await page.waitForSelector(R + '.st-wiz');
+  // 23 November 2026: the wizard asks Express or Detailed first; the fixture answers Detailed (as a person who chose it last
+  // time) unless a suite names the build
+  if (o.build) await page.click(R + '.st-build[data-build="' + o.build + '"]');
   // R2: the first step is the client and the brief; the kind of work is read from the brief and corrected here when asked
   await page.waitForSelector(R + '.st-client-card');
   await page.click(R + '.st-client-card:has-text("' + (o.client || 'Minerals Council') + '")');
