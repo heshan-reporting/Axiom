@@ -47,7 +47,7 @@ await api('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'approv
 const share = await api('POST', '/studio/share', { project: P, assets: [A, B], label: 'HOOF round 1', expiresDays: 14, allowApprove: true });
 const TOKEN = share.token;
 
-const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
 await new Promise(r => setTimeout(r, 900));
 const browser = await chromium.launch();
 const routeWorker = async page => page.route(/^https:\/\/(?!127\.0\.0\.1)[^/]+\//, async route => {

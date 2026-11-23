@@ -5,16 +5,36 @@
  *      only), the paragraphs that mention the search words first and marked, and says which route carried it.
  *   C. A subscriber-only article says so, offers the archives (a second /fulltext without light) and the original.
  *   D. Clearing the box and searching again brings the general feed back.
+ * And from Kai's ticket of 16 November 2026 ("Newsroom Irrelevant Result": a vacuum deal and a Matildas story on the MCA
+ * Newsroom):
+ *   E. With a client chosen in the Scope bar, the general feed shows only stories on that client's issues or naming its
+ *      registered people and organisations; the count and the chips name the client; the deal source is not a chip.
+ *   F. "All news" brings the whole feed back; the client's chip brings the narrowing back.
+ *   G. Changing the client re-narrows to the new client; clearing the client shows everything and hides the chips.
+ *   H. A search is never narrowed, and the general feed is narrowed again when the search is cleared.
+ *   I. A client with nothing in the window gets an empty state that names the client and the way out.
  * Run: node tests/newsroom-browser.mjs */
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';
 const PORT = 8773, W = 'https://newsaus.heshan-998.workers.dev';
-const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
 for (let i = 0; i < 40; i++) { try { const r = await fetch('http://127.0.0.1:' + PORT + '/index.html'); if (r.ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 150)); }
 const NOW = Date.now(), H = 3600e3, iso = t => new Date(t).toISOString();
 const general = [
   { title: 'Housing approvals fall for a third month', link: 'https://abc.test/housing', src: 'abc', date: iso(NOW - H), desc: 'Approvals fell again.' },
   { title: 'Chalmers on the surplus', link: 'https://afr.test/surplus', src: 'afr', date: iso(NOW - 2 * H), desc: '' },
+  // the two stories from Kai's screenshots, and the two that belong on the MCA Newsroom (one by issue, one by a registered name)
+  { title: 'Dyson V15 Detect Absolute $749 delivered', link: 'https://deals.test/vacuum', src: 'ozbargain deals', date: iso(NOW - H), desc: 'Cheapest ever for this stick vacuum.' },
+  { title: 'Matildas name squad for the Asian Cup', link: 'https://abc.test/matildas', src: 'abc', date: iso(NOW - 2 * H), desc: 'Three debutants in the 23.' },
+  { title: 'Miners press Treasury to keep fuel tax credits whole', link: 'https://afr.test/ftc', src: 'afr', date: iso(NOW - 3 * H), desc: 'The diesel rebate is back on the table.' },
+  { title: 'Priya Nandakumar warns on approval delays', link: 'https://theaustralian.test/nandakumar', src: 'the australian', date: iso(NOW - 4 * H), desc: 'The industry body\'s chief says projects are stalling.' },
+  { title: 'Gas supply shortfall looms for the east coast', link: 'https://smh.test/gas', src: 'smh', date: iso(NOW - 5 * H), desc: 'AEMO repeats its warning.' },
+];
+// the register: one person filed under the MCA client, one shared party (no client), one MCA entity switched off
+const ENTS = [
+  { id: 'priya_nandakumar', name: 'Priya Nandakumar', kind: 'person', ns: 'mca', aliases: ['Nandakumar'], active: true },
+  { id: 'alp', name: 'Labor', kind: 'party', ns: '', aliases: ['ALP'], active: true },
+  { id: 'old_chief', name: 'Chalmers', kind: 'person', ns: 'mca', aliases: [], active: false },
 ];
 const coal = [
   { title: 'Coal exports slow as China demand eases', link: 'https://theaustralian.test/coal', src: 'the australian', date: iso(NOW - H), desc: 'Thermal coal shipments fell in September.' },
@@ -31,6 +51,7 @@ const stub = (url) => {
   calls.push({ p, q });
   if (p === '/allnews') return { ok: true, items: q.q ? coal.slice(0, 1) : general, feeds: 40, sources: [{}, {}], generated: iso(NOW) };
   if (p === '/newsq') return { ok: true, items: coal.slice(1).map(it => Object.assign({}, it, { outlet: it.src })) };
+  if (p === '/entities') return { ok: true, entities: ENTS };
   if (p === '/fulltext') {
     if (/hunter/.test(q.url)) return { ok: false, url: q.url, text: '', paywall: true, method: '', attempts: [{ method: 'direct', ok: false }], detail: 'paywalled' };
     return { ok: true, url: q.url, final: q.url, text: ARTICLE, chars: ARTICLE.length, method: 'amp', title: 'Coal exports slow' };
@@ -98,6 +119,70 @@ await t('D. clearing the box and searching again brings the general feed back, a
   ok(!/"/.test(await page.textContent('#news-count')));
   await page.evaluate(() => loadCore()); await page.waitForTimeout(300);
   ok((await titles()).some(x => /Housing approvals/.test(x)));
+});
+const scopeChips = () => page.$$eval('#news-scope .chip', els => els.map(e => (e.classList.contains('on') ? '*' : '') + e.textContent));
+const srcChips = () => page.$$eval('#news-chips .chip', els => els.map(e => e.textContent));
+await t('E. Minerals Council chosen in the Scope bar: only its stories, the count and chips name it, the deal source is no chip', async () => {
+  await page.evaluate(() => AXUI.setScope({ ns: 'mca' }));
+  await page.waitForSelector('#news-list .wi:has-text("Priya Nandakumar")', { timeout: 5000 });   // the register read landed and the named story is in
+  const t1 = await titles();
+  ok(t1.some(x => /fuel tax credits/.test(x)), 'the fuel tax story (an MCA issue) is shown: ' + JSON.stringify(t1));
+  ok(t1.some(x => /Nandakumar/.test(x)), 'the story naming the registered person is shown');
+  ok(!t1.some(x => /Dyson|Matildas|Housing approvals|Gas supply/.test(x)), 'the deal, the Matildas, housing and gas are not: ' + JSON.stringify(t1));
+  ok(!t1.some(x => /Chalmers/.test(x)), 'a switched-off register entry does not pull a story in');
+  const count = await page.textContent('#news-count');
+  ok(/^MINERALS COUNCIL · /.test(count) && /2 STORIES/.test(count), 'the count names the client: ' + count);
+  ok(!(await page.$eval('#news-scope', e => e.hidden)), 'the scope chips are shown');
+  const sc = await scopeChips(); ok(sc[0] === '*Minerals Council only' && sc[1] === 'All news', JSON.stringify(sc));
+  ok(/registered people and organisations/.test(await page.textContent('#news-scope')), 'the hint says what narrows');
+  const srcs = await srcChips(); ok(!srcs.some(s => /ozbargain/.test(s)) && srcs.some(s => /^afr/.test(s)), 'source chips come from the narrowed feed: ' + JSON.stringify(srcs));
+});
+await t('F. All news brings the whole feed back; the client chip narrows it again', async () => {
+  await page.click('#news-scope .chip:has-text("All news")');
+  await page.waitForSelector('#news-list .wi:has-text("Dyson")');
+  const t1 = await titles(); ok(t1.length === 7, 'every story: ' + JSON.stringify(t1));
+  ok(!/MINERALS COUNCIL/.test(await page.textContent('#news-count')), 'the count no longer names the client');
+  const sc = await scopeChips(); ok(sc[0] === 'Minerals Council only' && sc[1] === '*All news', JSON.stringify(sc));
+  ok(/Every story from every source/.test(await page.textContent('#news-scope')));
+  await page.click('#news-scope .chip:has-text("Minerals Council only")');
+  await page.waitForFunction(() => { const t = [...document.querySelectorAll('#news-list .wi .wi-t')].map(e => e.textContent); return t.length === 2 && !t.some(x => /Dyson/.test(x)); });
+  // the five-minute refresh keeps the narrowing
+  await page.evaluate(() => loadCore()); await page.waitForTimeout(300);
+  ok((await titles()).length === 2, 'narrowed after the refresh');
+});
+await t('G. another client re-narrows to its stories (All news is forgotten); no client shows everything and hides the chips', async () => {
+  await page.click('#news-scope .chip:has-text("All news")');
+  await page.waitForSelector('#news-list .wi:has-text("Dyson")');
+  await page.evaluate(() => AXUI.setScope({ ns: 'aep' }));
+  await page.waitForFunction(() => document.querySelectorAll('#news-list .wi').length === 1);
+  const t1 = await titles(); ok(/Gas supply/.test(t1[0]), 'the gas story for Energy Producers: ' + JSON.stringify(t1));
+  ok(/^ENERGY PRODUCERS · /.test(await page.textContent('#news-count')));
+  ok((await scopeChips())[0] === '*Energy Producers only', JSON.stringify(await scopeChips()));
+  await page.evaluate(() => AXUI.setScope({ ns: '' }));
+  await page.waitForFunction(() => document.querySelectorAll('#news-list .wi').length === 7);
+  ok(await page.$eval('#news-scope', e => e.hidden), 'the chips are hidden with no client');
+  ok(!/ONLY|·  ·/.test(await page.textContent('#news-count')));
+});
+await t('H. a search is never narrowed; clearing it narrows the general feed again', async () => {
+  await page.evaluate(() => AXUI.setScope({ ns: 'mca' }));
+  await page.waitForFunction(() => document.querySelectorAll('#news-list .wi').length === 2);
+  await page.fill('#news-q', 'coal'); await page.press('#news-q', 'Enter');
+  await page.waitForSelector('#news-list .wi:has-text("Coal exports slow")');
+  const t1 = await titles(); ok(t1.length === 2 && t1.every(x => /coal/i.test(x)), 'the coal results, all of them: ' + JSON.stringify(t1));
+  ok(await page.$eval('#news-scope', e => e.hidden), 'no client chips while a search is shown');
+  ok(/^"COAL" · /.test(await page.textContent('#news-count')), 'the count names the search, not the client');
+  await page.fill('#news-q', ''); await page.press('#news-q', 'Enter');
+  await page.waitForFunction(() => { const t = [...document.querySelectorAll('#news-list .wi .wi-t')].map(e => e.textContent); return t.length === 2 && t.some(x => /fuel tax/.test(x)); });
+  ok(!(await page.$eval('#news-scope', e => e.hidden)), 'the chips are back');
+});
+await t('I. a client with nothing in the window: the empty state names the client and the way out', async () => {
+  await page.evaluate(() => AXUI.setScope({ ns: 'pharm' }));
+  await page.waitForSelector('#news-list .empty');
+  const e = await page.textContent('#news-list .empty');
+  ok(/Nothing on Pharmacy Guild's issues in the last 72 hours/.test(e) && /All news/.test(e), e);
+  ok(/^PHARMACY GUILD · 0 SOURCES · 0 STORIES/.test(await page.textContent('#news-count')), await page.textContent('#news-count'));
+  await page.evaluate(() => AXUI.setScope({ ns: '' }));
+  await page.waitForFunction(() => document.querySelectorAll('#news-list .wi').length === 7);
 });
 await t('no page errors', async () => { ok(!errors.length, errors.join(' | ')); });
 await browser.close(); server.kill();

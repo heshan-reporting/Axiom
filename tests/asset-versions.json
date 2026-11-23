@@ -56,8 +56,28 @@
   "sha": "37ba84a9f394526b"
  },
  "den.css": {
-  "v": "r45",
-  "sha": "5c43eb908fdbdcf3"
+  "v": "r48",
+  "sha": "b737430e5193ded2"
+ },
+ "den-brief.css": {
+  "v": "r2",
+  "sha": "ad027be77321fede"
+ },
+ "den-flags.css": {
+  "v": "r2",
+  "sha": "2a1eb507fe2cff99"
+ },
+ "den-today.css": {
+  "v": "r2",
+  "sha": "33c3601c956907de"
+ },
+ "den-desk.css": {
+  "v": "r1",
+  "sha": "2c72e269579ffa18"
+ },
+ "den-tour.css": {
+  "v": "r1",
+  "sha": "33d8c2039649c576"
  },
  "studio-render.js": {
   "v": "r46",
@@ -73,7 +93,7 @@
  },
  "studio.js": {
   "v": "r46",
-  "sha": "3241aac2ede3f8d9"
+  "sha": "dd8809e41bea4d5c"
  },
  "studio-guided.js": {
   "v": "r46",
@@ -96,12 +116,32 @@
   "sha": "c2fdd7cec9c075a4"
  },
  "sources.js": {
+  "v": "r3",
+  "sha": "2719d5cd3df31494"
+ },
+ "den-flags.js": {
+  "v": "r3",
+  "sha": "3aeeacbf2831298e"
+ },
+ "den-today.js": {
   "v": "r2",
-  "sha": "6b34844329b51a38"
+  "sha": "31009e6ff9c47439"
+ },
+ "den-brief.js": {
+  "v": "r11",
+  "sha": "00ac74a45756e0e2"
+ },
+ "den-desk.js": {
+  "v": "r3",
+  "sha": "0d70c8bec91ecf71"
  },
  "den.js": {
-  "v": "r48",
-  "sha": "db012bd4d79fb280"
+  "v": "r63",
+  "sha": "88333e27c1cca6ad"
+ },
+ "den-tour.js": {
+  "v": "r2",
+  "sha": "2147ddd675849863"
  },
  "sentiment.js": {
   "v": "r1",
@@ -112,11 +152,11 @@
   "sha": "ad2977781ea0f27f"
  },
  "overview.js": {
-  "v": "r1",
-  "sha": "5dda64a9307ede00"
+  "v": "r2",
+  "sha": "5f5e1ca30d908aea"
  },
  "scope.js": {
-  "v": "r1",
-  "sha": "27979c4b6aa607c8"
+  "v": "r2",
+  "sha": "ff12dcdd87de3db9"
  }
 }

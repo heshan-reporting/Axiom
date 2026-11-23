@@ -1,0 +1,202 @@
+/* AXIOM - Anne's Den: Today's report (build p72, lane P3; docs/den-today.js). UX-SPEC Part D s.4 (the screen), s.10.6
+ * (comfort: the Den's dark tokens, 32 px targets, 44 px under 900 px, no smooth scroll under reduced motion) and s.11 (narrow
+ * windows: one column and a bottom bar under 1200 px, Your reports folded under 900 px, the brand gone under 600 px). Every
+ * colour and size is a --dn- token of docs/den.css; the amber is never the only signal (the number and "To check n:" are). */
+#den-app.dt-on{grid-template-rows:auto minmax(0,1fr)}
+#den-tabpanel.tab-report{overflow:hidden}
+#den-root .dt-on .den-briefhost{height:100%}
+
+/* ---- the top bar (s.4.2) ---- */
+.dt-top{position:relative;z-index:10;display:flex;align-items:center;gap:var(--dn-sp-3);min-height:56px;padding:0 var(--dn-sp-6);background:var(--dn-bg-1);border-bottom:1px solid var(--dn-line);min-width:0}
+.dt-skip{position:absolute;left:8px;top:-80px;z-index:50;padding:8px 12px;border:0;border-radius:var(--dn-r-sm);background:var(--dn-accent);color:var(--dn-accent-ink);font:600 var(--dn-fs-md)/1.2 var(--dn-text);cursor:pointer}
+.dt-skip:focus{top:8px}
+.dt-back{min-height:var(--dn-hit);padding:0 6px;border:0;border-radius:var(--dn-r-sm);background:none;color:var(--dn-ink-2);font:500 var(--dn-fs-md)/1 var(--dn-text);white-space:nowrap;cursor:pointer}
+.dt-back:hover{color:var(--dn-ink-0);background:var(--dn-s2)}
+.dt-brand{font:600 var(--dn-fs-lg)/1 var(--dn-display);color:var(--dn-ink-0);white-space:nowrap;margin-right:6px}
+.dt-mine ul{display:flex;gap:4px;list-style:none;margin:0;padding:0}
+.dt-rep{display:flex;flex-direction:column;align-items:flex-start;min-width:150px;min-height:44px;padding:4px 12px;border:1px solid transparent;border-radius:var(--dn-r-md);background:none;color:inherit;text-align:left;line-height:1.3;cursor:pointer}
+.dt-rep:hover{background:var(--dn-s1)}
+.dt-rep b{font:600 var(--dn-fs-base)/1.3 var(--dn-text);color:var(--dn-ink-0)}
+.dt-rl{font-size:var(--dn-fs-sm);color:var(--dn-ink-3)}
+.dt-rl.w{color:var(--dn-warn-ink)} .dt-rl.ok{color:var(--dn-pos-ink)} .dt-rl.bad{color:var(--dn-neg-ink)}
+.dt-rep[aria-current="page"]{background:var(--dn-s2);border-color:var(--dn-line-2);box-shadow:inset 0 -2px 0 var(--dn-accent)}
+.dt-mine1{display:none}
+.dt-mlist .dt-narrow{display:none}
+.dt-spacer{flex:1}
+.dt-tbtn{min-height:var(--dn-hit);padding:6px 12px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-md);background:none;color:var(--dn-ink-1);font:500 var(--dn-fs-md)/1.2 var(--dn-text);white-space:nowrap;cursor:pointer}
+.dt-tbtn:hover,.dt-tbtn[aria-expanded="true"]{background:var(--dn-s2);color:var(--dn-ink-0)}
+.dt-menu{position:relative}
+.dt-mlist{position:absolute;right:0;top:calc(100% + 6px);z-index:var(--dn-z-menu,30);width:380px;max-width:calc(100vw - 24px);max-height:calc(100vh - 80px);overflow:auto;padding:8px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-lg);background:var(--dn-s1);box-shadow:var(--dn-e3)}
+.dt-mine1 .dt-mlist{left:0;right:auto}
+.dt-mlist h3{margin:10px 8px 4px;font:600 var(--dn-fs-xs)/1.3 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-ink-3)}
+.dt-mlist h3:first-child{margin-top:4px}
+.dt-mlist ul{list-style:none;margin:0;padding:0}
+.dt-mi{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;min-height:var(--dn-hit);padding:7px 8px;border:0;border-radius:var(--dn-r-sm);background:none;color:var(--dn-ink-1);font:inherit;text-align:left;cursor:pointer}
+.dt-mi:hover:not(:disabled){background:var(--dn-s2);color:var(--dn-ink-0)}
+.dt-mi:disabled{opacity:.55;cursor:default}
+.dt-mi small,.dt-mlist small{color:var(--dn-ink-3);font-size:var(--dn-fs-sm);white-space:nowrap}
+.dt-other{display:flex;flex-direction:column;align-items:stretch}
+.dt-rm{align-self:flex-end;margin:0 8px 4px;font-size:var(--dn-fs-sm)}
+.dt-dot{display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:var(--dn-warn);vertical-align:middle}
+.dt-mfoot{margin:8px 0 0;padding:8px 8px 2px;border-top:1px solid var(--dn-line);font-size:var(--dn-fs-sm);color:var(--dn-ink-3)}
+.dt-mfoot-row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.dt-help{width:330px}
+.dt-daylab{display:flex;flex-direction:column;gap:4px;margin:4px 8px;font-size:var(--dn-fs-sm);color:var(--dn-ink-2)}
+.dt-daylab input{min-height:var(--dn-hit);padding:4px 8px;border:1px solid var(--dn-line-3);border-radius:var(--dn-r-sm);background:var(--dn-bg-0);color:var(--dn-ink-0);font:inherit;color-scheme:dark}
+.dt-sheet{position:fixed;top:56px;right:0;bottom:0;z-index:var(--dn-z-drawer,20);display:flex;flex-direction:column;width:430px;max-width:100%;background:var(--dn-bg-1);border-left:1px solid var(--dn-line-2);box-shadow:var(--dn-e3)}
+.dt-sheet-h,.dt-drawer-h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:14px 16px 10px;border-bottom:1px solid var(--dn-line)}
+.dt-sheet-h h2,.dt-drawer-h h2{margin:0;font:600 15px/1.3 var(--dn-display);color:var(--dn-ink-0)}
+.dt-sheet-b{flex:1;overflow:auto;padding:4px 16px 16px}
+.dt-sheet-b dl{margin:0} .dt-sheet-b dt{margin-top:12px;font-weight:600;color:var(--dn-ink-0)} .dt-sheet-b dd{margin:2px 0 0;color:var(--dn-ink-2)}
+
+/* ---- the room: the report and the check column (s.4.1) ---- */
+.dt-room{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--dn-sp-6);height:100%;min-height:0;padding-left:var(--dn-sp-6);color:var(--dn-ink-1)}
+.dt-main{min-width:0;min-height:0;overflow:auto;padding:0 4px 48px 0}
+.dt-status{max-width:780px;padding:14px 0 12px}
+.dt-status h1{margin:0;font:600 17px/1.35 var(--dn-display);color:var(--dn-ink-0)}
+.dt-status h1:focus{outline:2px solid var(--dn-focus);outline-offset:3px;border-radius:4px}
+.dt-line,.dt-failln,.dt-prog,.dt-gaps{margin:3px 0 0;font-size:13.5px;color:var(--dn-ink-2)}
+.dt-failln b{color:var(--dn-neg-ink)}
+.dt-prog b{color:var(--dn-ink-0)}
+.dt-elapsed{font-variant-numeric:tabular-nums;color:var(--dn-ink-1)}
+.dt-spin{display:inline-block;width:12px;height:12px;margin-right:6px;border:2px solid var(--dn-line-3);border-top-color:var(--dn-accent);border-radius:50%;animation:dt-spin 1s linear infinite;vertical-align:-1px}
+@keyframes dt-spin{to{transform:rotate(360deg)}}
+.dt-act{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.dt-sub{font-size:var(--dn-fs-sm);color:var(--dn-ink-3)}
+.dt-quiet{margin:6px 0 0;font-size:var(--dn-fs-sm);color:var(--dn-ink-3);line-height:1.45}
+.dt-note{margin:10px 0 0;padding:10px 12px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-s1)}
+.dt-note.w{border-color:var(--dn-warn);background:var(--dn-warn-dim)}
+.dt-note p{margin:0 0 8px;font-size:var(--dn-fs-md)} .dt-note.w p{color:var(--dn-warn-ink)} .dt-note b{color:var(--dn-ink-0)}
+.dt-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.dt-oneline{margin:8px 0 0;padding:4px 10px;border-left:3px solid var(--dn-accent);font-size:var(--dn-fs-md);color:var(--dn-ink-2)}
+.dt-skel span{display:block;height:12px;width:60%;margin-top:6px;border-radius:6px;background:var(--dn-s2)}
+.dt-card{max-width:780px;margin:0 0 12px;padding:12px 14px;border:1px solid var(--dn-accent);border-radius:10px;background:var(--dn-accent-dim)}
+.dt-card:focus{outline:2px solid var(--dn-focus);outline-offset:2px}
+.dt-step{margin:0;font:600 var(--dn-fs-xs)/1.3 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-accent-text)}
+.dt-cardh{margin:2px 0 4px;font:600 15px/1.3 var(--dn-display);color:var(--dn-ink-0)}
+.dt-card p{margin:0 0 10px;font-size:13.5px;color:var(--dn-ink-1)}
+.dt-card .dt-sub{margin-left:auto;color:var(--dn-accent-text)}
+.dt-col .dt-card{margin:12px 12px 0}
+#den-root .dt-ring{box-shadow:0 0 0 2px var(--dn-accent),0 0 0 6px var(--dn-accent-dim)!important}
+
+/* ---- the report, as it will be pasted (s.4.4) ---- */
+.dt-doc{max-width:780px;padding:28px 36px 36px;border:1px solid var(--dn-line);border-radius:var(--dn-r-lg);background:var(--dn-s1);color:var(--dn-ink-1)}
+.dt-dochead{padding-bottom:14px;margin-bottom:6px;border-bottom:1px solid var(--dn-line)}
+.dt-doct{margin:0;font:700 21px/1.3 var(--dn-display);color:var(--dn-ink-0)}
+.dt-docc{margin:2px 0 0;font-size:14.5px;color:var(--dn-ink-1)}
+.dt-docl{margin:4px 0 0;font-size:var(--dn-fs-md);color:var(--dn-ink-2)}
+.dt-sec{margin-top:20px;scroll-margin-top:16px}
+.dt-sec-h{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.dt-sec-h h2{margin:0;font:600 17px/1.35 var(--dn-display);color:var(--dn-ink-0)}
+.dt-sec-h h2:focus{outline:2px solid var(--dn-focus);outline-offset:2px;border-radius:4px}
+.dt-sec p{margin:8px 0;font-size:15px;line-height:1.72}
+.dt-sec .den-docbody{cursor:text}
+.dt-sec-empty h2{color:var(--dn-ink-2)}
+.dt-empty{color:var(--dn-ink-3);font-style:italic}
+.dt-empty .den-link{font-style:normal}
+.dt-secmenu{position:relative}
+.dt-secbtn{min-height:28px;padding:3px 8px;border:1px solid transparent;border-radius:var(--dn-r-sm);background:none;color:var(--dn-ink-3);font-size:12.5px;cursor:pointer}
+.dt-secbtn:hover,.dt-secbtn[aria-expanded="true"]{border-color:var(--dn-line-2);color:var(--dn-ink-1)}
+.dt-secl{width:320px}
+.dt-regen{margin:8px 0;padding:8px;border:1px solid var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-bg-1)}
+.dt-regen input{min-height:var(--dn-hit);padding:4px 8px;border:1px solid var(--dn-line-3);border-radius:var(--dn-r-sm);background:var(--dn-bg-0);color:var(--dn-ink-0);font:inherit}
+.dt-rate{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;width:fit-content;max-width:100%;margin:8px 0 4px!important;padding:6px 12px;border:1px solid var(--dn-line);border-radius:var(--dn-r-md);background:var(--dn-bg-1);font-size:14px!important;line-height:1.5!important}
+.dt-rate b{color:var(--dn-ink-0)}
+.dt-rsel{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px}
+.dt-rsel label{display:inline-flex;align-items:center;gap:6px;font-size:var(--dn-fs-md);color:var(--dn-ink-2)}
+.dt-rsel select{min-height:28px;border:1px solid var(--dn-line-3);border-radius:var(--dn-r-sm);background:var(--dn-bg-0);color:var(--dn-ink-0);font:inherit;color-scheme:dark}
+sup.dt-src{line-height:0}
+sup.dt-src button{min-height:0;padding:0 1px;border:0;background:none;color:var(--dn-accent-text);font:600 11px/1 var(--dn-text);cursor:pointer}
+sup.dt-src button:hover{text-decoration:underline}
+/* p72 review U14: the small controls in the report take a press over at least 24 px (32 where the line allows) without moving a word */
+sup.dt-src button,.dt-secbtn,.dt-change{position:relative}
+sup.dt-src button::before{content:"";position:absolute;left:50%;top:50%;width:max(100%,24px);height:24px;transform:translate(-50%,-50%)}
+.dt-secbtn::before{content:"";position:absolute;left:0;right:0;top:50%;height:32px;transform:translateY(-50%)}
+.dt-change::before{content:"";position:absolute;left:-6px;right:-6px;top:50%;height:32px;transform:translateY(-50%)}
+.dt-unk{color:var(--dn-neg-ink);font-size:12.5px;font-weight:600}
+mark.dt-mark{padding:1px 2px;border-bottom:2px dotted var(--dn-warn);border-radius:3px;background:var(--dn-mark);color:inherit}
+mark.dt-mark .dt-pill{display:inline-block;min-width:16px;height:16px;margin-right:4px;border-radius:8px;background:var(--dn-warn);color:#2a1d05;font:700 10.5px/16px var(--dn-text);text-align:center;vertical-align:1px}
+mark.dt-mark.lit,#den-root mark.dt-mark.den-fl-on{outline:2px solid var(--dn-warn);outline-offset:2px;background:rgba(240,180,76,.22)}
+mark.dt-fw{padding:0 2px;border-radius:2px;background:var(--dn-warn-dim);color:var(--dn-warn-ink)}
+.dt-slot{padding:8px 12px;border:1px dashed var(--dn-warn);border-radius:var(--dn-r-md);color:var(--dn-warn-ink);font-size:var(--dn-fs-md)!important}
+.dt-srcg h3{margin:14px 0 2px;font:600 var(--dn-fs-sm)/1.3 var(--dn-text);letter-spacing:var(--dn-track-caps);text-transform:uppercase;color:var(--dn-ink-3)}
+.dt-srcl{list-style:none;margin:4px 0 0;padding:0}
+.dt-srcl li{margin:5px 0;font-size:14px;line-height:1.6;overflow-wrap:anywhere}
+.dt-ghost{border-style:dashed;background:transparent}
+.dt-ghostl{columns:2;margin:12px 0 0;padding-left:20px;color:var(--dn-ink-3);font-size:14px}
+.dt-skeleton span{display:block;height:14px;margin:12px 0;border-radius:6px;background:var(--dn-s2)} .dt-skeleton .s2{width:80%} .dt-skeleton .s3{width:60%}
+.dt-edit{margin:8px 0}
+.dt-ta{display:block;width:100%;min-height:180px;field-sizing:content;padding:12px;border:1px solid var(--dn-line-3);border-radius:var(--dn-r-md);background:var(--dn-bg-0);color:var(--dn-ink-0);font:14.5px/1.7 var(--dn-text);resize:vertical}
+.dt-hint{margin:6px 0 0!important;font-size:12.5px!important;color:var(--dn-ink-3)}
+.dt-hint b{color:var(--dn-warn-ink)}
+.dt-cmp h3{margin:12px 0 4px;color:var(--dn-ink-0)} .dt-cmp p{margin:0;color:var(--dn-ink-2)}
+
+/* ---- Check before you send, sticky beside the report (s.4.5, s.4.6) ---- */
+.dt-col{display:flex;flex-direction:column;min-height:0;margin:12px var(--dn-sp-6) 12px 0;border:1px solid var(--dn-line);border-radius:var(--dn-r-lg);background:var(--dn-s1);overflow:hidden}
+.dt-colscroll{display:flex;flex-direction:column;flex:1;min-height:200px;overflow:auto}   /* two items at least, whatever the send block says (U11) */
+.dt-colscroll>.den-checks{flex:1;min-height:0;padding:14px 12px 10px}
+.den-checks--today .den-checks-h{font-size:15.5px}
+.den-checks--today .den-checks-list{flex:0 1 auto;min-height:120px;overflow:auto}
+.den-checks--today .den-fl{background:var(--dn-bg-1)}
+.dt-send{display:flex;flex-direction:column;gap:8px;padding:12px 16px 14px;border-top:1px solid var(--dn-line);background:var(--dn-s1)}
+.dt-block{display:block;width:100%;min-height:36px}
+.dt-saveln{margin:0;font-size:12.5px;color:var(--dn-pos-ink)}
+.dt-saveln.w{color:var(--dn-warn-ink)} .dt-saveln.bad{color:var(--dn-neg-ink)}
+.dt-sendln{margin:0;padding:6px 10px;border-radius:var(--dn-r-md);background:var(--dn-s2);font-size:12.5px;line-height:1.45;color:var(--dn-ink-1)}
+.dt-sendln.w{background:var(--dn-warn-dim)}
+.dt-sendln>span{display:block} .dt-sendln>span+span{margin-top:4px}
+.dt-copied.w{color:var(--dn-warn-ink)} .dt-copied.w b{color:var(--dn-ink-0)}
+.dt-small{margin:0;font-size:11.5px;color:var(--dn-ink-3)}
+.dt-box{padding:10px 12px;border:1px solid var(--dn-warn);border-radius:10px;background:var(--dn-warn-dim)}
+.dt-box p{margin:0 0 8px;font-size:var(--dn-fs-md);color:var(--dn-warn-ink)} .dt-box b{color:var(--dn-ink-0)}
+/* one primary at a time (s.4.5): while the send box asks, its Go to the first is the primary, the column's is plain */
+.dt-box-on #dt-col .den-fl-first{display:none}
+.dt-sentok{margin:0} .dt-sentok b{color:var(--dn-pos-ink);font-size:15px}
+.dt-allsent{margin:0;font-weight:600;color:var(--dn-pos-ink)}
+.dt-allsent:focus{outline:2px solid var(--dn-focus);outline-offset:2px}
+
+/* ---- the Sources drawer and the earlier versions: non-modal side sheets over the column (s.4.7) ---- */
+.dt-drawer{position:absolute;top:0;right:0;bottom:0;z-index:var(--dn-z-drawer,20);display:flex;flex-direction:column;width:430px;max-width:100%;background:var(--dn-bg-1);border-left:1px solid var(--dn-line-2);box-shadow:var(--dn-e3)}
+.dt-drawer-h q{display:block;margin-top:4px;font-size:12.5px;font-style:italic;color:var(--dn-ink-2)}
+.dt-drawer-h h2:focus,.dt-sheet-h h2:focus{outline:2px solid var(--dn-focus);outline-offset:2px}
+.dt-drawerpane{flex:1;min-height:0;overflow:auto;height:auto}
+.dt-drawerpane .den-evpane{padding:0 12px 12px}
+.dt-drawer-f{margin:0;padding:10px 16px;border-top:1px solid var(--dn-line);font-size:var(--dn-fs-sm);color:var(--dn-ink-3)}
+.dt-drawer-h .dt-usewhere{margin-top:4px}
+.dt-drawer .den-drawersaid{padding:10px 0 0} .dt-drawer .den-drawersaid p{margin:0 0 6px;font-size:var(--dn-fs-sm)}
+
+/* ---- the bottom bar (s.11) ---- */
+.dt-bar{display:none}
+@media (max-width:1199px){
+  .dt-room{grid-template-columns:minmax(0,1fr);padding-left:0}
+  .dt-main{padding:0 var(--dn-sp-6) calc(var(--dt-bar-h,60px) + 36px)}
+  .dt-main>*{margin-left:auto;margin-right:auto}
+  .dt-status{max-width:780px}
+  .dt-col{display:none}
+  .dt-sheet-on .dt-col{display:flex;position:absolute;left:0;right:0;bottom:var(--dt-bar-h,60px);z-index:15;max-height:60%;margin:0;border-radius:var(--dn-r-lg) var(--dn-r-lg) 0 0;box-shadow:var(--dn-e3)}
+  .dt-sheet-on .dt-col .dt-send{display:none}
+  .dt-bar{position:absolute;left:0;right:0;bottom:0;z-index:16;display:flex;align-items:center;gap:8px;min-height:60px;padding:0 var(--dn-sp-6);background:var(--dn-bg-1);border-top:1px solid var(--dn-line-2);box-shadow:var(--dn-e3)}
+  .dt-bar .dt-barcount{margin-right:auto}
+  /* what the send block says, above the bar's buttons (p72 review U1) */
+  .dt-bar.dt-bar-noted{flex-wrap:wrap;row-gap:8px;padding-top:8px;padding-bottom:8px}
+  .dt-barnote{flex:1 1 100%;display:flex;flex-direction:column;gap:6px;max-height:45vh;overflow:auto}
+  .dt-barnote .dt-box{margin:0}
+  .dt-drawer{width:100%}
+}
+@media (max-width:899px){
+  .dt-top{gap:8px;padding:0 var(--dn-sp-4)}
+  .dt-mine,.dt-back{display:none}
+  .dt-mine1{display:block}
+  .dt-mlist .dt-narrow{display:block}
+  .dt-room .den-mini,.dt-tbtn,.dt-mi,.dt-secbtn{min-height:44px}
+  .dt-main{padding:0 var(--dn-sp-4) calc(var(--dt-bar-h,120px) + 20px)}
+  .dt-doc{padding:20px 18px 24px}
+  .dt-bar{flex-wrap:wrap;padding:8px var(--dn-sp-4)}
+  .dt-bar .dt-bargo{display:none}
+  .dt-bar .den-mini{flex:1 1 40%}
+  .dt-bar .dt-barcount{flex:1 1 100%;margin:0}
+  .dt-sheet-on .dt-col{bottom:var(--dt-bar-h,120px)}
+  .dt-mlist{position:fixed;left:12px;right:12px;top:60px;width:auto}
+}
+@media (max-width:599px){ .dt-brand{display:none} .dt-lg{display:none} }
+@media (prefers-reduced-motion:reduce){ .dt-room *,.dt-top *{animation:none!important;transition:none!important;scroll-behavior:auto!important} }

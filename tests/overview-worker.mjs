@@ -98,6 +98,22 @@ await t('the overview is read-role and GET only; without the database it says so
   const res = await handler.fetch(new Request('https://newsaus.test/overview', { headers: { 'X-Axiom-Key': 'read-key' } }), e2, ctx);
   eq(res.status, 501);
 });
+/* p71 fx3 (F2): an issue tagged as it is now for less than the fortnight (mining, narrowed by p71) has no usual and no ratio,
+   and says since when; it keeps the place its figures as they are give it, where its missing usual once sorted as nothing
+   and put it at the head of the table as new coverage */
+await t('an issue tagged as it is now for under a fortnight keeps the place its figures as they are give it, with no usual and since when', async () => {
+  await req('GET', '/overview', null, 'read-key'); const rec = JSON.parse(kv.get('den_tagsince')); rec.by.mining.at = NOW - 3 * H; kv.set('den_tagsince', JSON.stringify(rec));
+  // twelve mining rows in the day (two of the fuel stories above among them) against twenty a day in the fortnight before
+  const urls = []; const add = (title, ago) => { const u = 'https://news.test/mining-' + urls.length; urls.push(u); put('news', 'minewire', title, u, { reg: 1, issues: ['mining'] }, ago); };
+  for (let i = 0; i < 10; i++) add('Mine approval story ' + i, (1 + i) * H);
+  for (let dday = 1; dday <= 13; dday++) for (let k = 0; k < 20; k++) add('Older mine approval story ' + dday + '-' + k, dday * D + (1 + k * 0.5) * H);
+  try {
+    const r = await req('GET', '/overview', null, 'read-key'); const ids = r.d.issues.map(i => i.id); const m = r.d.issues.find(i => i.id === 'mining');
+    eq([m.recent, m.base, m.ratio, m.since], [12, null, null, NOW - 3 * H], 'no usual, no ratio, and since when');
+    eq(ids, (await mod.__test.overviewIssues(env, Date.now(), 24)).map(i => i.id), 'the order its figures as they are give');
+    eq([ids[0], ids[ids.length - 1]], ['ftc', 'mining'], 'twelve against a usual of twenty is the furthest below it, not new coverage at the head');
+  } finally { urls.forEach(u => db.prepare('DELETE FROM arc_items WHERE url=?').run(u)); }
+});
 
 // -- the daily brief --
 const claude = { calls: [], answer: null, fail: '' };

@@ -1,0 +1,66 @@
+/* AXIOM - Anne's Den: Check before you send (build p72, lane P2; docs/den-flags.js). The panel above the outline in the
+ * workbench (.den-panes-fl puts it in the outline column's first row), the same component in Today's column
+ * (.den-checks--today, laid out by docs/den-today.css), the marks in the reading text, the landing ring. The Den's dark
+ * tokens only (docs/den.css), AA or better; the amber is never the only signal (the words "To check:" and the number are). */
+.den-panes.den-panes-fl{grid-template-rows:auto minmax(0,1fr)}
+.den-panes.den-panes-fl>.den-checks{grid-column:1;grid-row:1;max-height:min(52vh,560px);overflow-y:auto;border-right:1px solid var(--dn-line);border-bottom:1px solid var(--dn-line);background:var(--dn-bg-1)}
+.den-panes.den-panes-fl>.den-outline{grid-column:1;grid-row:2}
+.den-panes.den-panes-fl>.den-write,.den-panes.den-panes-fl>.den-evpane{grid-row:1 / span 2}
+.den-panes.den-panes-fl>.den-write{grid-column:2}
+.den-panes.den-panes-fl>.den-evpane{grid-column:3}
+
+.den-checks{display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:var(--dn-sp-3) var(--dn-sp-3) var(--dn-sp-3);color:var(--dn-ink-1);font-size:var(--dn-fs-sm)}
+.den-checks-head{display:flex;align-items:center;flex-wrap:wrap;gap:var(--dn-sp-2)}
+.den-checks-h{margin:0;font:700 var(--dn-fs-md)/1.25 var(--dn-display,var(--dn-text));color:var(--dn-ink-0)}
+.den-checks-h:focus{outline:2px solid var(--dn-accent);outline-offset:2px}
+.den-checks-head .den-chip{font-weight:700}
+.den-checks-note,.den-checks-alerts{margin:0;color:var(--dn-ink-2);line-height:1.45}
+.den-checks-sub{margin:var(--dn-sp-2) 0 0;font:700 var(--dn-fs-xs)/1.3 var(--dn-text);color:var(--dn-ink-1);text-transform:uppercase;letter-spacing:var(--dn-track-caps,.06em)}
+.den-checks-done{display:flex;flex-wrap:wrap;align-items:center;gap:var(--dn-sp-1) var(--dn-sp-2);margin:0;padding:6px 8px;border-radius:var(--dn-r-sm);background:var(--dn-pos-dim);color:var(--dn-pos-ink)}
+.den-checks-done .den-link{color:var(--dn-pos-ink)}
+.den-checks-clear{margin:0;color:var(--dn-pos-ink);font-weight:600}
+.den-fl-first{align-self:flex-start}
+.den-checks-list{min-height:0;outline-offset:2px}
+.den-checks-list:focus-visible{outline:2px solid var(--dn-accent)}
+.den-checks-list>ol,.den-fl-sub{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--dn-sp-1)}
+.den-fl-sub{margin:var(--dn-sp-1) 0 0 var(--dn-sp-3)}
+.den-fl{border:1px solid var(--dn-line);border-radius:var(--dn-r-sm);background:var(--dn-s1)}
+.den-fl.open{border-color:var(--dn-warn);box-shadow:var(--dn-ring-warn,0 0 0 3px var(--dn-warn-dim))}
+.den-fl-group{border:1px dashed var(--dn-line-2);border-radius:var(--dn-r-sm);padding:2px}
+.den-fl-t{display:flex;align-items:flex-start;gap:var(--dn-sp-2);width:100%;min-height:var(--dn-hit);padding:6px 8px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:var(--dn-r-sm)}
+.den-fl-t:hover{background:var(--dn-s2)}
+.den-fl-n{flex:0 0 auto;min-width:20px;height:20px;padding:0 5px;border-radius:var(--dn-r-pill);background:var(--dn-warn-dim);color:var(--dn-warn-ink);font:700 var(--dn-fs-xs)/20px var(--dn-text);text-align:center}
+.den-fl-range{flex:0 0 auto;min-width:20px;color:var(--dn-ink-2);font:600 var(--dn-fs-xs)/20px var(--dn-text);font-variant-numeric:tabular-nums;white-space:nowrap}   /* a group's numbers: words, not a circle (p72 review U5) */
+.den-fl-tt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.den-fl-tt b{font:600 var(--dn-fs-sm)/1.3 var(--dn-text);color:var(--dn-ink-0)}
+.den-fl-w{color:var(--dn-ink-2);font-size:var(--dn-fs-xs);line-height:1.35;overflow-wrap:anywhere}
+.den-fl-q{display:block;color:var(--dn-ink-2);font-size:var(--dn-fs-xs);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.den-fl-body{display:flex;flex-direction:column;gap:var(--dn-sp-2);padding:0 8px 8px 36px}
+.den-fl-body .why{margin:0;color:var(--dn-ink-1);line-height:1.45}
+.den-fl-fix{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.den-fl-fix .den-mini{min-height:28px;padding:0 9px;font-size:var(--dn-fs-xs)}
+.den-fl-skip,.den-fl-whyb,.den-fl-all{align-self:flex-start;font-size:var(--dn-fs-xs)}
+.den-fl-reasons{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:6px 0 0}
+.den-fl-reasons .den-mini{min-height:28px;font-size:var(--dn-fs-xs);text-align:left}
+.den-fl-own{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.den-fl-own .den-in{min-width:0;flex:1 1 140px;min-height:28px}
+.den-fl-also{margin:4px 0 0;padding:6px 8px;border:1px solid var(--dn-line);border-radius:var(--dn-r-sm);display:flex;flex-direction:column;gap:4px;font-size:var(--dn-fs-xs)}
+.den-fl-also legend{padding:0 4px;color:var(--dn-ink-2)}
+.den-fl-err{margin:0;padding:6px 8px;border-radius:var(--dn-r-sm);background:var(--dn-neg-dim);color:var(--dn-neg-ink,var(--dn-ink-0));line-height:1.4}
+.den-fl-err.soft{background:var(--dn-warn-dim);color:var(--dn-warn-ink)}
+.den-checks-left{display:flex;flex-direction:column;gap:var(--dn-sp-1)}
+.den-checks-left .den-fold{align-self:flex-start}
+.den-fl-audit{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.den-fl-audit li{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:var(--dn-r-sm);background:var(--dn-s1)}
+.den-fl-audit b{color:var(--dn-ink-0);font-weight:600}
+.den-fl-by{color:var(--dn-ink-2);font-size:var(--dn-fs-xs)}
+.den-fl-back{align-self:flex-start;margin-top:4px;min-height:28px;font-size:var(--dn-fs-xs)}
+
+/* the marks in the reading text: a word or a figure picked out inside its sentence, and the landing ring */
+.den-docbody .den-flag mark.den-fw,.den-cites mark.den-fw{background:var(--dn-warn-dim);color:var(--dn-warn-ink);border-radius:2px;padding:0 2px;text-decoration:none}
+#den-root .den-fl-on{outline:2px solid var(--dn-warn);outline-offset:2px;border-radius:var(--dn-r-xs)}
+#den-root .den-fl-on:focus{outline:2px solid var(--dn-warn)}
+@media (prefers-reduced-motion:reduce){.den-checks *{transition:none!important;animation:none!important}}
+
+/* the Brief tab's badge: the one count, beside the tab's word (aria-hidden; the tab says it in aria-description) */
+.den-tab .den-tab-n{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-left:6px;padding:0 5px;border-radius:var(--dn-r-pill);background:var(--dn-warn-dim);color:var(--dn-warn-ink);font:700 var(--dn-fs-xs)/1 var(--dn-text);vertical-align:1px}

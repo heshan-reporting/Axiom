@@ -158,6 +158,9 @@ e = raises(lambda: rs.collect('facebook', 'https://x.workers.test', 'k', {'ns': 
 t('a refusal from the worker fails the job and says why', bool(e) and 'read_only' in str(e), e)
 
 # ---- signing in ----
+# these cases are about a machine with neither agent-reach nor opencli on it; without this they read whatever is
+# installed where the test runs (on the owner's Mac, the real agent-reach 1.5.0, which has no login command) and failed there
+rs.shutil.which = lambda b: None
 fresh(); said = []; ran = []
 t('signing in to Facebook with a profile that administers client assets stops', rs.login('facebook', ask=lambda q: 'yes', out=said.append, call=lambda c: ran.append(c) or 0) is False and ran == [] and 'administers nothing' in said[-1], said[-1])
 t('the warning names the terms, the account risk and the client-admin rule', 'against facebook\'s terms' in said[0] and 'NEVER use a profile that administers' in said[0] and 'never sees the password' in said[0])
@@ -170,9 +173,13 @@ answers = iter(['youtube'])
 t('YouTube needs no profile question', rs.login('youtube', ask=lambda q: next(answers), out=said.append, call=lambda c: 0, runner=mk()[0]) is True)
 answers = iter(['no', 'instagram'])
 t('a sign-in that does not finish switches nothing on', rs.login('instagram', ask=lambda q: next(answers), out=said.append, call=lambda c: 1) is False and 'switched_on' not in rs.state('instagram'))
+rs.shutil.which = real_which
 
 # ---- the agent: what it offers, and how a stop is reported ----
 agent = load('reach_agent', 'reach-agent.py')
+# the agent's own copy of the module must not start the agent-reach installed where the test runs: its doctor goes out to
+# the network. Cases that need an agent-reach hand in a runner.
+agent.rs.installed = lambda: False
 fresh(); real = agent.rs.status
 agent.rs.status = lambda c, runner=None, now=None: {'usable': c != 'instagram', 'channel': c}
 agent.rs.offered = lambda runner=None: [agent.rs.CHANNELS[c]['source'] for c in agent.rs.CHANNELS if agent.rs.status(c)['usable']]

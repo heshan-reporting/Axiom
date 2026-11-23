@@ -5,7 +5,7 @@
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';   // Playwright found portably (PLAYWRIGHT_MJS, the project, the global install)
 const PORT = 8772, W = 'https://newsaus.heshan-998.workers.dev';
-const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
 for (let i = 0; i < 40; i++) { try { const r = await fetch('http://127.0.0.1:' + PORT + '/index.html'); if (r.ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 150)); }
 const NOW = Date.now(), H = 3600e3;
 const narrA = { id: 'n1a', label: 'Fuel tax credits are a subsidy for billionaire miners', client: 'Minerals Council of Australia', issues: ['ftc', 'mining'], issueLabels: ['Fuel tax credits', 'Mining and resources'], ns: 'mca', side: 'hostile', n: 14, n24: 9, nprev: 3, velocity: 3, status: 'growing', first_ts: NOW - 30 * H, first_platform: 'news', first_channel: 'smh', last_ts: NOW - H, platforms: ['news', 'reddit', 'bluesky'], sentiment: { judged: 12, neg: 9, pos: 1, neu: 2, tone: -0.55 }, alerted: true, counter: '', proponents: 'Reddit posters and climate groups', summary: 'Posters say the rebate is welfare for miners.', claim: 'The fuel tax credit is a subsidy.', counter_claim: 'It refunds a road tax.', spread: [{ platform: 'news', first: NOW - 30 * H, n: 2 }, { platform: 'reddit', first: NOW - 20 * H, n: 9 }, { platform: 'bluesky', first: NOW - 5 * H, n: 3 }], channels: [], amplifiers: [], termsTop: ['rort'], items: [{ id: 1, title: 'Fuel tax credit a rort', excerpt: 'x', platform: 'news', channel: 'smh', ts: NOW - 30 * H, tone: -0.1, sim: 0.9, url: 'https://smh.test/a1' }], origin: { id: 1, url: 'https://smh.test/a1' }, series: [{ t: NOW - 86400e3, n: 5, platforms: { news: 2, reddit: 3 } }], muted: false, pinned: false, edited: false, entities: ['mca'], platformsMap: {} };
@@ -95,6 +95,18 @@ await t('our issues against their own baseline: rows, usual, a bar with the usua
   ok(!(await page.$(R + '.ov-issues tr.hot:has-text("Economy")')));
   eq(await page.getAttribute(R + '.ov-issues tr:first-child .ov-bar i', 'style'), 'width: 100%;');
   ok(/12 rows on client issues in 24h, 9 of them news/.test(await page.textContent(R + '.ov-sec:nth-of-type(4) .ov-why')));
+});
+/* p71 fx3 (F2): an issue tagged as it is now for less than the fortnight comes with since and no usual; it is not new coverage */
+await t('an issue tagged as it is now for under a fortnight says since when, never "new", with no usual and no usual mark', async () => {
+  const since = NOW - 3 * H, day = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short' }).format(new Date(since));
+  const refresh = () => Promise.all([page.waitForResponse(r => /\/overview\?days=1$/.test(r.url())), page.click(R + '.ov-head button:has-text("Refresh")')]);
+  overview.issues.push({ id: 'mining', label: 'Mining and resources', client: 'Minerals Council of Australia', ns: 'mca', recent: 12, news: 12, base: null, ratio: null, n14: 272, since });
+  try {
+    await refresh(); await page.waitForSelector(R + '.ov-issues tr:has-text("Mining and resources")'); const row = R + '.ov-issues tr:has-text("Mining and resources")';
+    const txt = await page.textContent(row); ok(txt.indexOf('tagged as it is now since ' + day) >= 0 && !/\bnew\b/.test(txt), txt);
+    eq(await page.$$eval(row + ' td', tds => [tds[3].textContent.trim(), tds[4].querySelectorAll('.ov-bar b').length, tds[4].querySelectorAll('.ov-bar i').length]), ['-', 0, 1], 'no usual, and its bar has no usual mark');
+    ok(!(await page.$(R + '.ov-issues tr.hot:has-text("Mining and resources")')), 'and it is not hot');
+  } finally { overview.issues.pop(); await refresh(); await page.waitForFunction(() => document.querySelectorAll('#overview-root .ov-issues tbody tr').length === 3); }
 });
 await t('latest on our issues: time, channel, title as a link, issue tags, tone and comments', async () => {
   const rows = await texts(page, R + '.ov-row'); eq(rows.length, 3);

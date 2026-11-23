@@ -4017,7 +4017,7 @@ contract, scoped for the next release rather than done halfway.
 | CP | contrast on every token pair | untested | every text token on every surface token at AA in the dark theme and the light one (quiet ink 3:1), the status inks on the panel | TK3 |
 | RM | motion off under reduced motion | per file, unchecked | every Studio stylesheet that animates carries the reduced-motion rule | TK4 |
 
-## 62. Two ways to build: Express and Detailed (build `2026-11-23.studio-p66`, page `?v=r46`; 23 November 2026)
+## 62. Two ways to build: Express and Detailed (build `2026-11-23.studio-p74`, page `?v=r46`; 23 November 2026)
 
 ### 62.0 The complaint, and what was counted
 
@@ -4037,7 +4037,7 @@ friction); the owner chose **three stages, with the seven steps kept, and the ch
   `ax_studio_build`) and one click changes it. The answer is stored on the project as `brief.build` (`stBriefNorm`: `express`
   or `detailed`; an unknown value is detailed; a project made before the question carries none and is read as detailed), and
   travels on `workflow.build` and on each `/studio/list` row.
-- **A detailed project is unchanged**: the seven stages, each confirmed, exactly as p65.
+- **A detailed project is unchanged**: the seven stages, each confirmed, exactly as before.
 - **An express project keeps the same record and the same seven worker steps** (so every rule that reads them holds) and groups
   them in three stages (`PHASES_X` in `docs/studio.js`; Alt+1..3):
   - **Brief** - the material, the reading and **the plan confirmed once**. `ExpressPlan` (`docs/studio-guided.js`) shows the
@@ -4065,7 +4065,7 @@ friction); the owner chose **three stages, with the seven steps kept, and the ch
 - The express page moves the person forward only where the button they pressed said it would (to Direction after "Confirm and
   propose directions"; to the canvas after "Use this and write the copy"), and not when they have moved elsewhere meanwhile. The
   detailed flow's rule (the page never moves on its own) is unchanged.
-- `PAGE_NEEDS_BUILD` is 66: on an older worker an express project would be shown as detailed, and the banner says the worker
+- `PAGE_NEEDS_BUILD` is 74: on an older worker an express project would be shown as detailed, and the banner says the worker
   is older than the page.
 
 ### 62.2 Evidence

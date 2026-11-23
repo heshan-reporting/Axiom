@@ -11,7 +11,7 @@ export const W = 'https://newsaus.heshan-998.workers.dev'; export const H = 3600
 const KEYS = { 'full-key': { n: 'Anne', r: 'full' }, 'read-key': { n: 'Reader', r: 'read' }, 'other-key': { n: 'Kai', r: 'full' } };
 const freePort = () => new Promise(r => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const up = port => new Promise(r => { const tryIt = n => { const c = net.connect(port, '127.0.0.1'); c.on('connect', () => { c.destroy(); r(true); }); c.on('error', () => (n > 60 ? r(false) : setTimeout(() => tryIt(n + 1), 120))); }; tryIt(0); });
-const PORT = await freePort(); const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1', '--directory', DOCS], { stdio: 'ignore' }); await up(PORT);
+const PORT = await freePort(); const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1', '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port await up(PORT);
 export const SHOT = process.env.SHOT === '1'; export const SHOTS = new URL('./shots/den/', import.meta.url).pathname; if (SHOT) fs.mkdirSync(SHOTS, { recursive: true });
 
 let seq = 0;
@@ -20,6 +20,10 @@ const post = o => Object.assign({ src: 'x', title: 'x post', body: 'The windfall
 export async function world(env) {
   const w = await workerEnv({ env: Object.assign({ ANTHROPIC_API_KEY: 'test-anthropic' }, env || {}), keys: KEYS }); const F = (m, p, b, k) => w.call(m, p, b, k || 'full-key');
   const push = async (kind, rows) => { const r = await F('POST', '/archive/add', { kind, rows }); if (r.status !== 200) throw new Error('seed failed ' + r.text.slice(0, 120)); };
+  // p71: the invented outlets are in the Source Registry, as a live source is, so a story is named by its outlet's name
+  // ("The Point Post"), never its feed key; the table is made by reading it once
+  await F('GET', '/sources'); const reg = w.env.MIND_DB.db.prepare('INSERT OR REPLACE INTO sources(id,name,tier,juris,issues,methods,urls,schedule,enabled,core,edited,created,updated) VALUES(?,?,?,?,?,?,?,60,1,0,1,?,?)');
+  [['pointpost', 'The Point Post', 'https://pointpost.example.com.au'], ['tribune', 'The Tribune', 'https://tribune.example.com.au']].forEach(s => reg.run(s[0], s[1], 'regional', 'au', '[]', '["rss"]', JSON.stringify({ site: s[2] }), NOW, NOW));
   await push('news', [news({ title: 'Harbour levy divides the Senate', url: 'https://pointpost.example.com.au/a', ts: NOW - 5 * H }), news({ src: 'tribune', title: 'Harbour levy divides the Senate - Tribune', url: 'https://tribune.example.com.au/a', ts: NOW - 4 * H, meta: { issues: ['gastax'], source: 'tribune', outlet: 'The Tribune', fb: { reactions: 300, comments: 40, shares: 22 } } }),
     news({ title: 'Producers answer the windfall tax push', url: 'https://pointpost.example.com.au/b', meta: { issues: ['gastax'], source: 'afr', gated: 1, access: 'subscriber', ft: 'subscriber' } }), news({ title: 'Harbour Watch will hold a rally at Parliament on 28 December over the gas export tax', url: 'https://pointpost.example.com.au/r' })]
     .concat([1, 2, 3, 4].map(i => news({ src: 'noisy', title: 'Noisy outlet on the gas export tax ' + i, url: 'https://noisy.example.com/s' + i, ts: NOW - (6 + i) * H, meta: { issues: ['gastax'], source: 'noisy' } }))));
@@ -30,15 +34,35 @@ export async function world(env) {
   const calls = [];
   w.answer(/api\.anthropic\.com/, async (u, init) => { const b = JSON.parse(init.body); calls.push(b); if (w.slow) await new Promise(r => setTimeout(r, w.slow)); const ev = b.messages[0].content; const ids = k => (ev.match(new RegExp('\\[' + k + ':[A-Za-z0-9_.-]+\\]', 'g')) || []).map(x => x.slice(1, -1));
     const one = /"bottom":"\.\.\."/.test(b.system) && !/"summary":"\.\.\."/.test(b.system);
-    const j = one ? { sections: { bottom: 'Written again, shorter [' + ids('M')[0] + '].' } } : { sections: { summary: 'Coverage of the gas taxation debate continued through the window, led by regional outlets and carried by others [' + ids('M')[0] + ']. A campaigner named Sam Private is behind it [M:999999]. The conversation on X stayed small [' + ids('S')[0] + '].', media: 'The story ran in three outlets and drew 300 reactions on Facebook [' + ids('M')[0] + '].', bottom: 'Activity is steady and the client is not directly targeted [' + ids('M')[0] + '].', posture: 'The client should continue monitoring.' }, ratings: { momentum: { level: 'Moderate', trend: 'Stable' } } };
+    // p71: the story this stub writes about is the Harbour levy one, found by its words: the relevance order (p71) now sends
+    // the national subscriber story first, and "drew 300 reactions" cited to it would rightly be flagged
+    const hl = (ev.match(/^\[(M:\d+)\] [^\n]*Harbour levy divides the Senate/m) || [])[1] || ids('M')[0];
+    const j = one ? { sections: { bottom: 'Written again, shorter [' + hl + '].' } } : { sections: { summary: 'Coverage of the gas taxation debate continued through the window, led by regional outlets and carried by others [' + hl + ']. A campaigner named Sam Private is behind it [M:999999]. The conversation on X stayed small [' + ids('S')[0] + '].', media: 'The story ran in three outlets and drew 300 reactions on Facebook [' + hl + '].', bottom: 'Activity is steady and the client is not directly targeted [' + hl + '].', posture: 'The client should continue monitoring.' }, ratings: { momentum: { level: 'Moderate', trend: 'Stable' } } };
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(j) }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 50 } }), { status: 200, headers: { 'Content-Type': 'application/json' } }); });
   return Object.assign(w, { F, push, calls });
 }
+/* p72 lane P3: the Next path needs a second report of the same client on the day. vicBrief(w) writes one for aep_vic by hand
+ * through POST /den/brief/save (no model call), every sentence invented; answers the brief. */
+export async function vicBrief(w, key) {
+  const k = key || 'full-key'; const s0 = await w.call('POST', '/den/brief/save', { desk: 'aep_vic' }, k); if (s0.status !== 200) throw new Error('vic start ' + s0.text.slice(0, 160));
+  const b = s0.body.brief; const r = await w.call('POST', '/den/brief/save', { id: b.id, revision: b.revision, sections: {
+    summary: 'Victorian coverage of the harbour levy stayed quiet through the reporting period, with two regional outlets reporting the Geelong port council\'s concerns about shipping moving north.',
+    media: 'Regional outlets carried the port council\'s statement and a short report on the committee hearing timetable, with no new angle on the levy itself.',
+    bottom: 'Activity in Victoria is low and steady, and the client is not named in any of it.' } }, k);
+  if (r.status !== 200) throw new Error('vic save ' + r.text.slice(0, 160)); return r.body.brief;
+}
 export const browser = await chromium.launch();
 export async function open(w, key, o) {
-  o = o || {}; const ctx = await browser.newContext({ viewport: { width: o.width || 1440, height: o.height || 900 }, acceptDownloads: true }); await ctx.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+  o = o || {}; const ctx = await browser.newContext(Object.assign({ viewport: { width: o.width || 1440, height: o.height || 900 }, acceptDownloads: true }, o.reducedMotion ? { reducedMotion: 'reduce' } : {})); await ctx.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
   const page = await ctx.newPage(); page.errors = []; page.on('pageerror', e => { page.errors.push(e.message); console.log('  [pageerror] ' + e.message.slice(0, 200)); });
-  await page.addInitScript(({ W, key }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', key); window.confirm = () => true; }, { W, key: key || 'full-key' });
+  // The guided tour (docs/den-tour.js) opens by itself on a first visit; every case but the tour's own starts with it already
+  // seen and never asked again, so nothing covers the page. open(w, key, { tour: true }) leaves the tour's record alone.
+  // p72 lane P3 (UX-SPEC s.14, the fixture option): every harness opens where it did before p72 (the workbench's Board, the
+  // introduction seen) unless it sets ax_den_tab itself; { room: 'today' } opens Today's report with the introduction seen;
+  // { room: 'fresh' } leaves the Den's store clean (the first open after p72: Today, and the introduction offered).
+  await page.addInitScript(({ W, key, tour, room }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', key); window.confirm = () => true; if (!tour) localStorage.setItem('ax_den_tour', JSON.stringify({ v: 1, status: 'done', ask: 'never' }));
+    if (room === 'fresh') return; localStorage.setItem('ax_den_p72', '1'); if (localStorage.getItem('ax_den_intro') == null) localStorage.setItem('ax_den_intro', JSON.stringify('seen'));
+    if (localStorage.getItem('ax_den_tab') == null) localStorage.setItem('ax_den_tab', JSON.stringify(room === 'today' ? 'report' : 'today')); }, { W, key: key || 'full-key', tour: !!o.tour, room: o.room || '' });
   await page.route(/^https:\/\/(?!newsaus\.)[^/]+\//, route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   w.hooks = w.hooks || []; page.served = [];
   await page.route(W + '/**', async route => { const r = route.request(); const u = new URL(r.url()); const path = u.pathname + u.search; page.served.push(r.method() + ' ' + path);
@@ -47,7 +71,7 @@ export async function open(w, key, o) {
     catch (e) { await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'fixture_failed', detail: String(e.message) }) }); } });
   await page.goto('http://127.0.0.1:' + PORT + '/index.html#v=' + (o.view || 'den'), { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof go === 'function' && typeof denInit === 'function', null, { timeout: 20000 });
-  if (!o.view) { await page.evaluate(() => go('den')); await page.waitForSelector('#den-app', { timeout: 20000 }); await page.waitForSelector('.den-strip ul, .den-strip .den-state', { timeout: 20000 }); }
+  if (!o.view) { await page.evaluate(() => go('den')); await page.waitForSelector('#den-app', { timeout: 20000 }); await page.waitForSelector(o.room ? '.dt-room, .den-strip ul, .den-strip .den-state, #den-shell .den-state' : '.den-strip ul, .den-strip .den-state', { timeout: 20000 }); }
   return page;
 }
 let pass = 0, fail = 0; const failures = [];
@@ -60,5 +84,15 @@ export const tab = async (page, name) => { await page.click('#den-tab-' + name);
 export const toast = page => page.evaluate(() => (document.querySelector('.toast, #toast') || {}).textContent || '');
 export const shot = async (page, n) => { if (SHOT) await page.screenshot({ path: SHOTS + n + '.png', fullPage: true, scale: 'css' }); };
 export const panel = (page, title) => page.locator('section.den-panel[aria-label="' + title + '"]');
+/* The Storyboard (13 November 2026): an evidence row is a card (.den-row[data-kind]) in the Unsorted column or under a
+ * section's column; the six checks are pills on the rail and a pill opens its findings; the brief shows one section at
+ * a time, chosen in its outline; the four exports sit in one Export menu. */
+export const CARD = kind => '.den-unsorted .den-row' + (kind ? '[data-kind="' + kind + '"]' : '');
+export const cards = (page, kind) => page.locator(CARD(kind));
+export const checks = async page => { const out = []; const pills = page.locator('.den-strip li button.den-check'); const n = await pills.count();
+  for (let i = 0; i < n; i++) { const b = pills.nth(i); if ((await b.getAttribute('data-n')) === '0') continue; await b.click(); await page.waitForSelector('.den-pop li'); const lab = await txt(page, '.den-pop header .den-chip'); (await all(page, '.den-pop li')).forEach(l => out.push(lab + ' ' + l)); await page.keyboard.press('Escape'); await page.waitForSelector('.den-pop', { state: 'detached' }); }
+  return out; };
+export const sec = async (page, id) => { const s = '.den-sec[data-section="' + id + '"]'; if (!(await page.locator(s).isVisible())) await page.locator('.den-outline [data-goto="' + id + '"]').click(); await page.waitForSelector(s, { state: 'visible' }); return page.locator(s); };
+export const exportItem = async (page, name) => { if (!(await page.locator('.den-menu-list').count())) await page.getByRole('button', { name: 'Export', exact: true }).click(); return page.getByRole('button', { name }); };
 
 export async function finish() { await browser.close(); server.kill(); console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0); }

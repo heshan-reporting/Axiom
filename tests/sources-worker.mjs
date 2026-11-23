@@ -99,7 +99,8 @@ await t('GET /sources seeds the registry from AU_FEEDS plus the extension list, 
   eq(r.status, 200); list = r.d;
   ok(list.summary.core >= 78 && list.sources.filter(s => s.core).length === list.summary.core, 'core feeds mirrored: ' + list.summary.core);
   ok(list.summary.total > 250, 'a wide net: ' + list.summary.total);
-  eq(list.summary.unverified, list.summary.total, 'nothing has been tried yet');
+  eq(list.summary.unverified, list.summary.total - mod.__test.CORE_OFF_DEFAULT.size, 'nothing has been tried yet; only the core feeds off by default (p73) are not unverified');
+  eq(list.sources.filter(s => s.enabled === false).map(s => s.id), [...mod.__test.CORE_OFF_DEFAULT], 'the feeds off by default are seeded switched off');
   ok(list.sources.every(s => s.methods.length), 'every source has at least one method');
   const nat = list.sources.find(s => s.id === 'nationals');
   eq(nat.methods, ['rss', 'wp', 'sitemap', 'gnews'], 'methods derive from the urls, in chain order');
@@ -144,7 +145,9 @@ await t('POST /sources/sweep with a few ids runs inline and files rows with the 
   const cb = row("SELECT meta FROM arc_items WHERE kind='news' AND src='capitalbrief'"); const cm = JSON.parse(cb.meta);
   eq(cm.outlet, 'Capital Brief'); ok(cm.issues.indexOf('ftc') >= 0);
   const pod = row("SELECT url, title FROM arc_items WHERE kind='news' AND src='pod_7am' ORDER BY id"); eq(pod.url, 'https://feeds.test/ep/101.mp3', 'episode filed under its enclosure when there is no link');
-  const g = row("SELECT meta, ts FROM arc_items WHERE kind='news' AND src='guild_org' ORDER BY id"); eq(JSON.parse(g.meta).dated, 0); ok(Math.abs(g.ts - Date.now()) < 60000, 'undated listing items are stamped at first sight');
+  // p71 (review CO3): a listing page read for the first time is a baseline, filed before every window, so a newsroom's old
+  // releases are not the day's news; a later read stamps a new link at first sight (tests/den-p71-sources-worker.mjs SR9)
+  const g = row("SELECT meta, ts FROM arc_items WHERE kind='news' AND src='guild_org' ORDER BY id"); eq([JSON.parse(g.meta).dated, JSON.parse(g.meta).baseline], [0, 1]); ok(g.ts < Date.now() - 28 * 86400000, 'undated listing items on a first read are a baseline');
   ok(kv.get('pod_feed_pod_7am') === 'https://feeds.test/7am.xml', 'the podcast feed url is remembered');
 });
 await t('a source with no working route records the failure with reasons, and stays failing', async () => {
@@ -177,15 +180,17 @@ await t('POST /sources/update switches a source off, and a core feed off drops i
   const a = await req('POST', '/sources/update', { id: 'riverine_herald', enabled: false, note: 'paused' });
   eq(a.d.source.enabled, false); eq(a.d.source.note, 'paused');
   const l = await req('GET', '/sources?status=off', null, 'read-key'); ok(l.d.sources.some(s => s.id === 'riverine_herald'));
-  const before = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(before.d.feeds, list.summary.core, 'every core feed is fetched');
+  // p73: the core feeds off by default (CORE_OFF_DEFAULT: ozbargain) are seeded enabled=0 and never fetched
+  const offDefault = mod.__test.CORE_OFF_DEFAULT.size; ok(offDefault >= 1 && mod.__test.CORE_OFF_DEFAULT.has('ozbargain'), 'ozbargain is off by default');
+  const before = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(before.d.feeds, list.summary.core - offDefault, 'every core feed but the ones off by default is fetched');
   const b = await req('POST', '/sources/update', { id: 'abc', enabled: false }); eq(b.d.source.enabled, false); eq(b.d.source.core, true);
-  eq(JSON.parse(kv.get('sources_core_off')), ['abc']);
-  const after = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(after.d.feeds, list.summary.core - 1, 'the switched-off core feed is not fetched');
+  eq(JSON.parse(kv.get('sources_core_off')).sort(), ['abc'].concat([...mod.__test.CORE_OFF_DEFAULT]).sort());
+  const after = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(after.d.feeds, list.summary.core - offDefault - 1, 'the switched-off core feed is not fetched');
   await req('POST', '/sources/update', { id: 'abc', enabled: true });
 });
 await t('/allnews merges the registry rows from the archive and marks them', async () => {
   const r = await req('GET', '/allnews?debug=1&hours=72', null, 'read-key');
-  ok(r.d.registry >= 10, 'registry rows merged: ' + r.d.registry);
+  ok(r.d.registry >= 6, 'registry rows merged: ' + r.d.registry); ok(!r.d.items.some(i => i.src === 'guild_org'), 'a listing page\'s first read is a baseline, not news (p71 review CO3)');
   const it = r.d.items.find(i => i.src === 'nationals');
   ok(it && it.reg === 1 && it.tier === 'party' && it.method === 'wp', JSON.stringify(it));
 });
@@ -260,6 +265,16 @@ await t('POST /sources/report lets a desktop collector record a render probe', a
   const r = await req('POST', '/sources/report', { id: 'guild_org', ok: true, method: 'render', n: 9, ms: 1200, added: 3 });
   eq(r.d.source.method_ok, 'render');
   const h = row('SELECT method, n, ok FROM source_health WHERE src=? ORDER BY id DESC', 'guild_org'); eq(h.method, 'render'); eq(h.n, 3); eq(h.ok, 1);
+});
+await t('POST /sources/listing files the links a desktop collector rendered through the worker: held links are not filed again, a new one is stamped as found (p71 review B6)', async () => {
+  const items = Array.from({ length: 6 }, (_, i) => ({ title: 'Guild welcomes the expansion of pharmacist prescribing in every state number ' + i, link: 'https://www.guild.org.au/news/2026/09/guild-welcomes-pharmacist-prescribing-expansion-' + i }))
+    .concat([{ title: 'Guild welcomes a new pharmacy workforce plan for every state', link: 'https://www.guild.org.au/news/2026/09/guild-welcomes-a-new-pharmacy-workforce-plan' }]);
+  const r = await req('POST', '/sources/listing', { id: 'guild_org', ok: true, method: 'render', ms: 1500, items });
+  eq(r.status, 200); eq([r.d.added, r.d.rows], [1, 7], 'the six it held are not filed again'); eq(r.d.source.method_ok, 'render');
+  const n = row("SELECT ts, meta FROM arc_items WHERE kind='news' AND url='https://www.guild.org.au/news/2026/09/guild-welcomes-a-new-pharmacy-workforce-plan'"); const m = JSON.parse(n.meta);
+  ok(!m.baseline && Math.abs(n.ts - Date.now()) < 120000 && m.method === 'render' && m.via === 'reach' && m.reg === 1, 'the page was read here within the window, so a new link is stamped as found: ' + n.meta);
+  const h = row('SELECT method, n, ok FROM source_health WHERE src=? ORDER BY id DESC', 'guild_org'); eq([h.method, h.n, h.ok], ['render', 1, 1]);
+  eq((await req('POST', '/sources/listing', { id: 'guild_org', ok: true, method: 'render', items }, 'read-key')).status, 403);
 });
 await t('GET /fulltext reads an article from the page itself (JSON-LD articleBody)', async () => {
   const r = await req('GET', '/fulltext?url=' + encodeURIComponent('https://www.example-news.com.au/story/one'), null, 'read-key');

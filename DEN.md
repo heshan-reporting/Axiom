@@ -164,7 +164,11 @@ code is built unproven against a real answer. Six of the eight reads under D2 re
 D1 registered public actors named on their own posts only; D2 at most eight live Supermetrics reads (two made, both
 refused by the licence);
 D3 layer 1 worker route built behind configuration; D4 one stated model call per draft, `DEN_DAILY_CALLS` 20, the
-morning draft off; D5 copy as rich text, `.md`, `.html`, Slack summary; D6 read role reads, full role drafts and
+morning draft off (amended 16 November 2026, the owner: narrative naming is automatic within `NARRATIVE_DAILY_CALLS`
+and every narrative has a computed working title; a draft is still one call a person starts, s.10.5; the morning draft is
+each desk's own choice in Options, off unless set: on 17 November 2026 it is on for MCA national, daily at 07:00 Sydney,
+and for MCA national weekly, on Mondays, s.10.12, at the owner's request that the analyst keep daily reports as well as
+the weekly ones); D5 copy as rich text, `.md`, `.html`, Slack summary; D6 read role reads, full role drafts and
 approves; D7 every reach channel built switched off, started only by a person signing in on the Mac; D8 subscriber
 outlets only through the agency's own subscription and only once clearance is recorded on the source; D9 the
 monitoring-export importer built.
@@ -656,7 +660,8 @@ offers a mute, which a person confirms and can remove in Options.
 became emerging, registered accounts and known actors seen for the first time in a fortnight, an issue running well
 above its own baseline, a registered account's post drawing several times its usual, and - first in the list -
 **any channel the desk relies on that delivered nothing in the window, with the reason**. An empty table must never
-be read as a quiet day.
+be read as a quiet day. *(Superseded on the page by s.10.2, 16 November 2026: gaps are said on the Collection tab
+only; the rail has five checks.)*
 
 **Brief** is the report. One button drafts it from the evidence on Today, and says what it costs before it is pressed:
 one model call, counted against twenty a day. The draft comes back checked against the rows it cites:
@@ -752,6 +757,129 @@ small table of tags by item (`item, issue, ts, kind`) written when a row is file
 baseline count read an index and never touch article text. It is the lasting fix and it is a change to how every
 collector files a row, so it was not made in a hurry on the day of the fault.
 
+### 6.10 The Storyboard (13 November 2026; page `den.css?v=r46`, `den.js?v=r49`; no worker change)
+
+The page was redesigned from the audit in `prompts/annes-den-ui-variations.md`; the owner chose concept A of the four
+prototypes in `design/prototypes/annes-den-concepts/`. What a person now meets:
+
+| Where | Before | Now |
+|---|---|---|
+| The window | The app's masthead, navigation and scope bar above the Den; the first row 600px down at 1366 x 768 | A focused window (`body.in-den`): a 48px top bar with Back to AXIOM and a 44px rail; the first card is on the first screen |
+| What must not be missed | A list repeated above every tab | Six pills on the rail, gaps first; a pill opens its findings, whether the brief covers each, and its one action. A gap is also said on the Board ("Not a quiet day"). *Superseded by s.10.2: five checks, gaps on Collection only* |
+| The evidence | Five stacked tables on Today | The **Board**: cards by weight in Unsorted, and a column for each section of the desk's report. A card is filed by drag, by the section's number, or by its select |
+| The brief | Nine to eleven textareas in one column, citations as bare ids | One section open between an outline and the evidence filed under it; "As it reads" with citations as outlet chips and each flag at its sentence; a card inserts its citation at the cursor; a sticky foot bar. *Superseded by s.10.3: one section page, read by default, edited in place; cards headed in words* |
+
+Decisions that bind:
+- **Filing pins.** Filing a row under a section sends `POST /den/pin` as the Pin button does, so a draft must cover
+  it. Narratives and dates are not rows the worker pins: they are filed on the computer only.
+- **Where a card sits is this browser's note**: localStorage `ax_den_file_<desk>_<Sydney day>`. The worker was not
+  changed, so a second person, or the same person on another computer, sees the pins and not the columns. Moving
+  this to the worker (a `section` on `den_marks`) is the obvious next step and was not built.
+- **A weight is the page's arithmetic**, from the figures `GET /den/board` already returns (`weigh()` in
+  `docs/den.js`), shown with its reasons. It orders cards; it hides nothing but old, low-reach posts (Low weight, one
+  press away).
+- **Covered / not covered** uses the rule `denBriefFile` applies (a cited row the check names, its words, or a plain
+  statement that a channel was not read), on the words in the editor.
+- **Only an id the brief's evidence holds can be cited from a card**, because `denCleanText` removes any other on
+  save. A row collected after the draft says so and offers nothing.
+- The Board still reads the window once (`/den/board?missed=1`). The brief (`GET /den/brief`, one row) is read when the
+  Den opens, not on the first visit to Brief.
+
+Not verified: the live worker and real rows. Weights, column widths and the rail at a desk with many findings were
+seen only on the fixture's invented day (`tests/den-shots.mjs` saves both sizes into `tests/shots/den/`; the earlier
+layout is in `tests/shots/den-before/`).
+
+### 6.11 Where a card is filed is the desk's (15 November 2026; build `2026-11-15.studio-p66`, page `den.js?v=r50`)
+
+The step s.6.10 named and did not take. Until now which column a card sat in was one browser's note, so a second
+person, or the same person on another computer, saw the pins and an Unsorted queue. Now:
+
+- **`den_marks` has a `section`** (added by `ensureDesks` with `ALTER TABLE`, once, on the first open after the
+  deploy). `POST /den/pin {desk, item, section}` files the row under that section as it pins it; `section: ''` takes it
+  back to Unsorted and leaves it pinned; a pin that says nothing about the section (the Pin button) keeps the one it
+  has, so pinning never unfiles. A section id the desk's report does not have, or the Source List, is refused
+  (`400 unknown_section`) and nothing is written. A set-aside unfiles the row; clearing a mark removes both.
+- **`GET /den/board` carries `section` on every media, social and actor row** (`''` when unfiled). A folded story
+  shows the section of whichever copy was filed.
+- **The page adopts the board's answer.** When the board arrives, what it says replaces this computer's note for
+  every row it names (`adopt()` in `DenApp`; a section hidden on Options counts as Unsorted), so a filing made by
+  someone else, or on another computer, shows here. The Den opened on another tab than the Board (the last tab used
+  is kept) now reads the window once too (`GET /den/board?desk=`, no checks), so the Brief's evidence is the desk's
+  record from the first screen and an Unfile there reaches the worker; the Board's own read, when it opens, carries
+  the checks as before. This computer's note (`ax_den_file_<desk>_<day>`) mirrors the worker and stands on its own
+  only for narratives and dates, which the worker does not pin, or under a worker older than this page, which says
+  nothing about sections. Filing from the Board (drag, number, select) and from the Brief ("File here", "Unfile")
+  sends the section with the pin, and the Board reads the window again after each write, so a read in flight when the
+  pin went out cannot bring the old column back.
+- **Notes made before p66.** The first board with sections a desk has seen on this computer (`ax_den_sec_sent_<desk>`)
+  sends each note it holds for a pinned row the worker reports under no section, once, instead of dropping it; after
+  that a pinned row under no section is someone's "back to Unsorted" and the note follows it.
+- **Cost:** a filing is one `POST /den/pin` and one read of the window; moving a row that is already pinned is now a
+  write and a read where it was none. The Board still opens on one read of the window.
+- Harnesses: `tests/den-worker.mjs` DK21 (the pin carries the section, the board returns it, a folded copy, a refused
+  section, a pin that says nothing keeps it, a set-aside unfiles it, clearing removes it, a read key, the sister desk
+  sees the same story unpinned and unfiled); `tests/den-browser.mjs` (the filing case checks the worker's answer and
+  opens a second browser with no note, as another person; a new case opens on the Brief tab on another computer and
+  finds the filed card as the section's evidence, and its Unfile reaches the worker); 33, 60, 21 and the five token
+  checks pass. The change was reviewed by three readers and each finding verified against the code before the commit:
+  the `ALTER` swallowed every error (now only "duplicate column"), an Unfile from the Brief without the Board read
+  stayed local, a stale board read could undo a fresh move, two quick clicks on the Brief lost one, a hidden section
+  was adopted, and two of DK21's assertions could not fail.
+
+Deployed by the owner on 15 November 2026 at 11:49 UTC, after the branch was merged to `main` (c057ef9) and GitHub Pages
+served `den.js?v=r50`: the live worker answers build `2026-11-15.studio-p66`, revision c057ef9, deploy token
+`6709076c463c0290`, and `/engine/status` answered 200 after the upload. Not verified: the `ALTER TABLE` on the live
+`den_marks` (it runs on the first `/den/` request with a key, which is the owner's), and the write and read a move now
+costs under a busy database.
+
+### 6.12 The four items s.6.10 left, and the quiet desk (15 November 2026; page `den.css?v=r47`, `den.js?v=r51`; no worker change)
+
+Page only: every route it uses already existed. Branch `claude/den-storyboard-next`, cut from `main` after s.6.11 was
+merged and the owner deployed p66.
+
+- **Bulk set-aside on the Board.** Every Unsorted card the worker can set aside (a story, a post, an actor's post)
+  carries a tick (`input.den-pick`, "Select: ..."); a shift-click on the card selects it too, and a button inside the
+  card is still its own. With one or more selected, a bar in the Unsorted tools (`.den-bulk`, "N selected") takes one
+  reason (the same list as a single set-aside, with "other") and one button, "Set aside N cards". Each row goes through
+  `POST /den/aside {desk, item, reason}` one after the other, exactly as a single set-aside does, so the worker's count
+  and its mute offer are what they would be by hand; the offer, when the worker makes one, is shown as before. One
+  Undo ("Set aside N cards") clears them all (`POST /den/aside {clear: true}` for each). A failure part way says how many
+  went before it; the rest stay on the board. The selection is this render's: it empties on a desk or day change, and a
+  card that leaves Unsorted leaves it. Narratives and dates, which the worker does not set aside, carry no tick.
+- **A citation chip leads to its card** *(the pane and chips are redrawn in s.10.3; the chip still leads to its card)*. Under "As it reads" a chip is now a button (`button.den-cite`) that scrolls
+  its card in the evidence pane into view, focuses it and lights it for a moment (`li.den-evitem[data-cite].lit`);
+  the card's Open link is the next press, so the source is one press away. Every id the open section cites and the
+  brief's evidence holds is listed in the pane (filed here, or "Cited here, filed elsewhere"), so there is always a
+  card to land on; a chip whose evidence has no row stays a plain, red chip as before.
+- **A meter under "model calls today".** `.den-budget` holds the count and, under it, `[role="meter"]` (used of the
+  cap, from the `budget` the desks route already returns, the same title text as the count): accent to three
+  quarters, warn past it, neg at the cap.
+- **A day picker in the top bar.** `input[type=date][aria-label="Day"]`, today by default and never later than
+  today. Another day sets `to` to the last millisecond of that Sydney day (`dayEnd`, the offset read at noon so a
+  clock change cannot move it): the Board reads `GET /den/board?desk=&missed=1&to=`, the checks on the other tabs
+  `GET /den/missed?to=`, and the Brief `GET /den/brief?desk=&day=`. The top bar then says "not today" (a warn chip),
+  the window line reads "the N hours to the end of that day", and a Today button comes back. On another day nothing
+  drafts (no Draft, Draft again or Regenerate: a brief is drafted for today's window only, and the empty state says
+  so); saving, filing and reopening an old brief are still a person's. Where a card is filed is kept under that day
+  (`ax_den_file_<desk>_<day>`). The day is never kept: a new open is today's. Nothing here spends.
+- **The quiet desk.** At 1920 a desk with little filed was a row of ten wide, empty drop zones. A column with no card
+  under it is now compact (`.den-col.empty`, `--dn-col-w-c: 160px` against 272 to 316): the same column, with its
+  key, its state chip, Write and the drop zone ("Drop here, or press N on a card"), its title on up to two lines; it
+  opens to full width as soon as a card is filed under it, and it still takes a drop. At 1920 eight section columns
+  now fit on the first screen where four did. The smallest fix that keeps the column structure; the alternatives
+  (folding empty columns into one strip, or hiding them) would have cost the one-key filing and the state at a glance.
+  The width changes at once, not over a transition: a drag begun while the columns under the pointer were still
+  moving started no drag in Chromium (found by the harness, a drop within 300 ms of a filing by key).
+
+Harnesses: `tests/den-browser.mjs` (36: the first case checks the meter and the picker's default; the draft case
+presses a chip and finds its card focused, in view, with its source link; three new cases - the bulk set-aside with
+the worker's count, the offer and one Undo; the day picker with the `to` it sends, the brief it asks for and that
+nothing was written or spent; the compact columns at 1920 with a drop into one), `tests/den-inject-browser.mjs` (60),
+`tests/den-worker.mjs` (21) and `node tests/run.mjs check` pass.
+
+Not verified: the live worker and real rows (a busy day's columns at 1366 with compact neighbours; the picker on a
+desk with weeks of briefs).
+
 ## 7. Hand-over (11 November 2026)
 
 ### 7.1 What exists
@@ -765,6 +893,10 @@ collector files a row, so it was not made in a hurry on the day of the fault.
 | 5 | p57 | Keyword discovery: proposed with evidence, approved by a person |
 | 6 | p58, r44 | Anne's Den: the page |
 | 6.9 | p61, den.js r48 | The page's first live open overloaded the database: one read on Today, slow counts cached, a busy database said and retried |
+| 6.10 | page only, den.js r49 | The Storyboard: a focused window, the Board of cards and section columns, the three-pane Brief (s.6.10) |
+| 6.11 | p66, den.js r50 | Where a card is filed is the desk's record (`den_marks.section`) |
+| 6.12 | page only, den.js r51 | Bulk set-aside, the chip that leads to its card, the meter, the day picker, compact empty columns |
+| 10 | p67, den.js r52 | The release-ready Den: gaps on Collection only, the section editor, the guided tour, working titles, a wider net (s.10) |
 
 ### 7.2 The three layers, in one table
 
@@ -786,7 +918,9 @@ the agency holds, only a source a person has cleared, never a paywall worked aro
 - **D2 Live Supermetrics reads.** Two of eight made, both refused by the licence (0.5). No client account data read.
 - **D3 Layer 1 from the worker.** Built behind configuration that is absent; `/meta/status?probe=1` says what to set.
 - **D4 Model spend.** A draft or one section written again is one call a person starts; `DEN_DAILY_CALLS` 20; the
-  morning draft is off for every desk. Discovery, the strip, the board and Preview make no model call.
+  morning draft is off for every desk. Discovery, the strip, the board and Preview make no model call. *Amended 16
+  November 2026, the owner: narrative naming is automatic within `NARRATIVE_DAILY_CALLS`, every narrative has a computed
+  working title, and naming on every tick is built behind `NARRATIVE_AUTO=tick`, off (s.10.5).*
 - **D5 Getting the report out.** Copy for the document, `.md`, `.html`, the Slack summary. No write to Google Docs.
 - **D6 Who can use it.** Reading is read role; every write is full. Open access never reads a desk.
 - **D7 Signed-in collection.** Every channel built, none switched on. **Automated reading with a signed-in account is
@@ -1094,7 +1228,7 @@ curl -sS -X POST -H "X-Axiom-Key: $AXIOM_KEY" https://newsaus.heshan-998.workers
 wait a minute and ask again.
 
 
-### 9.8 A sweep from the app that finishes (12 November 2026; build `2026-11-12.studio-p65`, `sources.js?v=r2`)
+### 9.8 A sweep from the app that finishes (written 12 November 2026; first shipped in build `2026-11-23.studio-p74`, `sources.js?v=r3`)
 
 Seen live: **Sweep every source** in the Sources view ended "FAILED, 86 lines" with `worker_stopped`. The button
 started a job the worker ran after its response, and such a job is stopped at about thirty seconds; the registry holds
@@ -1110,3 +1244,854 @@ started a job the worker ran after its response, and such a job is stopped at ab
   everywhere, a site answering 403 to the worker's network) is one fix, a wrong address is a row to edit or switch off.
 - Since p62 a stopped source is asked once a day, so leaving them on costs little; switching off what is gone is the
   owner's call, source by source.
+
+## 10. Release 8 - the release-ready Den (16 November 2026; build `2026-11-16.studio-p67`, page `den.css?v=r48`, `den.js?v=r52`, five new part files at `?v=r1`)
+
+Branch `claude/den-release`, cut from `main` at c2cff62 (worker p66, page `den.js?v=r51`, `den.css?v=r47`). Merged to
+`main` (93bf0fd) and live on GitHub Pages on 16 November 2026; the owner deployed the worker the same day at 06:08 UTC
+(s.10.8 records the deploy). The page is now six files: `docs/den.js` (the shell: shared
+helpers, the rail, the Board, the top bar, `DenApp`), `docs/den-brief.js` and `docs/den-brief.css` (the Brief),
+`docs/den-desk.js` and `docs/den-desk.css` (Watch, Collection, Options), `docs/den-tour.js` and `docs/den-tour.css` (the
+guided tour), with `docs/den.css` still the frame and the tokens. `den-brief.js` and `den-desk.js` are factories that
+`den.js` calls once with its shared names (`window.__DEN_PARTS`); the tour reads the page only through `data-tour` hooks
+and `den:did` events. The versions `r52`, `r48` and `r1` were set when the split began and none was ever served (`main`
+serves `r51` and `r47`), so no second bump was needed.
+
+### 10.1 What the owner asked, and what it reverses
+
+The owner's brief for this release, in its sense: (a) a delivery or collection problem ("Facebook delivered nothing in
+this window", the "Not collected" check) is shown **only on the Collection tab**; (b) a release-ready, professional Den,
+above all a redesigned section editor and evidence pane (his screenshot: a textarea of raw `[S:123]` codes stacked above
+a duplicate "As it reads", and evidence cards headed by raw ids with "not filed" under each); (c) a wider collection net
+and narratives named without anyone asking, nothing left waiting un-analysed; (d) better engines, logic and flows; (e) a
+guided tour from the first step to the last that rings the control to press, waits for the person to really do it, and
+on later visits asks whether they want it again.
+
+| Standing rule | What this release does | Decided by, when |
+|---|---|---|
+| "An empty table must never be read as a quiet day": gaps first on the strip, a gap line on the Board, gaps in every "not covered" count (s.6, s.6.10) | **Reversed outside the Collection tab.** Gaps are said on Collection only, with a neutral dot on its tab (s.10.2). Failed reads are not gaps and still show on every tab | The owner's instruction, 16 November 2026 (item a) |
+| The draft is told to "say so plainly" when a channel was not read (`denSys`, `DEN_KIND_GUIDE.social`) | **Reversed in worker p67.** The draft never writes about collection, collectors, sign-ins or repairs; one built line says which channels were read (s.10.2) | The owner, 16 November 2026 (item a); takes effect on the deploy |
+| The Storyboard editor: a textarea, "As it reads" under it, cards headed by their id (s.6.10) | **Replaced** by one section page, read by default and edited in place, and evidence cards headed in words (s.10.3). What is stored is unchanged | The owner, 16 November 2026 (item b) |
+| D4: automated model work, naming included, runs in one window a day (5 October 2026) | **Amended, not reversed.** Every narrative has a working title at once with no model call; the morning window now drains the whole naming queue within the same cap; naming on every tick is built behind `NARRATIVE_AUTO=tick`, **off** (s.10.5) | The owner's item (c), 16 November 2026; switching every-tick naming on is still his |
+| Filing and the desk's record are a person's act; nothing spends without a button that states its cost | **Kept.** The tour asks the person to press; it never presses, never makes a request and never spends (s.10.4) | Unchanged |
+| Keyword proposals need a person; no signed-in channel, paid source, lexicon term or cron cadence changes without the owner | **Kept.** The wider net uses existing keyless routes only (s.10.6, s.10.9) | Unchanged |
+
+Pointers are left where the older text stands: s.6 ("Nothing critical missed"), the s.6.10 table, s.6.12 (the chip
+that leads to its card) and D4 in s.0.7 and s.7.3.
+
+### 10.2 Collection gaps live on the Collection tab only
+
+Supersedes the page behaviour in s.6 ("first in the list - any channel the desk relies on that delivered nothing") and
+in s.6.10 ("six pills on the rail, gaps first ... A gap is also said on the Board").
+
+| Where | Before | Now |
+|---|---|---|
+| The rail | Six pills, "Not collected N" first, warn-coloured, on every tab | Five checks; a desk with only a gap says "five checks, nothing found". The strip still hands the full list to `DenApp`, so Collection has it |
+| The Board | "<Channel> delivered nothing in this window. Not a quiet day: see why" above Unsorted; a column's "N checks uncovered" in red | No gap line. Before a brief there is no check count at all; with a draft a column says "N checks not in the brief yet" in a neutral chip; after filing, "N acknowledged at filing" |
+| The Brief | "1 check uncovered" counted the gap; Mark as filed listed it | Gaps are dropped before anything is counted. A filing whose only open items are gaps files in one press (the page sends `acknowledge` itself under p66); a gap and a check list only the check |
+| The draft (worker p67) | Told to write which channels were not read, and did ("restoring the collector should be a priority") | `SIGNALS NOT TO MISS` carries no gap; one built line follows the desk: `CHANNELS READ IN THIS WINDOW: News (n rows), X (n rows); not read: Facebook.` The rule: never describe a channel that was not read as quiet or calm, draw nothing from its absence, never write about collection, collectors, sign-ins, feeds or repairs |
+| Filing (worker p67) | Gaps in `409 uncited_signals` and in `acknowledged` | `open` excludes gaps; `acknowledged` holds none; the revision note appends "; not read in this window: <channels>" (see below) |
+| Watch | A collector's `last_error` in red beside each account | The last good read ("3 h ago") or "not read yet", in neutral ink |
+| **Collection** | The channel table only | A first panel, **Not delivering** (`[data-tour="gaps"]`): each gap with the worker's own title, its reason as sentences, secret, permission and script names folded under a closed "Setup details", and one action - Collect now where the channel has a collection route and the key can write, otherwise what is missing (switched off, paused at a verification, no collection job, a full key needed). "Checking what each channel delivered..." while the checks load; a sentence and Try again when they could not be read; "Every channel this desk relies on delivered." when none. On a past day it says "For <day>" and that the channels are as they stand now. A gap's row in the table carries a warn rule; Collect now is disabled with its reason on the three channels that have no collection job |
+| The Collection tab | - | A neutral dot (`data-attn`, CSS only, no number, no warn colour); the tab's text stays exactly "Collection"; `aria-description` "A channel is not delivering" (decision D5 of the plan; deleting the attribute in `DenApp` removes it) |
+
+Still said on every tab, because they are not "a channel delivering nothing": a read that failed, `503 db_busy`, a
+wrong-shape answer (each with Try again); the Board's "X: none." sentences, which say what was **collected**, with the
+link "See what was collected, and why not"; the Watch form's note that no collector reads a platform being typed.
+
+`GET /den/missed` and `/den/board?missed=1` are unchanged (gaps are still computed and still first), so the page reads
+the same under p66 and p67 and a p66 page still works on p67.
+
+**One open conflict for the owner.** The plan asked the worker to keep the unread channels in the filing revision note
+(W1), which appears in History on the Brief tab. The page strips that part from the History table, so item (a) holds on
+the page; the worker still stores it. Whether it should stay in the note, move to a field of its own, or go, is the
+owner's call. Dropping it is two changes: the suffix in `denBriefFile`'s `denRevision` call, and DK12's gap-only note in
+`tests/den-worker.mjs` (expect "filed").
+
+### 10.3 The Brief's editor and evidence pane
+
+Supersedes the Brief row of the s.6.10 table and the citation chip of s.6.12.
+
+| Where | Before (r51) | Now (r52) |
+|---|---|---|
+| The section | A textarea of raw `[S:123]` codes, then "As it reads" under it: the same words twice | One page a section (`.den-sec[data-mode=read|edit]`). It opens **read**: the words with each citation a numbered chip and each flag at its sentence. Clicking a sentence, Edit, or Tab puts the caret at that sentence in the same place; Esc or leaving saves once and returns to reading (focus goes back to Edit). An empty writable section opens as the editor. A filed brief or a read key always reads |
+| Typing | Raw codes only | While editing, a mirror under the text tints each `[K:id]` (the one under the caret ringed, an unknown id red), and a line names the mark under the cursor: its source, what it says, its id |
+| Citing | A card inserted `[M:n]` where the cursor last was; each card a save | A card press keeps focus in the words and inserts at the caret through the browser's own edit, so Undo works and several citations are one save |
+| An evidence card | Headed by its id (`S:2396192`, `T:mining`, `N:...`) with "not filed" under every row | Headed by its source in words with the kind's icon, then what the row says and one line of figures; the id only in its accessible name and tooltip. Filing words only on rows the desk can file (stories, posts, actors, narratives, dates): "Add to this section", "Remove". Tone, alert and memory rows say nothing about filing. A card cited here shows its chip's number; "Cited in N" when elsewhere too |
+| Chips | The outlet name | "pointpost", "pointpost 2" for a repeat, "Narrative: <name>", "Tone: <issue>", "Agency memory", "Date: ..."; the number is drawn by CSS, so the text a test reads is unchanged |
+| The outline | Titles cut at one line, a key cap past nine | Sections numbered 1..n, titles on two lines, a quiet dot and a word for the state, and the count of sources (filed cards and cited ids, each once) |
+| The foot | Text counts | Buttons: "N need(s) a source" opens the first flagged sentence, the checks chip opens the section of the first check not mentioned |
+| Failures and finish | A toast | A failed draft or section rewrite stays as a notice until closed; a filed brief shows a band with "Copy it for the document"; Regenerate saves unsaved words first, and Write it again is disabled with "Save your edits first" while anything is unsaved; History and Compare open in a drawer that takes focus and gives it back |
+
+What binds, unchanged: the section text the worker stores and checks is still plain text with `[K:id]` tokens; only an id
+the brief's evidence holds can be cited; flags sit at their sentence; the working copy, save and conflict rules of s.6
+stand; other sections stay mounted so unsaved words are not lost. `DEN_EDITOR_STACK = false` in `docs/den-brief.js`
+brings back the r51 stacked layout with the new cards (verified to pass `tests/den-browser.mjs`).
+
+The worker side (p67): every evidence id records `text` (at most 160 characters) and `sub` (at most 120) for every
+kind, returned by `GET /den/brief` beside `label` (never the line itself, never a subscriber excerpt); a brief drafted
+before p67 derives them from its stored line. A social row's label is "<platform> post" only, so the Source List prints
+no post words. A brief started by hand fills its evidence from the window at once (no model call), a save that cites a
+row collected since then merges it, and a section rewrite refreshes the lines it holds. A sentence flagged "Needs a
+source" keeps its flag through later saves until it is cited or removed. Tone (`T:`) counts only rows a model judged.
+
+### 10.4 The guided tour
+
+`docs/den-tour.js`: one script with no dependency, mounted as `#den-tour` on `document.body`, opened by the **Guide**
+button beside `?` and by the first row of the Keyboard sheet. Twenty-four steps in six chapters, each finished only by
+the real action (a click, a drag, a key, words typed, read from the page and the Den's `den:did` events):
+
+| Chapter | Steps |
+|---|---|
+| Set up | Choose your desk; Check the day (and the model-call meter beside it); Read the checks |
+| Sort the evidence | Meet a card; Find a card; Pin what must be covered; Set one aside (with Undo and the mute offer); Add it to a section (drag, or the card's menu); Do it with one key |
+| Start the brief | Open the brief; Start the brief (paid: the Den's own Draft, or "Skip: show me with a sample") |
+| Write and cite | Open a section; Edit the words; Cite a card; Save; Follow a citation; Rewrite one section (paid form: only the person presses Write it again) |
+| File and share | Look back; Read the foot before filing; Take it out; Mark it as filed ("Not yet, show me the rest" in the dialog) |
+| Run the desk | See what is watched; See what was read (rings Not delivering when there is a gap); Make the desk yours |
+
+How it behaves: a ring and a cut-out spotlight on the control (the page underneath stays usable), a coach card with
+"Step n of 24", the chapter and a progress bar, Back, Skip this step and "I'll do it later". Each write step says what it
+will write and how to undo it before the press. After 20 seconds it offers "Show me where"; after 45 Skip becomes the
+first button; nothing skips by itself. Where the page is not in the state a step needs it asks for the one press that
+fixes it ("Come back to today", "Go back to the Brief", "Save your words first"). Alt+G moves between the card and the
+control; Escape pauses and returns focus; a Den dialog keeps its own Escape. Under reduced motion the ring is a static
+3px outline with a "here" badge.
+
+What it never does: press a Den control, make a network request (its harness greps for `fetch(`, `XMLHttpRequest`,
+`AXUI` and `.click(`), or spend. A control marked `data-paid="1"` gets a dashed ring and "1 model call, you press it"
+with the day's live count; the sample path makes no call. Collect now is never offered. A read key walks every step as
+"shown, not done"; an empty desk folds the sorting chapter into one card; a filed brief makes editing show-only and
+points filing at Reopen.
+
+Entry: a first open offers a welcome (Start the guide, I'll do it later, Don't ask again); a guide left part-way offers
+"Carry on with the guide?" at its step; after it ends or is declined, each open asks "Want the guide again?" ("Want a
+guided tour of the Den?" for someone who never started) until "Don't ask again". Its memory is this browser's note,
+localStorage `ax_den_tour` `{v, status, step, done[], skipped[], sample, ask, runs, startedAt, updatedAt, completedAt,
+t, w}`, read and written in try/catch. Removing the two `den-tour` tags from `docs/index.html` removes it; the Guide
+button and the sheet row hide themselves.
+
+### 10.5 Naming and analysis without a person (D4 amended)
+
+Three things left a narrative showing "A narrative not yet named": naming was held outside the 07:00 window; the Board
+lists narratives from two rows but a model names from three, so a two-row narrative could never be named; and past the
+120-call cap the rest waited for the next day.
+
+- **A working title, no model call.** Every narrative carries one (`narratives.auto_label`, with `auto_n`,
+  `label_tries`, `label_try_ts`, each added once by `ALTER TABLE`). Only a published **news headline** can be one: the
+  member headline that carries most of the cluster's shared words, cleaned (outlet suffix, "Live:", handles and links
+  out, at most 14 words), and only if a strict check finds no possible person's name in it (any capitalised name in any
+  script, initials, a lone surname, a speaker followed by a speech verb; a short list of institutions, places, days and
+  months is let through). Otherwise a template from the issue, the register's names and words the rows write in plain
+  lower case. Never a comment, never a post's sentence, never an unregistered person. Written at insert, refreshed only
+  when the narrative doubles (so a title a brief cites is stable), back-filled 60 a run, and built lazily on the Board
+  for rows older than p67 ("A narrative on <issue>"). A person's name always wins, then a model's.
+- **Said as what it is.** Board rows carry `named` (`person`, `model`, `auto`); the card shows a quiet "working title"
+  tag; the draft's line reads "working title, not yet reviewed"; an emerging signal reads "Emerging narrative (working
+  title): ...". `/narratives/status` adds `titled`, `awaitingModel` and `budgetAuto`.
+- **The window drains the queue.** The morning window now names the whole global queue of the last seven days, client
+  issues first, within `NARRATIVE_DAILY_CALLS` (120) and a window budget of 20 calls and four minutes, each row claimed
+  before its call; three failed attempts set a narrative aside until the next day.
+- **Every-tick naming, built and off.** `NARRATIVE_AUTO=tick` lets a held tick name client-issue narratives that moved in
+  the last day: two batches (up to four provider calls) a tick at most, on its own ledger scope `narr_auto`, capped by
+  `NARRATIVE_AUTO_DAILY_CALLS` (default 24 a Sydney day), never when `AI_AUTOMATION=off`. The default `window` spends
+  nothing new: `tests/ai-automation-worker.mjs` passes unchanged.
+
+D4 now reads: a draft or one section written again is still one call a person starts; narrative naming is automatic
+within its own cap, and every narrative has a computed working title until a model or a person names it.
+
+### 10.6 The wider net
+
+| What | How it is read | What is kept |
+|---|---|---|
+| The tick, measured | 22 stages timed in `handleScheduled`, written to KV `tick_last` (a partial record after the collectors) | `/den/collection` returns `tick` and `pipeline` (rows waiting to be grouped, the oldest, working titles, names waiting); the Collection tab shows them under **Analysis** only when sent |
+| Core-feed news on the Board | Core feed rows now carry `meta.issues`, `source`, `tier`, `juris`, `outlet` (a Google News outlet moved off the headline) and are archived before the snapshot's 120 cut, 600 a tick, newest first | Media cards under the outlet's name; the News channel's counts include them |
+| A back-fill of tags | 300 news rows of the last seven days a tick, newest first (KV `tagfill`); worker-tagged rows are tagged again after a desk term is approved | `meta.issues` where it was absent, `meta.tagv` on rows the worker tagged |
+| Bluesky search | `api.bsky.app` first, the public host after a 403 (recorded as `social_last.bluesky.host` / `fallback`); every desk-owned term first, then ten others in turn; stops after three failures in a row, five seconds a search, 180 seconds a run | As before |
+| X timelines | Up to 20 registered accounts of the desks every run (`X_DEN_EVERY_RUN`), never more than half the run | As before |
+| Google News by issue | 14 issue OR-queries a lexicon run, the desks' issues every run, the per-term rotation kept as the deep pass | `meta.q` holds the query that found a row |
+| Three seed sources | `v67_lemmy_world_au`, `v67_guardian_energy`, `v67_treasury_ministers`; `wn_aemc` reads its own feed first | Unverified until the owner's sweep |
+
+No lexicon, signed-in route, paid key or cron cadence changed. The legacy `/collect` tail still runs, now timed as
+`legacy`.
+
+### 10.7 Verified here, and not verified
+
+Every harness below ended N passed, 0 failed on the release head, run from the `den-release` worktree:
+`node tests/run.mjs check` (30), `tests/den-worker.mjs` (22), `den-release-worker` (6, new), `den-autoname-worker` (15,
+new), `den-widen-worker` (11, new), `narratives-worker` (18, unchanged), `ai-automation-worker` (4, unchanged),
+`widenet-worker` (12), `social-worker` (16), `collect-hardening-worker` (19), `auth-policy-worker` (20),
+`studio-tokens-test` (6; TK6 holds the tour's inks to AA), `den-browser` (36), `den-inject-browser` (60),
+`den-gaps-browser` (12, new), `den-editor-browser` (12, new), `den-collection-browser` (10, new), `den-tour-browser` (11,
+new), `den-visual-browser` (14, new), `den-release-browser` (7, new). Four release reviews (engine truth, the
+experience, page correctness, rules and accessibility) were read against the code and fixed with tests first. The
+full `node tests/run.mjs all` was not run here; CI on the pushed branch is the full run.
+
+| Not verified | Why | What verifies it |
+|---|---|---|
+| The live worker and real rows: the Board, the rail and Collection on a real desk | The sandbox contacts no live worker | Open the Den after the deploy, Board then Collection |
+| A real draft under the new prompt: no collection talk, the channels line | No paid model call is made here | One draft on the live worker, read against her report |
+| Working titles on real clusters, and that none names a private person | Seen only on invented rows | Narratives, sort by new, a day after the deploy |
+| Naming spend on a real day under the window drain | Not run against the account | `/narratives/status` `budget` and `budgetAuto` the day after |
+| Bluesky from Cloudflare's egress (which host answers) | No egress | `social_last.bluesky.host` and `fallback` after a two-hourly run |
+| Google News tolerance of 14 more requests a run | No egress | `lex_gnews` in Sources a day on: delivering, not refused |
+| The tick's real wall clock and CPU with the new stages | Cannot be timed here | `tick` on the Collection tab after two ticks |
+| The three seed sources | No egress | Sources, filter Untried, Sweep |
+| The tour on a live desk (its writes are real) | Only the fixture's desk | One walk with a full key, then Undo on the Board |
+| The look with the vendored fonts and real data at 1366 | Shots are of the fixture's invented day | The owner's first open |
+| Firefox and WebKit | Not installed here | CI |
+
+### 10.8 The owner's steps for this release
+
+Done on 16 November 2026. The branch was pushed, CI ran on it, and the owner merged it to `main` (93bf0fd); GitHub Pages
+then served `den.js?v=r52`, `den.css?v=r48` and the five part files at `?v=r1`. A first deploy at 04:58 UTC ran before
+the merge and uploaded the p66 code again, which changed nothing. The owner deployed again from the merged `main` at
+06:08 UTC: the live worker answers build `2026-11-16.studio-p67`, revision 93bf0fd, deploy token `aa4787ea59c482f4`, and
+`/engine/status` answered 200 after the upload. Bindings, vars, secrets and crons were unchanged. Still open from s.10.7:
+real rows, a real draft under the new prompt, working titles on real clusters, and the tick's real wall clock (items 3,
+4 and 6 below).
+
+```
+git push origin claude/den-release                                                   # then wait for CI to pass
+tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh                           # the worker, from the Mac, from the branch tip
+git checkout main && git merge --ff-only claude/den-release && git push origin main   # the page; GitHub Pages serves main /docs
+```
+
+1. With `AXIOM_KEY` exported the deploy proves the build: `/engine/status` answers `2026-11-16.studio-p67`. The live page
+   r51 keeps working on p67. Open Anne's Den once with a full key; the four new `narratives` columns are added by
+   `ensureNarratives` the first time the narratives tables are touched (the next tick at the latest).
+2. After the merge, hard refresh once (Cmd+Shift+R); the page loads `den.js?v=r52`. If the page goes out before the
+   worker: gaps are already off the rail, Board and Brief, the editor and the tour work, but a new draft is still told
+   to write about unread channels and narratives still show "A narrative not yet named" until p67 is deployed.
+3. Read `tick` on the Collection tab after two ticks. Raise `SOURCES_PER_TICK` only if the tick total is well under
+   five minutes.
+4. Sources, filter Untried, Sweep (the three new seeds); a day later, filter Failing and Dead.
+5. Off or unchanged on arrival, and the owner's: `NARRATIVE_AUTO=tick` and `NARRATIVE_AUTO_DAILY_CALLS`; a cheaper
+   `NARRATIVE_MODEL`; tone judged more than once a day; the Collection tab's dot (one attribute); the revision-note
+   suffix (s.10.2); whether a published headline with evaluative words may stand as a working title; every Mac
+   `--login`, source clearances, `OPENAUSTRALIA_KEY`, the Meta permissions, the Supermetrics licence and
+   `tools/den-backtest.py ... --save`.
+6. One draft on a live desk, read against her own report for the day: the acceptance test no harness runs.
+
+### 10.9 Asked for and not built, with the reason
+
+- **Auto-approval of proposed keywords.** The proposer counts and does not understand (s.5); approval stays a person's.
+- **Signed-in channels, paid sources, a second cron, Hansard on the Board.** Not asked for by name and each is the
+  owner's decision; the net was widened through existing keyless routes only.
+- **Naming on every tick by default, tone every tick.** Built behind `NARRATIVE_AUTO=tick` (naming) and left off; tone is
+  unchanged. Both are spend the owner switches on.
+- **The legacy `/collect` tail removed.** Nothing could confirm that no reader depends on the keys it writes.
+- **Stable `U:` and `K:` ids.** The page cites an upcoming card by its position; it needs a page change first.
+- **A plain Status column on Collection, Draft disabled on an empty Board, the Upcoming card titled in words.** Each
+  conflicts with an assertion of `tests/den-browser.mjs` that pins today's text; left for a release that rewrites them.
+- **The tour's "Try it: Collect now".** It would start real collection; Collection is explained, not pressed.
+- **`docs/narratives.js` and `docs/overview.js` preferring the working title**, outlet display names, a `[` citation
+  picker, a summary band and chevrons on Options: optional, left out.
+- **A light theme, phone and tablet layouts.** Out of scope by standing rule (dark, desktop first).
+
+### 10.10 Draining the queues on 16 November 2026: two bugs found and fixed (build p68)
+
+Branch `claude/narr-drain-fix`, cut from `main` at b242482 (the live p67). The owner asked for all pending AI analysis to
+be finished. `tools/daily-brief.py --only sentiment` drained cleanly (731 rows in 37 steps). `--only narratives` did not,
+in either of two runs (the second started sixteen minutes after the first, which was still going): 400 place steps each
+reported "100 scanned, 100 placed (0 joined, 100 started)" while "remaining" stayed at about 130, and the one naming batch
+failed with "the naming model answered without valid JSON", after which the drain stopped with 642 narratives waiting.
+Both causes were confirmed by reading the code, the first also by a harness, before anything changed.
+
+1. **Placement looped (older than p67).** A run takes the oldest unplaced rows of the last 72 hours and, at its end,
+   prunes every singleton with nothing newer than 48 hours, freeing its rows "to be placed again". A row 48 to 72 hours
+   old that joined nothing started a singleton whose newest row was itself, the same run pruned it, and the next run took
+   the row again, first in line: reproduced on p67 as "5 scanned, 5 placed, 5 started, 5 pruned, remaining 5" on every
+   step. The tick (300 a pass) got past them but spent those slots and their embeddings every pass. Now one constant,
+   `NARR_SINGLE_KEEP_H` = 48, sets both the prune and a new rule applied when the run writes: a cluster the run started
+   that is still one row, and whose row is older than that, is not written as a narrative; its row is set aside
+   (narrative `''`, counted in `unanchored` and in the new `aged`). Rows of the same run may still join an old row's
+   cluster, so a story whose rows all reach placement 48 to 72 hours old (a backlog after an outage, rows freed by
+   **Dissolve broad clusters** or a reset) still forms its narrative, and a story keeps its first report as its first row.
+   (The first p68 commit applied the rule when a row would start a cluster; the review found that it stranded those
+   stories for good, so it moved to the write.) An old row still joins a live narrative it matches; a younger row still
+   starts one; the prune of singletons that never grew is unchanged. A singleton written 24 to 48 hours old is never a
+   candidate again (`NARR_SINGLE_CAND_H` = 24, which must stay at most `NARR_SINGLE_KEEP_H`), so its row comes back once
+   after the prune for one more look against what formed since, and is then joined or set aside: one extra embedding a
+   row at most, where p67 looped for ever.
+2. **One long batch failed, then blocked the queue.** `narrLabelBatch` gave five clusters 300 + 5 x 260 = 1,600 output
+   tokens for a label, a two-sentence summary, claim, counter, proponents, issues, scope, relevance and why each, and its
+   retry used the same limit. The ledger shows two answered calls and one retry, so both answers came back and neither
+   parsed; whether they were cut off or prose is not in the logs, because `claudeMsg` reports `stop_reason` through
+   `acct.info` and `narrLabelBatch` never asked for it. The name step then took the five largest eligible narratives with
+   no regard to claims or strikes; the failed five were claimed for two minutes, so the next step claimed nothing, made no
+   call, and the tool stopped. Now: the budget is 600 + 450 a cluster (2,850 for five, at most 4,096); an answer that
+   does not parse is asked again in halves, then the singles of a half that failed, and a batch of one once more with
+   the JSON-only nudge, so one unnameable cluster takes its own strike and the others are named; a declined answer is
+   split the same way, and so is an answer that does not come within the call's 45 seconds; any other provider error is
+   not; two singles failing with nothing named stops the splitting. A batch of five costs at most eight provider calls
+   (five, three and two, then the five singles, when a single has been named); one the model cannot name at all costs
+   five. Each provider call is reserved and settled on the same ledger scope (`narratives`, or `narr_auto`) and checked
+   against the day's cap and the run's share before it is sent. Errors name the narratives and the reason ("cut off at
+   max_tokens 2850", "not JSON", "declined", "no answer within 45 s"); the answer's first 120 characters go to the console
+   line only, because the page and the tool read errors for budget and spend-limit words and a narrative about the federal
+   budget or bulk billing would otherwise stop them (found in review). `calls` now counts provider calls, the ledger's own
+   unit; p67 counted a batch and its retry as one, which made `NARRATIVE_AUTO=tick`'s two a tick up to four and the
+   window's 20 up to 40. The name step uses the window's own queue (`narrLabelQueue`, one batch a press, no call started after
+   135 of its 150 seconds), so it skips narratives in a claim or set aside after three failures today and names only those
+   active in seven days, and it answers `remaining` (what can be named now), `setAside`, `claimed` and `stopped`.
+   A batch can stop inside its split (the cap, the run's share, the clock): what it sent and did not name keeps its claim
+   and its strike, and only what was never sent is released, so a batch the model cannot name builds its three strikes
+   and is set aside (the first p68 commit released all five, which brought the blocked queue back; found in review). A
+   split can also outlast the two-minute claim, so the drain renews its claims on every narrative of the batch still
+   waiting before each call (`narrRenew`, compare-and-set on the claim time it holds); a second drain pressing meanwhile
+   never sends the same five, and one whose claim was taken is dropped, never asked again by the first.
+   `tools/daily-brief.py` goes on past a step that named nothing but made a call; it stops at `remaining` 0, on the
+   budget, on an account limit, after two steps in a row with no call, or after three steps in a row that made calls and
+   named nothing (showing the first error); and it stops placing when ten steps in a row leave the backlog no lower. The
+   page's **Finish all waiting** loop is unchanged (no page change in p68): it stops on the budget or the account limit
+   read from errors, which now carry no model words, at `remaining` 0, after a step with neither a name nor a call, or
+   after 80 steps.
+
+Tests first: `tests/narr-drain-worker.mjs` (23: A1 to A9, B1 to B12, C1, C2) and `tests/daily-brief-test.py` (11). Of the
+first fourteen worker cases eleven fail on p67 (A2, A3 and A5 are guards that already held); of the first nine tool cases
+six fail on p67's tool. A7 to A9, B7 to B12 and the two tool cases on steps that spend calls and name nothing came from the
+review of p68: A7 to A9 and B7 to B11 failed on the first p68 commit (5eb1da0), B12 pins the eight-call bound, and B4 and
+B5 were tightened (the model's words stay out of errors; a stop keeps the strikes of what was sent and releases only what
+was never sent). One assertion changed: `tests/den-autoname-worker.mjs` AN11
+pinned p67's count of one call per strike where two provider calls were sent and settled; it now expects two.
+Not verified: the live answers themselves. If the `ai_usage` row for scope `narratives` and day `20261116` held about
+3,200 output tokens over its first two settled calls, they were cut off. The owner's steps: deploy p68
+(`tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh`; no page change, `docs/narratives.js` reads the same
+fields), confirm `/engine/status` answers `2026-11-16.studio-p68`, then run `tools/daily-brief.py --only narratives` once.
+The rows that looped are set aside or joined by the first tick after the deploy.
+
+**Deployed and drained (16 November 2026).** The owner deployed p68 at 09:40 UTC (revision 5fd5573, deploy token
+`a38a7d54ef16b8d4`) and `/engine/status` answered `2026-11-16.studio-p68`; the drain was run once more, guarded on that
+build. Placement set aside the 126 looping rows in two steps and the backlog read 0. Naming made 34 calls (36 of 120 that
+day, counting the two failed calls before the deploy) and named 166 narratives, leaving none that could be named; every
+one of the 34 answers parsed at the larger output budget, which fits the cut-off reading without proving it. Nine
+emerging narratives raised their Slack alert as they were named. Tone verdicts the same day: 731 rows in 48 calls before
+the deploy and 260 more in 15 calls after it (63 of 300), queue at 0. No name was a private person's (all 166 read).
+
+### 10.11 One story, one narrative: duplicates prevented, proposed and merged with an undo (build p69)
+
+Branch `claude/narr-merge`, cut from `main` at 5fd5573 (the live p68). After the p68 drain the narratives list showed one
+story spread over several narratives. A census of the 300 live narratives of 16 November 2026 (read-only) found 34 groups
+of narratives telling one story: 96 narratives (a third of the 300) and 704 rows; consolidating them would retire 62
+narratives. 14 of the 34 groups span more than one client namespace; none of the 300 was edited, pinned or muted; 11 had
+alerted; no counter pair was set. The causes, ranked by the evidence:
+
+1. **The join bar sits where the same story in another text form lands.** bge-base puts the same story across outlets at
+   about 0.84-0.93 and unrelated political headlines at 0.70-0.83; a bare headline (the lexicon sweep stores no body), a
+   forum page with its boilerplate or a short post scores just under the 0.84 bar against a centroid built from
+   body-rich articles, with the shared issue present. The p68 drain's rows that started a narrative had their closest
+   live narrative at median 0.75, 90th percentile 0.83, 19 of 100 between 0.80 and 0.84. Syndicated copies of one
+   headline give the new narrative three or four rows at once. Lowering `NARRATIVE_SIM` does not fix it: at 0.80 a sibling
+   story placed first moves the centroid and joins instead (order-dependent over-merge), at 0.82 nothing changes.
+2. **Nothing ever consolidated.** Once two narratives on one story exist, each new row joins the closer one and both grow;
+   no step compared narratives with each other, and the manual merge kept no record, so it could not be undone.
+3. **Late rows and the prune.** A row placed 24-48h after its own time started a singleton that was never a candidate
+   (the candidate window counted from the row's time); 33 of the 300 were made 47-50h after their first row, the prune's
+   signature.
+4. **The recount wiped the entity anchor.** `narrRefresh` replaced `entities` with the sentiment entities, empty until
+   rows are judged: 178 of the 300 had none, so a row sharing only an entity needed 0.91 across runs instead of 0.84.
+
+Side findings: the all-capitals alias `PHON` matched "phones" (the matcher allowed a plural on every alias), and two
+placements at once placed the same rows twice and left a ghost narrative counting rows it no longer held (reproduced).
+
+**What changed (no model call anywhere; no page change).**
+- **P1, the near-miss join (near mode, default `shadow`).** A row within 0.05 of its bar that joins nothing may join the
+  closest such candidate when the candidate's member evidence (as the narrative stood when the run began: its stored
+  amplifier titles, its 40 most recent story titles and its label, each of four or more words) covers the row's
+  headline: IDF over the run's candidates' term maps, register names and issue words dropped, possessives stripped, at
+  least 0.45 on two or more shared words; the row must not lean to the candidate's model counter-claim, the anchor must
+  hold and the candidate must have had a row within 48h. At most three near joins into one narrative and twelve
+  candidates' evidence read a run; in mode `on` a row past either cap waits unplaced for the next run (recorded `capped`
+  when it qualified; never a narrative of its own, never set aside). Every near miss looked at is recorded in D1
+  `narrative_near` (`on` joined, `shadow` would have joined, `miss` did not qualify, `capped` waiting, with sim, the
+  cover, the shared words and the lean; kept 14 days; a reset retires the records of what it dissolves as `reset`);
+  `POST /narratives/near {undo: item | 'day', day}` puts near-joined rows back in the backlog (or sets aside those
+  outside the 72h window), takes their words off the narrative's terms and recounts it, at most 100 a call in one batch
+  (`more: true` until the day is done); a row no longer on that near join (a reset, a merge, a later run moved it) is
+  left where it is and its record closed as stale; an undone row is never near-joined again. Every new narrative stores
+  `born_near`, `born_sim` and `born_bar` (the closest live narrative and the bar it missed), and the merge pass counts
+  how many proposals were born within 0.05 of their survivor (`nearBorn`): P1's reach.
+- **P2.** A singleton is a candidate for 24h after it was placed as well as after its row, except one whose first row is a
+  recorded would-join (`shadow`) of a live narrative: that row is a late near miss of a story that has its narrative,
+  and as a candidate it grew a duplicate across runs that nothing consolidates at the defaults (review); it stands alone
+  as in p68. The prune waits for both clocks, and a pruned singleton's row about to leave the 72h window is set aside
+  instead of freed (`prunedAside`).
+- **One alert a story.** A narrative whose first row is a recorded would-join of another live narrative is read after the
+  others by the alert pass and raises no alert once that narrative (or its survivor) has alerted, unless a person kept
+  the two apart (`alertsHeld` in the run). `/narratives/status.merge.nearBorn` counts the standing near-born narratives
+  (`standing`) and those that began with a would-join (`wouldJoin`), with ten named.
+- **P3.** The recount keeps the entities placement wrote while no row has a sentiment verdict.
+- **P4.** An all-capitals alias takes no plural.
+- **P5.** A D1 lease (`narr_lease`, three minutes, freed in a `finally`) around placement, the prune, every merge, undo,
+  near undo and reset; a busy placement skips placing and still recounts, titles, scans and names. Each placement first
+  moves rows left on a merged-away id to its survivor; once an hour it puts rows on a missing narrative with no merge
+  behind them back in the backlog (inside the window) or sets them aside (`out.repaired`).
+- **The merge pass (merge mode, default `propose`).** Once a tick, after the recount and the titles and before naming,
+  model-free: up to 600 candidates (the 400 most recent and the 300 largest of the last week, two or more rows, not
+  muted or broad); for every pair the centroid cosine `c`, an IDF term cosine `T` over the 40-term maps (names, issue
+  words and filler dropped) and the census word score `S` (the JS port of the census scorer: U .45, H .25, X .15, E .05,
+  Tm .10), with `S_auto`, the score the automatic clause reads: the same weights over bags without the register's
+  person and party words (a name links a story and its same-actor siblings alike; organisations and topics stay), with
+  the best headline pair replaced by the best disjoint one in H and the words only that pair brings left out of U and X
+  (review: the first build took the shared row out of H alone, and one live-blog row still carried U and X), plus a
+  model-free opposite-claim veto from stored claims and counters. The scan is bounded by the pairs it scores (80,000 a
+  tick, `NARRATIVE_MERGE_PAIRS` 10,000-400,000; the dry route 400,000), not by a clock. A pair is
+  proposed by the first rule that fires (`centroid` c >= C_HI; `strict` no anchor and c >= 0.91; `form` c >= 0.79 and
+  T >= FORM_T; `centroid+words` C_LO <= c < C_HI and S >= 0.25; `words` S >= 0.45; `terms` no centroid and T >= FORM_T)
+  and listed with its holds: `opposite`, `undone` or `kept` (keep-apart), `person` (edited or pinned), `clients` (another
+  namespace), `scope` (exactly one side `off`, or a politics survivor absorbing a client narrative), `naming` (in a naming
+  claim), `size`, `member`, `cap`, `paused`, `keeps` (the keep-apart list was too long to read whole: nothing merges by
+  itself). A pair is automatic only with no hold, a shared leading issue or entity,
+  spans within 24h, the member check (complete link: the clause holds against the survivor's pre-merge state and every
+  narrative it absorbed automatically in 96h or earlier in the tick, so drift never snowballs a survivor; and, review,
+  every narrative the absorbed one took automatically in 96h passes the clause and holds no opposite, keep-apart,
+  clients or scope hold against the survivor, so a chain never puts a narrative where its direct pair could not go) and the clause
+  in force: the centroid clause c >= C_HI and S_auto >= S_CORR, or the form clause (`s`: c >= C_FORM and S_auto >= FORM_S;
+  `t`: also T >= FORM_T). Decisions are taken per connected component with the component's largest narrative as the
+  survivor, under caps of 5 a tick, 40 a Sydney day and 3 a survivor a day; three automatic merges undone within 24h
+  pause the automatic pass until a person posts the mode again. Each apply re-reads both rows, the pair's own
+  keep-aparts and re-scores the pair under the lease; the counter pointers are part of its compare-and-set. KV
+  `narr_merge_last` (7 days) holds the true count (`proposalsN`), the first 100 proposals in a slim form that fits
+  (ids, titles, c, T, S, S_auto, H2, the rule, the holds), the holds counted by kind (`held`), `scored` and `pairCap`.
+  The owner's list leads with automatic pairs, then the rest, a words-only pair whose second headline pair is weak
+  (H2 under 0.1: one shared row carries it) after the others, kept-apart pairs last.
+- **Every merge is logged and undoable.** `narrative_merges` keeps the absorbed row whole, the survivor's row before and
+  its compared fields after, the moved rows (`narrative_merge_items`) and the counters that pointed at it. Undo restores
+  the absorbed row column for column, moves back exactly its rows (rows that joined since stay and are counted), restores
+  the survivor's terms, counts, entities, first row, working title and alert (an inherited alert goes back, one sent
+  after the merge stays), its centroid (verbatim while nothing moved it; rebuilt exactly from the logged weights while
+  every later merge moved it in turn with nothing between; un-mixed by counts while the survivor is young; else left
+  as it is, and once an undo left it, every later undo leaves it too and says so), and its naming state as a whole only
+  when no person has edited it since: a later person merge's carry of a name or a pin is no edit and is replayed on the
+  pre-merge state (review: the first build read it as an edit, so undoing the earlier merge first left another
+  narrative's person label on the survivor). Later merges' records are rebased, so merges into one survivor undo in
+  either order. Every undo writes a keep-apart, as does a
+  person's `POST /narratives/merges {keep}`: the pair is listed last and never merged by the pass until a person lifts it
+  (`unkeep`); every active keep is read (no cap drops one), and an hourly sweep retires a keep whose narrative is gone
+  for good (`undone_by` `retired`). A person's merge carries an edited narrative's name, issues and namespace to the survivor; the pass never
+  touches an edited, pinned or muted narrative. An absorbed id keeps resolving (`/narratives/one` answers the survivor
+  with `mergedFrom`; `/update` and `/merge` answer 409 `merged`; Studio's narrative source and `/den/board`'s additive
+  `aliases` follow it); at filing, a brief's cite of an absorbed narrative covers the survivor's signal only when every
+  merge in the chain was a person's, and an automatic one is named in the 409 for the person to judge.
+- **Routes (full key).** `GET /narratives/merges` (stored), `?dry=1` (computed now, nothing written), `?dry=1&pairs=a:b`
+  (features, the pre-filter and verdicts for listed pairs, the calibration instrument), `?log=1` (merges and keeps),
+  `&modes=1` (`narr_mode_log`); `POST /narratives/merges {apply}|{undo}|{keep}|{unkeep}|{mode}`; `GET/POST
+  /narratives/near`. `POST /narratives/merge {into, from}` keeps its body and answer and now logs. `POST /narratives/update`
+  records `person_ts` and `person_by`. `/narratives/status.merge` gives the modes and their source, the clause, a pause,
+  the last tick's proposal count, holds by kind, pairs scored against the cap, the standing near-born narratives and the
+  last day's automatic merges with their undo ids; the run summary names merges with their undo id, the tick prints
+  them and records the pass as the `narr merge` stage with its wall time and `{scored, cap, partial}` (a Worker's clock
+  stands still in a loop without I/O, so the milliseconds leave the scoring out).
+
+**Defaults and the modes.** `narr_near_mode` and `narr_merge_mode` live in KV, are written only by `POST
+/narratives/merges {mode}` with a full key, and every change is logged in `narr_mode_log` with its before and after (it
+is undone by posting the previous mode); they override the vars `NARRATIVE_NEAR`, `NARRATIVE_NEAR_LEX`, `NARRATIVE_MERGE`,
+`NARRATIVE_MERGE_SIM`, `_FORM`, `_FORM_C`, `_FORM_T`, `_FORM_S`, `_CORR`, `_CROSS_NS`, `_TICK` (documented in
+`wrangler.toml`). Without either, nothing new joins or merges: the near mode records and the pass proposes, because no
+live centroid or 40-term map has been read and the automatic bars must be set from them. What the defaults still leave
+(review): a syndicated batch of one story's headlines placed in one run starts its own narrative beside the story's
+(as p68 did; it raises no second alert and the pass proposes it); a late row P1 would have joined stands alone and is
+set aside after a day (as p68); a late, weakly worded near miss that P1's evidence does not cover still grows its own
+narrative under P2 (the pass proposes it when its words carry it). Near mode `on` takes the first two into the story's
+narrative; merge mode `auto` takes what its clause passes.
+
+**Calibration (offline, read-only).** On the 223 labelled pairs of the census the worker's own scorer reproduces the
+census scorer's S exactly (largest difference under 0.0001). Over all 44,818 non-borderline pairs of the 300 (truth: the
+34 groups; 112 within-group pairs, 96 grouped narratives): S >= 0.25 precision 0.29, pair recall 0.61, member recall 0.82;
+S >= 0.35 0.71 / 0.37 / 0.61; S >= 0.45 0.81 / 0.19 / 0.32 (5 false). With every non-score guard of an automatic merge
+and c and T assumed to pass (the best case), the first build's S_auto: >= 0.45 11 true, 0 false; >= 0.40 17 true, 1
+false; >= 0.35 26 true, 6 false; >= 0.25 39 true, 58 false. That "0 false" held only after the holds: two labelled
+different pairs cleared 0.45 with an anchor within 24h, one stopped only by the opposite veto, the other (two press
+releases from one MP) only by the clients hold. The review's S_auto (person and party words out, the best pair's own
+words out of U and X; the snapshot scored with the default register, so live names drop more): >= 0.45 10 true, 0 false;
+>= 0.40 11 true, 0 false; >= 0.35 15 true, 1 false; >= 0.25 34 true, 29 false. With every hold ignored (anchor, 24h, under
+60 rows only) >= 0.45 still takes 10 true and no false pair; the highest false pairs sit at 0.44 (held on scope) and
+0.439 (held by the opposite veto), the highest with no hold at 0.38. So the form clause keeps 0.45 (0.01 above the
+highest false pair with its holds ignored, 0.07 with them; live IDF over up to 600 candidates moves the scores), the
+words rule stays at 0.45, the centroid clause's 0.25 is corroboration only and that clause rests on C_HI. On invented
+fixtures the live-blog pair (one shared row naming two stories) scores S_auto 0.21-0.24 at three to five rows a side
+(0.41-0.47 before, automatic at 3/2 rows) and the sibling sweep's false automatic merge at sibling cosine 0.86-0.87 is
+gone. The opposite veto fires on 0 of 46 same pairs that carry claims and a counter, 1 of
+43 hard negatives, 1 of 8 borderline. The centroid bars cannot be measured on a snapshot without centroids and come from placement's own: C_HI =
+0.92 sits just above `NARR_SIM_STRICT` 0.91, the cosine at which placement joins a row with no shared anchor at all; C_LO
+= C_FORM = C_HI - 0.06 = 0.86 sits above `NARR_SIM` 0.84 (centroid cosines run above row cosines: two halves at row
+cosine 0.80 reached 0.877) and above the 0.70-0.83 band of unrelated political headlines; the form rule's floor, 0.79,
+is P1's near-miss band under 0.84. Every bar is a ranged setting the deploy-day calibration re-reads on live centroids.
+
+**Deploy day (this session's work, the owner's yeses).** The owner deploys (`tools/deploy-worker.sh --dry-run &&
+tools/deploy-worker.sh`; no page change); `/engine/status` answers `2026-11-16.studio-p69` and `/narratives/status.merge`
+shows `propose` and `shadow` from source `default`. After the first tick the session reads the stored and dry proposals
+and the labelled pairs through `?dry=1&pairs=` (read-only), reads the live centroid cosine of every census member whose
+outcome depends on it (45 of the 62: 26 proposed only at c >= 0.86, 11 at c >= 0.92, 8 at c >= 0.91 with no anchor)
+before anything else, chooses on a grid the clause with the most automatic same pairs and no automatic hard negative,
+reads every automatic pair from its rows, and shows the owner two lists: the merges to apply (each undoable) and the
+clause with its numbers. On his yes the session posts the apply list and the mode. P1 is not counted as the prevention
+for cause 1: on the census's labelled pairs its evidence of the first build (six stored titles) would have let back
+about one split-off row in seven, one starter in seven (16 of 107; 20 of 107 with the label), under the one-in-five bar
+P1 must clear to stay; the merge pass is what consolidates cause 1. The 40 recent titles the review added cannot be
+measured on a snapshot that holds six titles a narrative, so P1 is judged live: it stays in shadow until at least 50
+would-joins read 95% the same story with no opposite-claim, live-blog or forum-boilerplate join, and its reach is read
+from the shadow log (would-joins and `status.merge.nearBorn.wouldJoin`) against the near-born narratives (`standing`,
+`nearBorn` in the pass) - under one in five, P1 is dropped in a later build.
+
+**Tests first.** `tests/narr-merge-worker.mjs` (63 cases at first: P1a-P1j, P2a-P2c, P3a-P3b, P4a, P5a-P5d, M1-M14,
+U1-U10, R1-R11, D1-D3, A1-A5), every row invented on neutral stories. On 5fd5573, 59 of the 63 failed, all 28 marked (F)
+among them; P1d, P1e, P1f and P3b are guards that already held. The review added thirteen cases and extended three (76
+in all: P1k, P2d, P2e, M2b, M15-M19, U7b, U7c, R12, R13; P1h, M13 and A3 extended); on 90078e3, the first build, all 16
+failed, each for the defect the review found. One assertion of the first build moved: U7 required a later merge's
+rebased record to carry no centroid; it may now carry the one rebuilt from the weights, which is the survivor's own.
+The four named harnesses pass unchanged (narratives-worker 18, den-autoname-worker 15, narr-drain-worker 23,
+ai-automation-worker 4), as do den-worker 22 and den-release-worker 6.
+
+**Not verified.** Live cosines and term maps (the clause defaults rest on the snapshot's word score and invented rows);
+P1's evidence on invented text only (the 40 recent titles on none); the opposite veto needs a model claim on both sides;
+the scan's cost on synthetic data only (in Node, 600 narratives with 768-d centroids: about 18,000 pairs on ten issues
+in 0.3 s; on one issue the tick's 80,000-pair cap in 0.5 s with random centroids, 1.3 s of CPU when every pair is close
+enough to need its headline scores, under the emulated Worker clock as under the real one; on the 16 November snapshot
+about 23% of pairs share a leading issue or entity within 96h, so about 41,000 at 600 candidates). There is no time budget inside the scan: a
+Worker's clock does not move in a loop without I/O, so the bound is the pairs cap and `tick_last` records the pairs
+scored, not the loop's CPU. D1's JSON functions inside a batch (`json_group_array`, `json_patch`, `json_remove`,
+`json_each`) and the recursive keep-apart read are checked in SQLite only - the first live merge confirms them. Places that
+differ from the written design: an alert is captured by a compare-and-set on the alert values instead of a subquery (an
+alert between the read and the batch makes the batch a no-op and the merge reads again); P1 records the near misses
+that did not qualify as well (`miss`), so the calibration sees both sides; a pair the pre-filter of the scan skips (S
+could not reach any bar even with H = 1) is not scored for the automatic clause either, which only ever withholds an
+automatic merge.
+
+**Review (16 November 2026, same build `2026-11-16.studio-p69`, not deployed).** Three reviews (data safety, matching,
+cost) of the first build found five data-safety defects, six matching ones and four of cost; each is fixed above or
+listed here. Left, with the reason: development chains (three days of one story at c 0.85) are still not proposed,
+because widening the proposal net at 0.84 lists as many sibling pairs as true ones on invented fixtures; the bar moves
+with `NARRATIVE_MERGE_SIM` (C_LO = C_HI - 0.06) once live cosines are read. At the defaults all 62 census duplicates stay
+split by design; the default rules list 16 of them whatever the live centroids are, and under the first build's score
+the automatic clause could reach 8 to 26 depending on them (the review's S_auto passes one same pair fewer at 0.45 on
+the snapshot). The member-held and cap-held pairs are counted apart in `narr_merge_last.held`, so the cost of complete
+link and the day caps is visible.
+
+**Asked for and not built.** The page: a proposals panel with Apply, Keep apart and Undo, "merged from" in the drawer, the
+near log, and the Brief pane reading `aliases`. Open for the owner: automatic merges across clients (`crossNs`, built,
+off), claim-level merges over separate events (a later build), where the labelled pairs are kept, merge-row retention
+(kept for good: about 20 KB a merge), case-sensitive acronyms.
+
+**Deployed, the first live run, and automatic merging (16 November 2026).** The owner deployed p69 at 15:45 UTC
+(revision 6bf6b1b, deploy token `72a3e4b627773fa6`); `/engine/status` answered `2026-11-16.studio-p69` after three reads
+while Cloudflare switched versions. The first dry run (`GET /narratives/merges?dry=1`) considered 379 narratives, scored
+17,956 pairs in 2.3 s and proposed 74 (words 31, centroid and words 28, form 8, centroid 7; holds: clients 17, scope 6,
+opposite 1), 5 of them automatic. Three independent readers (an editor, a sceptic and a client view) judged every pair
+from its rows: 47 the same story, 26 different, 1 split. The wrong proposals came mostly from large, diffuse narratives
+whose centroids sit near everything (centroid 0.92 to 0.93 with word scores of 0.13 to 0.18); none of them was
+automatic, and all 5 automatic pairs were judged the same story by all three readers. On the owner's yes, at 16:15 UTC:
+42 merges (37 within a client; 5 moving unassigned or general rows onto the client board the story belongs to) and 25
+keep-aparts (the pairs all three readers judged different); one cross-client move and the split pair were held back.
+Narratives went from 3,101 to 3,059; every merge is logged and undoable, an absorbed id answers with its survivor
+(checked), and D1's JSON functions inside a batch ran in all 42 merges without an error. A fresh dry run listed 26
+proposals: the 22 kept pairs last, and 4 open, one of them new because a merged centroid moved. At 17:15 UTC, on the
+owner's instruction, the merge mode was set to `auto` (`POST /narratives/merges {mode: {merge: 'auto'}}`, KV, logged in
+`narr_mode_log`): the automatic clause at its defaults, never across clients, 5 a tick and 40 a day, paused after three
+undos in a day; near mode stays `shadow`. `{mode: {merge: 'propose'}}` goes back. No pair qualified at the switch, so the
+first automatic merges come from new duplicates. The readers' notes and the plan are client-confidential and kept out of
+the repository. Not verified yet: the automatic merges themselves, and near mode's reach from its shadow log.
+
+### 10.12 Weekly desks and their morning draft (build p70)
+
+Branch `claude/den-weekly-desk`, cut from `main` at 26d3753 (the live p69). The owner asked on 16 November 2026 that the
+analyst can keep daily reports as well as the weekly ones. A desk's cadence (Options, Daily or Weekly) changed one word
+of the draft's prompt and the page's label, nothing else: `denBriefCron` drafted every desk with `auto_draft` set every
+morning, so a weekly desk was drafted seven times a week, like a daily one. Now a daily desk is drafted every morning
+exactly as before, and a weekly desk only on its report day: the Sydney weekday in `options.weekday` (0 Sunday to 6
+Saturday), Monday when it has none, read from the Sydney day of the window's end, so 8am on a Wednesday in Sydney is
+Wednesday while UTC still says Tuesday; the cron's answer names each weekly desk it left in `waiting`
+(`mca_au: Monday`). `POST /den/desk/update {id, patch: {options: {weekday: 3}}}` (full key) saves the day as a whole
+number 0-6 (the one digit as text, as a select sends it, is read the same); any other value is dropped and the saved day
+stands, and the Options editor's own save keeps it. The cadence does not set the window: a weekly desk wants a reporting
+window of 168 hours. A report day the morning window misses (automated model work off that day, the day's Den calls
+spent) is not made up later in the week; that week's brief is drafted by hand from the Brief tab. No page change:
+Options has no report-day control yet, so a day other than Monday is set through the route, and its wording still says
+one model call a morning. Tests first: `tests/den-weekly-worker.mjs` (3: DW1 to DW3, on a clock set to named Sydney
+mornings), all three failing on 26d3753; `tests/den-worker.mjs` (22), `den-release-worker` (6) and
+`ai-automation-worker` (4) pass unchanged, as does `node tests/run.mjs check` (30). The owner's steps: deploy p70
+(`tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh`; no page change), confirm `/engine/status` answers
+`2026-11-17.studio-p70`, then on each weekly desk set Cadence Weekly, Reporting window 168 and Draft each morning Yes in
+Options, and post the report day if it is not Monday. Not verified: the live cron on a real desk; the first report-day
+morning of a weekly desk after the deploy shows it.
+
+**Deployed.** Merged to `main` as b583915 and pushed; the owner deployed it on 17 November 2026 at 00:35 UTC (deploy
+token `caf9abf1726d7f5b`), and `/engine/status` answered `2026-11-17.studio-p70`. The same day, through
+`POST /den/desk/update` (full key), a weekly desk was created in the analyst's weekly MCA format: **MCA national weekly**
+(`mca_mca_national_weekly`), cadence weekly, a 168-hour window, her thirteen sections in her order (critics' and
+supporters' narratives, emerging risks and positive opportunities as sections of their own, since a section holds no
+headings), one rating item "Overall assessment" on her six-level sentiment scale (Negative to Positive; "Neutral to
+mixed leaning negative" without its comma, because Options splits levels on commas) with Improving, Stable or
+Deteriorating; then, after the deploy, `auto_draft` on with report day Monday. Its first morning draft is due on
+Monday 23 November 2026. The daily MCA national desk (`mca_au`) is unchanged and drafts at 07:00 every day (D4).
+
+### 10.13 The real-data fixes (build p71)
+
+Branch `claude/den-p71`, cut from `main` at b583915 (the live p70). On 17 November 2026 the owner asked for every fix the
+real-data check called for that needs no decision of theirs ("Yes, start them"). The check set the first live drafts on
+`aep_au` and `mca_au` beside the analyst's own reports for the same windows; its notes quote client material and stay out
+of this repository, so this record names their findings by id (AEP B1-B5, M1-M10, m1-m10; MCA 1-17; combined B1-B7,
+M1-M8). Six lanes were built in parallel from a shared base (a2222eb: the client's short name, the report's title, a link
+cleaner, a text key, tone in words, how a row bears on the desk's issues, the set of rows a draft must be given) and merged
+by hand. A review in five dimensions then confirmed 44 findings; they were fixed in five lanes, each checked by a skeptic
+who tried to break the fix, and what the skeptics found in those fixes went through six more rounds the same way, until
+the last checks found nothing worse than the build before. Where a part kept trading one edge case for another (how
+upcoming dates are read, the figure check, the sponsored label), every sentence any reviewer had listed went into one
+table with its expected result, decided by two rules (keep a real event rather than drop it; keep two different events
+apart rather than fold them into one), and every row must pass.
+
+**What the draft is told** (denSys, DEN_KIND_GUIDE). It writes for the client's communications team and calls the client
+by its short name (AEP, MCA), never "rows", "evidence", "supplied", "held", "judged", "registered", "pinned", "working
+title" or "the client"; counts are plain quantities and tone is in words, never a score (combined M4, AEP M2). It never
+says which platform a conversation was on, never compares platforms by volume, and writes nothing about a channel the
+CHANNELS line lists as not read (combined B2, AEP B1). "Remains", "still", "continues", "again" and "no longer" are used
+only against the last filed bottom line (combined B4, MCA 1). It gives the client no position the evidence does not give
+it, names who "industry" means, and treats criticism of a company as no attack on the client (combined B3, AEP B2, MCA
+3). People are named as rule D1 says (AEP B4, MCA 4). A measure word rests on a cited line (MCA 6). A "Special Report"
+an outlet labels as a piece made with the company is the company's material, never the outlet's reporting (MCA 15). The
+guides follow her format and lengths (3,300-5,000 words a brief; a draft may now run to 16,000 output tokens), the brief
+carries its own title (`options.title`, else by cadence), and a desk names the channels its reports rest on
+(`options.channels`; AEP M4, M5, M10, MCA 17).
+
+**Which evidence reaches it.** Rows are chosen by how they bear on the desk's issues, not by syndication and time
+(combined M1): every row a check or a pin rests on first, wherever the Board's own lists stop (review EV1, ST5), then a
+cap of 30 to 60 lines by window with a place for each channel, a share for each issue and a quarter of the window, no
+more than an eighth of the stories from one outlet, and a story that only mentions an issue in passing left out. Stories
+fold by headline or by their address's own slug, keeping a day's live pages apart (EV3); an outlet is printed by its
+registry name, never a key (AEP M8); a link is the publisher's address, decoded and stripped of tracking (MCA 16); paywall
+and feed boilerplate are struck, and a story dated only by its address says its day, with the year when it is not the
+window's (CO7, R2). Three or more posts of one text are one templated line that stands for the rest (AEP M5), and citing
+it covers a check resting on any of them. Engagement reads as the platform gave it: "engagement not recorded" when no
+count was read, "no interactions" only when likes and comments were both read at nothing, else the counts read and the
+ones not recorded ("0 comments, likes not recorded"; EV5, CO2, D3). The comments read under a post are counted, and their
+tone said only when three or more carry one (R1). A narrative is said to be taken up only on the channels this window read
+(found by the p72 acceptance run: a draft had written that a narrative was carried on a channel the window never read).
+The sponsored label is read only for the outlets in `DEN_SPONSORED_HOSTS` (Stockhead, per MCA 15), by what stands before
+it on its own line (ST4, D4b, F1, Q1; a 129-row table in the rank harness).
+
+**The strip, tone, narratives and the window before.** A burst is a citable line I:<issue> carrying its figures, bounded by
+the window (AEP M4, m6; ST1); a first-seen name's check rests on the rows that named it, and only a row that bears on the
+desk (MCA 2). Tone is one judgement per story or templated text, in words, with the stories behind each count (combined B7,
+AEP B5, MCA 5; ST7 leaves the listed outlet's sponsored pieces out of press tone). Each issue's posts and stories are set
+against the window of the same length before (C:<issue>), counted as the Board counts them (combined M2; EV2). An issue
+whose matcher changed in p71 (critical minerals, mining, MCA mentions) is compared only from the moment it changed:
+`DEN_TAG_P71` freezes p70's matchers and `den_tagsince` (KV) records when each changed, so no false burst or rise follows
+the deploy (CO1, D5). The Overview shows such an issue as "tagged as it is now since <day>" in its raw place for a
+fortnight (F2). Whether approving a desk's lexicon term should restart its issue's comparison is the owner's call; p71
+does not (F3).
+
+**The figure check and upcoming dates.** The figure check reads whole numbers with their sign, count words, magnitudes and
+units (Mt, ML, yr), years, "other" against "in all", and lists and tones (combined M3, AEP M3, MCA 12; CK2-CK9, A1-A6,
+E1-E9, P5, S6). A line with no id clears a figure only on a count word or unit they share, or a year; the window's own
+span is not a claim, a different span is. A sentence that cites nothing is checked against every line, and its flag says
+"is not in the evidence". denUpcoming reads standing schedules ("every Tuesday and Friday") as recurring, one entry each,
+never past their end, folds one event told by many stories, keeps two events apart, keeps next year's dates, and drops
+what has ended (AEP m2; CK3, CK4, A7-A10, E2-E8, P1-P4, S1-S5); the Board keeps 40 and the draft 15, schedules keeping
+three places. `tests/den-p71-checker-worker.mjs` CK36 holds the table: 171 upcoming and 101 figure rows.
+
+**The document a client receives.** One numbering for the text and the Source List, keyed by the clean address, written as
+text (AEP B3, combined B5); her header and date (AEP M10, combined M5); a rating under its own section, else its first
+momentum section, else after the summary (compare-mca 8.7, EX1); the list headed "Sources" (EX6); clean links in every
+evidence card (EX5). The page reads the measure lines (EX3), words a figure flag by where it was looked for (CK11), and a
+card says what its evidence line says (CO5, C6, C8, G1-G3, R1, R2); measure chips name their measure (C5); an upcoming card
+is keyed and cited by its row, and a recorded date by its record (C7, K3).
+
+**Collection.** Five sources added to `SOURCE_SEED_EXT`, read openly (ABC News Environment, ABC News Top Stories, Region
+Canberra's own feed, the AEP newsroom's listing, MCA's releases; combined item 3). An MCA mentions issue (combined item 7),
+a narrower mining matcher (MCA 14), the gas trigger's bill wordings, and a critical-minerals guard against deal posts; the
+lexicon copies in `docs/index.html` and `tools/reach-reddit.py` are regenerated (`node tools/lexicon-sync.mjs`). Counts a
+collector did not give stay absent (MCA 11; CO2). A listing's first read is a baseline, filed before every window, on
+every route (CO3, B6); a read a person asks for (Probe with a browser, the drawer's Sweep of a source, the worker's render
+job) files what is new as found, however long since the last (H1, SR29); a scheduled sweep keeps its 72-hour window. Every
+feed escape of "&" is looked up before filing (CO6, B5). An undated feed item takes its address's day: the time it was
+found if found that day, else the day's end (B1). New: `POST /sources/listing` (full key), where the Mac agent's render
+job files its links; `tools/reach-agent.py` posts there and falls back to the old route on a worker before p71. The mining
+matcher's join check runs in linear time (SR28: one list of ", and" items had made it exponential).
+
+**The morning draft.** A draft's hold lasts as long as the draft may and its write is guarded, so a second press, an edit
+or a filing meanwhile is never written over (ST2: 409 `draft_in_progress`, 409 `brief_changed` with the brief that is
+there). The morning cron has a deadline from the tick's start, drafts desks one after another within it, catches each
+desk's failure, and keeps a desk it could not finish (a deadline, a throw, a busy database) in `den_cron_left_<day>` for a
+later tick the same day, at most two tries a desk (ST3, C1, K2, K5). The Den keeps its own once-a-day marker
+(`den_cron_day`), so a window tick cut before the Den's stage is made up by a later tick (C3). Under `AI_AUTOMATION=daily`
+this means a later tick the same day may send a Den call; the gate's comment and status text say so (C2, K6). Each desk not
+drafted is logged ("Den morning drafts not made: <desk>: <why>").
+
+**Tests.** Seven new harnesses: `den-p71-prompt-worker` (14), `den-p71-signals-worker` (20), `den-p71-checker-worker`
+(41), `den-p71-rank-worker` (19), `den-p71-export-worker` (25), `den-p71-sources-worker` (29) and
+`den-p71-merge-worker` (4); each case fails on the build before it. Changed expectations, each because the behaviour was
+meant to change: den-worker DK2, DK6, DK8, DK12, DK21; den-release-worker DR2, DR4; collect-hardening CH11, CH12;
+social-worker's Bluesky row; sources-worker's listing baseline and registry count; overview-worker (a fresh issue's place);
+den-browser, den-editor-browser and scope-browser where card words changed; tests/den-fixture.mjs registers its invented
+outlets. Final runs on 1366760, 18 November 2026: `node tests/run.mjs check` 30 of 30; backend 117 of 117 (four bind a local port
+and pass with the sandbox off; `workerd-deploy-test` skips its miniflare part, as before); browser 75 of 75 (three studio
+harnesses skip parts they skipped before: fonts not installed, and no second Chromium for the cross-browser runs). The browser harness den-browser's
+strip case ("the strip says what should not be missed ...") fails now and then on an Escape-focus check and passes when run
+alone; it did the same before p71.
+
+**Known limits, left on purpose.** An upcoming card whose entry a newer, fuller telling takes over can read "new since the
+draft" and not be citable until the next draft (round 4's attempt to key it by its earliest telling let a card be cited by
+another town's line, which is worse; p72's merge on save covers it). The upcoming reader and the label rule are heuristics:
+their tables hold every case found; a new wording can still misread. Left from the last review: a levy and a tax with no other word in common stay two entries ("the levy" and "the gas tax" on one
+day); a hike, increase or cut on two measures of one kind folds them; a weekday comma, a noun in -ing or "in response to"
+after a begun verb can give a past day as next year's; a postponement word elsewhere in a clause can keep an ended event;
+a cited sentence restating a span the line does not give passes. A manual probe after a month away files that month's
+undated releases as today's news, as p70 did. A sitemap whose dated entries go stale falls back to undated ones and stamps
+them as found within 72 hours of its last read, as before.
+
+**Not verified here.** The five new sources' addresses (unverified until a live sweep); a real draft under the new rules at
+her length; the cron's deadline and make-up ticks on the live platform; the Mac agent against the live worker; the frozen
+matcher table against the live `den_tagsince`.
+
+**The owner's steps.**
+1. Merge the squashed branch `claude/den-p71-release` (one commit on `main`; the working branch's history holds strings
+   copied from client data in two harnesses, rewritten since, and must not reach `main`): `git merge --ff-only
+   claude/den-p71-release`, then push.
+2. Deploy the worker: `tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh`; confirm `/engine/status` answers
+   `2026-11-17.studio-p71`.
+3. GitHub Pages serves the page from `main` (den.js r58, den-brief.js r6, overview.js r2, index.html's lexicon).
+4. Restart the Mac agent (launchd) so `tools/reach-agent.py` posts renders to `/sources/listing`.
+5. After the first sweeps, read Collection for the five new sources; a source that fails its address is the owner's to
+   correct or remove. When `p71_region` (Region Canberra's own feed) delivers, `region_au` can be switched off.
+
+**Deployed.** Merged to `main` as 5f8ceee (one commit: the working branch `claude/den-p71` stays local, as its history
+holds strings copied from client data) and pushed; the owner deployed it on 17 November 2026 at 19:11 UTC (18 November,
+06:11 in Sydney; deploy token `b57b52bbbe82758e`), and `/engine/status` answered `2026-11-17.studio-p71`, revision
+5f8ceee. Bindings, secrets and crons unchanged. GitHub Pages serves the page from `main` (den.js r58, den-brief.js r6,
+overview.js r2). Still the owner's: restarting the Mac agent so its renders file through `/sources/listing`, and
+switching on Draft each morning for AEP National and AEP Victoria (Options; `auto_draft` sits at the top of the desk
+patch, not under `options`). Not yet verified on the live worker: the first morning cron under p71 and its make-up ticks,
+the five new sources' first sweeps, and a real draft under the new rules.
+
+**Asked for and not built, with the reason (each the owner's decision).** Reading X, Facebook, Instagram and YouTube and
+registering her voices; subscriber outlets (D8); the note on client positions; the evidence pane's line words (s.10.3);
+flagging sentences with no source (DK7); printing narrative and tone sources; register fixes (who leads the Opposition,
+title aliases); the window's end hour; bullets (deferred); whether approving a term restarts a comparison (F3); adding
+outlets to `DEN_SPONSORED_HOSTS`.
+
+## 11. Release 9 - Today's report (18 November 2026; build `2026-11-18.studio-p72`, page `den.js?v=r63`, `den-brief.js?v=r11`, `den-desk.js?v=r3`, `den-tour.js?v=r2`, new `den-flags.js?v=r3`, `den-today.js?v=r2`)
+
+Branch `claude/den-p72`, cut from p70 with the final p71 merged in (a3db965, the tree `main` carries as 5f8ceee), then
+`main` merged in (c242fc3) so the deploy record rides along. On 17 November the owner asked for something automatic "without
+the Board in the section"; the same day the analyst said in Slack that the Den looked intimidating, with too many steps,
+and asked for the daily AEP report to be as automatic as it can be. The owner approved a report-first design (the UX
+spec, Part D, with a mockup driven at 1366x768 and 390 wide) and the recommended answer to each of its nine decisions
+("Yes, build it"). The spec, the decisions and the acceptance run sit in the build's scratchpad; this record holds what
+was built.
+
+### 11.1 What she sees
+
+**Today's report** is a new room and the Den's front door (tab id `report`, Alt+0). The first open after p72 lands there
+once (`ax_den_p72`, which also writes `ax_den_tab = report`, so a p71-era stored tab cannot send her to the workbench on
+day two); after that the Den opens on the tab last chosen in the workbench's row or by Alt+0, and on Today it opens the
+first of her reports not yet sent today. Visits (More tools, Alt+1 to 5 from Today, the drawer's links) never move the
+remembered tab.
+
+- **Your reports** (`ax_den_mine`, seeded with the desks of the same client, kept 14 days; at most three in the bar,
+  More tools > Other reports lists every desk) each with its state today: not written, being written, written with N to
+  check, sent by whom and when. Refreshed every 60 seconds, after a send and after a draft, from `GET /den/desks?day=`;
+  a busy database's plain list keeps the day fields already held.
+- **The report as it will be pasted**: her header (from `head`), the sections in the desk's order, ratings in words where
+  the export puts them, source numbers equal to the export's, a Source List with View source links. A sentence to check is
+  marked and numbered. Each section has a menu: Edit, Rewrite this section... (uses 1 AI draft), Sources for this section,
+  Open in Sections and sources.
+- **Check before you send**: one list and one count of everything to look at (a sentence that lost its source, an alert
+  not covered, an empty section, a Den word in client text, a figure the evidence does not hold), each with its fix in
+  place. Go to the first walks them; the next opens by itself after each fix; Leave it out takes a reason and is recorded.
+- **Copy for Google Docs** (no DRAFT line; unsaved words saved first) and **Mark as sent** (one press when nothing is
+  open; otherwise an inline box with Go to the first and Send anyway). D2: when every open alert was left out with a
+  reason, it files without a second ask. Then **Next: <report>**, or "All your reports are sent for today." With nothing
+  to check, both AEP reports take five presses (Copy, Mark as sent, Next, Copy, Mark as sent), measured.
+- **The Sources drawer** (the pane in its Today form): stories, posts and her added links only, each with Use here and
+  View source; Use here puts the number at her cursor, else at the end of the sentence the drawer was opened for, and
+  saves.
+- Three intro cards on the first visit (they write nothing), D3's one line "Not read today: <channels>", Help (Show me
+  how, What the checks mean, Keyboard shortcuts, Full guided tour, Show the tips again) and More tools (the workbench's
+  tabs, Other reports, Other formats). One polite and one alert region; under 1200 px a bottom bar carries the count and
+  the send buttons with their feedback; under 900 px the switcher folds and targets are 44 px.
+
+**The workbench** keeps its rooms. Each section page now has the pane beside it (Part A: used, suggested with reasons,
+new since it was written, Find and Add, Use here / Not for this section / Not for this report, Add a new source by
+pasting links) and the same Check before you send list (Part B). Its words follow D8: Mark as sent, Send anyway, Write it
+now, Write it myself, Rewrite this section, Rewrite the whole report, AI drafts left today, Sections and sources (the
+Brief tab's label, D1), Must mention, Change the sent report, Sent by, Alerts (a visible label on the rail). The filing
+dialog is "Before you send" with Go back to them as the focused primary; it lists the alerts she left out with their
+reasons. The Board's, Watch's, Collection's and Options' own words stay.
+
+**Help and tour.** The Den no longer offers the tour on open (the "Want a guided tour" prompt and its checkboxes are
+gone; a person who left mid-step in the same session is still asked to carry on). The tour opens from Guide, Help or the
+Keyboard sheet; its welcome says it is a tour of the tools behind the report, about 15 minutes, not needed for the report
+itself. Started from Today it visits the workbench and finishes with Back to Today's report. Every Sections-and-sources
+step offers a sample, so following it never writes into the real report. The Keyboard sheet lists Alt+0 and the Board's
+renamed keys under "On the Board".
+
+### 11.2 The worker
+
+- **The review column** (`den_briefs.review`, `review_rev`; `den_brief_review_log`; added by the idempotent schema step,
+  no migration to run). One writer, `POST /den/brief/review {id, ops}` (full key): `add|remove|unremove` a source for a
+  section, `leave|unleave` a flag or check with a note. A compare-and-set on `review_rev` (four tries, then 409
+  `review_busy`); 60 ids a list, 200 shown marks (hidden marks are kept and the oldest pruned past 400); a filed brief 409.
+- **Flags** on the brief's JSON answers (`flags`, `covers`, `review`): figure, figure_bare, dropped and trimmed always;
+  denwords on by default; compare, unread, mark and rating off behind `options.flags` (the acceptance run's decisions: of
+  104 Den-word hits on four real drafts, 81 and 84 by two lenses sat on sentences the real-data check rewrote; the other
+  four kinds could not show a majority). Keys are FNV hashes of a sentence's plain form; a check's mark uses the bare
+  signal key. One sentence splitter (never after a title or abbreviation) shared by the flags and the cover rule.
+- **The save** takes `sources` (H: cards from pasted links), `sources_remove` (409 naming the sections while cited) and
+  `nosource` (a sentence kept without a source; `not_kept` for one that matched nothing; the section is not marked edited
+  for it). A cited id the evidence lacks is merged by item or refused with 409 `cannot_cite`.
+- **Filing**: checks a person left are answered in `left`, not `signals`; `acknowledge: 'left'` files only when every open
+  check is a left one; `acknowledged` entries are objects `{key, how, at, fig}`. The filing write is guarded on
+  `review_rev`, so a colleague's unleave during the check is never lost.
+- **The day fields** on `GET /den/desks?day=`: `head`, `today`, `drafting`, `morning`. Upcoming `U:` ids are hashes
+  stable across a redraft (ties broken on process, then the earliest telling); a replace draft re-matches or names each
+  pick in `review_dropped`. `format=html|md&nodraft=1` copies without the DRAFT line.
+- **Names**: no person's name reaches a guest or public reader in the brief, Board, desks, briefs, history, missed or the
+  write answers (`denNoNames`). Section ids `__proto__`, `constructor` and `prototype` are refused; notes, source lines
+  and kept sentences are cut to 2,000 characters before any pattern runs.
+
+### 11.3 How it was built and checked
+
+Three worker lanes (review, text, today) and five page lanes (P1 the pane, P2 the flags, P3 Today, P4 help, P5 the
+workbench's words), each in its own worktree from a shared base (831a454), merged by hand. Three reviews then read the
+whole build: the worker (7 findings), the page (12) and the room against the spec and the mockup, driven at 1366, 1100
+and 390 wide (14). All 33 were fixed in two lanes, each serious one with a case that fails before its fix (den-today
+T17-T31, den-p72-fix PF1-PF7). The most important: under 1200 px the send feedback and two intro cards were hidden;
+the drawer offered alerts and figures as sources and showed Den words; leaving a flag during a save could put an older
+copy on screen; Write a sentence for it closed its editor at once; a p71-era stored tab sent her to the workbench from
+day two; Today waited forever for alerts when the Board's answer carried none.
+
+New harnesses: `den-p72-base` (3), `den-auto` (13), `den-auto-save` (12), `den-today` (10), `den-p72-fix` (7);
+`den-pane-browser` (17), `den-auto-browser` (21), `den-today-browser` (31). Changed expectations are listed case by case
+in the lane commits (words, the tour, the release prompt that no longer appears).
+
+### 11.4 Known limits
+
+- After a person's replace draft, `today.at` is the first write's time while `today.by` is that person; a remap that could
+  not run answers `review_dropped: []`.
+- `morning.state` reads `due` after the cron gave up on a desk, with automation off, or for desks past the cron's 20.
+- Text the worker writes (alert titles and details, history notes) keeps its own words; the drawer leaves alerts out, the
+  workbench shows them as before. Names are not yet stripped for guests on `/den/collection`, `/den/watch`,
+  `/den/process` and `/den/lexicon` (as before p72).
+- Send anyway records only the alerts; on Today the box says so ("The other N are not recorded").
+- The weekly not-due state cannot name the due weekday; Compare shows the last sent report's text, not a word diff; the
+  workbench's Copy does not save first and its Try again shows only for a failed first draft; the Alerts label is styled
+  inline.
+- Not covered by a test: the being-written-elsewhere polling, the rewrite-whole-report dialog on Today, Safari's
+  ClipboardItem, and the lower-severity review fixes (the switcher preferring the newer state, an edit fix waiting for an
+  in-flight save, the send count read after its save, an alert first met at filing joining the list, menu focus, the
+  enlarged targets, "1 AI draft was used").
+
+### 11.5 The owner's steps
+
+1. Merge the squashed branch `claude/den-p72-release` (one commit on `main`; the working branch's history carries p71's,
+   which holds strings copied from client data and must not reach `main`): `git merge --ff-only claude/den-p72-release`,
+   then push.
+2. Deploy the worker: `tools/deploy-worker.sh --dry-run && tools/deploy-worker.sh`; confirm `/engine/status` answers
+   `2026-11-18.studio-p72`. The schema step adds the review columns and log table on first use.
+3. GitHub Pages serves the page from `main`. The first open after the deploy lands on Today's report.
+4. Go through it together (her request; about 15 minutes, on a morning the AEP draft is already written): bookmark
+   `#v=den`, Show me how, National for real from Go to the first to Mark as sent, Next for Victoria, then open More tools
+   once. Ask her D4: her Source List's form, the sub-headings, Recommended Posture's place, source numbers in the pasted
+   text.
+5. D7: read the first post-p71 AEP drafts for Den words; if the draft still writes them, the prompt is the next fix.
