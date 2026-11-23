@@ -64,7 +64,7 @@ console.log('scope-browser harness');
 let page = await open();
 await t('the bar sits under the navigation with six controls and a hint; the register fills the party or person list', async () => {
   eq(await page.$$eval(S + 'select', els => els.map(e => e.getAttribute('aria-label'))), ['Client', 'Client issue', 'Party or person', 'Channel', 'Window', 'Region']);
-  ok(/Narrows Sentiment, Narratives, Signals, Sources and the front page/.test(await page.textContent(S + '.scope-hint')));
+  ok(/Narrows the Newsroom, Sentiment, Narratives, Signals, Sources and the front page/.test(await page.textContent(S + '.scope-hint')));
   const opts = await texts(page, S + 'select[aria-label="Party or person"] option'); ok(opts.indexOf('Australian Labor Party') >= 0 && opts.indexOf('Anthony Albanese (ALP)') >= 0 && !opts.some(o => /Minerals Council/.test(o)), 'parties and people, not organisations: ' + opts.join(','));
   ok((await texts(page, S + 'select[aria-label="Client"] option')).indexOf('Minerals Council') >= 0);
 });

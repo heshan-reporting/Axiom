@@ -99,7 +99,8 @@ await t('GET /sources seeds the registry from AU_FEEDS plus the extension list, 
   eq(r.status, 200); list = r.d;
   ok(list.summary.core >= 78 && list.sources.filter(s => s.core).length === list.summary.core, 'core feeds mirrored: ' + list.summary.core);
   ok(list.summary.total > 250, 'a wide net: ' + list.summary.total);
-  eq(list.summary.unverified, list.summary.total, 'nothing has been tried yet');
+  eq(list.summary.unverified, list.summary.total - mod.__test.CORE_OFF_DEFAULT.size, 'nothing has been tried yet; only the core feeds off by default (p73) are not unverified');
+  eq(list.sources.filter(s => s.enabled === false).map(s => s.id), [...mod.__test.CORE_OFF_DEFAULT], 'the feeds off by default are seeded switched off');
   ok(list.sources.every(s => s.methods.length), 'every source has at least one method');
   const nat = list.sources.find(s => s.id === 'nationals');
   eq(nat.methods, ['rss', 'wp', 'sitemap', 'gnews'], 'methods derive from the urls, in chain order');
@@ -179,10 +180,12 @@ await t('POST /sources/update switches a source off, and a core feed off drops i
   const a = await req('POST', '/sources/update', { id: 'riverine_herald', enabled: false, note: 'paused' });
   eq(a.d.source.enabled, false); eq(a.d.source.note, 'paused');
   const l = await req('GET', '/sources?status=off', null, 'read-key'); ok(l.d.sources.some(s => s.id === 'riverine_herald'));
-  const before = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(before.d.feeds, list.summary.core, 'every core feed is fetched');
+  // p73: the core feeds off by default (CORE_OFF_DEFAULT: ozbargain) are seeded enabled=0 and never fetched
+  const offDefault = mod.__test.CORE_OFF_DEFAULT.size; ok(offDefault >= 1 && mod.__test.CORE_OFF_DEFAULT.has('ozbargain'), 'ozbargain is off by default');
+  const before = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(before.d.feeds, list.summary.core - offDefault, 'every core feed but the ones off by default is fetched');
   const b = await req('POST', '/sources/update', { id: 'abc', enabled: false }); eq(b.d.source.enabled, false); eq(b.d.source.core, true);
-  eq(JSON.parse(kv.get('sources_core_off')), ['abc']);
-  const after = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(after.d.feeds, list.summary.core - 1, 'the switched-off core feed is not fetched');
+  eq(JSON.parse(kv.get('sources_core_off')).sort(), ['abc'].concat([...mod.__test.CORE_OFF_DEFAULT]).sort());
+  const after = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(after.d.feeds, list.summary.core - offDefault - 1, 'the switched-off core feed is not fetched');
   await req('POST', '/sources/update', { id: 'abc', enabled: true });
 });
 await t('/allnews merges the registry rows from the archive and marks them', async () => {

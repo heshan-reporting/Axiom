@@ -342,6 +342,12 @@ const AU_FEEDS = {
   act_pettersson:'https://www.cmtedd.act.gov.au/open_government/functions/functionality/media_release_rss_feeds/michael-pettersson-mla-media-releases-rss',
   flagpost:      'https://parliamentflagpost.blogspot.com/feeds/posts/default?alt=rss', // Parliamentary Library FlagPost (Blogspot mirror)
 };
+/** Core feeds that start switched off (Sources view: status 'off'; never read by buildAllNews until the operator turns them
+ *  on). ozbargain was added as a cost-of-living signal and takes every post in a deals feed: a vacuum deal reached the MCA
+ *  Newsroom (Kai, 16 November 2026) and lithium coin batteries reached the critical-minerals issue (17 November). The row stays
+ *  in the registry, so POST /sources/update {id, enabled:true} brings a feed back without a deploy; a row the operator has
+ *  edited is never changed by this list (build p73). */
+const CORE_OFF_DEFAULT = new Set(['ozbargain']);
 
 /** A link as a feed or a sitemap writes it, read as the address it is (p71, AEP M8, M9): XML requires an ampersand in element
  *  text to be written &amp; (WordPress writes &#038;), and before p71 the entity was filed as written, so the archive, the
@@ -469,8 +475,8 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, 
   const qw  = q.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
   const cacheKey = `allnews2_${q || 'all'}_${max}_${hours}`;
   const now  = Date.now();
-  // core feeds the operator switched off in the Sources view stay off here too
-  const off  = env.MIND_DB ? await sourcesCoreOff(env) : new Set();
+  // core feeds the operator switched off in the Sources view stay off here too; without a registry, the ones off by default
+  const off  = env.MIND_DB ? await sourcesCoreOff(env) : new Set(CORE_OFF_DEFAULT);
   const keys = Object.keys(AU_FEEDS).filter(k => !off.has(k));
   const cb   = await cbLoad(env.AXIOM_KV);
   const health = [];
@@ -5590,7 +5596,7 @@ function sourceSeed() {
     const m = CORE_META[k] || [];
     const sweep = /^gnews_/.test(k);
     out.push({ id: k, name: m[0] || (sweep ? 'Sweep: ' + k.replace(/^gnews_/, '').replace(/_/g, ' ') : k), tier: m[1] || (sweep ? 'sweep' : 'core'), juris: m[2] || 'au',
-      issues: CORE_ISSUES[k] || [], methods: ['rss'], urls: { rss: AU_FEEDS[k] }, schedule: SOURCE_SCHED.core, core: true });
+      issues: CORE_ISSUES[k] || [], methods: ['rss'], urls: { rss: AU_FEEDS[k] }, schedule: SOURCE_SCHED.core, core: true, off: CORE_OFF_DEFAULT.has(k) });
   });
   SOURCE_SEED_EXT.forEach(r => {
     const u = r[5] || {}; const urls = {};
@@ -5626,15 +5632,22 @@ async function sourcesSeed(env, force) {
   const n = ((await env.MIND_DB.prepare('SELECT COUNT(*) n FROM sources').first()) || {}).n || 0;
   if (!force && n > 0 && (await kvGet(env.AXIOM_KV, 'sources_seed_v')) === ver) return { ok: true, unchanged: true, n };
   const now = Date.now();
-  const ins = env.MIND_DB.prepare("INSERT INTO sources(id,name,tier,juris,issues,methods,urls,schedule,enabled,core,edited,created,updated,last_try,last_ok,next_due,fails,method_ok,last_error,latest_ts,note,alerted) VALUES(?,?,?,?,?,?,?,?,1,?,0,?,?,0,0,0,0,'','',0,'',0) ON CONFLICT(id) DO NOTHING");
+  const ins = env.MIND_DB.prepare("INSERT INTO sources(id,name,tier,juris,issues,methods,urls,schedule,enabled,core,edited,created,updated,last_try,last_ok,next_due,fails,method_ok,last_error,latest_ts,note,alerted) VALUES(?,?,?,?,?,?,?,?,?,?,0,?,?,0,0,0,0,'','',0,'',0) ON CONFLICT(id) DO NOTHING");
   const upd = env.MIND_DB.prepare('UPDATE sources SET name=?, tier=?, juris=?, issues=?, methods=?, urls=?, schedule=?, core=?, updated=? WHERE id=? AND edited=0');
   const stmts = [];
   seed.forEach(s => {
     const j = [JSON.stringify(s.issues), JSON.stringify(s.methods), JSON.stringify(s.urls)];
-    stmts.push(ins.bind(s.id, s.name, s.tier, s.juris, j[0], j[1], j[2], s.schedule, s.core ? 1 : 0, now, now));
+    stmts.push(ins.bind(s.id, s.name, s.tier, s.juris, j[0], j[1], j[2], s.schedule, s.off ? 0 : 1, s.core ? 1 : 0, now, now));
     stmts.push(upd.bind(s.name, s.tier, s.juris, j[0], j[1], j[2], s.schedule, s.core ? 1 : 0, now, s.id));
   });
   for (let i = 0; i < stmts.length; i += 100) await env.MIND_DB.batch(stmts.slice(i, i + 100));
+  // a core feed that is off by default (CORE_OFF_DEFAULT) is switched off on a registry that still has it on, unless the
+  // operator has edited the row; the KV mirror buildAllNews reads follows at once
+  const offIds = seed.filter(s => s.core && s.off).map(s => s.id);
+  if (offIds.length) {
+    await env.MIND_DB.prepare('UPDATE sources SET enabled=0, updated=? WHERE core=1 AND edited=0 AND enabled=1 AND id IN (' + offIds.map(() => '?').join(',') + ')').bind(now, ...offIds).run();
+    await sourcesCoreOffRefresh(env);
+  }
   await kvPut(env.AXIOM_KV, 'sources_seed_v', ver, 30 * 86400);
   return { ok: true, seeded: seed.length, had: n };
 }
@@ -5743,9 +5756,16 @@ async function sourceGet(env, id) {
   const r = await env.MIND_DB.prepare('SELECT * FROM sources WHERE id=?').bind(id).first();
   return r ? sourceRow(r) : null;
 }
-/** Core feeds the operator switched off, so buildAllNews skips them. */
+/** Core feeds the operator switched off, so buildAllNews skips them: the KV mirror of the registry's enabled=0 core rows,
+ *  rebuilt from the registry when the mirror is missing (it carries a 90-day TTL; before p73 an expired mirror quietly turned
+ *  every switched-off feed back on). When neither can be read, the feeds off by default stay off. */
 async function sourcesCoreOff(env) {
-  try { const a = JSON.parse((await kvGet(env.AXIOM_KV, 'sources_core_off')) || '[]'); return new Set(Array.isArray(a) ? a : []); } catch (e) { return new Set(); }
+  try {
+    let raw = await kvGet(env.AXIOM_KV, 'sources_core_off');
+    if (raw == null && env.MIND_DB) { await sourcesCoreOffRefresh(env); raw = await kvGet(env.AXIOM_KV, 'sources_core_off'); }
+    if (raw == null) return new Set(CORE_OFF_DEFAULT);
+    const a = JSON.parse(raw || '[]'); return new Set(Array.isArray(a) ? a : []);
+  } catch (e) { return new Set(CORE_OFF_DEFAULT); }
 }
 async function sourcesCoreOffRefresh(env) {
   const rows = (await env.MIND_DB.prepare('SELECT id FROM sources WHERE core=1 AND enabled=0').all()).results || [];
@@ -14182,7 +14202,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-18.studio-p72';
+const AXIOM_BUILD = '2026-11-23.studio-p73';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -22244,6 +22264,7 @@ Object.assign(__test, { denShort, denTitle, DEN_CLIENT_SHORT, denCleanUrl, denGo
 Object.assign(__test, { DEN_EVIDENCE_MAX, DEN_BOILER_RX, denSlugKey, denUrlDate, denSummary, denCut, denRegEntry, denRegistry, denOutlet, denEvCap, denPick, denAcct });
 Object.assign(__test, { DEN_SPONSORED_HOSTS, denSponsored });   // p71 review, lane evidence (ST4): a harness adds an invented outlet to its own module's list
 Object.assign(__test, { DEN_SPONSORED_RX });   // p71 fx3, lane evidence (F1): the label read on its own, both lists
+Object.assign(__test, { CORE_OFF_DEFAULT, sourcesCoreOff, AU_FEEDS });   // p73: core feeds off by default (tests/newsroom-off-worker.mjs)
 
 // lane signals (strip, tone, narratives, momentum):
 Object.assign(__test, { DEN_RELIED, denRelied });

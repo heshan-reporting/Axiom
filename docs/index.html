@@ -56,7 +56,7 @@
 <script src="sentiment.js?v=r1" defer></script>
 <script src="narratives.js?v=r1" defer></script>
 <script src="overview.js?v=r2" defer></script>
-<script src="scope.js?v=r1" defer></script>
+<script src="scope.js?v=r2" defer></script>
 <!-- Tailwind (additive utility layer, token-configured; nothing critical depends on it) -->
 <script src="https://cdn.tailwindcss.com" onerror="void 0"></script>
 <script>try{if(window.tailwind)tailwind.config={theme:{extend:{colors:{
@@ -2316,6 +2316,7 @@ select option,select optgroup{background-color:var(--x-bg2);color:var(--t1)}
             <button class="chip" onclick="setNewsWindow(24,this)">24h</button>
             <button class="chip on" onclick="setNewsWindow(72,this)">72h</button>
           </div>
+          <div class="chips" id="news-scope" style="margin-bottom:8px;align-items:center" role="group" aria-label="Which stories the Newsroom shows" hidden></div>
           <div class="chips" id="news-chips"></div>
           <div class="wire" id="news-list"><div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px"></div></div>
         </div>
@@ -5017,6 +5018,54 @@ let NEWS_WINDOW=72,NEWS_LAST=[];
 /* the search the Newsroom is showing ({q, items}); null shows the general feed. The five-minute refresh re-runs it
    quietly instead of drawing the general feed over it while the term is still in the box. */
 let NEWS_SEARCH=null;
+/* The Newsroom follows the scope bar's client (Kai, 16 November 2026: a vacuum deal and a Matildas story on the MCA
+   Newsroom). With a client chosen, the general feed shows only the stories that touch one of that client's issues
+   (AX_ISSUES, the page's twin of the worker's CLIENT_ISSUES) or name one of the people and organisations registered
+   to the client (/entities, by name or alias). "All news" brings the whole feed back until the client changes; a search
+   is the reader's own question and is never narrowed. With no client chosen the Newsroom works as it always did. */
+let NEWS_ALL=false,NEWS_ENTS=null,NEWS_ENT_RX={};
+function newsNs(){try{return (window.AXUI&&AXUI.scope&&AXUI.scope().ns)||'';}catch(e){return '';}}
+function newsScopeNs(){return (NEWS_SEARCH||NEWS_ALL)?'':newsNs();}
+function newsClientName(ns){const i=AX_ISSUES.find(x=>x.ns===ns);return i&&i.client||ns;}
+/* one regex per client from the register: every active entity filed under the client, its name and aliases as whole
+   words (plurals and possessives allowed); null until the register has been read, or when the client has none */
+function newsEntityRx(ns){
+  if(NEWS_ENT_RX[ns]!==undefined)return NEWS_ENT_RX[ns];
+  if(!Array.isArray(NEWS_ENTS))return null;
+  const words=[];
+  NEWS_ENTS.forEach(e=>{if(!e||e.ns!==ns||e.active===false)return;[e.name].concat(e.aliases||[]).forEach(w=>{w=String(w||'').trim();if(w.length>2)words.push(w);});});
+  const rx=words.length?new RegExp('(^|[^a-z0-9])(?:'+words.map(w=>w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\s+/g,'\\s+')).join('|')+")(?:'s|s)?(?![a-z0-9])",'i'):null;
+  NEWS_ENT_RX[ns]=rx;return rx;
+}
+function newsLoadEntities(){
+  if(NEWS_ENTS!==null)return;NEWS_ENTS=false;   // false: a read is in flight or failed; the issues alone narrow until then
+  api('/entities?active=1').then(d=>{NEWS_ENTS=(d&&d.entities)||[];NEWS_ENT_RX={};renderNews();}).catch(()=>{NEWS_ENTS=[];});
+}
+function newsRelevant(it,ns){
+  const hay=issueText(it);
+  if(AX_ISSUES.some(i=>i.ns===ns&&i.rx.test(hay)))return true;
+  const rx=newsEntityRx(ns);return !!(rx&&rx.test(hay));
+}
+/* the stories the Newsroom is showing before the window and the source chips: the search's results, or the general feed
+   narrowed to the chosen client */
+function newsPool(){
+  const base=NEWS_SEARCH?NEWS_SEARCH.items:state.news;
+  const ns=newsScopeNs();if(!ns)return base;
+  newsLoadEntities();
+  return base.filter(it=>newsRelevant(it,ns));
+}
+function setNewsAll(all){NEWS_ALL=!!all;renderNews();}
+function renderNewsScope(){
+  const el=$('news-scope');if(!el)return;
+  const ns=newsNs();
+  if(!ns||NEWS_SEARCH){el.hidden=true;el.innerHTML='';return;}
+  const name=newsClientName(ns);
+  el.hidden=false;
+  el.innerHTML='<button class="chip'+(NEWS_ALL?'':' on')+'" onclick="setNewsAll(false)" aria-pressed="'+(!NEWS_ALL)+'">'+esc(name)+' only</button>'+
+    '<button class="chip'+(NEWS_ALL?' on':'')+'" onclick="setNewsAll(true)" aria-pressed="'+NEWS_ALL+'">All news</button>'+
+    '<span class="scope-hint">'+(NEWS_ALL?'Every story from every source. ':'Stories on '+esc(name)+'\'s issues, or naming its registered people and organisations. ')+'Set in the Scope bar above.</span>';
+}
+window.addEventListener('ax:scope',()=>{NEWS_ALL=false;if(Array.isArray(state.news))renderNews();});
 function newsWindowFilter(items){
   const cut=Date.now()-NEWS_WINDOW*3600e3;
   return items.filter(it=>{const t=Date.parse(it.date)||0;return !t||t>=cut;});
@@ -5034,22 +5083,23 @@ function rowSignal(it){
   return '<span class="wi-sig"><b style="background:'+tcol+'" title="headline tone"></b>'+pd+'</span>';
 }
 function renderNews(list){
-  const base=NEWS_SEARCH?NEWS_SEARCH.items:state.news;
+  const base=newsPool(),ns=newsScopeNs();
   const items=newsWindowFilter(list||base);
   NEWS_LAST=items;
+  renderNewsScope();
   const srcs={};base.forEach(n=>{srcs[n.src]=(srcs[n.src]||0)+1;});
-  $('news-count').textContent=(NEWS_SEARCH?'"'+NEWS_SEARCH.q.toUpperCase()+'" · ':'')+Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
+  $('news-count').textContent=(NEWS_SEARCH?'"'+NEWS_SEARCH.q.toUpperCase()+'" · ':ns?newsClientName(ns).toUpperCase()+' · ':'')+Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
   $('news-chips').innerHTML='<button class="chip on" onclick="filterSrc(null,this)">All</button>'+
     Object.entries(srcs).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([s,n])=>
       '<button class="chip" onclick="filterSrc(\''+jsAttr(s)+'\',this)">'+esc(s)+' · '+n+'</button>').join('');
   $('news-list').innerHTML=items.length?items.slice(0,60).map((it,i)=>
     '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span>'+issueChip(it.title)+(it.desc?'<span class="wi-d">'+esc(it.desc)+'</span>':'')+'</span>'+rowSignal(it)+'<span class="wi-time">'+ago(it.date)+'</span>'+(it.link?'<span class="wi-read" role="button" tabindex="0" title="Read the article here, where the publisher makes the text public" onclick="newsRead(event,'+i+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \')newsRead(event,'+i+')">Read</span>':'')+'</a>').join('')
-    :'<div class="empty">Nothing in the last '+NEWS_WINDOW+' hours matched. Widen the window or search the full Google index above.</div>';
+    :'<div class="empty">'+(ns?'Nothing on '+esc(newsClientName(ns))+'\'s issues in the last '+NEWS_WINDOW+' hours. Widen the window, choose All news above, or search the full Google index.':'Nothing in the last '+NEWS_WINDOW+' hours matched. Widen the window or search the full Google index above.')+'</div>';
 }
 function filterSrc(src,btn){
   document.querySelectorAll('#news-chips .chip').forEach(b=>b.classList.remove('on'));
   if(btn)btn.classList.add('on');
-  renderNews(src?(NEWS_SEARCH?NEWS_SEARCH.items:state.news).filter(n=>n.src===src):null);
+  renderNews(src?newsPool().filter(n=>n.src===src):null);
 }
 function exportNewsCSV(){
   const rows=[['date','source','title','tone','parties','link']].concat(NEWS_LAST.map(it=>{

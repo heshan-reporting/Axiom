@@ -106,6 +106,8 @@ node --experimental-sqlite tests/narratives-worker.mjs
 node --experimental-sqlite tests/sentiment-worker.mjs
 node --experimental-sqlite tests/social-worker.mjs
 node --experimental-sqlite tests/sources-worker.mjs
+node --experimental-sqlite tests/newsroom-off-worker.mjs      # core feeds off by default (6, p73): ozbargain seeded off and never read, the KV mirror rebuilt when expired, the operator's switch-on kept through a reseed, a live registry switched off once, no registry at all
+node tests/newsroom-browser.mjs                              # the Newsroom (10, Chromium): a search survives the refresh, Read, subscriber-only articles; E-I the Scope bar's client narrows the general feed to the client's issues and registered names, All news, another client, a search is never narrowed, the empty state
 node tests/run.mjs check                                     # also: docs/den*.js parse, every Den asset carries its ?v= (asset-versions)
 node --experimental-sqlite tests/den-worker.mjs              # Anne's Den worker (22): desks, board, checks, the brief, filing (no collection gap in uncited_signals since p67), the section on a pin, uncited flags kept through saves (DK11b)
 node --experimental-sqlite tests/den-release-worker.mjs      # Den release 8 worker (6): no collection talk in the draft's prompt and one CHANNELS line, evidence text/sub on every id, briefs stored before p67, tone counts judged rows only, a hand-started brief can cite, a section rewrite refreshes lines

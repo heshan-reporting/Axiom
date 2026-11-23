@@ -819,7 +819,11 @@ source reaches `SOURCE_DEAD_FAILS` = 6 consecutive failures (`alerted` 1, or 2
 when no webhook is set); a later success resets it. Core feeds are fetched by
 `buildAllNews` as before; the cron passes `onHealth` so `sourcesCoreHealth()`
 mirrors their result, and a core feed switched off in the view is skipped
-there too (KV `sources_core_off`). `/allnews` merges the registry's last-72h
+there too (KV `sources_core_off`, a mirror of the registry's `enabled=0` core
+rows; since p73 it is rebuilt from the registry when it has expired, and
+`CORE_OFF_DEFAULT` names the core feeds the seed switches off on a registry the
+operator has not edited: `ozbargain`, a deals feed whose every post reached the
+wire; `tests/newsroom-off-worker.mjs`). `/allnews` merges the registry's last-72h
 archive rows (`json_extract(meta,'$.reg')=1`, marked `reg:1`) so the newsroom
 shows the whole estate; `arcNewsSnap` does not re-file them.
 
@@ -1449,8 +1453,14 @@ the view holding it) - answered in tables, not cards.
   that is one of its tabs; Sources adopts issue and region; the front page
   narrows its alerts, narratives, issues and rows to the client and issue
   and follows the window. The bar only sets; each island keeps its own
-  finer controls. Legacy views (Newsroom, Pulse, Radar, Audience, Briefing)
-  keep their own controls and do not read the scope yet.
+  finer controls. The Newsroom (inline in `docs/index.html`, `renderNews`)
+  follows the client: with one chosen, its general feed shows only stories
+  that touch one of the client's issues (`AX_ISSUES`) or name one of its
+  registered entities (`/entities?active=1`, those with the client's `ns`,
+  name or alias as a whole word); "All news" lifts it until the client
+  changes, and a search is never narrowed (Kai's ticket of 16 November 2026,
+  `tests/newsroom-browser.mjs` E-I). The other legacy views (Pulse, Radar,
+  Audience, Briefing) keep their own controls and do not read the scope yet.
 - **Sources** opens on the delivering sources, most productive first
   (`status: 'ok'`, sort `items`); failing, dead, stale, untried and off are
   one quiet figure with a breakdown that filters to them, and the dead line
