@@ -68,8 +68,12 @@
   "sha": "2a1eb507fe2cff99"
  },
  "den-today.css": {
+  "v": "r3",
+  "sha": "934fe5206216b97a"
+ },
+ "den-snapshot.css": {
   "v": "r2",
-  "sha": "33c3601c956907de"
+  "sha": "2d4c6a05a54cf8db"
  },
  "den-desk.css": {
   "v": "r1",
@@ -124,8 +128,12 @@
   "sha": "3aeeacbf2831298e"
  },
  "den-today.js": {
+  "v": "r3",
+  "sha": "ea477982b777638b"
+ },
+ "den-snapshot.js": {
   "v": "r2",
-  "sha": "31009e6ff9c47439"
+  "sha": "edf3a10d08cb3e80"
  },
  "den-brief.js": {
   "v": "r11",
@@ -136,8 +144,8 @@
   "sha": "0d70c8bec91ecf71"
  },
  "den.js": {
-  "v": "r63",
-  "sha": "88333e27c1cca6ad"
+  "v": "r64",
+  "sha": "09a309981f676a29"
  },
  "den-tour.js": {
   "v": "r2",

@@ -89,7 +89,9 @@
   /* ---- the top bar (s.4.2, s.7): skip links, AXIOM, Your reports, More tools, Help ---- */
   const lineLabel = l => (l ? ', ' + l[0].charAt(0).toLowerCase() + l[0].slice(1).replace(/ \u00b7 /g, ', ') : '');
   function Top(p) {
-    const { desks, desk, mine, lineOf, pick, remove, budget, visit, refresh, actions, setDay, today, keys, tour, back } = p;
+    const { desks, desk, mine, lineOf, pick, remove, budget, visit, refresh, actions, setDay, today, keys, tour, back, to } = p;
+    // the coverage report (docs/den-snapshot.js): figures and charts counted from the window, no AI; absent when its script is
+    const snap = window.DenSnapshot && typeof window.DenSnapshot.open === 'function' ? opener => window.DenSnapshot.open({ desk, to, opener }) : null;
     const S = useStore(); const [menu, setMenu] = useState(''); const [sub, setSub] = useState(''); const box = useRef(null);
     const close = backTo => { const m = menu; setMenu(''); setSub(''); if (backTo && m) focusSoon('#dt-btn-' + m, 0); };
     useOutside(menu, box, close);   // keyed on which menu (p72 review P12): moving from one to another gives the focus back to the right button
@@ -107,6 +109,7 @@
       <ul class="dt-narrow">${item('Back to AXIOM', run(back))}</ul>
       <h3>This report</h3><ul>
         ${item('Sections and sources', run(() => visit('brief')), 'Alt+2')}${item('Find a story the report missed', run(() => visit('today')), 'Alt+1')}
+        ${snap ? item('Coverage report', run(() => snap(document.getElementById('dt-btn-more'))), 'charts, no AI') : null}
         ${A.sections && A.sections.length ? item('Jump to a section \u203a', () => setSub('jump')) : null}
         ${A.canRewrite ? item('Rewrite the whole report\u2026', run(() => A.run('rewrite')), 'uses 1 AI draft', { disabled: !(budget && budget.left) }) : null}
         ${A.hasBrief ? item('Earlier versions', run(() => A.run('history'))) : null}${A.hasBrief ? item('Compare with the last sent report', run(() => A.run('compare'))) : null}
@@ -132,6 +135,7 @@
         return html`<li key=${d.id}><button type="button" class="dt-rep" data-desk=${d.id} aria-current=${d.id === desk.id ? 'page' : null} aria-label=${d.name + lineLabel(l)} onClick=${() => pick(d.id)}><b>${d.name}</b>${l ? html`<span class=${'dt-rl ' + (l[1] || '')}>${l[0]}</span>` : null}</button></li>`; })}</ul></nav>
       <div class="dt-menu dt-mine1"><button type="button" class="dt-tbtn" id="dt-btn-others" aria-expanded=${menu === 'others' ? 'true' : 'false'} aria-controls="dt-list-others" aria-label=${desk.name + lineLabel(cur) + ': every report'} onClick=${() => toggle('others')}>${desk.name} \u25be</button>${menu === 'others' ? othersList : null}</div>
       <span class="dt-spacer"></span>
+      ${snap ? html`<button type="button" class="dt-tbtn dt-cov" id="dt-btn-cov" title="Figures and charts for this window: mentions, share of voice, outlets, top stories and posts. No AI, nothing spent." onClick=${e => snap(e.currentTarget)}>Coverage<span class="dt-lg"> report</span></button>` : null}
       <div class="dt-menu"><button type="button" class="dt-tbtn" id="dt-btn-more" aria-expanded=${menu === 'more' ? 'true' : 'false'} aria-controls="dt-list-more" onClick=${() => toggle('more')}>More tools \u25be</button>${menu === 'more' ? moreList : null}</div>
       <div class="dt-menu"><button type="button" class="dt-tbtn" id="dt-btn-help" aria-expanded=${menu === 'help' ? 'true' : 'false'} aria-controls="dt-list-help" aria-label="Help" onClick=${() => toggle('help')}>?<span class="dt-lg"> Help \u25be</span></button>${menu === 'help' ? helpList : null}</div>
       ${S.sheet === 'checks' ? html`<${Sheet} onClose=${b => { setStore({ sheet: '' }); if (b) focusSoon('#dt-btn-help', 0); }} />` : null}

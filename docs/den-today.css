@@ -139,6 +139,12 @@ mark.dt-fw{padding:0 2px;border-radius:2px;background:var(--dn-warn-dim);color:v
 .den-checks--today .den-checks-list{flex:0 1 auto;min-height:120px;overflow:auto}
 .den-checks--today .den-fl{background:var(--dn-bg-1)}
 .dt-send{display:flex;flex-direction:column;gap:8px;padding:12px 16px 14px;border-top:1px solid var(--dn-line);background:var(--dn-s1)}
+/* an introduction card in the column (cards 2 and 3) never pushes Copy and Mark as sent out of the column: the send block keeps
+   its size, the list gives up its two-item floor while the card shows, and the card scrolls in itself before anything is cut
+   (found in CI at 1366x650: Mark as sent ended 9 px below the column, cut off; den-today-browser T5 "card 2") */
+.dt-col>.dt-send{flex:none}
+.dt-col>.dt-card{flex:0 1 auto;min-height:0;overflow:auto}
+.dt-col:has(>.dt-card) .dt-colscroll{min-height:120px}
 .dt-block{display:block;width:100%;min-height:36px}
 .dt-saveln{margin:0;font-size:12.5px;color:var(--dn-pos-ink)}
 .dt-saveln.w{color:var(--dn-warn-ink)} .dt-saveln.bad{color:var(--dn-neg-ink)}
