@@ -17,6 +17,7 @@ const ACTS = [
   ['GET', '/collect?topics=housing'],
   ['GET', '/fetchurl?url=' + encodeURIComponent('https://example.com/article')],
   ['GET', '/sources/probe?id=abc'],
+  ['POST', '/sources/step', { what: 'all' }],
   ['GET', '/topics/probe'],
   ['GET', '/meta/status?probe=1'],
   ['GET', '/reddit/status?probe=1'],

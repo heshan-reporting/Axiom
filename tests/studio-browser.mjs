@@ -84,7 +84,7 @@ await api('GET', '/release/list?ns=mca');
 env.MIND_DB.db.prepare("INSERT INTO release_packs(id,ns,title,source,extract,tiles,status,job,who,format,created,updated) VALUES('rp1','mca','Critical minerals reserve','Release text here about a strategic reserve.','{\"headline\":\"Reserve\",\"claims\":[\"Australia holds the minerals\"],\"numbers\":[],\"quotes\":[]}','[{\"n\":0,\"kind\":\"lead\",\"headline\":\"Critical minerals need a reserve\",\"support\":\"x\",\"cta\":\"Learn more\",\"captions\":{\"linkedin\":\"A reserve.\"},\"alt\":\"tile\",\"image\":{\"ver\":1,\"model\":\"gemini-2.5-flash-image\"},\"verdict\":\"approved\"}]','rendered','','Dee','square',1000,2000)").run();
 r2.set('packs/rp1/0.png', { v: Buffer.from(PNG, 'base64'), o: { httpMetadata: { contentType: 'image/png' } } });
 
-const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
 await new Promise(r => setTimeout(r, 900));
 let pass = 0, fail = 0;
 async function t(name, fn) { try { await fn(); pass++; console.log('  ok   ' + name); } catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e && e.stack || e).toString().split('\n').slice(0, 3).join('\n       ')); try { if (typeof page !== 'undefined' && page && !page.isClosed()) { const f = new URL('./shots/fail-studio-browser-' + (pass + fail) + '.png', import.meta.url).pathname; await page.screenshot({ path: f }); console.log('       screenshot: ' + f); } } catch (x) {} } }
@@ -95,7 +95,7 @@ const browser = await chromium.launch();
 async function open(role) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } }); await studioAskBridge(page);
   page.on('pageerror', e => console.log('  [pageerror] ' + String(e.stack || e.message).split('\n').slice(0, 3).join(' | ').slice(0, 400)));
-  await page.addInitScript(({ W, role }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', role === 'read' ? 'read-key' : 'full-key'); if (role) window.AX_ROLE = role; }, { W, role });
+  await page.addInitScript(({ W, role }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', role === 'read' ? 'read-key' : 'full-key'); if (role) window.AX_ROLE = role; if (!localStorage.getItem('ax_studio_build')) localStorage.setItem('ax_studio_build', 'detailed');   /* the wizard's first question, answered as last time */ }, { W, role });
   // the page's worker calls go to the module in this process; other hosts (fonts, charts) are dropped
   await page.route(/^https:\/\/(?!127\.0\.0\.1)[^/]+\//, async route => {
     const rq = route.request(); const u = rq.url();

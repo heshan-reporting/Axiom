@@ -984,3 +984,9 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st-dscore-row .st-qsum-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-ok, #6fd39a); }
 #studio-root .st-dscore-row.fair .st-qsum-dot { background: var(--st-warn, #f5c27a); }
 #studio-root .st-dscore-row.poor .st-qsum-dot { background: var(--st-bad, #f5a08a); }
+
+/* the Express build (23 November 2026): Make's steps - Direction, Words, Canvas - at the foot of the tool rail, above the Design
+   views, since the canvas has no stage head of its own */
+#studio-root .st .st-dock-views .st-phasesteps-bar{display:flex;flex-direction:column;align-items:stretch;gap:2px;width:100%;padding:0 0 6px;margin:0 0 6px;border:0;border-bottom:1px solid var(--sk-line);border-radius:0;background:none;overflow:visible}
+#studio-root .st .st-dock-views .st-phasesteps-bar .st-substep{justify-content:center;padding:4px 2px;font-size:10.5px;white-space:nowrap}
+#studio-root .st .st-dock-views .st-phasesteps-bar .st-substep-n{display:none}

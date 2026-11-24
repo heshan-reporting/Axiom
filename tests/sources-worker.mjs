@@ -99,7 +99,8 @@ await t('GET /sources seeds the registry from AU_FEEDS plus the extension list, 
   eq(r.status, 200); list = r.d;
   ok(list.summary.core >= 78 && list.sources.filter(s => s.core).length === list.summary.core, 'core feeds mirrored: ' + list.summary.core);
   ok(list.summary.total > 250, 'a wide net: ' + list.summary.total);
-  eq(list.summary.unverified, list.summary.total, 'nothing has been tried yet');
+  eq(list.summary.unverified, list.summary.total - mod.__test.CORE_OFF_DEFAULT.size, 'nothing has been tried yet; only the core feeds off by default (p73) are not unverified');
+  eq(list.sources.filter(s => s.enabled === false).map(s => s.id), [...mod.__test.CORE_OFF_DEFAULT], 'the feeds off by default are seeded switched off');
   ok(list.sources.every(s => s.methods.length), 'every source has at least one method');
   const nat = list.sources.find(s => s.id === 'nationals');
   eq(nat.methods, ['rss', 'wp', 'sitemap', 'gnews'], 'methods derive from the urls, in chain order');
@@ -144,7 +145,9 @@ await t('POST /sources/sweep with a few ids runs inline and files rows with the 
   const cb = row("SELECT meta FROM arc_items WHERE kind='news' AND src='capitalbrief'"); const cm = JSON.parse(cb.meta);
   eq(cm.outlet, 'Capital Brief'); ok(cm.issues.indexOf('ftc') >= 0);
   const pod = row("SELECT url, title FROM arc_items WHERE kind='news' AND src='pod_7am' ORDER BY id"); eq(pod.url, 'https://feeds.test/ep/101.mp3', 'episode filed under its enclosure when there is no link');
-  const g = row("SELECT meta, ts FROM arc_items WHERE kind='news' AND src='guild_org' ORDER BY id"); eq(JSON.parse(g.meta).dated, 0); ok(Math.abs(g.ts - Date.now()) < 60000, 'undated listing items are stamped at first sight');
+  // p71 (review CO3): a listing page read for the first time is a baseline, filed before every window, so a newsroom's old
+  // releases are not the day's news; a later read stamps a new link at first sight (tests/den-p71-sources-worker.mjs SR9)
+  const g = row("SELECT meta, ts FROM arc_items WHERE kind='news' AND src='guild_org' ORDER BY id"); eq([JSON.parse(g.meta).dated, JSON.parse(g.meta).baseline], [0, 1]); ok(g.ts < Date.now() - 28 * 86400000, 'undated listing items on a first read are a baseline');
   ok(kv.get('pod_feed_pod_7am') === 'https://feeds.test/7am.xml', 'the podcast feed url is remembered');
 });
 await t('a source with no working route records the failure with reasons, and stays failing', async () => {
@@ -177,15 +180,17 @@ await t('POST /sources/update switches a source off, and a core feed off drops i
   const a = await req('POST', '/sources/update', { id: 'riverine_herald', enabled: false, note: 'paused' });
   eq(a.d.source.enabled, false); eq(a.d.source.note, 'paused');
   const l = await req('GET', '/sources?status=off', null, 'read-key'); ok(l.d.sources.some(s => s.id === 'riverine_herald'));
-  const before = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(before.d.feeds, list.summary.core, 'every core feed is fetched');
+  // p73: the core feeds off by default (CORE_OFF_DEFAULT: ozbargain) are seeded enabled=0 and never fetched
+  const offDefault = mod.__test.CORE_OFF_DEFAULT.size; ok(offDefault >= 1 && mod.__test.CORE_OFF_DEFAULT.has('ozbargain'), 'ozbargain is off by default');
+  const before = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(before.d.feeds, list.summary.core - offDefault, 'every core feed but the ones off by default is fetched');
   const b = await req('POST', '/sources/update', { id: 'abc', enabled: false }); eq(b.d.source.enabled, false); eq(b.d.source.core, true);
-  eq(JSON.parse(kv.get('sources_core_off')), ['abc']);
-  const after = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(after.d.feeds, list.summary.core - 1, 'the switched-off core feed is not fetched');
+  eq(JSON.parse(kv.get('sources_core_off')).sort(), ['abc'].concat([...mod.__test.CORE_OFF_DEFAULT]).sort());
+  const after = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(after.d.feeds, list.summary.core - offDefault - 1, 'the switched-off core feed is not fetched');
   await req('POST', '/sources/update', { id: 'abc', enabled: true });
 });
 await t('/allnews merges the registry rows from the archive and marks them', async () => {
   const r = await req('GET', '/allnews?debug=1&hours=72', null, 'read-key');
-  ok(r.d.registry >= 10, 'registry rows merged: ' + r.d.registry);
+  ok(r.d.registry >= 6, 'registry rows merged: ' + r.d.registry); ok(!r.d.items.some(i => i.src === 'guild_org'), 'a listing page\'s first read is a baseline, not news (p71 review CO3)');
   const it = r.d.items.find(i => i.src === 'nationals');
   ok(it && it.reg === 1 && it.tier === 'party' && it.method === 'wp', JSON.stringify(it));
 });
@@ -210,10 +215,66 @@ await t('a big sweep becomes a job the console tails, running in the worker', as
   eq(j.d.result.ran, 6); eq(j.d.result.succeeded, 5);
   const s = await req('POST', '/sources/sweep', { all: true }); ok(s.d.job, 'sweep all is a job'); await drain();
 });
+/* -- the sweep from the app, in steps (12 November 2026): "Sweep every source" ran as a job after the
+      response and the worker stopped it at about thirty seconds, 86 lines in. A step runs a few sources
+      inside the request and says how many wait, and the page repeats it. -- */
+await t('STEP1 a step sweeps a few sources inside the request and says how many still wait', async () => {
+  const T = Date.now();
+  db.prepare("UPDATE sources SET last_try=? WHERE core=0").run(T + 1);
+  const ten = ['nationals', 'couriermail', 'capitalbrief', 'pod_7am', 'guild_org', 'miningnews'].concat(db.prepare("SELECT id FROM sources WHERE core=0 AND enabled=1 AND id LIKE 'wn_%' ORDER BY id LIMIT 4").all().map(r => r.id));
+  for (const id of ten) db.prepare('UPDATE sources SET last_try=1, enabled=1 WHERE id=?').run(id);
+  const jobs0 = row('SELECT COUNT(*) n FROM bridge_jobs').n;
+  const a = await req('POST', '/sources/step', { what: 'all', before: T });
+  eq(a.status, 200, JSON.stringify(a.d).slice(0, 200)); eq(a.d.ok, true); eq(a.d.what, 'all'); eq(a.d.before, T);
+  ok(a.d.ran >= 1 && a.d.ran <= 4, 'a step is small: ' + a.d.ran); eq(a.d.remaining, 10 - a.d.ran);
+  ok(Array.isArray(a.d.lines) && a.d.lines.some(l => l.kind === 'cmd'), 'the step hands its console lines back');
+  eq(a.d.results.length, a.d.ran); ok(!a.d.job, 'not a job');
+  eq(row('SELECT COUNT(*) n FROM bridge_jobs').n, jobs0, 'no job was created');
+  const seen = new Set(a.d.results.map(r => r.id)); let guard = 0, last = a.d;
+  while (last.remaining > 0 && guard++ < 10) {
+    last = (await req('POST', '/sources/step', { what: 'all', before: T })).d;
+    for (const r of last.results) { ok(!seen.has(r.id), 'a source is not swept twice in one walk: ' + r.id); seen.add(r.id); }
+  }
+  eq(last.remaining, 0); eq(seen.size, 10); eq(Array.from(seen).sort(), ten.slice().sort());
+  const over = await req('POST', '/sources/step', { what: 'all', before: T }); eq(over.d.ran, 0); eq(over.d.remaining, 0);
+  const bad = row("SELECT fails, last_error FROM sources WHERE id='miningnews'"); ok(bad.fails >= 1 && /sitemap/.test(bad.last_error), 'a failure is recorded as the tick records it');
+});
+await t('STEP2 the due walk takes only what was due when it began, and a read key cannot sweep', async () => {
+  const T = Date.now();
+  db.prepare('UPDATE sources SET next_due=? WHERE core=0').run(T + 3600000);
+  db.prepare("UPDATE sources SET next_due=1 WHERE id IN ('nationals','capitalbrief')").run();
+  const ro = await req('POST', '/sources/step', { what: 'due', before: T }, 'read-key'); eq(ro.status, 403); eq(ro.d.error, 'read_only');
+  const a = await req('POST', '/sources/step', { what: 'due', before: T });
+  eq(a.d.what, 'due'); eq(a.d.ran, 2); eq(a.d.remaining, 0); eq(a.d.results.map(r => r.id).sort(), ['capitalbrief', 'nationals']);
+  ok(row("SELECT next_due FROM sources WHERE id='nationals'").next_due > T, 'swept sources are no longer due');
+  const b = await req('POST', '/sources/step', { before: T }); eq(b.d.what, 'due'); eq(b.d.ran, 0);
+});
+await t('STEP3 a source with no route to try is passed over once, never the head of every step', async () => {
+  const T = Date.now();
+  db.prepare('UPDATE sources SET last_try=? WHERE core=0').run(T + 1);
+  db.prepare("UPDATE sources SET last_try=0, methods='[]' WHERE id='capitalbrief'").run();
+  db.prepare("UPDATE sources SET last_try=2 WHERE id='nationals'").run();
+  const a = await req('POST', '/sources/step', { what: 'all', before: T, limit: 1 });
+  eq(a.d.ran, 0); eq(a.d.skipped, ['capitalbrief']); eq(a.d.remaining, 1);
+  const b = await req('POST', '/sources/step', { what: 'all', before: T, limit: 1 });
+  eq(b.d.results.map(r => r.id), ['nationals']); eq(b.d.remaining, 0);
+  db.prepare("UPDATE sources SET methods='[\"gnews\"]' WHERE id='capitalbrief'").run();
+  const big = await req('POST', '/sources/step', { what: 'all', before: Date.now() + 5, limit: 99 }); ok(big.d.ran <= 5, 'a step never grows past five: ' + big.d.ran);
+});
 await t('POST /sources/report lets a desktop collector record a render probe', async () => {
   const r = await req('POST', '/sources/report', { id: 'guild_org', ok: true, method: 'render', n: 9, ms: 1200, added: 3 });
   eq(r.d.source.method_ok, 'render');
   const h = row('SELECT method, n, ok FROM source_health WHERE src=? ORDER BY id DESC', 'guild_org'); eq(h.method, 'render'); eq(h.n, 3); eq(h.ok, 1);
+});
+await t('POST /sources/listing files the links a desktop collector rendered through the worker: held links are not filed again, a new one is stamped as found (p71 review B6)', async () => {
+  const items = Array.from({ length: 6 }, (_, i) => ({ title: 'Guild welcomes the expansion of pharmacist prescribing in every state number ' + i, link: 'https://www.guild.org.au/news/2026/09/guild-welcomes-pharmacist-prescribing-expansion-' + i }))
+    .concat([{ title: 'Guild welcomes a new pharmacy workforce plan for every state', link: 'https://www.guild.org.au/news/2026/09/guild-welcomes-a-new-pharmacy-workforce-plan' }]);
+  const r = await req('POST', '/sources/listing', { id: 'guild_org', ok: true, method: 'render', ms: 1500, items });
+  eq(r.status, 200); eq([r.d.added, r.d.rows], [1, 7], 'the six it held are not filed again'); eq(r.d.source.method_ok, 'render');
+  const n = row("SELECT ts, meta FROM arc_items WHERE kind='news' AND url='https://www.guild.org.au/news/2026/09/guild-welcomes-a-new-pharmacy-workforce-plan'"); const m = JSON.parse(n.meta);
+  ok(!m.baseline && Math.abs(n.ts - Date.now()) < 120000 && m.method === 'render' && m.via === 'reach' && m.reg === 1, 'the page was read here within the window, so a new link is stamped as found: ' + n.meta);
+  const h = row('SELECT method, n, ok FROM source_health WHERE src=? ORDER BY id DESC', 'guild_org'); eq([h.method, h.n, h.ok], ['render', 1, 1]);
+  eq((await req('POST', '/sources/listing', { id: 'guild_org', ok: true, method: 'render', items }, 'read-key')).status, 403);
 });
 await t('GET /fulltext reads an article from the page itself (JSON-LD articleBody)', async () => {
   const r = await req('GET', '/fulltext?url=' + encodeURIComponent('https://www.example-news.com.au/story/one'), null, 'read-key');

@@ -39,7 +39,7 @@
   const buildN = b => { const m = /studio-p(\d+)/.exec(String(b || '')); return m ? +m[1] : 0; };
   /* RC (R1): the worker build this page was written against. A worker answering an older build is named in a banner, so a stale
      deployment is seen, not guessed from refusals. Raise it with every page release that needs a new worker. */
-  const PAGE_NEEDS_BUILD = 52;
+  const PAGE_NEEDS_BUILD = 74;
   const STUDIO_RELEASE = (() => { try { const s = Array.from(document.scripts).map(x => x.src).find(u => /studio\.js\?v=/.test(u)); return s ? s.replace(/^.*\?v=/, '') : ''; } catch (e) { return ''; } })();
   const testClientsOf = s => {
     if (!s || !s.build) return null;
@@ -306,8 +306,27 @@
     { id: 'review', label: 'Review', steps: ['review'], sub: 'Check and approve each piece' },
     { id: 'deliver', label: 'Deliver', steps: ['export'], sub: 'Export and delivery' },
   ];
-  const SUB_LABEL = { brief: 'Understanding', objectives: 'Objectives', strategy: 'Strategy', export: 'Deliver' };
-  const phaseOf = id => PHASES.find(x => x.steps.indexOf(id) >= 0) || PHASES[0];
+  /* The Express build (23 November 2026): the team found seven stages too many, so a project may be built in three - asked first
+     in the wizard and kept on the brief (brief.build). The worker's seven steps and their record are the same; an express
+     project groups them: Brief is the material, the reading and the plan confirmed once (one page, no steps to walk); Make is
+     the direction, the words and the canvas, each step starting the next; Ship is the approval and the package. A detailed
+     project keeps PHASES exactly as it was. */
+  const PHASES_X = [
+    { id: 'brief', label: 'Brief', steps: ['brief', 'objectives', 'strategy'], sub: 'The material, Axiom\'s understanding and the plan, confirmed once', single: true },
+    { id: 'make', label: 'Make', steps: ['directions', 'copy', 'design'], sub: 'Choose the direction, then the words and the creative on the canvas' },
+    { id: 'ship', label: 'Ship', steps: ['review', 'export'], sub: 'Approve each piece and deliver the package' },
+  ];
+  const SUB_LABEL = { brief: 'Understanding', objectives: 'Objectives', strategy: 'Strategy', directions: 'Direction', copy: 'Words', design: 'Canvas', review: 'Approve', export: 'Deliver' };
+  /* what an express project's stage heads say where the detailed words would name a step that is not asked for */
+  const XP_STAGE = {
+    brief: { sub: 'Understand the situation and confirm the plan', need: 'Material about the situation, then one confirmation of the plan Axiom recommends.', decide: 'whether the plan is right: confirm it once, or change a part of it first', act: 'Analyse reads the material (one model call). One confirmation covers the reading, the objective, the key message and the strategy; nothing is spent by confirming.', then: 'Make: creative directions built on the confirmed plan (one model call).' },
+    directions: { need: 'A confirmed plan. Use one direction to write from.', decide: 'which direction to build from', act: 'Use this and write the copy selects the direction and writes each channel\'s words and layout from it: one model call, no image. Refine and alternatives are one model call each.', then: 'Words and Canvas: each channel\'s words on an editable composition.' },
+    copy: { need: 'A direction in use. Nothing here needs marking ready.', decide: 'whether the words are right; they are approved with the design, in Ship', act: 'Edits are free and saved as versions. The canvas is open as soon as the words are written.', then: 'Canvas: each creative built from these words.' },
+    design: { need: 'Written copy. Imagery is asked for here, with its cost stated first.', then: 'Ship: a person approves the exact versions; the package is drawn from them.' },
+    review: { decide: 'approval of the exact version: its words and its design together', act: 'Approve words and design records your approval of exactly this version, with one reason; or share a private review link with the client. Nothing is sent until you say so.' },
+  };
+  const phasesFor = build => build === 'express' ? PHASES_X : PHASES;
+  const phaseOf = (id, build) => { const P = phasesFor(build); return P.find(x => x.steps.indexOf(id) >= 0) || P[0]; };
   const STATE_RANK = { error: 0, running: 1, review: 2, current: 3, todo: 4, blocked: 5, locked: 5, skipped: 6, done: 7 };
   /** A phase's state and note from its steps: an error, then work running, then something to review, then the step in progress. */
   function phaseFlow(flow, ph) {
@@ -320,7 +339,7 @@
     return { state: top.state === 'locked' || top.state === 'blocked' || (top.state === 'todo' && fs.some(f => f.state === 'done')) ? 'current' : top.state, note: top.note || '', blocked: top.blocked || '', step: top.id };
   }
   /** Where a click on a phase lands: the first of its steps that is not finished and is open, else its first step. */
-  const phaseTarget = (flow, ph) => { if (!(flow && flow.wf && flow.wf.v === 2)) return ph.steps[0]; const open = ph.steps.find(id => { const f = (flow && flow[id]) || {}; return f.state && f.state !== 'done' && f.state !== 'skipped' && f.state !== 'locked' && f.state !== 'blocked'; }); return open || ph.steps[0]; };
+  const phaseTarget = (flow, ph) => { if (!(flow && flow.wf && flow.wf.v === 2) || ph.single) return ph.steps[0]; const open = ph.steps.find(id => { const f = (flow && flow[id]) || {}; return f.state && f.state !== 'done' && f.state !== 'skipped' && f.state !== 'locked' && f.state !== 'blocked'; }); return open || ph.steps[0]; };
   /* a finished creative has no layers to measure: it is ready once its words and marks were read back (readiness.production) */
   const validOf = a => { const v = current(a); return !!v && (v.mode === 'copy' || v.mode === 'generated' || (v.mode === 'finished' ? !!(a.readiness || {}).production : (a.readiness || {}).technical === 'passed')); };
   const MODE_WORD = { editable: 'Editable Studio', finished: 'Finished creative', artwork: 'Hybrid artwork', generated: 'Legacy flattened', copy: 'Copy only' };
@@ -332,7 +351,7 @@
   function flowOf(p) {
     const base = flowCounts(p); const wf = p.workflow;
     if (!wf || !wf.steps) return base;
-    const out = { counts: base.counts, wf };
+    const out = { counts: base.counts, wf, build: wf.build === 'express' ? 'express' : 'detailed' };
     STAGES.forEach(s0 => { const st = wf.steps[s0.id]; out[s0.id] = st ? { state: WF_CLASS[st.state] || 'todo', raw: st.state, note: st.note || '', blocked: st.need || '', why: st.why || '' } : (base[s0.id] || { state: 'todo', note: '' }); });
     return out;
   }
@@ -777,9 +796,10 @@
   const FLOW_WORD = { done: 'complete', current: 'in progress', todo: 'not started', running: 'processing', skipped: 'skipped', blocked: 'locked', locked: 'locked', review: 'needs review', error: 'error' };
   /** The workflow navigator: every step reachable (a locked one opens on what unlocks it), its state and a short note. */
   function Flow({ flow, at, onGo }) {
-    const ref = useRef(null); const atPh = phaseOf(at).id;
+    const bld = flow && flow.build; const phs = phasesFor(bld);
+    const ref = useRef(null); const atPh = phaseOf(at, bld).id;
     useEffect(() => { const el = ref.current && ref.current.querySelector('.st-step.on'); if (el && el.scrollIntoView && ref.current.scrollWidth > ref.current.clientWidth) { try { el.scrollIntoView({ inline: 'center', block: 'nearest' }); } catch (e) {} } }, [atPh]);
-    return html`<nav class="st-steps st-flow" aria-label="Workflow" ref=${ref}>${PHASES.map((ph, i) => { const f = phaseFlow(flow, ph); const on = atPh === ph.id; const locked = f.state === 'locked' || f.state === 'blocked';
+    return html`<nav class=${'st-steps st-flow' + (bld === 'express' ? ' express' : '')} aria-label="Workflow" data-build=${bld || 'detailed'} ref=${ref}>${phs.map((ph, i) => { const f = phaseFlow(flow, ph); const on = atPh === ph.id; const locked = f.state === 'locked' || f.state === 'blocked';
       const note = locked ? 'Locked' : f.state === 'review' ? 'Needs review' : f.state === 'error' ? 'Error' : f.state === 'running' ? 'Processing' : f.note || '';
       return html`<button key=${ph.id} class=${'st-step ' + (f.state || '') + (on ? ' on' : '')} aria-current=${on ? 'step' : undefined} data-phase=${ph.id} data-state=${f.state || ''} title=${ph.sub + ': ' + (locked ? (f.blocked || 'locked') : f.state === 'skipped' ? 'skipped - ' + (f.note || 'not needed') : f.note || ph.sub) + ' (Alt+' + (i + 1) + ')'} onClick=${() => onGo(phaseTarget(flow, ph))}>
         <span class="st-step-n" aria-hidden="true">${f.state === 'done' ? html`<${Icon} n="check" size=${12} />` : locked ? html`<${Icon} n="lock" size=${11} />` : f.state === 'error' ? '!' : f.state === 'skipped' ? '-' : String(i + 1).padStart(2, '0')}</span><span class="st-step-txt"><span class="st-step-l">${ph.label}</span>${note ? html`<span class="st-step-meta"><span class="st-step-note">${note}</span></span>` : null}</span><span class="st-vh">, ${FLOW_WORD[f.state] || ''}</span>${f.state === 'running' ? html`<span class="st-step-live" aria-hidden="true"></span>` : null}${f.state === 'review' ? html`<span class="st-step-dot" aria-hidden="true"></span>` : null}</button>`; })}</nav>`;
@@ -801,7 +821,7 @@
     const done = s => s && (s.state === 'complete' || s.state === 'skipped');
     const accepted = []; let missing = '';
     const need = (f.state === 'blocked' ? f.blocked : '') || st.need || '';   // S29 (FS6): a step's blocking reason only while it is blocked
-    if (id === 'brief') { if (done(st)) accepted.push('the understanding' + (st.note ? ' (' + st.note + ')' : '')); else if ((p.sources || []).length) accepted.push(plural(p.sources.length, 'source') + ' added'); missing = done(st) ? '' : st.state === 'needs_review' ? 'a person to review Axiom\'s understanding' : st.state === 'processing' ? 'Axiom is still reading the material' : 'the brief or the material about the situation'; }
+    if (id === 'brief') { if (done(st)) accepted.push('the understanding' + (st.note ? ' (' + st.note + ')' : '')); else if ((p.sources || []).length) accepted.push(plural(p.sources.length, 'source') + ' added'); missing = done(st) ? (wf.build === 'express' && !done(steps.strategy) ? 'your confirmation of the plan' : '') : st.state === 'needs_review' ? (wf.build === 'express' ? 'your confirmation of the plan: the reading, the objective, the key message and the strategy' : 'a person to review Axiom\'s understanding') : st.state === 'processing' ? 'Axiom is still reading the material' : 'the brief or the material about the situation'; }
     else if (id === 'objectives') { if (done(steps.brief)) accepted.push('the understanding'); if (done(st) && objT) accepted.push('objective "' + objT + '"' + (msgT ? ' and its key message' : '')); missing = done(st) ? '' : need || 'one objective and one key message, confirmed'; }
     else if (id === 'strategy') { if (objT) accepted.push('objective "' + objT + '"'); if (msgT) accepted.push('the key message'); if (done(st)) accepted.push(st.noResponse ? 'a decision not to respond' : 'strategy: ' + (strT || 'chosen')); missing = done(st) ? '' : need || 'a response strategy, or a decision not to respond'; }
     else if (id === 'directions') { if (objT) accepted.push('objective "' + objT + '"'); if (strT) accepted.push('strategy: ' + strT); if (chosen && done(st)) accepted.push('direction "' + chosen.title + '"'); missing = done(st) ? '' : st.why === 'chosen_earlier' ? 'a direction built on the current choices (the selected one is on an earlier choice)' : need || (dirs.length ? 'one direction selected to write from' : 'creative directions to choose from'); }
@@ -820,9 +840,18 @@
       purpose), what it needs, what its main action does (and what it costs), and what is blocking it - with the main action on the
       right and the step's views as tabs. What Axiom proposed and why is the step's own content, below. The longer account of what
       happens next is behind the help toggle, so the work starts high on the page. */
+  /** The steps of a stage that holds several (an express project's Make: Direction, Words, Canvas), for the canvas, which has no
+      stage head of its own: the same buttons the head shows, each with its state; the worker's gate still decides what opens. */
+  function PhaseSteps({ flow, id, onStep }) {
+    const ph = phaseOf(id, flow && flow.build);
+    if (!(flow && onStep && ph.steps.length > 1 && !ph.single)) return null;
+    return html`<div class="st-phasesteps st-phasesteps-bar" role="group" aria-label=${ph.label + ' steps'}>${ph.steps.map((sid, k) => { const sf = flow[sid] || {}; const on = sid === id; const lk = sf.state === 'locked' || sf.state === 'blocked';
+      return html`<button key=${sid} class=${'st-substep ' + (sf.state || '') + (on ? ' on' : '')} aria-current=${on ? 'step' : undefined} data-state=${sf.raw || sf.state || ''} onClick=${() => onStep(sid)} title=${lk ? (sf.blocked || 'locked') : sf.note || ''}><span class="st-substep-n" aria-hidden="true">${sf.state === 'done' ? html`<${Icon} n="check" size=${11} />` : lk ? html`<${Icon} n="lock" size=${10} />` : k + 1}</span>${SUB_LABEL[sid] || sid}<span class="st-vh">, ${FLOW_WORD[sf.state] || ''}</span></button>`; })}</div>`;
+  }
   function StageHead({ id, title, purpose, next, flow, children, tabs, tab, onTab, focusRef, compact, onStep, qs }) {
     const f = (flow && flow[id]) || {};
-    const sd = STAGES.find(x => x.id === id) || {}; const ph = phaseOf(id); const pi = PHASES.indexOf(ph);
+    const bld = flow && flow.build; const sd0 = STAGES.find(x => x.id === id) || {}; const sd = bld === 'express' && XP_STAGE[id] ? Object.assign({}, sd0, XP_STAGE[id]) : sd0;
+    const ph = phaseOf(id, bld); const pi = phasesFor(bld).indexOf(ph);
     const [help, setHelp] = useState(false); const narrow = useNarrow();
     const blocked = f.state === 'blocked' || f.state === 'locked' ? (f.blocked || f.note || 'Locked until the step before is done.') : '';
     const heading = sd.headline || title;
@@ -834,7 +863,7 @@
     </dl>`;
     const tabsEl = tabs ? html`<div class="st-subnav" role="tablist" aria-label=${sd.label + ' views'}>${tabs.map(([k, l, n]) => html`<button key=${k} role="tab" aria-selected=${tab === k} class=${'st-railbtn st-subtab' + (tab === k ? ' on' : '')} onClick=${() => onTab(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}</div>` : null;
     // a phase with several steps shows them here, each with its state; the worker's gate still decides what opens
-    const stepsEl = ph.steps.length > 1 && onStep && flow && ph.steps.some(sid => sid !== 'brief' && flow[sid]) ? html`<div class="st-phasesteps" role="group" aria-label=${ph.label + ' steps'}>${ph.steps.map((sid, k) => { const sf = flow[sid] || {}; const on = sid === id; const lk = sf.state === 'locked' || sf.state === 'blocked';
+    const stepsEl = ph.steps.length > 1 && !ph.single && onStep && flow && ph.steps.some(sid => sid !== 'brief' && flow[sid]) ? html`<div class="st-phasesteps" role="group" aria-label=${ph.label + ' steps'}>${ph.steps.map((sid, k) => { const sf = flow[sid] || {}; const on = sid === id; const lk = sf.state === 'locked' || sf.state === 'blocked';
       return html`<button key=${sid} class=${'st-substep ' + (sf.state || '') + (on ? ' on' : '')} aria-current=${on ? 'step' : undefined} data-state=${sf.raw || sf.state || ''} onClick=${() => onStep(sid)} title=${lk ? (sf.blocked || 'locked') : sf.note || ''}><span class="st-substep-n" aria-hidden="true">${sf.state === 'done' ? html`<${Icon} n="check" size=${11} />` : lk ? html`<${Icon} n="lock" size=${10} />` : k + 1}</span>${SUB_LABEL[sid] || sid}<span class="st-vh">, ${FLOW_WORD[sf.state] || ''}</span></button>`; })}</div>` : null;
     const attention = blocked ? html`<span class="st-pl-att warn st-blocked"><${Chip} kind="warn">blocked</${Chip}> ${blocked}</span>`
       : f.state === 'review' || f.state === 'error' || f.state === 'running' ? html`<span class=${'st-pl-att st-stepstate ' + f.state}><span class="st-stepstate-dot" aria-hidden="true"></span>${f.state === 'review' ? 'Needs review' : f.state === 'error' ? 'Error' : 'Processing'}${f.note ? html`<span class="ov-dim"> - ${f.note}</span>` : null}</span>`
@@ -844,7 +873,7 @@
       : sd.decide ? html`<span class="st-pl-att decide"><span class="st-pl-k">Your decision</span> ${sd.decide}</span>` : null;
     return html`<div class=${'st-stagehead' + (compact ? ' compact' : '')} data-phase=${ph.id}>
       <div class="st-stagehead-row">
-        <div class="st-stagehead-main"><div class="st-eyebrow" aria-hidden="true"><span class="st-eyebrow-n">${String(pi + 1).padStart(2, '0')}</span>${ph.label}${ph.steps.length > 1 ? html`<span class="st-eyebrow-step">${SUB_LABEL[id] || sd.label}</span>` : null}</div><h2 class="st-stage-title" tabIndex="-1" ref=${focusRef} title=${purpose}>${heading}</h2></div>
+        <div class="st-stagehead-main"><div class="st-eyebrow" aria-hidden="true"><span class="st-eyebrow-n">${String(pi + 1).padStart(2, '0')}</span>${ph.label}${ph.steps.length > 1 && !(ph.single && id === ph.steps[0]) ? html`<span class="st-eyebrow-step">${SUB_LABEL[id] || sd.label}</span>` : null}</div><h2 class="st-stage-title" tabIndex="-1" ref=${focusRef} title=${purpose}>${heading}</h2></div>
         ${stepsEl}${tabsEl}
         <div class="st-stagehead-acts">${children}<button class=${'st-iconbtn sm' + (help ? ' on' : '')} aria-expanded=${help ? 'true' : 'false'} onClick=${() => setHelp(!help)} title="What this step needs, produces and decides; what its actions do and cost" aria-label=${'About the ' + (sd.label || title) + ' step'}><${Icon} n="help" size=${15} /></button></div>
       </div>
@@ -928,7 +957,7 @@
      a project made before the guided workflow keeps its status words */
   const PHASE_NEXT = { brief: 'review the understanding', objectives: 'confirm the objective and message', strategy: 'choose how to respond', directions: 'choose a direction', copy: 'mark the copy ready', design: 'build and measure', review: 'approve each piece', export: 'export' };
   const PHASE_ORDER = { brief: 0, objectives: 1, strategy: 2, directions: 3, copy: 4, design: 5, review: 6, export: 7 };
-  const libStage = p => p.phase ? { key: 'p:' + phaseOf(p.phase).id, label: phaseOf(p.phase).label, next: PHASE_NEXT[p.phase] || '', order: PHASE_ORDER[p.phase] || 0, cls: p.phase }
+  const libStage = p => p.phase ? { key: 'p:' + phaseOf(p.phase, p.build).id, label: phaseOf(p.phase, p.build).label, next: PHASE_NEXT[p.phase] || '', order: PHASE_ORDER[p.phase] || 0, cls: p.phase }
     // S30 (QA6): a classic project's status is named by the stage the header shows for it, never the bare status word
     : (() => { const ph = CLASSIC_PHASE[p.status]; return ph ? { key: 'p:' + phaseOf(ph).id, label: phaseOf(ph).label, next: NEXT_WORD[p.status] || '', order: PHASE_ORDER[ph] || 0, cls: ph } : { key: p.status, label: String(p.status || 'brief').replace(/^./, c => c.toUpperCase()), next: NEXT_WORD[p.status] || '', order: STAGE_ORDER[p.status] || 0, cls: p.status }; })();
   const CLASSIC_PHASE = { brief: 'brief', directions: 'directions', production: 'design', review: 'review', approved: 'review', exported: 'export' };
@@ -2147,7 +2176,7 @@
     </section>`;
   }
   const PF_WORD = { ok: 'pass', warn: 'check', bad: 'fix', na: 'n/a' };
-  function ReviewStage({ p, onApprove, onOpen, head, onGo, flow, onMeasure }) {
+  function ReviewStage({ p, onApprove, onOpen, head, onGo, flow, onMeasure, express, onApproveBoth }) {
     const rw = canWrite() && !p.readOnly;
     /* S28: Review measures what has not been measured, here, with the same renderer and filing as Design - a set of six pieces no
        longer means opening six canvases first. Measuring is free and never approves anything. */
@@ -2158,7 +2187,12 @@
       setMeas({ busy: false, done: out }); };
     const cell = (a, part) => { const v = current(a); const ap = standing(a, part); const copyOnly = v && v.mode === 'copy';
       if (part === 'design' && copyOnly) return html`<span class="ov-dim">copy only</span>`;
-      const blocked = part === 'design' && v && v.mode === 'finished' ? (!v.image ? 'The finished creative has not been generated yet.' : !(a.readiness && a.readiness.baked && a.readiness.baked.verified) ? 'Design approval waits for the Creative Partner to read the painted words and the mark back from this exact bitmap: open it in Create and press Review.' : '') : part === 'design' && (!a.readiness || (a.readiness.technical !== 'passed' && a.readiness.technical !== 'not_applicable')) ? 'Design approval waits for a passing validation of this exact version: measure it here (above) or open it in Create.' : part === 'design' && v && v.layout && (v.layout.incomplete || []).length ? 'The campaign mark is not on file.' : '';
+      const blocked = blockOf(a, part);
+      return cellOf(a, part, ap, blocked); };
+    /* why a part cannot be approved yet (design only: the checks of this exact version) */
+    const blockOf = (a, part) => { const v = current(a);
+      return part === 'design' && v && v.mode === 'finished' ? (!v.image ? 'The finished creative has not been generated yet.' : !(a.readiness && a.readiness.baked && a.readiness.baked.verified) ? 'Design approval waits for the Creative Partner to read the painted words and the mark back from this exact bitmap: open it in Create and press Review.' : '') : part === 'design' && (!a.readiness || (a.readiness.technical !== 'passed' && a.readiness.technical !== 'not_applicable')) ? 'Design approval waits for a passing validation of this exact version: measure it here (above) or open it in Create.' : part === 'design' && v && v.layout && (v.layout.incomplete || []).length ? 'The campaign mark is not on file.' : ''; };
+    const cellOf = (a, part, ap, blocked) => {
       return ap ? html`<span><${Chip} kind="ok">${part === 'copy' ? 'ready / approved' : 'approved'}</${Chip}> <span class="ov-dim">v${vnum(a, a.versions.find(x => x.id === ap.version) || {})} by ${ap.by}${ap.carried ? ', unchanged since' : ''}</span>${rw ? html` <button class="ov-link" onClick=${() => onApprove(a, part, 'withdraw')}>withdraw</button>` : null}</span>`
         : rw ? html`<span class="st-apcell"><button class="btn sm ghost" disabled=${!!blocked} title=${blocked} onClick=${() => onApprove(a, part, 'approve')} aria-label=${'Approve ' + part + ' of ' + a.title}>Approve ${part}</button>${blocked ? html`<span class="ov-dim">${blocked}</span>` : null}</span>` : html`<span class="ov-dim">not approved</span>`; };
     const pfs = p.assets.map(a => ({ a, f: preflight(a) }));
@@ -2171,7 +2205,12 @@
       <div class="st-pf-sum" role="status"><b>${clear} of ${p.assets.length}</b> clear the preflight; <b>${flow.counts.approved}</b> approved; <b>${flow.counts.ready}</b> ready to export.</div>
       ${rw && (unmeasured.length || meas) ? html`<div class="st-measure-all" role="status">${meas && meas.busy ? html`<span class="st-spin" aria-hidden="true"></span> Measuring ${meas.n} of ${meas.of}: ${meas.title}...` : meas && meas.done ? html`<span>Measured ${meas.done.filter(x => x.ok).length} of ${meas.done.length}${meas.done.some(x => !x.ok) ? '; could not measure ' + meas.done.filter(x => !x.ok).map(x => x.title).join(', ') + ' (an image or font did not load: open it in Create)' : ''}.</span>${unmeasured.length ? html` <button class="ov-link" onClick=${measureAll}>Measure again</button>` : null}` : html`<span>${unmeasured.length} piece${unmeasured.length === 1 ? ' has' : 's have'} no current measurement.</span> <button class="btn sm" onClick=${measureAll}>Measure ${unmeasured.length === 1 ? 'it' : 'them'} here (free)</button> <span class="ov-dim">Draws each composition at its output size and files the measurement, as Create does. It never approves anything.</span>`}</div>` : null}
       <div class="st-copydeck-scroll"><table class="ov-table st-approvals" aria-label="Preflight and approvals"><thead><tr><th>Asset</th><th>Copy</th><th>Design</th><th>Brand</th><th>Accessibility</th><th>Approvals</th></tr></thead><tbody>
-        ${pfs.map(({ a, f }) => { const v = current(a); const fin = v && v.mode === 'finished'; return html`<tr key=${a.id}><td class="st-pf-asset">${v && v.mode !== 'copy' ? html`<span class="st-pf-thumb"><${Composition} v=${v} a=${a} ns=${p.ns} size="mini" /></span>` : null}<button class="st-lib-open" onClick=${() => onOpen(a.id)}>${a.title}</button><div class="ov-dim">${chanLabel(a.channel)} ${a.format}${fin ? ', finished creative' : ''}; v${vnum(a, v)} of ${vtotal(a)}</div>${f.advice ? html`<div class="ov-dim st-pf-advice">${f.advice}</div>` : null}</td>${pf(f.copy, 'copy')}${pf(f.design, 'design')}${pf(f.brand, 'brand')}${pf(f.access, 'accessibility')}<td class="st-pf-ap"><div><span class="st-lbl">Copy</span> ${cell(a, 'copy')}</div><div><span class="st-lbl">Design</span> ${cell(a, 'design')}</div></td></tr>`; })}
+        ${pfs.map(({ a, f }) => { const v = current(a); const fin = v && v.mode === 'finished'; return html`<tr key=${a.id}><td class="st-pf-asset">${v && v.mode !== 'copy' ? html`<span class="st-pf-thumb"><${Composition} v=${v} a=${a} ns=${p.ns} size="mini" /></span>` : null}<button class="st-lib-open" onClick=${() => onOpen(a.id)}>${a.title}</button><div class="ov-dim">${chanLabel(a.channel)} ${a.format}${fin ? ', finished creative' : ''}; v${vnum(a, v)} of ${vtotal(a)}</div>${f.advice ? html`<div class="ov-dim st-pf-advice">${f.advice}</div>` : null}</td>${pf(f.copy, 'copy')}${pf(f.design, 'design')}${pf(f.brand, 'brand')}${pf(f.access, 'accessibility')}<td class="st-pf-ap">${(() => {
+          // express: one approval of exactly this version, its words and its design together, by a person with one reason
+          const copyOnly = v && v.mode === 'copy'; const one = !!express && rw && !!onApproveBoth && !standing(a, 'copy') && (copyOnly || !standing(a, 'design'));
+          if (!one) return html`<div><span class="st-lbl">Copy</span> ${cell(a, 'copy')}</div><div><span class="st-lbl">Design</span> ${cell(a, 'design')}</div>`;
+          const blk = copyOnly ? '' : blockOf(a, 'design');
+          return html`<div class="st-apcell st-apboth"><button class="btn sm" disabled=${!!blk} title=${blk || 'Your approval of exactly this version: the words and the design, recorded with your reason'} onClick=${() => onApproveBoth(a)} aria-label=${'Approve ' + a.title}>${copyOnly ? 'Approve the words' : 'Approve words and design'}</button>${blk ? html`<span class="ov-dim">${blk}</span>` : null}</div>`; })()}</td></tr>`; })}
       </tbody></table></div>`}
       ${p.assets.length ? html`<${ReviewIssues} p=${p} onOpen=${onOpen} onGo=${onGo} onMeasure=${onMeasure} rw=${rw} />` : null}
       ${p.assets.length ? html`<${ReviewView} p=${p} onOpen=${onOpen} />` : null}
@@ -4539,7 +4578,7 @@
         const formats = {}; o.channels.forEach(c => { formats[c] = (CHANNELS[c] || {}).format || '1:1'; }); if (o.deliverable === 'visual') formats.instagram = '4:5';
         const first = (o.text || '').split('\n').map(x => x.replace(/^#+\s*/, '').trim()).filter(Boolean)[0] || ((o.items || [])[0] || {}).label || '';
         const typeName = ((window.STFlow && window.STFlow.TYPES.find(t => t[0] === o.type)) || [0, 'Project'])[1];
-        const brief = { workflow: 2, projectType: o.type, campaignMode: o.campaignMode, channels: o.channels, deliverable: o.deliverable, formats, deliverables: (o.deliverable === 'copy' ? 'Copy only for ' : o.deliverable === 'visual' ? 'One visual for ' : 'Coordinated set for ') + o.channels.map(chanLabel).join(', '), creationMode: 'editable', imageryTiming: 'after_copy', campaignConfirmed: o.campaignMode !== 'detect', assumptions: o.campaignMode === 'standalone' ? ['Standalone: no campaign identity or campaign facts apply'] : [] };
+        const brief = { workflow: 2, build: o.build === 'express' ? 'express' : 'detailed', projectType: o.type, campaignMode: o.campaignMode, channels: o.channels, deliverable: o.deliverable, formats, deliverables: (o.deliverable === 'copy' ? 'Copy only for ' : o.deliverable === 'visual' ? 'One visual for ' : 'Coordinated set for ') + o.channels.map(chanLabel).join(', '), creationMode: 'editable', imageryTiming: 'after_copy', campaignConfirmed: o.campaignMode !== 'detect', assumptions: o.campaignMode === 'standalone' ? ['Standalone: no campaign identity or campaign facts apply'] : [] };
         const pr = await call('/studio/project', { ns: o.ns, campaign, title: (o.title || first || typeName + ' ' + new Date().toLocaleDateString('en-AU')).slice(0, 80), brief, idem: 'p:' + o.ns + ':' + Date.now() });
         if (o.ns !== clientRef.current) { resumed.current = true; clientRef.current = o.ns; setClientId(o.ns); }
         setStarting(x => x && Object.assign({}, x, { at: 1 }));
@@ -4581,17 +4620,18 @@
         if (opts.then) await opts.then();
         return true;
       } catch (e) {
-        if (e.status === 409 && e.code === 'affects_downstream') { setImpactQ({ step, body, opts, impact: e.body ? e.body.impact : (e.impact || {}), title: step === 'objectives' ? 'Changing this objective may affect your current Creative Directions' : 'Changing the strategy may affect your current Creative Directions' }); return false; }
+        if (e.status === 409 && e.code === 'affects_downstream') { setImpactQ({ step, body, opts, impact: e.body ? e.body.impact : (e.impact || {}), title: step === 'objectives' ? 'Changing this objective may affect your current Creative Directions' : step === 'plan' ? 'Changing the plan may affect your current Creative Directions' : 'Changing the strategy may affect your current Creative Directions' }); return false; }
         if (e.status === 409) await reload();
         fail(e, 'The ' + step + ' was not confirmed'); return false;
       } finally { setBusy(''); }
     };
     const answerImpact = async (ans) => {
       const q = impactQ; setImpactQ(null); if (!q || !ans) return;
-      if (q.kind === 'direction') { if (q.classic) await chooseDirection(q.d.id, ans); else await chooseGuided(q.d, ans); return; }
+      if (q.kind === 'direction') { if (q.classic) await chooseDirection(q.d.id, ans); else if (q.express) await chooseExpress(q.d, ans); else await chooseGuided(q.d, ans); return; }
       const ok = await confirmStep(q.step, Object.assign({}, q.body, { acknowledge: ans }), q.opts);
       // "Update directions": the earlier work stays, and new directions are built on the new choice (one model call)
-      if (ok && ans === 'update') { const d = pRef.current; const wf = d && d.workflow; if (wf && wf.steps.directions && wf.steps.directions.state !== 'locked') await directGuided({ n: 3 }); else setNotice({ kind: 'info', title: 'The earlier work is kept, marked as built on the earlier choice.', text: 'Confirm the strategy to build new directions on the new choice.' }); }
+      // (the express plan asks for its directions itself when the person pressed "Confirm and propose": never twice)
+      if (ok && ans === 'update' && !(q.step === 'plan' && q.opts && q.opts.then)) { const d = pRef.current; const wf = d && d.workflow; if (wf && wf.steps.directions && wf.steps.directions.state !== 'locked') await directGuided({ n: 3 }); else setNotice({ kind: 'info', title: 'The earlier work is kept, marked as built on the earlier choice.', text: 'Confirm the strategy to build new directions on the new choice.' }); }
     };
     /** Directions in a guided project: fresh, alternatives, refine or merge - one model call; the board shows them where they land. */
     const directGuided = (o) => guard('direct:' + pidRef.current, async () => {
@@ -4610,6 +4650,37 @@
         if (e.status === 409 && e.code === 'affects_downstream' && !decision) { setImpactQ({ kind: 'direction', d, impact: (e.body && e.body.impact) || e.impact || {} }); return; }
         if (e.status === 409) await reload(); fail(e, 'The direction was not selected'); } finally { setBusy(''); }
     };
+    /* ---- the Express build (23 November 2026): the same steps and the same worker rules, asked for in fewer presses ---- */
+    /** The plan confirmed once - the reading, the objective with its key message, the strategy and the campaign in one request
+        (nothing spent) - and then, when the button said so, the creative directions: one model call, on the Direction page. */
+    const confirmPlan = async (body, gen) => {
+      const then = gen ? async () => { setView('directions', true); await directGuided({ n: 3 }); } : null;
+      if (!body) { if (then) await then(); return true; }
+      return confirmStep('plan', body, { then });
+    };
+    /** Not responding is a decision with its reason: the objective it is taken against is confirmed with the reading, then the reason is asked. */
+    const noResponseExpress = async (o) => { const ok = await confirmStep('plan', Object.assign({ upto: 'objectives' }, o || {})); if (ok) await intelDecision('no_response', ''); };
+    /** Choosing a direction writes the copy from it (one model call, stated on the button, no image) and opens the canvas on the
+        result, because the person asked for exactly that. A change of direction over pieces already written asks first, as in a
+        detailed project, and leaves them to the person: nothing is rewritten by itself. */
+    const chooseExpress = async (d, decision) => {
+      const had = ((pRef.current || {}).assets || []).length;
+      try { setBusy('Selecting the direction'); await call('/studio/direction/choose', Object.assign({ id: d.id }, decision ? { decision } : {})); await reload(); }
+      catch (e) {
+        if (e.status === 409 && e.code === 'affects_downstream' && !decision) { setImpactQ({ kind: 'direction', express: true, d, impact: (e.body && e.body.impact) || e.impact || {} }); return; }
+        if (e.status === 409) await reload(); fail(e, 'The direction was not selected'); return; } finally { setBusy(''); }
+      if (had) { ready('copy', 'Direction selected: ' + d.title, decision === 'update' ? 'The pieces written from the earlier direction are marked in Words, where you can write new copy from this one.' : 'The pieces already written are kept.', 'Open the words'); return; }
+      const at = viewRef.current;
+      await produce({});
+      const d2 = pRef.current; const A2 = (d2 && d2.assets) || []; if (!A2.length || viewRef.current !== at) return;   // nothing written (the notice says why), or the person moved on
+      const vis = A2.filter(x => (current(x) || {}).mode !== 'copy');
+      setNotice(null);
+      if (vis.length) { setSelAsset(vis[0].id); setView('asset', true); toastMsg(A2.length + ' piece' + (A2.length === 1 ? '' : 's') + ' written: the canvas is open'); }
+      else { setSelAsset(A2[0].id); setView('copywrite', true); toastMsg(A2.length + ' piece' + (A2.length === 1 ? '' : 's') + ' of copy written'); }
+    };
+    /** One approval in Ship: the words and the design of exactly this version, approved by a person with one reason. The copy
+        approval is recorded first (with a short reason, so the reason is filed once, on the design); a copy-only piece has no design. */
+    const approveBoth = (as) => { const v = current(as) || {}; setDialog({ kind: 'reason', part: v.mode === 'copy' ? 'copy' : 'design', both: v.mode !== 'copy' && !standing(as, 'copy'), what: 'approve', asset: as.id, title: as.title, version: vnum(as, v), versionId: v.id, browserOnly: v.mode !== 'copy' && as.readiness && Array.isArray(as.readiness.browserOnly) ? as.readiness.browserOnly : null, copyOpen: !standing(as, 'copy') ? copyOpen(v) : null }); };
     const updateDirection = async (d, patch, reason) => { try { const base = {}; Object.keys(patch || {}).forEach(k => { if (typeof d[k] === 'string' || d[k] == null) base[k] = d[k] == null ? '' : d[k]; }); await call('/studio/direction/update', { id: d.id, patch, base, reason: reason || undefined });   /* P50: the fields as this editor saw them */ await reload(); if (patch.saved != null) toastMsg(patch.saved ? 'Saved for later' : 'No longer saved'); if (patch.archived) toastMsg('Set aside; the reason is recorded'); } catch (e) { fail(e, 'The direction was not changed'); } };
     const duplicateDirection = async (d) => { try { await call('/studio/direction/duplicate', { id: d.id }); await reload(); toastMsg('Duplicated "' + d.title + '"'); } catch (e) { fail(e, 'The direction was not duplicated'); } };
     /** The production mode, chosen in Create once the words are ready: editable queues the planned imagery; finished paints each piece. */
@@ -4843,8 +4914,12 @@
     });
     const recordDecision = async (why) => {
       const d = dialog; setDialog(null); if (!why) return;
-      try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, version: d.versionId || undefined }); await reload(); }
+      // express, one approval: the words first (a short reason, so the person's reason is filed once, with the design), then the
+      // design of the same version. Should the design be refused, the words stay approved and the refusal says what is missing.
+      try { if (d.both) await call('/studio/approve', { asset: d.asset, part: 'copy', decision: 'approve', reason: 'with design', version: d.versionId || undefined });
+        await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, version: d.versionId || undefined }); await reload(); }
       catch (e) {
+        if (d.both) await reload();
         // painted words nobody could verify, or an inconsistent inspection: a person may still approve, having looked
         if (e.status === 409 && /baked_text_unverified|inspection_inconsistent/.test(e.code || e.message) && (await askStudio({ title: 'Approve anyway?', text: (e.detail || e.message) + '\n\nApprove only if you have checked the tile yourself; the decision is recorded as yours.', ok: 'Approve anyway' }))) { try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, acknowledgeInspection: true, version: d.versionId || undefined }); await reload(); } catch (e2) { fail(e2, 'The decision was not recorded'); } }
         else fail(e, 'The decision was not recorded');
@@ -4971,7 +5046,7 @@
       if (id === 'brief-details') { setView('brief', true); setTimeout(() => { const el = document.getElementById('st-brief-details'); if (el) { el.open = true; el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } }, 60); return; }
       if (id === 'brief' || id === 'objectives' || id === 'strategy' || id === 'directions') setView(id, true);
       else if (id === 'copy') { if (p && p.assets[0] && !a) setSelAsset(p.assets[0].id); setView('copywrite', true); }
-      else if (id === 'design') { const guided = !!(p && p.workflow && p.workflow.v === 2); const needsMode = guided && !(p.brief || {}).production && visual.length && !visual.some(x => { const v = current(x); return v && v.image && v.image.key; }); if (!visual.length || needsMode) setView('board', true); else { if (!a || visual.indexOf(a) < 0) setSelAsset(visual[0].id); setView('asset', true); } }
+      else if (id === 'design') { const guided = !!(p && p.workflow && p.workflow.v === 2); const needsMode = guided && p.workflow.build !== 'express' && !(p.brief || {}).production && visual.length && !visual.some(x => { const v = current(x); return v && v.image && v.image.key; }); if (!visual.length || needsMode) setView('board', true); else { if (!a || visual.indexOf(a) < 0) setSelAsset(visual[0].id); setView('asset', true); } }
       else if (id === 'review') setView('review', true); else if (id === 'export') setView('export', true);
       else if (id === 'brand' || id === 'context') setView(id, true);
     };
@@ -4979,7 +5054,7 @@
     const openAsset = id => { setSelAsset(id); setSelField(null); setView('asset'); };
     /* Alt+1..7 jumps to a step from anywhere in the Studio, except while typing; the digit is read by its key (e.code), since
        Option with a digit types a symbol on a Mac */
-    useEffect(() => { const h = e => { if (!pRef.current || !e.altKey || e.ctrlKey || e.metaKey) return; const dm = /^(?:Digit|Numpad)([1-9])$/.exec(e.code || ''); const n = dm ? +dm[1] : +e.key; if (n >= 1 && n <= PHASES.length && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); goStage(phaseTarget(flow, PHASES[n - 1])); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); });
+    useEffect(() => { const h = e => { if (!pRef.current || !e.altKey || e.ctrlKey || e.metaKey) return; const dm = /^(?:Digit|Numpad)([1-9])$/.exec(e.code || ''); const n = dm ? +dm[1] : +e.key; const phs = phasesFor(flow && flow.build); if (n >= 1 && n <= phs.length && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); goStage(phaseTarget(flow, phs[n - 1])); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); });
 
     const inRefine = !!(p && view === 'asset' && a && !cmp);
     const liveJobs = p ? (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running') : [];
@@ -5022,8 +5097,9 @@
     </header>`;
     const helpPanel = helpOpen ? html`<div class="st-help" id="st-help" role="region" aria-label="How the Studio works">
       <div class="st-help-head"><b>How the Studio works</b><button class="ov-link" onClick=${() => setHelpOpen(false)}>close</button></div>
-      <ol class="st-help-steps">${PHASES.map(ph => html`<li key=${ph.id}><b>${ph.label}</b> ${ph.sub}.${ph.steps.map(sid => { const s0 = STAGES.find(x => x.id === sid); return html` <span class="ov-dim">${ph.steps.length > 1 ? (SUB_LABEL[sid] || s0.label) + ': ' : ''}${s0.purpose}</span>`; })}</li>`)}</ol>
-      <div class="ov-dim">Nothing is generated, approved, deleted or moved for you: every paid action states its cost first and asks; a change to an earlier choice asks what to do with the work built on it. Alt+1..7 moves between the stages; on the canvas, ? lists the editing keys.</div>
+      ${p && flow && flow.wf && flow.wf.v === 2 ? html`<div class="st-help-build" role="note"><b>${flow.build === 'express' ? 'Express build' : 'Detailed build'}:</b> ${flow.build === 'express' ? 'three stages, with the plan confirmed once and each step starting the next. The seven steps of a detailed build are the same work, each confirmed on its own.' : 'seven steps, each confirmed before the next. An express build does the same work in three stages.'} <span class="ov-dim">The way a project is built is chosen when it is created.</span></div>` : null}
+      <ol class="st-help-steps">${phasesFor(p && flow && flow.build).map(ph => html`<li key=${ph.id}><b>${ph.label}</b> ${ph.sub}.${ph.steps.map(sid => { const s0 = STAGES.find(x => x.id === sid); return html` <span class="ov-dim">${ph.steps.length > 1 ? (SUB_LABEL[sid] || s0.label) + ': ' : ''}${s0.purpose}</span>`; })}</li>`)}</ol>
+      <div class="ov-dim">${p && flow && flow.build === 'express' ? 'Nothing is generated, approved or deleted for you: every paid action states its cost on the button; the page moves on only where the button you pressed said it would; a change to an earlier choice asks what to do with the work built on it.' : 'Nothing is generated, approved, deleted or moved for you: every paid action states its cost first and asks; a change to an earlier choice asks what to do with the work built on it.'} Alt+1..${phasesFor(p && flow && flow.build).length} moves between the stages; on the canvas, ? lists the editing keys.</div>
       <${ReportProblem} p=${p} view=${view} assetId=${selAsset} />
       <div class="st-help-theme"><span class="st-lbl">Appearance</span><${ThemeSwitch} value=${appearance} onChange=${setAppearance} /><span class="ov-dim">for this browser; the artwork and its exports are unaffected</span></div>
     </div>` : null;
@@ -5039,6 +5115,7 @@
     const jobsLineLive = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} link=${link} notify=${notify} ro=${!canWrite()} open=${actOpen} liveOnly=${!actOpen} compact=${true} busy=${busy} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
 
     const F = window.STFlow; const guided = !!(p && p.workflow && p.workflow.v === 2 && F);
+    const xp = guided && p.workflow.build === 'express';   // the Express build: three stages over the same seven steps
     const lockedAt = id => guided && flow && flow[id] && flow[id].state === 'locked';
     const lastJob = st => p ? ((p.jobs || []).filter(j => j.stage === st).sort((x, y) => (y.created || 0) - (x.created || 0))[0] || null) : null;
     const notUsed = step => html`<div class="st-empty-state"><b>Not used in this project.</b><span>This project was made before the guided workflow${step === 'objectives' ? ': its objective and key message are written in the Brief' : ': its strategy, if any, is in the Brief'}. New projects choose ${step === 'objectives' ? 'their objectives' : 'their strategy'} here, from Axiom's reading of the brief.</span><button class="btn sm ghost" onClick=${() => goStage('brief')}>Open the Brief</button></div>`;
@@ -5051,30 +5128,30 @@
     else if (starting && view === 'brief') centre = html`<div class="st-centre-pad"><${StartingCard} s=${starting} /></div>`;
     else if (cmp && a) centre = html`<${CompareView} a=${a} ns=${p.ns} vA=${a.versions.find(v => v.id === cmp.a)} vB=${a.versions.find(v => v.id === cmp.b)} onClose=${() => setCmp(null)} onRestore=${vid => restore(a, vid)} />`;
     else if (lockedAt(stage) && view !== 'brand' && view !== 'context') centre = Staged(stage, null, html`<${F.LockedStage} step=${stage} wf=${p.workflow} onGo=${goStage} />`);
-    else if (view === 'brief' && guided) centre = Staged('brief', null, html`<${F.BriefWorkspace} key=${p.id} p=${p} client=${client} kit=${kit} busy=${busy} prov=${prov} wf=${p.workflow} job=${lastJob('analyse')} now=${now} durations=${(status || {}).durations} onAnalyse=${analyseGuided} onConfirm=${() => confirmStep('brief', {}, { then: async () => { const st = ((pRef.current || {}).workflow || {}).steps || {}; if (st.objectives && st.objectives.state !== 'locked' && (st.brief || {}).state === 'complete') setView('objectives', true); } })} onCampaign=${setCampaign} onRetry=${() => { const j = lastJob('analyse'); if (j) retryJob(j); }} onCancel=${() => { const j = lastJob('analyse'); if (j) cancelJob(j.id); }} onGo=${goStage} onSaveBrief=${saveBriefPatch} />`);
+    else if (view === 'brief' && guided) centre = Staged('brief', null, html`<${F.BriefWorkspace} key=${p.id} p=${p} client=${client} kit=${kit} busy=${busy} prov=${prov} wf=${p.workflow} job=${lastJob('analyse')} now=${now} durations=${(status || {}).durations} onAnalyse=${analyseGuided} onConfirm=${() => confirmStep('brief', {}, { then: async () => { const st = ((pRef.current || {}).workflow || {}).steps || {}; if (st.objectives && st.objectives.state !== 'locked' && (st.brief || {}).state === 'complete') setView('objectives', true); } })} onCampaign=${setCampaign} onRetry=${() => { const j = lastJob('analyse'); if (j) retryJob(j); }} onCancel=${() => { const j = lastJob('analyse'); if (j) cancelJob(j.id); }} onGo=${goStage} onSaveBrief=${saveBriefPatch} express=${xp} onPlan=${confirmPlan} onNoResponse=${noResponseExpress} onRespond=${() => intelDecision('respond_anyway', '', true)} />`);
     else if (view === 'objectives') centre = Staged('objectives', null, p.intel && F ? html`<${F.ObjectivesStep} key=${p.intel.id} p=${p} busy=${busy} onConfirm=${body => guided ? confirmStep('objectives', body, { then: () => setView('strategy', true) }) : selectIntel({ objective: body.objective, message: body.message })} onDecision=${intelDecision} />` : notUsed('objectives'));
     else if (view === 'strategy') centre = Staged('strategy', null, p.intel && F ? html`<${F.StrategyStep} key=${p.intel.id} p=${p} kit=${kit} busy=${busy} wf=${p.workflow} job=${lastJob('direct')} now=${now} durations=${(status || {}).durations} onConfirm=${(body, gen) => !body ? directGuided({ n: 3 }) : guided ? confirmStep('strategy', body, { then: gen ? () => directGuided({ n: 3 }) : null }) : selectIntel({ strategy: body.strategy })} onDecision=${intelDecision} onDraftStrategy=${draftStrategy} onSaveStrategy=${st => saveBriefPatch({ strategy: st })} onRetry=${() => { const j = lastJob('direct'); if (j) retryJob(j); }} onGo=${goStage} />` : notUsed('strategy'));
-    else if (view === 'directions' && guided) centre = Staged('directions', null, html`<${F.DirectionsBoard} p=${p} kit=${kit} busy=${busy} wf=${p.workflow} job=${lastJob('direct')} now=${now} durations=${(status || {}).durations} onDirect=${directGuided} onChoose=${chooseGuided} onUpdate=${updateDirection} onDuplicate=${duplicateDirection} onDecision=${intelDecision} onRetry=${() => { const j = lastJob('direct'); if (j) retryJob(j); }} onGo=${goStage} onKeep=${d => keepEarlier(null, [d.id])} />`);
+    else if (view === 'directions' && guided) centre = Staged('directions', null, html`<${F.DirectionsBoard} p=${p} kit=${kit} busy=${busy} wf=${p.workflow} job=${lastJob('direct')} now=${now} durations=${(status || {}).durations} onDirect=${directGuided} onChoose=${xp ? chooseExpress : chooseGuided} express=${xp} prov=${prov} copyJob=${xp ? lastJob('copy') : null} onUpdate=${updateDirection} onDuplicate=${duplicateDirection} onDecision=${intelDecision} onRetry=${() => { const j = lastJob('direct'); if (j) retryJob(j); }} onGo=${goStage} onKeep=${d => keepEarlier(null, [d.id])} />`);
     else if (view === 'brief') centre = html`<${BriefView} key=${p.id} p=${p} head=${headOf('brief', tabsFor('brief'))} prov=${prov} onGo=${goStage} onSave=${saveBrief} onDirect=${direct} onProduce=${o => produce(o || {})} onCampaign=${setCampaign} onStrategy=${draftStrategy} onAnalyse=${analyse} onChoose=${chooseDirection} onSelect=${selectIntel} onDecision=${intelDecision} onVariants=${produceVariants} onKit=${writeKit} kit=${kit} client=${client} busy=${busy} />`;
     else if (view === 'sources') centre = Staged('brief', null, html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`);
     else if (view === 'references') centre = Staged('brief', null, html`<${ReferencesView} p=${p} kit=${kit} onAdd=${addReference} onAnalyse=${analyseReference} onRecipe=${saveRecipe} onMeta=${saveRefMeta} onObs=${refObs} onTeach=${teachObs} busy=${busy} />`);
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} head=${headOf('directions')} prov=${prov} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
     else if ((view === 'copywrite' || view === 'copy') && guided && !p.assets.length) centre = Staged('copy', null, html`<${F.CopyStart} key=${'cs:' + p.id} p=${p} busy=${busy} prov=${prov} job=${lastJob('copy')} now=${now} durations=${(status || {}).durations} onGenerate=${() => produce({})} onSaveBrief=${saveBriefPatch} onRetry=${() => { const j = lastJob('copy'); if (j) retryJob(j); }} onGo=${goStage} />`);
     else if (view === 'copywrite') centre = html`<${CopyStage} p=${p} a=${a} head=${headOf('copy', tabsFor('copy'))} activity=${jobsLine} banner=${guided ? html`<${F.StaleCopy} p=${p} wf=${p.workflow} busy=${busy} onRewrite=${() => produce({})} onKeep=${ids => keepEarlier(ids)} />` : null} prov=${prov} busy=${busy} onSel=${id => { if (id !== selAssetRef.current) { const st0 = history.state && history.state.studio; if (st0 && st0.pid === pidRef.current && !st0.asset && selAssetRef.current) try { history.replaceState({ ax: 1, v: 'studio', studio: Object.assign({}, st0, { asset: selAssetRef.current }) }, ''); } catch (e) {} pushHist(pidRef.current, viewRef.current, id); } setSelAsset(id); setSelField(null); }} onEdit=${editAsset} conflict=${conflict} onConflict=${resolveConflict} onReady=${readyCopy} onDirect=${directTeam} onPick=${pickAlternative} onWrite=${() => produce({})} onGo=${goStage} onDraftState=${onDraftState} />`;
-    else if (view === 'board' && guided && !(p.brief || {}).production && p.assets.some(x => { const v = current(x); return v && v.mode !== 'copy' && !(v.image && v.image.key); }) && !(p.jobs || []).some(j => j.stage === 'render')) centre = Staged('design', null, html`${jobsLine}<${F.ProductionModes} p=${p} busy=${busy} prov=${prov} onProduce=${produceMode} /><${BoardView} p=${p} onOpen=${openAsset} />`);
+    else if (view === 'board' && guided && !(p.brief || {}).production && p.assets.some(x => { const v = current(x); return v && v.mode !== 'copy' && !(v.image && v.image.key); }) && !(p.jobs || []).some(j => j.stage === 'render')) centre = Staged('design', null, html`${jobsLine}<${F.ProductionModes} p=${p} busy=${busy} prov=${prov} express=${xp} onProduce=${produceMode} /><${BoardView} p=${p} onOpen=${openAsset} />`);
     else if (view === 'board') { const wait = p.assets.filter(needsImagery); const imgRunning = (p.jobs || []).some(j => j.stage === 'render' && (j.state === 'queued' || j.state === 'running')); centre = Staged('design', p.assets.length ? html`${wait.length && canWrite() && !p.readOnly ? html`<button class="btn sm" disabled=${!!busy || (prov && !prov.gemini) || imgRunning} title=${prov && !prov.gemini ? 'Image generation is not configured on the worker' : imgRunning ? 'Renders are already running' : 'One paid image generation per planned region, confirmed first'} onClick=${() => generateImagery(wait)}>Generate imagery (${wait.length})</button>` : null}${p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<button class=${'btn sm' + (wait.length ? ' ghost' : '')} onClick=${() => goStage('design')}>Open the canvas</button>` : html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>`}` : canWrite() && !p.readOnly ? html`<button class="btn sm" onClick=${() => goStage('copy')}>Write the copy first</button>` : null, html`${jobsLine}${!p.assets.length ? html`<div class="st-empty-state"><b>Nothing to design yet.</b><span>The words come first: write and check the copy, then build each creative here.</span></div>` : !p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<div class="st-empty-state"><b>Copy only: nothing to design.</b><span>This project's pieces are words for the channels, with no creative to build. Approve them in Review.</span></div>` : wait.length ? html`<div class="st-imagery-wait" role="status"><b>${wait.length} composition${wait.length === 1 ? '' : 's'} waiting for imagery.</b> <span class="ov-dim">${(p.brief || {}).imageryTiming === 'after_copy' ? 'The brief holds the imagery until the copy is ready: ' + p.assets.filter(x => wait.indexOf(x) >= 0 && standing(x, 'copy')).length + ' of them have their copy marked ready' + (wait.some(x => standing(x, 'copy') && (p.jobs || []).some(jj => jj.stage === 'render' && jj.asset === x.id && jj.state === 'failed')) ? '; for those, the render failed: press Generate imagery to try again.' : '.') : 'Their renders have not landed (or did not run).'}</span></div>` : null}<${BoardView} p=${p} onOpen=${openAsset} />`); }
     else if (view === 'kit') centre = Staged('copy', null, html`<${KitView} p=${p} busy=${busy} onWrite=${writeKit} onUpdate=${updateText} onVerdict=${textVerdict} />`);
     else if (view === 'sequence') centre = Staged('copy', null, html`<${SequenceView} p=${p} onPlan=${planSequence} onOpen=${openAsset} busy=${busy} />`);
     else if (view === 'production') centre = Staged('design', null, html`<${ProductionView} p=${p} onRun=${async () => pump(await reload())} onOpen=${openAsset} onReview=${() => setView('review', true)} onRevise=${reviseFromImpact} />`);
     else if (view === 'jobs') centre = Staged('design', null, html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${status ? status.budget : null} />`);
     else if (view === 'copy') centre = Staged('copy', null, html`<${CopyView} p=${p} onEdit=${editAsset} onOpen=${id => { setSelAsset(id); setView('copywrite'); }} />`);
-    else if (view === 'review') centre = html`<${ReviewStage} p=${p} head=${headOf('review', tabsFor('review'))} flow=${flow} onGo=${goStage} onApprove=${approve} onOpen=${openAsset} onMeasure=${async id => { const okd = await composeExport(pRef.current, id); await reload(); return okd; }} />`;
+    else if (view === 'review') centre = html`<${ReviewStage} p=${p} head=${headOf('review', tabsFor('review'))} flow=${flow} express=${xp} onApproveBoth=${approveBoth} onGo=${goStage} onApprove=${approve} onOpen=${openAsset} onMeasure=${async id => { const okd = await composeExport(pRef.current, id); await reload(); return okd; }} />`;
     else if (view === 'export') centre = html`<${ExportView} p=${p} head=${headOf('export')} flow=${flow} state=${exportState} onGo=${goStage} onExport=${doExport} onClickup=${ready => setDialog({ kind: 'clickup', ready })} />`;
     else if (view === 'brand') centre = html`<div class="st-centre-pad"><${BrandView} p=${p} tick=${ctxTick} /></div>`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
-    else if (a) { const i = p.assets.indexOf(a); const dt = tabsFor('design'); const dlead = html`<h2 class="st-vh" tabIndex="-1" ref=${titleRef}>Design: ${a.title}</h2><div class="st-subnav st-designtabs" role="tablist" aria-label="Design views">${dt.tabs.map(([k, l, n]) => html`<button key=${k} role="tab" aria-selected=${dt.tab === k} class=${'st-railbtn st-subtab' + (dt.tab === k ? ' on' : '')} onClick=${() => dt.onTab(k)}>${k === 'asset' ? 'Canvas' : k === 'production' ? 'Recipes' : l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}</div>`;
+    else if (a) { const i = p.assets.indexOf(a); const dt = tabsFor('design'); const dlead = html`<h2 class="st-vh" tabIndex="-1" ref=${titleRef}>Design: ${a.title}</h2>${xp ? html`<${PhaseSteps} flow=${flow} id="design" onStep=${goStage} />` : null}<div class="st-subnav st-designtabs" role="tablist" aria-label="Design views">${dt.tabs.map(([k, l, n]) => html`<button key=${k} role="tab" aria-selected=${dt.tab === k} class=${'st-railbtn st-subtab' + (dt.tab === k ? ' on' : '')} onClick=${() => dt.onTab(k)}>${k === 'asset' ? 'Canvas' : k === 'production' ? 'Recipes' : l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}</div>`;
       const dstep = (() => { const dq = stageQuestions(p, flow, 'design'); const sd = STAGES.find(x => x.id === 'design'); return dq ? html`<details class="st-dstep"><summary title=${'About the Create step: ' + (dq.missing ? 'missing ' + dq.missing : 'nothing missing')}><span class=${'st-dstep-dot' + (dq.missing ? ' warn' : ' ok')} aria-hidden="true"></span><${Icon} n="help" size=${14} /><span class="st-vh">About this step</span></summary><div class="st-dstep-pop" role="note"><dl class="st-five"><div class="st-five-doing"><dt>Doing</dt><dd>${sd.sub}: ${sd.purpose}</dd></div><div class="st-five-missing"><dt>Missing</dt><dd>${dq.missing || 'nothing'}</dd></div><div class="st-five-accepted"><dt>Accepted</dt><dd>${dq.accepted.length ? dq.accepted.join('; ') : 'nothing yet'}</dd></div><div class="st-five-act"><dt>Main action</dt><dd>${sd.act}</dd></div><div class="st-five-ai"><dt>AI</dt><dd>${sd.ai + costNote(sd.id)}</dd></div><div class="st-five-next"><dt>Next</dt><dd>${sd.then}</dd></div></dl></div></details>` : null; })();
-      const dprimary = html`${dstep}${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm st-primary" onClick=${() => goStage('review')} title="Continue to Review"><span class="st-cb-long">Continue to </span>Review</button>` : null}`;
+      const dprimary = html`${dstep}${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm st-primary" onClick=${() => goStage('review')} title=${xp ? 'Continue to Ship: approve each piece and deliver' : 'Continue to Review'}><span class="st-cb-long">Continue to </span>${xp ? 'Ship' : 'Review'}</button>` : null}`;
       centre = html`<div class="st-centre-pad st-refine">${jobsLineLive}<${AssetView} key=${a.id} lead=${dlead} primary=${dprimary} p=${p} a=${a} kit=${kit} slot=${slot} tool=${tool} setTool=${setTool} preview=${preview} setPreview=${setPreview} onBrand=${() => setView('brand', true)} onContext=${() => setView('context', true)} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onUndoRepair=${undoRepair} onLayoutDirty=${setLayoutDirty} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onRegenerate=${regenerateFinished} onDerive=${deriveEditable} onPreservation=${filePreservation} onVariant=${layoutVariant} onRetryJob=${retryJob} sugg=${sugg} onSuggRefresh=${r => fetchSugg(r !== false)} onSelection=${setSelLayers} onPage=${pageAction} onResize=${resizeAsset} onTemplate=${templateAsset} resized=${resized[a.id]} busy=${busy} /></div>`; }
     else centre = Staged('design', null, html`<div class="st-empty-state"><b>${p.assets.length ? 'Choose an asset on the left.' : 'Nothing to design yet.'}</b><span>${p.assets.length ? 'Each asset opens here with its words, layout and imagery.' : p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction, then write the copy.' : 'Write the copy first.'}</span>${!p.assets.length ? html`<button class="btn sm" onClick=${() => goStage(p.directions.length && !p.directions.some(d => d.chosen) ? 'directions' : 'copy')}>${p.directions.length && !p.directions.some(d => d.chosen) ? 'Go to Direction' : 'Go to Copy'}</button>` : null}</div>`);
 
@@ -5132,7 +5209,7 @@
       ${impactQ && F ? html`<${F.ImpactDialog} q=${impactQ} onAnswer=${answerImpact} />` : null}
       <${AskHost} />
       ${editConflict ? html`<${ConflictDialog} c=${editConflict} onDone=${v => editConflict.res(v)} />` : null}
-      ${dialog && dialog.kind === 'reason' ? html`<${ReasonDialog} title=${(dialog.what === 'approve' ? 'Approve ' : 'Reject ') + dialog.part} prompt=${'On ' + dialog.title + ', version ' + dialog.version + ' (the current one). Approval is recorded as client acceptance of this exact version, never as performance.' + (dialog.browserOnly && dialog.browserOnly.length ? ' The ' + dialog.browserOnly.map(m => m.role).join(' and ') + ' ' + (dialog.browserOnly.length === 1 ? 'was' : 'were') + ' checked in the browser only (' + dialog.browserOnly.map(m => m.why).join('; ') + '): look at ' + (dialog.browserOnly.length === 1 ? 'it' : 'them') + ' on the tile first. The approval records this.' : '') + (dialog.copyOpen && dialog.copyOpen.length ? ' The copy still carries ' + dialog.copyOpen.join(', ') + ' (see the checks): approve only if that is what the client accepted. The approval records it.' : '')} onDone=${recordDecision} />` : null}
+      ${dialog && dialog.kind === 'reason' ? html`<${ReasonDialog} title=${dialog.both ? 'Approve the words and the design' : (dialog.what === 'approve' ? 'Approve ' : 'Reject ') + dialog.part} prompt=${'On ' + dialog.title + ', version ' + dialog.version + ' (the current one). Approval is recorded as client acceptance of this exact version, never as performance.' + (dialog.browserOnly && dialog.browserOnly.length ? ' The ' + dialog.browserOnly.map(m => m.role).join(' and ') + ' ' + (dialog.browserOnly.length === 1 ? 'was' : 'were') + ' checked in the browser only (' + dialog.browserOnly.map(m => m.why).join('; ') + '): look at ' + (dialog.browserOnly.length === 1 ? 'it' : 'them') + ' on the tile first. The approval records this.' : '') + (dialog.copyOpen && dialog.copyOpen.length ? ' The copy still carries ' + dialog.copyOpen.join(', ') + ' (see the checks): approve only if that is what the client accepted. The approval records it.' : '')} onDone=${recordDecision} />` : null}
     </div>`;
   }
 

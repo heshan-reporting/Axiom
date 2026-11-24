@@ -46,7 +46,7 @@ Run one platform by hand (the agent does this when the app asks):
   python3 tools/reach_social.py facebook --ns aep --key $AXIOM_KEY [--dry-run --out rows.json]
   python3 tools/reach_social.py --status
 """
-import argparse, json, os, re, shutil, subprocess, sys, time, urllib.request
+import argparse, json, os, random, re, shutil, subprocess, sys, time, urllib.error, urllib.request
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -680,11 +680,55 @@ def sweep(channel, plan, log=print, runner=None, sleep=time.sleep, clock=time.ti
 
 
 # ---- the worker ------------------------------------------------------------------
-def http_json(url, key, body=None, timeout=60):
-    req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, method='POST' if body is not None else 'GET',
-                                 headers={'X-Axiom-Key': key, 'Content-Type': 'application/json', 'User-Agent': 'axiom-reach/1.0'})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode() or '{}')
+HTTP_RETRY_STATUS = (500, 502, 503, 504)
+HTTP_NEVER_TWICE = ('/bridge/next',)
+HTTP_WAIT_MAX = 30          # seconds: the longest Retry-After waited inside one call
+_http_sleep = time.sleep    # a test swaps this
+
+
+def _retry_after(headers, default):
+    """Seconds the server asked us to wait (Retry-After as seconds or an HTTP date), capped."""
+    v = (headers.get('Retry-After') if headers is not None else None) or ''
+    try:
+        return min(max(float(v), 0), HTTP_WAIT_MAX)
+    except (TypeError, ValueError):
+        pass
+    try:
+        import email.utils, datetime as _dt
+        t = email.utils.parsedate_to_datetime(v)
+        return min(max((t - _dt.datetime.now(t.tzinfo)).total_seconds(), 0), HTTP_WAIT_MAX)
+    except Exception:
+        return default
+
+
+def http_retry(send, is_get, retries=1):
+    """One more ask, after a backoff, when it is safe: a GET after a dropped connection, a timeout or a 5xx; a POST
+    only when the server itself said it did not take the request (429, 503), since a write whose answer was lost may
+    have landed. A 429 or 503 waits what Retry-After says (at most HTTP_WAIT_MAX seconds). retries=0 for a call that
+    must not be repeated (the job claim)."""
+    attempt = 0
+    while True:
+        try:
+            return send()
+        except urllib.error.HTTPError as e:
+            again = e.code in (429, 503) or (is_get and e.code in HTTP_RETRY_STATUS)
+            if attempt >= retries or not again: raise
+            wait = _retry_after(e.headers, 1.5) if e.code in (429, 503) else 1.5
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt >= retries or not is_get: raise
+            wait = 1.5
+        attempt += 1
+        _http_sleep(wait + random.random())
+
+
+def http_json(url, key, body=None, timeout=60, retries=1):
+    def send():
+        req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, method='POST' if body is not None else 'GET',
+                                     headers={'X-Axiom-Key': key, 'Content-Type': 'application/json', 'User-Agent': 'axiom-reach/1.0'})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode() or '{}')
+    # the job claim is a GET that takes a job: it is never asked twice, since the first ask may have taken one
+    return http_retry(send, body is None, 0 if any(x in url for x in HTTP_NEVER_TWICE) else retries)
 
 
 def desks(worker, key, params, http=http_json):

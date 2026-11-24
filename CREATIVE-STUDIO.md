@@ -4016,3 +4016,78 @@ contract, scoped for the next release rather than done halfway.
 | TK | one design system | 68 hex colours and 98 pixel radii in Studio stylesheets outside the token files | the canvas chrome's colours (handles, guides, snap marks, checkerboard, hue spectrum, logo plate) and a radius scale (`--st-r-hair` 2 to `--st-r-pill`) are tokens in `studio-skin.css`; every other Studio stylesheet reads them (radii mapped to the nearest step, a pixel at most); `--sk-r-md`, which was never defined and lived on a fallback, is defined | `studio-tokens-test` TK1, TK2 |
 | CP | contrast on every token pair | untested | every text token on every surface token at AA in the dark theme and the light one (quiet ink 3:1), the status inks on the panel | TK3 |
 | RM | motion off under reduced motion | per file, unchecked | every Studio stylesheet that animates carries the reduced-motion rule | TK4 |
+
+## 62. Two ways to build: Express and Detailed (build `2026-11-23.studio-p74`, page `?v=r46`; 23 November 2026)
+
+### 62.0 The complaint, and what was counted
+
+The owner, 23 November 2026: "Nobody likes it as it takes you through a lot of steps." Counted from the code, not from watching
+anyone: a guided project asked for about a dozen required decisions across eight screens, with three model waits and a render,
+before one tile could be downloaded (the wizard; the reading confirmed; the objective and message confirmed; the strategy
+confirmed; directions asked for and one selected; channels chosen and each piece marked ready; a production mode and a confirmed
+render; copy and design approved apart, a reason each; the package). The worker enforced that order (`workflow_locked`) and the
+wizard had no quicker route. Three options were put to the owner (an express route, three stages, the same steps with less
+friction); the owner chose **three stages, with the seven steps kept, and the choice asked first**.
+
+### 62.1 What was built
+
+- **The question.** The wizard's first screen asks *How do you want to build this?* before the client and the brief:
+  **Express build** (three stages) or **Detailed build** (seven steps). Nothing is assumed for a first project (Next waits,
+  and the foot says "Choose Express or Detailed"); afterwards the last answer is offered already selected (localStorage
+  `ax_studio_build`) and one click changes it. The answer is stored on the project as `brief.build` (`stBriefNorm`: `express`
+  or `detailed`; an unknown value is detailed; a project made before the question carries none and is read as detailed), and
+  travels on `workflow.build` and on each `/studio/list` row.
+- **A detailed project is unchanged**: the seven stages, each confirmed, exactly as before.
+- **An express project keeps the same record and the same seven worker steps** (so every rule that reads them holds) and groups
+  them in three stages (`PHASES_X` in `docs/studio.js`; Alt+1..3):
+  - **Brief** - the material, the reading and **the plan confirmed once**. `ExpressPlan` (`docs/studio-guided.js`) shows the
+    objective, the key message, the response strategy and the campaign on one page, Axiom's recommendation selected and marked
+    "Axiom's pick" (a changed part reads "your choice"). One button confirms them in ONE request -
+    `POST /studio/workflow/confirm {step: 'plan', objective?, message?, strategy?, campaign?, topics?, upto?, acknowledge?}`
+    (`stWfConfirmPlan`) - and then asks for the creative directions (one model call, stated on the button). What the person did
+    not choose is the reading's own recommendation. Every part is checked before any part is written, so a refusal confirms
+    nothing: an unknown pick, a campaign still undecided with two or more in the kit (`campaign_required`), a strategy that is
+    "do not respond" (`use_decision`), work downstream on an earlier plan (`affects_downstream`, asked as before).
+    `upto: 'objectives'` stops before the strategy for the team recording a decision not to respond, which is still a decision
+    with its reason.
+  - **Make** - Direction, Words and Canvas as three steps of one stage. **Use this and write the copy** selects a direction and
+    writes each channel's words and layout from it (one model call, no image), then opens the canvas on the result, because that
+    is what the button said. There is **no "ready for design" tick**: the worker opens the canvas as soon as the copy exists,
+    and `/studio/imagery` and `/studio/production` do not answer `copy_not_ready` (a render is still asked for by a person, with
+    its cost). A change of direction over written pieces asks first and rewrites nothing by itself.
+  - **Ship** - Approve and Deliver. Review opens on a piece that passes its checks; **one approval** covers the words and the
+    design of exactly that version (the copy approval is recorded first with the short reason `with design`, so the person's
+    reason is filed once, on the design; both name the version). A piece with no passing measurement cannot be approved and
+    says why.
+- **What an express project does not relax**: approval is a person's, of the exact version; the campaign is asked for when the
+  kit leaves it open; not responding needs a reason; a paid render states its cost and is pressed by a person; the technical
+  validation, the mark policy, the campaign walls and the per-person caps are untouched.
+- The express page moves the person forward only where the button they pressed said it would (to Direction after "Confirm and
+  propose directions"; to the canvas after "Use this and write the copy"), and not when they have moved elsewhere meanwhile. The
+  detailed flow's rule (the page never moves on its own) is unchanged.
+- `PAGE_NEEDS_BUILD` is 74: on an older worker an express project would be shown as detailed, and the banner says the worker
+  is older than the page.
+
+### 62.2 Evidence
+
+- `tests/studio-express-worker.mjs` (8; 0 of 8 on `316b2a0`): the build kept and reported; one confirmation with the
+  recommendation; the person's picks over it, and a refusal that writes nothing; the campaign decision; not responding; the
+  canvas and imagery without the tick in express and with it in detailed; Review without a prior copy approval; the step
+  refused for a project made before the guided workflow.
+- `tests/studio-express-browser.mjs` (6, Chromium): the question asked first with nothing assumed and the answer remembered;
+  Brief / Make / Ship with one confirmation request and one directions job; a direction choice that writes the copy and opens
+  the canvas with nothing approved and no image asked for; one approval recorded as copy then design for the version seen, with
+  an unmeasured piece blocked in words; Make locked until the plan is confirmed, the lock leading to the Brief; "Confirm only"
+  confirming with no model call asked for and the directions then one press away; a detailed project still seven stages.
+- The harnesses written for the seven steps start as a person who chose Detailed last time (`tests/studio-fixture.mjs`,
+  `tests/studio-browser.mjs` seed `ax_studio_build`; `wizardCreate(page, {build})` in `tests/studio-flow.mjs`).
+- Providers mocked throughout. **Not measured with people**: whether three stages feel short enough is for the team's next round
+  (`TESTING.md`).
+
+### 62.3 Left as it is, on purpose
+
+- The Copy step still offers "Mark this copy ready for design" in an express project; it is optional there and nothing waits
+  for it.
+- The production-mode chooser (Editable or Full AI) stays on the Board for an express project; the canvas is where express lands.
+- The legacy Intake (`createProject`, projects without `workflow: 2`) is not asked the question: it is not reachable from the
+  wizard.

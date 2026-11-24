@@ -59,7 +59,7 @@ const boards = [{ name: 'House default (before)', layout: house.layout, copy: ho
     { name: 'Full artwork (words baked: ' + (artV.layout.baked || []).join(', ') + ')', layout: artV.layout, copy: artV.copy, bg: 'poster' }]);
 boards.forEach(b => console.log('  ' + b.name + ': ' + (b.layout.mediumName || b.layout.templateName) + ', ' + (b.layout.layers || []).length + ' layers' + ((b.layout.unsupported || []).length ? ' [cannot draw: ' + b.layout.unsupported.join('; ') + ']' : '')));
 
-const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
 await new Promise(r => setTimeout(r, 900));
 const browser = await chromium.launch(); const page = await browser.newPage({ viewport: { width: 1800, height: 900 } });
 await page.setContent('<!doctype html><html><body style="margin:0;background:#0f141a"></body></html>');

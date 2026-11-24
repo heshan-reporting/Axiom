@@ -17,6 +17,7 @@
   const PLAT = { news: 'News', reddit: 'Reddit', x: 'X', bluesky: 'Bluesky', mastodon: 'Mastodon', youtube: 'YouTube', substack: 'Substack', linkedin: 'LinkedIn', meta: 'Facebook', forum: 'Forums' };
   const fmtAest = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
   const aest = ts => (ts ? fmtAest.format(new Date(+ts)) : '');
+  const fmtDay = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short' });
   const pct = (a, n) => (n ? Math.round(a / n * 100) : 0);
   const signed = v => (v == null ? '' : (v > 0 ? '+' : '') + (Math.round(v * 100) / 100).toFixed(2));
   const pace = n => (n.nprev ? n.velocity + 'x' : n.n24 ? 'new' : 'quiet');
@@ -97,6 +98,9 @@
       </div>`}
     </${Sec}>`;
   }
+  /* p71 fx3 (F2): an issue tagged as it is now for less than the fortnight comes with since and no usual (its fortnight was
+     tagged by an older rule). It is not new coverage: its row says since when, and its bar has no usual mark. The worker
+     keeps it where its figures as they are put it in the order. */
   function Issues({ issues, hours, totals }) {
     const max = Math.max(1, ...issues.map(i => Math.max(i.recent, i.base)));
     return html`<${Sec} title="Our issues against their own baseline" why=${fmtN(totals.rows) + ' rows on client issues in ' + hours + 'h, ' + fmtN(totals.news) + ' of them news; the bar is this window, the mark is the usual'}>
@@ -105,9 +109,10 @@
           <td><b>${i.label}</b></td>
           <td class="ov-dim">${i.client}</td>
           <td class="num">${i.recent}<span class="ov-dim"> (${i.news} news)</span></td>
-          <td class="num ov-dim">${i.base}</td>
-          <td class="ov-barcell"><span class="ov-bar"><i style=${{ width: Math.round(i.recent / max * 100) + '%' }}></i><b style=${{ left: Math.round(i.base / max * 100) + '%' }}></b></span></td>
-          <td class=${'num ' + (i.ratio != null && i.ratio >= 2 ? 'neg' : '')}>${i.ratio == null ? (i.recent ? 'new' : '-') : i.ratio + 'x'}</td>
+          <td class="num ov-dim">${i.since ? '-' : i.base}</td>
+          <td class="ov-barcell"><span class="ov-bar"><i style=${{ width: Math.round(i.recent / max * 100) + '%' }}></i>${i.since ? null : html`<b style=${{ left: Math.round(i.base / max * 100) + '%' }}></b>`}</span></td>
+          ${i.since ? html`<td class="ov-dim" style=${{ textAlign: 'right' }} title=${'Not set against its usual: rows filed before ' + aest(i.since) + ' were tagged by an older rule'}>tagged as it is now since ${fmtDay.format(new Date(+i.since))}</td>`
+            : html`<td class=${'num ' + (i.ratio != null && i.ratio >= 2 ? 'neg' : '')}>${i.ratio == null ? (i.recent ? 'new' : '-') : i.ratio + 'x'}</td>`}
           <td class="ov-go"><${Link} onClick=${() => goto('narratives', { issue: i.id })}>narratives</${Link}> <${Link} onClick=${() => goto('sentiment', { issue: i.id })}>stances</${Link}></td>
         </tr>`)}</tbody></table>
     </${Sec}>`;

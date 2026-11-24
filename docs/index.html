@@ -19,34 +19,44 @@
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
 <script src="vendor/htm.umd.js"></script>
-<script src="ax-ui.js?v=r5" defer></script>
+<script src="ax-ui.js?v=r4" defer></script>
 <script src="signals.js?v=r1" defer></script>
 <script src="release.js?v=r1" defer></script>
 <script src="topics.js?v=r1" defer></script>
 <script src="content.js?v=r3" defer></script>
-<link rel="stylesheet" href="studio-progress.css?v=r45">
-<link rel="stylesheet" href="studio-flow.css?v=r45">
-<link rel="stylesheet" href="studio-skin.css?v=r45">
-<link rel="stylesheet" href="studio-guided.css?v=r45">
-<link rel="stylesheet" href="studio-editor.css?v=r45">
-<link rel="stylesheet" href="studio-shell.css?v=r45">
-<link rel="stylesheet" href="studio-polish.css?v=r45">
-<link rel="stylesheet" href="den.css?v=r53">
-<script src="studio-render.js?v=r45" defer></script>
-<script src="studio-progress.js?v=r45" defer></script>
-<script src="studio-merge.js?v=r45" defer></script>
-<script src="studio.js?v=r45" defer></script>
-<script src="studio-guided.js?v=r45" defer></script>
-<script src="studio-editor.js?v=r45" defer></script>
-<script src="studio-canvas.js?v=r45" defer></script>
-<script src="studio-style.js?v=r45" defer></script>
-<script src="studio-brandmem.js?v=r45" defer></script>
-<script src="sources.js?v=r1" defer></script>
-<script src="den.js?v=r55" defer></script>
+<link rel="stylesheet" href="studio-progress.css?v=r46">
+<link rel="stylesheet" href="studio-flow.css?v=r46">
+<link rel="stylesheet" href="studio-skin.css?v=r46">
+<link rel="stylesheet" href="studio-guided.css?v=r46">
+<link rel="stylesheet" href="studio-editor.css?v=r46">
+<link rel="stylesheet" href="studio-shell.css?v=r46">
+<link rel="stylesheet" href="studio-polish.css?v=r46">
+<link rel="stylesheet" href="den.css?v=r48">
+<link rel="stylesheet" href="den-brief.css?v=r2">
+<link rel="stylesheet" href="den-flags.css?v=r2">
+<link rel="stylesheet" href="den-today.css?v=r2">
+<link rel="stylesheet" href="den-desk.css?v=r1">
+<link rel="stylesheet" href="den-tour.css?v=r1">
+<script src="studio-render.js?v=r46" defer></script>
+<script src="studio-progress.js?v=r46" defer></script>
+<script src="studio-merge.js?v=r46" defer></script>
+<script src="studio.js?v=r46" defer></script>
+<script src="studio-guided.js?v=r46" defer></script>
+<script src="studio-editor.js?v=r46" defer></script>
+<script src="studio-canvas.js?v=r46" defer></script>
+<script src="studio-style.js?v=r46" defer></script>
+<script src="studio-brandmem.js?v=r46" defer></script>
+<script src="sources.js?v=r3" defer></script>
+<script src="den-flags.js?v=r3" defer></script>
+<script src="den-today.js?v=r2" defer></script>
+<script src="den-brief.js?v=r11" defer></script>
+<script src="den-desk.js?v=r3" defer></script>
+<script src="den.js?v=r63" defer></script>
+<script src="den-tour.js?v=r2" defer></script>
 <script src="sentiment.js?v=r1" defer></script>
 <script src="narratives.js?v=r1" defer></script>
-<script src="overview.js?v=r1" defer></script>
-<script src="scope.js?v=r1" defer></script>
+<script src="overview.js?v=r2" defer></script>
+<script src="scope.js?v=r2" defer></script>
 <!-- Tailwind (additive utility layer, token-configured; nothing critical depends on it) -->
 <script src="https://cdn.tailwindcss.com" onerror="void 0"></script>
 <script>try{if(window.tailwind)tailwind.config={theme:{extend:{colors:{
@@ -1015,6 +1025,7 @@ body.kiosk .kprog{display:block}
 .src-banner.quiet .src-link{color:var(--t2);font-size:12px}
 .src-banner b{color:var(--x-neg)}
 .src-banner-list{display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:8px}
+.src-why{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:12px}
 .src-link{background:none;border:0;padding:0;color:var(--x-ac-hi);cursor:pointer;font-size:12.5px;text-decoration:underline dotted}
 .src-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:12px 0 8px}
 .src-filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1 1 600px}
@@ -2306,6 +2317,7 @@ select option,select optgroup{background-color:var(--x-bg2);color:var(--t1)}
             <button class="chip" onclick="setNewsWindow(24,this)">24h</button>
             <button class="chip on" onclick="setNewsWindow(72,this)">72h</button>
           </div>
+          <div class="chips" id="news-scope" style="margin-bottom:8px;align-items:center" role="group" aria-label="Which stories the Newsroom shows" hidden></div>
           <div class="chips" id="news-chips"></div>
           <div class="wire" id="news-list"><div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px"></div></div>
         </div>
@@ -2549,7 +2561,7 @@ select option,select optgroup{background-color:var(--x-bg2);color:var(--t1)}
       </section>
       <!-- ═══ NARRATIVES — the stories the conversation keeps telling: origin, spread, pace, split, counter, evidence (React island, docs/narratives.js) ═══ -->
       <section class="view" id="v-den">
-        <div class="note" style="margin:0 0 14px">The monitoring desk. Choose a desk: a client, a region and a report format. Today is the window's evidence sorted into the report's sections, with what should not be missed above it. Brief is the report, drafted from that evidence by one stated model call or written by hand, every sentence tied to the row it rests on. Watch is what this desk follows and what waits for a decision. Collection shows the channels delivering for this desk and where to add one. Nothing on this page spends without a button that says so.</div>
+        <div class="note" style="margin:0 0 14px">The monitoring desk. Choose a desk: a client, a region and a report format. Today is the window's evidence sorted into the report's sections, with what should not be missed above it. Brief is the report, drafted from that evidence by one stated model call or written by hand, every sentence tied to the row it rests on. Watch is what this desk follows and what waits for a decision. Collection says which channels read, and why not. Nothing on this page spends without a button that says so.</div>
         <div id="den-root"><div class="empty" style="padding:40px 0">Loading the desk...</div></div>
       </section>
       <section class="view" id="v-narratives">
@@ -3055,8 +3067,9 @@ function arcLog(surface,role,text){
    that touch one of them. `q` is the phrase Radar tracks when clicked. */
 const AX_ISSUES=[
  {id:'ftc',ns:'mca',client:'Minerals Council',label:'Fuel tax credits',q:'fuel tax credit',rx:/fuel tax credits?|fuel tax|diesel (fuel )?rebate|fuel excise|excise credit|hands off our fuel|\bhoof\b|off-?road diesel|diesel (tax|price|cost|subsid)|fuel (levy|subsid)/i},
- {id:'cm',ns:'mca',client:'Minerals Council',label:'Critical minerals',q:'critical minerals',rx:/critical minerals?|rare earths?|gallium|antimony|\blithium\b|\bnickel\b|\bcobalt\b|graphite|vanadium|\btungsten\b|strategic reserve|minerals? (strategy|processing|refinery|reserve|facility)|downstream processing|\blynas\b|\biluka\b|arafura|pilgangoora/i},
- {id:'mining',ns:'mca',client:'Minerals Council',label:'Mining & resources',q:'mining industry',rx:/\bmining\b|\bminers?\b|minerals council|iron ore|coal (mine|mining|export|industry|seam)|royalt(y|ies)|resources (sector|industry|policy|tax|minister|company|state)|\bbhp\b|rio tinto|fortescue|glencore|whitehaven|yancoal|\bpilbara\b|bowen basin|hunter valley (coal|mine)|super ?profits tax|minerals? tax|mine (approval|closure|rehabilitation|site|worker)|same job,? same pay|nature positive|\bepbc\b|uranium|\bfifo\b|smelter|alumina|refinery closure/i},
+ {id:'cm',ns:'mca',client:'Minerals Council',label:'Critical minerals',q:'critical minerals',rx:/critical minerals?|rare earths?|gallium|antimony|^(?![\s\S]*(\s@\s+(?!(?:(?:us|au?|nz)?\$|usd|aud|nzd)\s?\.?\d|(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d*\.\d+)(?:[ck]|(?:\s?\/\s?(?:t|tonne|lb|kg|oz)\b|\s+(?:a|per)\s+(?:tonne|ton|pound|lb|kg|ounce|oz|share)\b))?(?![\w%]|-\D)|\d+(?:[ck]\b|(?:\s?\/\s?(?:t|tonne|lb|kg|oz)\b|\s+(?:a|per)\s+(?:tonne|ton|pound|lb|kg|ounce|oz|share)\b))|\d{3,}(?![\w%]|-\D|[.,]\d)|\d{1,2}(?![\w%]|-\D|[.,]\d)(?=\s*(?:[^\w\s]|$)|\s+(?:as|after|amid|and|at|but|down|from|in|now|on|since|then|to|today|up|while|with|usd|aud|nzd|each|ea)\b)|\d{1,2}(?:[:.]\d{2})?\s?[ap]\.?m\b)\w|\(s&s\)|\+ ?delivery\b|free (shipping|delivery)\b))[\s\S]*?\b(lithium|nickel|cobalt|graphite|tungsten)\b|vanadium|strategic reserve|minerals? (strategy|processing|refinery|reserve|facility)|downstream processing|\blynas\b|\biluka\b|arafura|pilgangoora/i},
+ {id:'mining',ns:'mca',client:'Minerals Council',label:'Mining & resources',q:'mining industry',rx:/\bmining\b|minerals council|iron ore|coal (mine|mining|export|industry|seam)|royalt(y|ies)|resources (sector|industry|policy|tax|company|state)|\bbhp\b|rio tinto|fortescue|glencore|whitehaven|yancoal|bowen basin|hunter valley (coal|mine)|super ?profits tax|minerals? tax|mine (approval|closure|rehabilitation|site|worker)|same job,? same pay|nature positive|\bepbc\b|uranium|\bfifo\b|smelter|alumina|refinery closure|\bminers?\b[^.]{0,80}\b(mines?|ore|coal|gold|lithium|nickel|copper|zinc|bauxite|rare earths?|minerals?|exploration|underground|asx|stocks?|diesel|fuel tax|tax(es)?|kalgoorlie|mount isa|broken hill)\b|\b(mines?|ore|coal|gold|lithium|nickel|copper|zinc|bauxite|rare earths?|minerals?|exploration|underground|asx|stocks?|diesel|fuel tax|tax(es)?|kalgoorlie|mount isa|broken hill)\b[^.]{0,80}\bminers?\b|\bpilbara\b[^.]{0,80}\b(mines?|miners?|ore|lithium|gold|copper|manganese|minerals?|exploration|tenements?|hancock|roy hill)\b|\b(mines?|miners?|ore|lithium|gold|copper|manganese|minerals?|exploration|tenements?|hancock|roy hill)\b[^.]{0,80}\bpilbara\b|resources minister(?:(?!\b(?:gas|lng|petroleum|offshore)\b)[^.?!]){0,80}?\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b(?!(?:\s*(?:[,&\/+]|(?:and|or|nor|plus)\b|as\s+well\s+as\b)(?:\s+(?!(?:and|or|nor|plus|as|gas|lng|petroleum|offshore|not|than|rather|instead|unlike|except|but|while|whereas|versus|vs|without|no)\b)[a-z][\w'-]*(?![\w'-])){0,2})+?\s*\b(?:gas|lng|petroleum|offshore)\b)|(?:^\s*(?!(?:\S+\s+){0,3}\S*?\b(?:gas|lng|petroleum|offshore)\b\s*(?:,\s*(?:and|or)\b|[,&\/+]|(?:and|or|nor|plus)\b|as\s+well\s+as\b)(?:\s*(?!(?:not|than|rather|instead|unlike|except|but|while|whereas|versus|vs|without|no)\b)[^\s.?!]+){0,3}?\s*[^\s\w]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b)(?:\S+\s+){0,4}|\s(?=(?:\S+\s+){4}[^\s\w,&\/+]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b)(?!(?:\S+\s+){0,3}\S*?\b(?:gas|lng|petroleum|offshore)\b\s*(?:,\s*(?:and|or)\b|[,&\/+]|(?:and|or|nor|plus)\b|as\s+well\s+as\b)(?:\s*(?!(?:not|than|rather|instead|unlike|except|but|while|whereas|versus|vs|without|no)\b)[^\s.?!]+){0,3}?\s*[^\s\w]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b)(?:\S+\s+){4})[^\s\w,&\/+]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b(?:(?!\b(?:gas|lng|petroleum|offshore)\b)[^.?!]){0,80}?resources minister/i},
+ {id:'mcamentions',ns:'mca',client:'Minerals Council',label:'MCA mentions',q:'minerals council of australia',rx:/minerals council of australia|(^|[^a-z\s.]\s*|[^\s.]{2}\.\s*|\.\.\s*|(?:^|[^\w.]|[^\s.]{2}\.|\.\.)(?!(nsw|wales|tasmanian?|queensland|s)\b)[a-z]+\s+|(?:^|[^\w.]|[^\s.]{2}\.|\.\.)(?!(nsw|wales|tasmanian?|queensland)\b)[a-z]+\Ws\s+)minerals council\b(?! (of )?(south africa|tasmania|nsw|new south wales|n\.s\.w|queensland)\b|\s*[(,]\s*(of\s+)?(south africa|tasmania|nsw|new south wales|n\.s\.w\.?|queensland)(?:\s*(?:[^\s\w'\u2019-]|$)|\s+-))|minerals\.org\.au|tania constable/i},
  {id:'gas',ns:'aep',client:'Energy Producers',label:'Gas supply',q:'gas supply',rx:/\bgas\b|\blng\b|gas (supply|reservation|shortfall|market|price|field|project|export|import|ban|connection|network|plant)|domestic gas|east coast gas|\bsantos\b|woodside|beach energy|\bshell\b|petroleum|offshore (gas|drilling|exploration)|north ?west shelf|scarborough (gas|project|field|lng)|barossa (gas|project|field|pipeline)|narrabri|beetaloo|browse basin|\baemo\b|gas-?fired|fracking|coal seam gas|\bcsg\b/i},
  {id:'gastax',ns:'aep',client:'Energy Producers',label:'Gas taxation',q:'gas export tax',rx:/windfall (profits? )?tax|super-?profits? tax[^.]{0,140}\b(gas|lng|petroleum|oil)\b|\b(gas|lng|petroleum)\b[^.]{0,140}super-?profits? tax|gas (exports? )?tax|export tax on (gas|lng)|\bprrt\b(?![^.]{0,60}(therap|treatment|lutetium|tumou?r|neuroendocrine))|petroleum resource rent|tax(ing|es)? (the |on )?(gas|lng)\b|gastax|taxthegas|stopgreed|\b(gas|lng) (giants?|companies|exporters?|producers?|industry|sector)[^.]{0,80}(fair share|pay (no|zero|little|more) tax|royalt)|fair share[^.]{0,80}\b(gas|lng)\b|gas (royalt(y|ies)|profits?)/i},
  {id:'gasprojects',ns:'aep',client:'Energy Producers',label:'Gas projects and approvals',q:'scott reef',rx:/scott reef|browse (basin|project|gas|development|proposal|joint venture)|burrup|murujuga|golden beach (gas|energy|project|storage)|bass strait (gas|oil|reserves?|platforms?|decommission\w*)|otway (basin|gas|offshore|drilling)|scarborough (gas|project|field|lng)|pluto (lng|train)|north ?west shelf|barossa (gas|project|field|pipeline)|narrabri|beetaloo|\bnopsema\b|stopwoodside|savescottreef|seismic (blasting|testing|survey)|woodside|\bsantos\b|beach energy|amplitude energy|cooper energy|\binpex\b|offshore (gas|drilling|exploration|petroleum)|gas (projects?|fields?|hubs?|pipelines?|terminals?|exploration|expansion|developments?|basins?|storage)|new gas\b|fracking|coal seam gas|\bcsg\b|gas import terminal|carbon capture/i},
@@ -3149,6 +3162,8 @@ function go(v,fromHistory){
   // inside the Creative Studio the news navigation, the scope bar and the masthead step aside: the Studio carries its own
   // header with the way back to AXIOM, and owns the whole window below it
   document.body.classList.toggle('in-studio',v==='studio');
+  // Anne's Den is a focused window too (docs/den.css): its own top bar carries the way back
+  document.body.classList.toggle('in-den',v==='den');
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
@@ -5004,6 +5019,54 @@ let NEWS_WINDOW=72,NEWS_LAST=[];
 /* the search the Newsroom is showing ({q, items}); null shows the general feed. The five-minute refresh re-runs it
    quietly instead of drawing the general feed over it while the term is still in the box. */
 let NEWS_SEARCH=null;
+/* The Newsroom follows the scope bar's client (Kai, 16 November 2026: a vacuum deal and a Matildas story on the MCA
+   Newsroom). With a client chosen, the general feed shows only the stories that touch one of that client's issues
+   (AX_ISSUES, the page's twin of the worker's CLIENT_ISSUES) or name one of the people and organisations registered
+   to the client (/entities, by name or alias). "All news" brings the whole feed back until the client changes; a search
+   is the reader's own question and is never narrowed. With no client chosen the Newsroom works as it always did. */
+let NEWS_ALL=false,NEWS_ENTS=null,NEWS_ENT_RX={};
+function newsNs(){try{return (window.AXUI&&AXUI.scope&&AXUI.scope().ns)||'';}catch(e){return '';}}
+function newsScopeNs(){return (NEWS_SEARCH||NEWS_ALL)?'':newsNs();}
+function newsClientName(ns){const i=AX_ISSUES.find(x=>x.ns===ns);return i&&i.client||ns;}
+/* one regex per client from the register: every active entity filed under the client, its name and aliases as whole
+   words (plurals and possessives allowed); null until the register has been read, or when the client has none */
+function newsEntityRx(ns){
+  if(NEWS_ENT_RX[ns]!==undefined)return NEWS_ENT_RX[ns];
+  if(!Array.isArray(NEWS_ENTS))return null;
+  const words=[];
+  NEWS_ENTS.forEach(e=>{if(!e||e.ns!==ns||e.active===false)return;[e.name].concat(e.aliases||[]).forEach(w=>{w=String(w||'').trim();if(w.length>2)words.push(w);});});
+  const rx=words.length?new RegExp('(^|[^a-z0-9])(?:'+words.map(w=>w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\s+/g,'\\s+')).join('|')+")(?:'s|s)?(?![a-z0-9])",'i'):null;
+  NEWS_ENT_RX[ns]=rx;return rx;
+}
+function newsLoadEntities(){
+  if(NEWS_ENTS!==null)return;NEWS_ENTS=false;   // false: a read is in flight or failed; the issues alone narrow until then
+  api('/entities?active=1').then(d=>{NEWS_ENTS=(d&&d.entities)||[];NEWS_ENT_RX={};renderNews();}).catch(()=>{NEWS_ENTS=[];});
+}
+function newsRelevant(it,ns){
+  const hay=issueText(it);
+  if(AX_ISSUES.some(i=>i.ns===ns&&i.rx.test(hay)))return true;
+  const rx=newsEntityRx(ns);return !!(rx&&rx.test(hay));
+}
+/* the stories the Newsroom is showing before the window and the source chips: the search's results, or the general feed
+   narrowed to the chosen client */
+function newsPool(){
+  const base=NEWS_SEARCH?NEWS_SEARCH.items:state.news;
+  const ns=newsScopeNs();if(!ns)return base;
+  newsLoadEntities();
+  return base.filter(it=>newsRelevant(it,ns));
+}
+function setNewsAll(all){NEWS_ALL=!!all;renderNews();}
+function renderNewsScope(){
+  const el=$('news-scope');if(!el)return;
+  const ns=newsNs();
+  if(!ns||NEWS_SEARCH){el.hidden=true;el.innerHTML='';return;}
+  const name=newsClientName(ns);
+  el.hidden=false;
+  el.innerHTML='<button class="chip'+(NEWS_ALL?'':' on')+'" onclick="setNewsAll(false)" aria-pressed="'+(!NEWS_ALL)+'">'+esc(name)+' only</button>'+
+    '<button class="chip'+(NEWS_ALL?' on':'')+'" onclick="setNewsAll(true)" aria-pressed="'+NEWS_ALL+'">All news</button>'+
+    '<span class="scope-hint">'+(NEWS_ALL?'Every story from every source. ':'Stories on '+esc(name)+'\'s issues, or naming its registered people and organisations. ')+'Set in the Scope bar above.</span>';
+}
+window.addEventListener('ax:scope',()=>{NEWS_ALL=false;if(Array.isArray(state.news))renderNews();});
 function newsWindowFilter(items){
   const cut=Date.now()-NEWS_WINDOW*3600e3;
   return items.filter(it=>{const t=Date.parse(it.date)||0;return !t||t>=cut;});
@@ -5021,22 +5084,23 @@ function rowSignal(it){
   return '<span class="wi-sig"><b style="background:'+tcol+'" title="headline tone"></b>'+pd+'</span>';
 }
 function renderNews(list){
-  const base=NEWS_SEARCH?NEWS_SEARCH.items:state.news;
+  const base=newsPool(),ns=newsScopeNs();
   const items=newsWindowFilter(list||base);
   NEWS_LAST=items;
+  renderNewsScope();
   const srcs={};base.forEach(n=>{srcs[n.src]=(srcs[n.src]||0)+1;});
-  $('news-count').textContent=(NEWS_SEARCH?'"'+NEWS_SEARCH.q.toUpperCase()+'" · ':'')+Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
+  $('news-count').textContent=(NEWS_SEARCH?'"'+NEWS_SEARCH.q.toUpperCase()+'" · ':ns?newsClientName(ns).toUpperCase()+' · ':'')+Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
   $('news-chips').innerHTML='<button class="chip on" onclick="filterSrc(null,this)">All</button>'+
     Object.entries(srcs).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([s,n])=>
       '<button class="chip" onclick="filterSrc(\''+jsAttr(s)+'\',this)">'+esc(s)+' · '+n+'</button>').join('');
   $('news-list').innerHTML=items.length?items.slice(0,60).map((it,i)=>
     '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span>'+issueChip(it.title)+(it.desc?'<span class="wi-d">'+esc(it.desc)+'</span>':'')+'</span>'+rowSignal(it)+'<span class="wi-time">'+ago(it.date)+'</span>'+(it.link?'<span class="wi-read" role="button" tabindex="0" title="Read the article here, where the publisher makes the text public" onclick="newsRead(event,'+i+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \')newsRead(event,'+i+')">Read</span>':'')+'</a>').join('')
-    :'<div class="empty">Nothing in the last '+NEWS_WINDOW+' hours matched. Widen the window or search the full Google index above.</div>';
+    :'<div class="empty">'+(ns?'Nothing on '+esc(newsClientName(ns))+'\'s issues in the last '+NEWS_WINDOW+' hours. Widen the window, choose All news above, or search the full Google index.':'Nothing in the last '+NEWS_WINDOW+' hours matched. Widen the window or search the full Google index above.')+'</div>';
 }
 function filterSrc(src,btn){
   document.querySelectorAll('#news-chips .chip').forEach(b=>b.classList.remove('on'));
   if(btn)btn.classList.add('on');
-  renderNews(src?(NEWS_SEARCH?NEWS_SEARCH.items:state.news).filter(n=>n.src===src):null);
+  renderNews(src?newsPool().filter(n=>n.src===src):null);
 }
 function exportNewsCSV(){
   const rows=[['date','source','title','tone','parties','link']].concat(NEWS_LAST.map(it=>{

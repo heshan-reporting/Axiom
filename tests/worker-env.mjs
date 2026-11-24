@@ -36,6 +36,7 @@ export async function workerEnv(o) {
       deleteByIds: async ids => { ids.forEach(id => vectors.delete(id)); return {}; },
     },
     AI: { run: async (m, { text }) => ({ data: (Array.isArray(text) ? text : [text]).map(() => new Array(8).fill(0.1)) }) },
+    __collectSleep: async () => {},   // the collector fetch's backoff before its one retry passes at once here; tests/collect-hardening-worker.mjs records it
     __pubSleep: async () => {},   // the public reader's ten seconds a host pass at once here; tests/den-public-worker.mjs records them instead
   }, o.env || {});
   if (o.keys !== null) env.AXIOM_KEYS = JSON.stringify(o.keys || { 'full-key': { n: 'Full', r: 'full' }, 'read-key': { n: 'Reader', r: 'read' } });

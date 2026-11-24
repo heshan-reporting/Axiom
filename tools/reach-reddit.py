@@ -31,7 +31,7 @@ Options: --subs A,B,C  --per-sub 25  --threads 30  --comments 80  --worker URL
          --issue <issue ids or client namespaces>  (narrows the keyword pass)
 Stdlib only. Needs `rdt` on PATH (pipx install 'git+https://github.com/public-clis/rdt-cli.git').
 """
-import argparse, datetime, json, os, re, subprocess, sys, time, urllib.request
+import argparse, datetime, json, os, random, re, subprocess, sys, time, urllib.error, urllib.request
 
 WORKER = 'https://newsaus.heshan-998.workers.dev'
 # Where our clients get argued about: national politics and money, the state and
@@ -53,8 +53,9 @@ LABEL = 'com.curiousminds.axiom.reach-reddit'
 # from GET /reddit/issues so this copy can never drift; it is the fallback.
 ISSUES = [
     ('ftc', re.compile(r'fuel tax credits?|fuel tax|diesel (fuel )?rebate|fuel excise|excise credit|hands off our fuel|\bhoof\b|off-?road diesel|diesel (tax|price|cost|subsid)|fuel (levy|subsid)', re.I)),
-    ('cm', re.compile(r'critical minerals?|rare earths?|gallium|antimony|\blithium\b|\bnickel\b|\bcobalt\b|graphite|vanadium|\btungsten\b|strategic reserve|minerals? (strategy|processing|refinery|reserve|facility)|downstream processing|\blynas\b|\biluka\b|arafura|pilgangoora', re.I)),
-    ('mining', re.compile(r'\bmining\b|\bminers?\b|minerals council|iron ore|coal (mine|mining|export|industry|seam)|royalt(y|ies)|resources (sector|industry|policy|tax|minister|company|state)|\bbhp\b|rio tinto|fortescue|glencore|whitehaven|yancoal|\bpilbara\b|bowen basin|hunter valley (coal|mine)|super ?profits tax|minerals? tax|mine (approval|closure|rehabilitation|site|worker)|same job,? same pay|nature positive|\bepbc\b|uranium|\bfifo\b|smelter|alumina|refinery closure', re.I)),
+    ('cm', re.compile(r'critical minerals?|rare earths?|gallium|antimony|^(?![\s\S]*(\s@\s+(?!(?:(?:us|au?|nz)?\$|usd|aud|nzd)\s?\.?\d|(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d*\.\d+)(?:[ck]|(?:\s?\/\s?(?:t|tonne|lb|kg|oz)\b|\s+(?:a|per)\s+(?:tonne|ton|pound|lb|kg|ounce|oz|share)\b))?(?![\w%]|-\D)|\d+(?:[ck]\b|(?:\s?\/\s?(?:t|tonne|lb|kg|oz)\b|\s+(?:a|per)\s+(?:tonne|ton|pound|lb|kg|ounce|oz|share)\b))|\d{3,}(?![\w%]|-\D|[.,]\d)|\d{1,2}(?![\w%]|-\D|[.,]\d)(?=\s*(?:[^\w\s]|$)|\s+(?:as|after|amid|and|at|but|down|from|in|now|on|since|then|to|today|up|while|with|usd|aud|nzd|each|ea)\b)|\d{1,2}(?:[:.]\d{2})?\s?[ap]\.?m\b)\w|\(s&s\)|\+ ?delivery\b|free (shipping|delivery)\b))[\s\S]*?\b(lithium|nickel|cobalt|graphite|tungsten)\b|vanadium|strategic reserve|minerals? (strategy|processing|refinery|reserve|facility)|downstream processing|\blynas\b|\biluka\b|arafura|pilgangoora', re.I)),
+    ('mining', re.compile(r"\bmining\b|minerals council|iron ore|coal (mine|mining|export|industry|seam)|royalt(y|ies)|resources (sector|industry|policy|tax|company|state)|\bbhp\b|rio tinto|fortescue|glencore|whitehaven|yancoal|bowen basin|hunter valley (coal|mine)|super ?profits tax|minerals? tax|mine (approval|closure|rehabilitation|site|worker)|same job,? same pay|nature positive|\bepbc\b|uranium|\bfifo\b|smelter|alumina|refinery closure|\bminers?\b[^.]{0,80}\b(mines?|ore|coal|gold|lithium|nickel|copper|zinc|bauxite|rare earths?|minerals?|exploration|underground|asx|stocks?|diesel|fuel tax|tax(es)?|kalgoorlie|mount isa|broken hill)\b|\b(mines?|ore|coal|gold|lithium|nickel|copper|zinc|bauxite|rare earths?|minerals?|exploration|underground|asx|stocks?|diesel|fuel tax|tax(es)?|kalgoorlie|mount isa|broken hill)\b[^.]{0,80}\bminers?\b|\bpilbara\b[^.]{0,80}\b(mines?|miners?|ore|lithium|gold|copper|manganese|minerals?|exploration|tenements?|hancock|roy hill)\b|\b(mines?|miners?|ore|lithium|gold|copper|manganese|minerals?|exploration|tenements?|hancock|roy hill)\b[^.]{0,80}\bpilbara\b|resources minister(?:(?!\b(?:gas|lng|petroleum|offshore)\b)[^.?!]){0,80}?\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b(?!(?:\s*(?:[,&\/+]|(?:and|or|nor|plus)\b|as\s+well\s+as\b)(?:\s+(?!(?:and|or|nor|plus|as|gas|lng|petroleum|offshore|not|than|rather|instead|unlike|except|but|while|whereas|versus|vs|without|no)\b)[a-z][\w'-]*(?![\w'-])){0,2})+?\s*\b(?:gas|lng|petroleum|offshore)\b)|(?:^\s*(?!(?:\S+\s+){0,3}\S*?\b(?:gas|lng|petroleum|offshore)\b\s*(?:,\s*(?:and|or)\b|[,&\/+]|(?:and|or|nor|plus)\b|as\s+well\s+as\b)(?:\s*(?!(?:not|than|rather|instead|unlike|except|but|while|whereas|versus|vs|without|no)\b)[^\s.?!]+){0,3}?\s*[^\s\w]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b)(?:\S+\s+){0,4}|\s(?=(?:\S+\s+){4}[^\s\w,&\/+]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b)(?!(?:\S+\s+){0,3}\S*?\b(?:gas|lng|petroleum|offshore)\b\s*(?:,\s*(?:and|or)\b|[,&\/+]|(?:and|or|nor|plus)\b|as\s+well\s+as\b)(?:\s*(?!(?:not|than|rather|instead|unlike|except|but|while|whereas|versus|vs|without|no)\b)[^\s.?!]+){0,3}?\s*[^\s\w]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b)(?:\S+\s+){4})[^\s\w,&\/+]*\b(?:mines?|miners?|ore|coal|gold|lithium|nickel|copper|minerals?)\b(?:(?!\b(?:gas|lng|petroleum|offshore)\b)[^.?!]){0,80}?resources minister", re.I)),
+    ('mcamentions', re.compile(r"minerals council of australia|(^|[^a-z\s.]\s*|[^\s.]{2}\.\s*|\.\.\s*|(?:^|[^\w.]|[^\s.]{2}\.|\.\.)(?!(nsw|wales|tasmanian?|queensland|s)\b)[a-z]+\s+|(?:^|[^\w.]|[^\s.]{2}\.|\.\.)(?!(nsw|wales|tasmanian?|queensland)\b)[a-z]+\Ws\s+)minerals council\b(?! (of )?(south africa|tasmania|nsw|new south wales|n\.s\.w|queensland)\b|\s*[(,]\s*(of\s+)?(south africa|tasmania|nsw|new south wales|n\.s\.w\.?|queensland)(?:\s*(?:[^\s\w'\u2019-]|$)|\s+-))|minerals\.org\.au|tania constable", re.I)),
     ('gas', re.compile(r'\bgas\b|\blng\b|gas (supply|reservation|shortfall|market|price|field|project|export|import|ban|connection|network|plant)|domestic gas|east coast gas|\bsantos\b|woodside|beach energy|\bshell\b|petroleum|offshore (gas|drilling|exploration)|north ?west shelf|scarborough (gas|project|field|lng)|barossa (gas|project|field|pipeline)|narrabri|beetaloo|browse basin|\baemo\b|gas-?fired|fracking|coal seam gas|\bcsg\b', re.I)),
     ('gastax', re.compile(r'windfall (profits? )?tax|super-?profits? tax[^.]{0,140}\b(gas|lng|petroleum|oil)\b|\b(gas|lng|petroleum)\b[^.]{0,140}super-?profits? tax|gas (exports? )?tax|export tax on (gas|lng)|\bprrt\b(?![^.]{0,60}(therap|treatment|lutetium|tumou?r|neuroendocrine))|petroleum resource rent|tax(ing|es)? (the |on )?(gas|lng)\b|gastax|taxthegas|stopgreed|\b(gas|lng) (giants?|companies|exporters?|producers?|industry|sector)[^.]{0,80}(fair share|pay (no|zero|little|more) tax|royalt)|fair share[^.]{0,80}\b(gas|lng)\b|gas (royalt(y|ies)|profits?)', re.I)),
     ('gasprojects', re.compile(r'scott reef|browse (basin|project|gas|development|proposal|joint venture)|burrup|murujuga|golden beach (gas|energy|project|storage)|bass strait (gas|oil|reserves?|platforms?|decommission\w*)|otway (basin|gas|offshore|drilling)|scarborough (gas|project|field|lng)|pluto (lng|train)|north ?west shelf|barossa (gas|project|field|pipeline)|narrabri|beetaloo|\bnopsema\b|stopwoodside|savescottreef|seismic (blasting|testing|survey)|woodside|\bsantos\b|beach energy|amplitude energy|cooper energy|\binpex\b|offshore (gas|drilling|exploration|petroleum)|gas (projects?|fields?|hubs?|pipelines?|terminals?|exploration|expansion|developments?|basins?|storage)|new gas\b|fracking|coal seam gas|\bcsg\b|gas import terminal|carbon capture', re.I)),
@@ -78,6 +79,7 @@ ISSUE_NS = {
     'ftc': 'mca',
     'cm': 'mca',
     'mining': 'mca',
+    'mcamentions': 'mca',
     'gas': 'aep',
     'gastax': 'aep',
     'gasprojects': 'aep',
@@ -99,6 +101,7 @@ ISSUE_Q = {
     'ftc': ['fuel tax credit', 'diesel rebate', 'fuel excise', 'hands off our fuel'],
     'cm': ['critical minerals', 'rare earths', 'lithium mine', 'nickel industry', 'critical minerals strategic reserve'],
     'mining': ['mining royalties', 'iron ore', 'coal mine approval', 'minerals council', 'nature positive laws', 'same job same pay mining'],
+    'mcamentions': ['minerals council of australia', 'tania constable'],
     'gas': ['gas reservation', 'gas prices', 'north west shelf', 'offshore gas project', 'gas shortfall', 'fracking beetaloo', 'domestic gas reservation bill'],
     'gastax': ['gas export tax', 'windfall tax gas australia', 'tax the gas', 'PRRT gas tax', 'gas tax australia institute', 'gas companies fair share australia'],
     'gasprojects': ['scott reef', 'save scott reef', 'woodside browse', 'burrup hub', 'golden beach gas', 'bass strait gas', 'otway basin drilling'],
@@ -417,12 +420,56 @@ def comment_rows(post, comments, topic=''):
 
 
 # ---- AXIOM ------------------------------------------------------------------------
-def http_json(url, key=None, body=None, timeout=60):
-    req = urllib.request.Request(url, method='POST' if body is not None else 'GET',
-                                 data=json.dumps(body).encode() if body is not None else None,
-                                 headers={'Content-Type': 'application/json', 'User-Agent': 'axiom-reach-reddit/1.0', **({'X-Axiom-Key': key} if key else {})})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode() or '{}')
+HTTP_RETRY_STATUS = (500, 502, 503, 504)
+HTTP_NEVER_TWICE = ('/bridge/next',)
+HTTP_WAIT_MAX = 30          # seconds: the longest Retry-After waited inside one call
+_http_sleep = time.sleep    # a test swaps this
+
+
+def _retry_after(headers, default):
+    """Seconds the server asked us to wait (Retry-After as seconds or an HTTP date), capped."""
+    v = (headers.get('Retry-After') if headers is not None else None) or ''
+    try:
+        return min(max(float(v), 0), HTTP_WAIT_MAX)
+    except (TypeError, ValueError):
+        pass
+    try:
+        import email.utils, datetime as _dt
+        t = email.utils.parsedate_to_datetime(v)
+        return min(max((t - _dt.datetime.now(t.tzinfo)).total_seconds(), 0), HTTP_WAIT_MAX)
+    except Exception:
+        return default
+
+
+def http_retry(send, is_get, retries=1):
+    """One more ask, after a backoff, when it is safe: a GET after a dropped connection, a timeout or a 5xx; a POST
+    only when the server itself said it did not take the request (429, 503), since a write whose answer was lost may
+    have landed. A 429 or 503 waits what Retry-After says (at most HTTP_WAIT_MAX seconds). retries=0 for a call that
+    must not be repeated (the job claim)."""
+    attempt = 0
+    while True:
+        try:
+            return send()
+        except urllib.error.HTTPError as e:
+            again = e.code in (429, 503) or (is_get and e.code in HTTP_RETRY_STATUS)
+            if attempt >= retries or not again: raise
+            wait = _retry_after(e.headers, 1.5) if e.code in (429, 503) else 1.5
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt >= retries or not is_get: raise
+            wait = 1.5
+        attempt += 1
+        _http_sleep(wait + random.random())
+
+
+def http_json(url, key=None, body=None, timeout=60, retries=1):
+    def send():
+        req = urllib.request.Request(url, method='POST' if body is not None else 'GET',
+                                     data=json.dumps(body).encode() if body is not None else None,
+                                     headers={'Content-Type': 'application/json', 'User-Agent': 'axiom-reach-reddit/1.0', **({'X-Axiom-Key': key} if key else {})})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode() or '{}')
+    # the job claim is a GET that takes a job: it is never asked twice, since the first ask may have taken one
+    return http_retry(send, body is None, 0 if any(x in url for x in HTTP_NEVER_TWICE) else retries)
 
 
 def kind_count(worker, kind):

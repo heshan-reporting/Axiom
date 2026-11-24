@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anne's Den concepts</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+  :root { --bg: #0e1113; --panel: #171b1e; --line: #2a3035; --ink: #eef1f3; --ink2: #b4bcc2; --ink3: #8b959c; --accent: #e0a458; --r: 12px; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f6f4ef; --panel: #ffffff; --line: #dedad0; --ink: #16191b; --ink2: #454c51; --ink3: #666e74; --accent: #9a5b12; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 'DM Sans', system-ui, sans-serif; }
+  main { max-width: 1320px; margin: 0 auto; padding: 48px 24px 80px; }
+  .eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
+  h1 { font: 700 40px/1.1 'Manrope', sans-serif; letter-spacing: -.02em; margin: 8px 0 12px; }
+  .lede { max-width: 68ch; color: var(--ink2); font-size: 17px; margin: 0 0 8px; }
+  .warn { color: var(--ink3); font-size: 13px; margin: 0 0 36px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  article { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; display: flex; flex-direction: column; }
+  article > a.shot { display: block; aspect-ratio: 1366 / 768; background: var(--bg); border-bottom: 1px solid var(--line); overflow: hidden; }
+  article img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+  .body { padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  h2 { font: 700 22px/1.2 'Manrope', sans-serif; margin: 0; letter-spacing: -.01em; }
+  h2 span { color: var(--ink3); font-weight: 600; margin-right: 8px; }
+  p { margin: 0; color: var(--ink2); }
+  dl { margin: 4px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13.5px; }
+  dt { color: var(--ink3); } dd { margin: 0; color: var(--ink2); }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 12px; }
+  .links a { color: var(--ink); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 13px; font-size: 13px; font-weight: 550; }
+  .links a.open { background: var(--accent); border-color: var(--accent); color: #14100a; }
+  @media (prefers-color-scheme: light) { .links a.open { color: #fff; } }
+  .links a:hover, .links a:focus-visible { border-color: var(--accent); outline: none; }
+  footer { margin-top: 40px; color: var(--ink3); font-size: 13px; max-width: 80ch; }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Anne's Den - concepts for the owner to choose from</div>
+  <h1>Four ways to run the morning</h1>
+  <p class="lede">Each concept is a working prototype of the whole Den: triage, the brief, Watch, Collection, Options and its own design system. They differ in how the work is organised, not only in how it looks.</p>
+  <p class="warn">Synthetic data only. Harbourline Ferries is an invented client; nothing here is connected to AXIOM, a worker or a model.</p>
+  <div class="grid">
+    <article>
+      <a class="shot" href="concept-a.html"><img src="shots/a-today-1366.png" alt="The Storyboard, main view at 1366 by 768"></a>
+      <div class="body"><h2><span>A</span>The Storyboard</h2>
+        <p>Organised by the report, not the channel. Each brief section is a column holding the evidence assigned to it; opening a column turns it into that section's writing surface.</p>
+        <dl><dt>Fixes</dt><dd>Evidence and the brief living on separate tabs</dd><dt>Look</dt><dd>Studio pinboard: deep slate, raised cards, a colour per section</dd></dl>
+        <div class="links"><a class="open" href="concept-a.html">Open</a><a href="concept-a.html#brief">Brief</a><a href="concept-a.html#watch">Watch</a><a href="concept-a.html#collection">Collection</a><a href="concept-a.html#system">Design system</a></div></div>
+    </article>
+    <article>
+      <a class="shot" href="concept-b.html"><img src="shots/b-today-1366.png" alt="The Front Page, main view at 1366 by 768"></a>
+      <div class="body"><h2><span>B</span>The Front Page</h2>
+        <p>The window laid out like an edition, ranked by weight: a lead item, a second tier, a dense "in brief" list and a noise drawer. The brief is the facing page.</p>
+        <dl><dt>Fixes</dt><dd>Every row having the same weight</dd><dt>Look</dt><dd>Editorial: serif display, rules and columns, light first with a true dark</dd></dl>
+        <div class="links"><a class="open" href="concept-b.html">Open</a><a href="concept-b.html#brief">Brief</a><a href="concept-b.html#watch">Watch</a><a href="concept-b.html#collection">Collection</a><a href="concept-b.html#system">Design system</a></div></div>
+    </article>
+    <article>
+      <a class="shot" href="concept-c.html"><img src="shots/c-today-1366.png" alt="The Reading Room, main view at 1366 by 768"></a>
+      <div class="body"><h2><span>C</span>The Reading Room</h2>
+        <p>A reader. A narrow list, a large pane showing the item itself, and the brief sliding in beside it. Watch and Collection use the same shape, so the Den is one pattern.</p>
+        <dl><dt>Fixes</dt><dd>Every row opening in another browser tab</dd><dt>Look</dt><dd>Calm focus tool: soft dark, one warm accent, comfortable reading type</dd></dl>
+        <div class="links"><a class="open" href="concept-c.html">Open</a><a href="concept-c.html#brief">Brief</a><a href="concept-c.html#watch">Watch</a><a href="concept-c.html#collection">Collection</a><a href="concept-c.html#system">Design system</a></div></div>
+    </article>
+    <article>
+      <a class="shot" href="concept-d.html"><img src="shots/d-today-1366.png" alt="The Clock, main view at 1366 by 768"></a>
+      <div class="body"><h2><span>D</span>The Clock</h2>
+        <p>Time is the spine. A 24-hour timeline plots volume, spikes and collection gaps; brushing a span filters the evidence stream below, with the brief docked beside it.</p>
+        <dl><dt>Fixes</dt><dd>Gaps and spikes being lines of text; no way to see the day</dd><dt>Look</dt><dd>Premium data instrument: near-black, disciplined data colour, fine grids</dd></dl>
+        <div class="links"><a class="open" href="concept-d.html">Open</a><a href="concept-d.html#brief">Brief</a><a href="concept-d.html#watch">Watch</a><a href="concept-d.html#collection">Collection</a><a href="concept-d.html#system">Design system</a></div></div>
+    </article>
+  </div>
+  <footer>Demo states: add <code>?state=loading</code>, <code>empty</code>, <code>error</code>, <code>busy</code>, <code>dropped</code>, <code>readonly</code>, <code>filed</code> or <code>nogap</code> before the hash of any concept. The thumbnails come from <code>shots.mjs</code>; if one is missing, run it (see the README).</footer>
+</main>
+</body>
+</html>

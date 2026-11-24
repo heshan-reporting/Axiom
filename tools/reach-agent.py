@@ -31,7 +31,10 @@ at once on a verification and pauses that platform for 24 hours.
 Needs: rdt (Reddit) and/or twitter (X) on PATH, signed in. With Playwright
 installed (pip install playwright && playwright install chromium) it also takes
 `render` jobs: a source's listing page, or one article, read through a real
-browser for the sites that build their pages in JavaScript. It reports which
+browser for the sites that build their pages in JavaScript (a listing's links
+go to the worker, which files them as its own render job does, so a page read
+for the first time is a baseline, not the day's news, and a later probe files
+what is new as found, however long since the last). It reports which
 collectors are available when it connects, and AXIOM shows that in Signals.
 """
 import argparse, datetime, html as htmlmod, importlib.util, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
@@ -299,6 +302,10 @@ def job_x(worker, key, params, log):
             'errors': errors[:5], 'holds': {'threads': tot_t, 'comments': tot_c}}
 
 
+# the words the worker's own render job adds (SOURCE_BASELINE_SAY) when a probe's read was a baseline (p71 review H1)
+BASELINE_SAY = " (the first read of this page: filed as a baseline, before every window, so none of them is the day's news; the next probe files what is new as found)"
+
+
 def job_render(worker, key, params, log):
     """A source's listing page (files what it finds, reports the probe) or one
     article (writes its text back onto the archive row), through Chromium."""
@@ -319,15 +326,27 @@ def job_render(worker, key, params, log):
         items = listing_links(html_text, final or url)
         ms = int((time.time() - t0) * 1000)
         log('out', '%d article-shaped links on the rendered page (%dms)' % (len(items), ms))
-        now = int(time.time() * 1000)
-        rows = [{'src': src, 'title': it['title'][:500], 'body': '', 'url': it['link'], 'ts': now,
-                 'meta': {'reg': 1, 'source': src, 'tier': s.get('tier'), 'juris': s.get('juris'), 'method': 'render', 'issues': tag_issues(it['title']), 'dated': 0, 'via': 'reach'}}
-                for it in items]
-        n, tot = rr.push(worker, key, 'news', rows) if rows else (0, 0)
-        log('info', 'filed %d new rows for %s' % (n, src))
-        rr.http_json(base + '/sources/report', key, {'id': src, 'ok': bool(items), 'method': 'render', 'n': len(items), 'added': n, 'ms': ms,
-                                                    'detail': '' if items else 'rendered page had no article-shaped links'}, timeout=30)
-        return {'ok': bool(items), 'source': src, 'url': url, 'items': len(items), 'added': n, 'method': 'render', 'holds': {'news': tot}}
+        detail = '' if items else 'rendered page had no article-shaped links'
+        # p71 (review B6): the worker files the links (POST /sources/listing) as its own render job does, so a page read for the
+        # first time is a baseline there and the newsroom's old releases are not filed as today's news (every link here was
+        # stamped as found). A worker from before p71 answers 404: the rows are filed here and the probe reported, as before.
+        # p71 (review H1): a person asked for this read, so a later probe files what is new as found however long since the
+        # last; the worker says when the read was a baseline and the log says so, as the worker's own render job does.
+        base_read = False
+        try:
+            d = rr.http_json(base + '/sources/listing', key, {'id': src, 'ok': bool(items), 'method': 'render', 'ms': ms, 'detail': detail,
+                                                             'items': [{'title': it['title'][:500], 'link': it['link']} for it in items]}, timeout=60)
+            n, tot, base_read = int(d.get('added') or 0), None, bool(d.get('baseline'))
+        except urllib.error.HTTPError as e:
+            if e.code != 404: raise
+            now = int(time.time() * 1000)
+            rows = [{'src': src, 'title': it['title'][:500], 'body': '', 'url': it['link'], 'ts': now,
+                     'meta': {'reg': 1, 'source': src, 'tier': s.get('tier'), 'juris': s.get('juris'), 'method': 'render', 'issues': tag_issues(it['title']), 'dated': 0, 'via': 'reach'}}
+                    for it in items]
+            n, tot = rr.push(worker, key, 'news', rows) if rows else (0, 0)
+            rr.http_json(base + '/sources/report', key, {'id': src, 'ok': bool(items), 'method': 'render', 'n': len(items), 'added': n, 'ms': ms, 'detail': detail}, timeout=30)
+        log('info', 'filed %d new rows for %s%s' % (n, src, BASELINE_SAY if base_read else ''))
+        return {'ok': bool(items), 'source': src, 'url': url, 'items': len(items), 'added': n, 'method': 'render', 'baseline': base_read, 'holds': {'news': tot}}
     if not re.match(r'^https?://', url):
         raise RuntimeError('render needs a url or a source id')
     log('cmd', 'chromium goto %s' % url)
@@ -599,7 +618,8 @@ def main(argv=None):
             st = rs.status(c)
             print('%-10s %s%s' % (c, 'usable, %d of %d reads today' % (st['reads_today'], st['per_day']) if st['usable'] else (st['status'] or 'not installed'), ('  - ' + st['why']) if st.get('why') else '') + (('\n             ' + st['native_hint']) if st.get('native_hint') else '') + ((' (read through %s)' % st['backend']) if st.get('backend') and st['usable'] else ''))
         return 0
-    if not a.key: sys.exit('need --key or AXIOM_KEY (export it in ~/.zshrc so the background agent can find it)')
+    # the background agent runs under launchd as a login shell (zsh -lc), which reads ~/.zprofile and never ~/.zshrc
+    if not a.key: sys.exit('need --key or AXIOM_KEY (export it in ~/.zprofile: the background agent starts as a login shell, which does not read ~/.zshrc)')
     say = (lambda *x: None) if a.quiet else print
     fixed = [s.strip() for s in a.sources.split(',') if s.strip()]
     try:

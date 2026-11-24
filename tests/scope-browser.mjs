@@ -5,7 +5,7 @@
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';   // Playwright found portably (PLAYWRIGHT_MJS, the project, the global install)
 const PORT = 8774, W = 'https://newsaus.heshan-998.workers.dev';
-const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
+const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' }); process.on('exit', () => { try { server.kill(); } catch (e) {} });   // a harness that stops early must not leave its server holding the port
 for (let i = 0; i < 40; i++) { try { const r = await fetch('http://127.0.0.1:' + PORT + '/index.html'); if (r.ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 150)); }
 const NOW = Date.now(), H = 3600e3;
 const narr = (id, label, ns, issues, ents) => ({ id, label, client: ns === 'mca' ? 'Minerals Council of Australia' : 'Curious Minds', issues, issueLabels: issues, ns, side: 'hostile', n: 6, n24: 4, nprev: 1, velocity: 4, status: 'growing', first_ts: NOW - 20 * H, first_platform: 'news', first_channel: 'smh', last_ts: NOW - H, platforms: { news: 2, reddit: 4 }, sentiment: { judged: 0 }, alerted: false, counter: '', proponents: '', entities: ents, muted: false, pinned: false, edited: false, spread: [], channels: [], amplifiers: [], termsTop: [], items: [], origin: null, series: [] });
@@ -64,7 +64,7 @@ console.log('scope-browser harness');
 let page = await open();
 await t('the bar sits under the navigation with six controls and a hint; the register fills the party or person list', async () => {
   eq(await page.$$eval(S + 'select', els => els.map(e => e.getAttribute('aria-label'))), ['Client', 'Client issue', 'Party or person', 'Channel', 'Window', 'Region']);
-  ok(/Narrows Sentiment, Narratives, Signals, Sources and the front page/.test(await page.textContent(S + '.scope-hint')));
+  ok(/Narrows the Newsroom, Sentiment, Narratives, Signals, Sources and the front page/.test(await page.textContent(S + '.scope-hint')));
   const opts = await texts(page, S + 'select[aria-label="Party or person"] option'); ok(opts.indexOf('Australian Labor Party') >= 0 && opts.indexOf('Anthony Albanese (ALP)') >= 0 && !opts.some(o => /Minerals Council/.test(o)), 'parties and people, not organisations: ' + opts.join(','));
   ok((await texts(page, S + 'select[aria-label="Client"] option')).indexOf('Minerals Council') >= 0);
 });
@@ -76,7 +76,7 @@ await t('a client narrows the front page to that client\'s alerts, narratives, i
   eq((await texts(page, '#overview-root .ov-issues tbody tr')).length, 1);
   eq((await texts(page, '#overview-root .ov-row')).length, 1);
   ok(/scoped to Minerals Council of Australia/.test(await page.textContent('#overview-root .ov-head')));
-  const iss = await texts(page, S + 'select[aria-label="Client issue"] option'); ok(iss.length >= 2 && iss.every(o => /Every issue|Fuel tax|Critical minerals|Mining/i.test(o)), iss.join(','));
+  const iss = await texts(page, S + 'select[aria-label="Client issue"] option'); ok(iss.length >= 2 && iss.every(o => /Every issue|Fuel tax|Critical minerals|Mining|MCA mentions/i.test(o)), iss.join(','));
   ok(/Clear 1 filter/.test(await page.textContent(S + '.scope-clear')));
   ok(await page.$(S + 'select[aria-label="Client"].on'), 'an active control is marked');
 });

@@ -44,9 +44,12 @@
     return 'social';
   }  const STEP_WORD = { not_started: 'Not started', in_progress: 'In progress', processing: 'Processing', needs_review: 'Needs review', complete: 'Complete', locked: 'Locked', error: 'Error', skipped: 'Skipped' };
   const STEP_LABEL = { brief: 'Brief', objectives: 'Objectives', strategy: 'Strategy', directions: 'Direction', copy: 'Copy', design: 'Create', review: 'Review' };
+  const STEP_LABEL_ALL = STEP_LABEL;
   // concept C: the seven stages the person moves between, over the worker's seven steps (Deliver has no worker step)
   const PHASE_STEPS = [['Brief', ['brief']], ['Plan', ['objectives', 'strategy']], ['Direction', ['directions']], ['Copy', ['copy']], ['Create', ['design']], ['Review', ['review']], ['Deliver', ['export']]];   // S29 (UX11): the seven stages the header names
-  const SUB_LABEL = { brief: 'Understanding', objectives: 'Objectives', strategy: 'Strategy' };
+  // the Express build's three stages over the same seven steps (23 November 2026)
+  const PHASE_STEPS_X = [['Brief', ['brief', 'objectives', 'strategy']], ['Make', ['directions', 'copy', 'design']], ['Ship', ['review', 'export']]];
+  const SUB_LABEL = { brief: 'Understanding', objectives: 'Objectives', strategy: 'Strategy', directions: 'Direction', copy: 'Words', design: 'Canvas', review: 'Approve', export: 'Deliver' };
   // the worker's workflow ends at Review; Deliver opens once Review is complete
   const wfStep = (wf, id) => (wf.steps || {})[id] || (id === 'export' ? { state: ((wf.steps || {}).review || {}).state === 'complete' ? 'not_started' : 'locked' } : undefined);
   const STARTS = [
@@ -95,8 +98,12 @@
 
   /* ------------------------------------------------------------ locked steps, ready notices, the impact question */
   function LockedStage({ step, wf, onGo }) {
-    const s = (wf && wf.steps && wf.steps[step]) || {}; const order = (wf && wf.order) || Object.keys(STEP_LABEL);
-    const unlock = order.slice(0, order.indexOf(step)).find(k => wf.steps[k] && wf.steps[k].state !== 'complete' && wf.steps[k].state !== 'skipped');
+    const STEP_LABEL0 = STEP_LABEL_ALL;
+    const s = (wf && wf.steps && wf.steps[step]) || {}; const order = (wf && wf.order) || Object.keys(STEP_LABEL0);
+    const unlock0 = order.slice(0, order.indexOf(step)).find(k => wf.steps[k] && wf.steps[k].state !== 'complete' && wf.steps[k].state !== 'skipped');
+    // an express project confirms its plan on the Brief: what unlocks a later step is there, never on a step it does not walk
+    const xp = !!(wf && wf.build === 'express'); const unlock = xp && (unlock0 === 'objectives' || unlock0 === 'strategy') ? 'brief' : unlock0;
+    const STEP_LABEL = xp ? Object.assign({}, STEP_LABEL0, { brief: 'the Brief', directions: 'Direction', copy: 'Words', design: 'Canvas', review: 'Approve' }) : STEP_LABEL0;
     return html`<div class="st-locked" role="region" aria-label=${STEP_LABEL[step] + ' is locked'}>
       <span class="st-locked-ic" aria-hidden="true"><${Icon} n="lock" size=${26} /></span>
       <h3>${STEP_LABEL[step]} is locked</h3>
@@ -193,6 +200,11 @@
     return u ? html`<img class="st-clogo" src=${u} alt="" style=${{ width: (size || 44) + 'px', height: (size || 44) + 'px' }} />` : html`<span class="st-clogo ph" aria-hidden="true" style=${{ width: (size || 44) + 'px', height: (size || 44) + 'px', '--c': (c && c.accent) || '#5dd4e5' }}>${initials}</span>`;
   }
   /** Four steps before a project exists: what kind of work, for which client, in which campaign context, and the brief. */
+  /* the two ways to build, asked first: [id, name, what it means, chip, icon] */
+  const BUILDS = [
+    ['express', 'Express build', 'Three stages: Brief, Make, Ship. Axiom\'s plan is pre-selected and you confirm it once; choosing a direction writes the copy; the words and the design are approved together at the end.', 'fewest steps', 'sparkle'],
+    ['detailed', 'Detailed build', 'Seven steps, each one confirmed: Brief, Plan, Direction, Copy, Create, Review, Deliver. For work where every choice is weighed before the next begins.', 'most control', 'layers'],
+  ];
   function Wizard({ clients, clientId, preset, onCreate, onCancel, onClient, busy, prov }) {
     // the model that reads the brief is checked before it is asked for: without it the project is made, unanalysed
     const noClaude = !!(prov && prov.claude === false); const NO_CLAUDE = 'Claude is not configured on the worker (ANTHROPIC_API_KEY): create the project now and analyse the brief once it is. Nothing is spent.';
@@ -207,6 +219,11 @@
     const [chs, setChs] = useState(null); const [deliverable, setDeliverable] = useState('set');
     // P49 (F5): one visual is one channel the person chooses (it was always Instagram, with the choice hidden)
     const [one, setOne] = useState('instagram');
+    /* 23 November 2026: the first question. Express is three stages (Brief, Make, Ship) with Axiom's plan confirmed once; Detailed
+       is the seven steps, each confirmed. Nothing is assumed for a first project; afterwards the last answer is offered, already
+       selected, and one click changes it. */
+    const [build, setBuild0] = useState(() => { if (pr.build === 'express' || pr.build === 'detailed') return pr.build; try { const v = localStorage.getItem('ax_studio_build'); return v === 'express' || v === 'detailed' ? v : ''; } catch (e) { return ''; } });
+    const setBuild = k => { setBuild0(k); try { localStorage.setItem('ax_studio_build', k); } catch (e) {} };
     useEffect(() => { let live = true; call('/studio/clients?ns=' + encodeURIComponent(clients.map(c => c.id).join(','))).then(d => { if (live) setInfo(d.clients || []); }).catch(() => { if (live) setInfo([]); }); return () => { live = false; }; }, []);
     // choosing a client prepares its knowledge in the background: the kit and what of it reaches the models
     useEffect(() => { if (!ns) return; let live = true; setInv(null); setKit(null); setCamp(''); setCmode('');
@@ -225,10 +242,10 @@
     const camps = ((kit && kit.campaigns) || []).filter(c => c.active !== false);
     const campOk = cmode === 'existing' ? !!camp : cmode === 'new' ? ncName.trim().length >= 2 : !!cmode;
     const hasMaterial = text.trim().length >= 20 || items.length > 0;
-    const can = [!!ns, campOk, true][step];
+    const can = [!!ns && !!build, campOk, true][step];
     const steps = [['Brief', 'What do you need?'], ['Campaign', 'Which campaign context?'], ['Deliverables', 'What should we make?']];
     const next = () => { if (can && step < 2) setStep(step + 1); };
-    const make = analyse => onCreate({ type, ns, campaignMode: cmode, campaign: cmode === 'existing' ? camp : '', newCampaign: cmode === 'new' ? { name: ncName.trim(), description: ncDesc.trim() } : null, title: title.trim(), text, kind, items, channels: deliverable === 'visual' ? [one] : (chs || []).filter(c => CHANNELS[c]), deliverable, analyse, kit });
+    const make = analyse => onCreate({ build: build === 'express' ? 'express' : 'detailed', type, ns, campaignMode: cmode, campaign: cmode === 'existing' ? camp : '', newCampaign: cmode === 'new' ? { name: ncName.trim(), description: ncDesc.trim() } : null, title: title.trim(), text, kind, items, channels: deliverable === 'visual' ? [one] : (chs || []).filter(c => CHANNELS[c]), deliverable, analyse, kit });
     const keys = e => { if (e.key === 'Escape') { e.preventDefault(); onCancel(); } else if (e.key === 'Enter' && !e.shiftKey && step < 2 && can && !/^(TEXTAREA|INPUT|BUTTON|SELECT|A)$/.test((e.target || {}).tagName || '')) { e.preventDefault(); next(); } };
     const usable = inv && !inv.error ? (inv.usable || []).filter(u => u.n) : [];
     /* S30 (UX-5): the focus moves to each step's question as it opens (it was left on the page behind), and Escape leaves the
@@ -243,6 +260,8 @@
       <ol class="st-wiz-steps" aria-label="Steps">${steps.map(([l], i) => html`<li key=${l} class=${i < step ? 'done' : i === step ? 'on' : ''}><button disabled=${i > step} onClick=${() => i < step && setStep(i)} aria-current=${i === step ? 'step' : undefined}><span class="st-wiz-n">${i < step ? html`<${Icon} n="check" size=${12} />` : i + 1}</span>${l}</button></li>`)}</ol>
       <div class="st-wiz-body" key=${'s' + step}>
         ${step === 0 ? html`<div class="st-wiz-start">
+          <div class="st-buildq"><span class="st-lbl" id="st-buildq-l">How do you want to build this?</span>
+            <div class="st-builds" role="radiogroup" aria-labelledby="st-buildq-l">${BUILDS.map(([k, l, t, chip, ic], i) => html`<button key=${k} role="radio" aria-checked=${build === k} data-build=${k} class=${'st-type st-build' + (build === k ? ' on' : '')} style=${{ '--i': i }} onClick=${() => setBuild(k)}><span class="st-type-ic"><${Icon} n=${ic} size=${20} /></span><b>${l}</b><span>${t}</span><span class="st-mini-chip">${chip}</span></button>`)}</div></div>
           <div class="st-cpick">
           <label class="st-search"><${Icon} n="search" size=${15} /><input class="st-in" value=${q} placeholder="Search clients and campaigns" aria-label="Search clients" onInput=${e => setQ(e.target.value)} /></label>
           <div class="st-clients" role="radiogroup" aria-label="Client">${!info ? html`<div class="ov-dim">Reading the clients...</div>` : shown.map((c, i) => html`<button key=${c.id} role="radio" aria-checked=${ns === c.id} class=${'st-client-card' + (ns === c.id ? ' on' : '')} style=${{ '--i': i, '--c': c.accent }} onClick=${() => { setNs(c.id); if (onClient) onClient(c.id); }}>
@@ -266,12 +285,12 @@
             <div><span class="st-lbl">Deliverable</span><div class="st-seg">${[['set', 'Coordinated set'], ['visual', 'One visual'], ['copy', 'Copy only']].map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (deliverable === k ? ' on' : '')} aria-pressed=${deliverable === k} onClick=${() => setDeliverable(k)}>${l}</button>`)}</div></div>
             ${deliverable === 'visual' ? html`<div><span class="st-lbl">Channel</span><div class="st-seg" role="radiogroup" aria-label="Channel for the one visual">${Object.keys(CHANNELS).map(k => html`<button key=${k} role="radio" aria-checked=${one === k} class=${'st-segbtn' + (one === k ? ' on' : '')} onClick=${() => setOne(k)}>${CHANNELS[k].label}</button>`)}</div></div>` : null}
             ${deliverable !== 'visual' ? html`<div><span class="st-lbl">Channels</span><div class="st-seg">${Object.keys(CHANNELS).map(k => html`<button key=${k} class=${'st-segbtn' + ((chs || []).indexOf(k) >= 0 ? ' on' : '')} aria-pressed=${(chs || []).indexOf(k) >= 0} onClick=${() => { chsTouched.current = true; setChs((chs || []).indexOf(k) >= 0 ? (chs || []).filter(x => x !== k) : (chs || []).concat([k])); }}>${CHANNELS[k].label}</button>`)}</div></div>` : null}</div>
-          <div class="st-wiz-recap" role="status"><span class="st-lbl">Recap</span><span>${client ? client.name : ''}${cmode === 'existing' && camp ? ' - ' + ((camps.find(c => c.id === camp) || {}).name || camp) : cmode === 'new' ? ' - new campaign ' + ncName.trim() : cmode === 'standalone' ? ' - standalone' : cmode === 'detect' ? ' - campaign detected from the brief' : ''}; ${(TYPES.find(t => t[0] === type) || [])[1] || type}${typeTouched ? '' : ' (Axiom\'s reading)'}; ${deliverable === 'visual' ? 'one visual for ' + CHANNELS[one].label : (deliverable === 'copy' ? 'copy only for ' : 'a coordinated set for ') + ((chs || []).filter(c => CHANNELS[c]).map(c => CHANNELS[c].label).join(', ') || 'no channel yet')}; ${hasMaterial ? (items.length ? items.length + ' item' + (items.length === 1 ? '' : 's') + ' of material' : '') + (text.trim().length >= 20 ? (items.length ? ' and ' : '') + 'a written brief' : '') : 'no material yet: create it and add the material on the Brief'}</span></div>
+          <div class="st-wiz-recap" role="status"><span class="st-lbl">Recap</span><span>${build === 'express' ? 'Express build (Brief, Make, Ship); ' : 'Detailed build (seven steps); '}${client ? client.name : ''}${cmode === 'existing' && camp ? ' - ' + ((camps.find(c => c.id === camp) || {}).name || camp) : cmode === 'new' ? ' - new campaign ' + ncName.trim() : cmode === 'standalone' ? ' - standalone' : cmode === 'detect' ? ' - campaign detected from the brief' : ''}; ${(TYPES.find(t => t[0] === type) || [])[1] || type}${typeTouched ? '' : ' (Axiom\'s reading)'}; ${deliverable === 'visual' ? 'one visual for ' + CHANNELS[one].label : (deliverable === 'copy' ? 'copy only for ' : 'a coordinated set for ') + ((chs || []).filter(c => CHANNELS[c]).map(c => CHANNELS[c].label).join(', ') || 'no channel yet')}; ${hasMaterial ? (items.length ? items.length + ' item' + (items.length === 1 ? '' : 's') + ' of material' : '') + (text.trim().length >= 20 ? (items.length ? ' and ' : '') + 'a written brief' : '') : 'no material yet: create it and add the material on the Brief'}</span></div>
         </div>` : null}
       </div>
       <div class="st-wiz-foot">
         ${step > 0 ? html`<button class="btn sm ghost" onClick=${() => setStep(step - 1)}><${Icon} n="back" size=${14} /> Back</button>` : html`<span></span>`}
-        <span class="ov-dim">${step === 0 ? (!client ? 'Choose the client' : hasMaterial ? client.name + ': the brief is in' : client.name + ': add the brief now or on the Brief later') : step === 1 ? (cmode ? { existing: camp ? 'Inside ' + ((camps.find(c => c.id === camp) || {}).name || camp) : 'Choose the campaign', new: 'A new campaign in the kit', standalone: 'Standalone', detect: 'Axiom will recommend a campaign' }[cmode] : 'Choose the campaign context') : 'Analysing is one model call (at most ' + (K.costCeil ? K.costCeil('analyse') : 3) + ' requests with retries, more for each uploaded file it must read first); nothing else is spent until you choose'}</span>
+        <span class="ov-dim">${step === 0 ? (!build ? 'Choose Express or Detailed' : !client ? 'Choose the client' : hasMaterial ? client.name + ': the brief is in' : client.name + ': add the brief now or on the Brief later') : step === 1 ? (cmode ? { existing: camp ? 'Inside ' + ((camps.find(c => c.id === camp) || {}).name || camp) : 'Choose the campaign', new: 'A new campaign in the kit', standalone: 'Standalone', detect: 'Axiom will recommend a campaign' }[cmode] : 'Choose the campaign context') : 'Analysing is one model call (at most ' + (K.costCeil ? K.costCeil('analyse') : 3) + ' requests with retries, more for each uploaded file it must read first); nothing else is spent until you choose'}</span>
         ${step < 2 ? html`<button class="btn sm" disabled=${!can} onClick=${next}>Next <${Icon} n="arrow" size=${14} /></button>`
           : html`<span class="st-wiz-go"><button class="btn sm ghost" disabled=${!!busy || (deliverable !== 'visual' && !(chs || []).length)} onClick=${() => make(false)}>Create without analysing</button><button class="btn sm" disabled=${!!busy || noClaude || !hasMaterial || (deliverable !== 'visual' && !(chs || []).length)} title=${noClaude ? NO_CLAUDE : !hasMaterial ? 'Write, paste, link or upload the brief first' : ''} onClick=${() => make(true)}>Create and analyse <span class="ov-dim">(1 model call)</span></button></span>`}
       </div>
@@ -279,7 +298,7 @@
   }
 
   /* ------------------------------------------------------------ the brief workspace and Axiom's understanding */
-  function UnderstandingReview({ p, it, client, kit, ro, busy, onConfirm, onCampaign, onAgain, wf }) {
+  function UnderstandingReview({ p, it, client, kit, ro, busy, onConfirm, onCampaign, onAgain, wf, express }) {
     const a = (p.brief || {}).analysis || {}; const sit = it.situation || {}; const u = it.understanding || {}; const cmp = it.comparison || {};
     const [showParas, setShowParas] = useState(false);
     const camps = ((kit && kit.campaigns) || []); const c = it.campaign || {};
@@ -310,10 +329,60 @@
       <div class="st-an-sec"><button class="st-tools-toggle" aria-expanded=${showParas} onClick=${() => setShowParas(!showParas)}><span class="st-lbl">What was kept and what was set aside (${(it.relevant || []).length} / ${(it.filtered || []).length})</span><span aria-hidden="true">${showParas ? '-' : '+'}</span></button>
         ${showParas ? html`${it.relevance ? html`<div class="ov-dim st-rel-counts">The pre-pass anchored ${it.relevance.anchored} of ${it.relevance.anchored + it.relevance.unanchored} paragraphs to a client issue, entity, campaign term or the client's name${it.relevance.keptByReason ? '; ' + it.relevance.keptByReason + ' kept on the reading\'s stated reason alone' : ''}${it.relevance.demoted ? '; ' + it.relevance.demoted + ' the reading kept without a reason ' + (it.relevance.demoted === 1 ? 'was' : 'were') + ' set aside' : ''}.</div>` : null}<table class="ov-table st-an-paras"><thead><tr><th>Paragraph</th><th>Read as</th><th>Why</th><th>Evidence</th></tr></thead><tbody>${(it.relevant || []).map(x => html`<tr key=${'k' + x.p} data-p=${x.p}><td><span class="ov-dim">${x.p}</span> ${x.text}</td><td><${Chip} kind="ok">kept</${Chip}></td><td>${x.why}</td><td><${K.RelEvidence} x=${x} /></td></tr>`)}${(it.filtered || []).map(x => html`<tr key=${'f' + x.p} data-p=${x.p}><td><span class="ov-dim">${x.p}</span> ${x.text}</td><td><${Chip}>set aside</${Chip}></td><td>${x.why}</td><td><${K.RelEvidence} x=${x} /></td></tr>`)}</tbody></table>` : null}</div>
       ${!ro ? html`<div class="st-stepbar" role="group" aria-label="Review the understanding">
-        <div><b>${reviewed ? 'Understanding confirmed.' : st.why === 'campaign_changed' ? 'The campaign changed after this reading.' : 'Does Axiom have this right?'}</b><span class="ov-dim">${reviewed ? 'The objectives come from this reading.' : st.why === 'campaign_changed' ? 'Analyse again so relevance and the strategy follow the new campaign, or keep this reading.' : 'Confirm it to choose the objectives, or add material and analyse again.'}</span></div>
-        <div class="st-stepbar-acts"><button class="btn sm ghost" disabled=${!!busy} onClick=${onAgain}><${Icon} n="refresh" size=${13} /> ${st.why === 'campaign_changed' ? 'Analyse again' : 'Add material and analyse again'}</button>${!reviewed ? html`<button class="btn sm" disabled=${!!busy} onClick=${onConfirm}>${st.why === 'campaign_changed' ? 'Keep this reading' : 'Confirm and continue to Objectives'} <${Icon} n="arrow" size=${14} /></button>` : null}</div>
+        <div><b>${reviewed ? 'Understanding confirmed.' : st.why === 'campaign_changed' ? 'The campaign changed after this reading.' : 'Does Axiom have this right?'}</b><span class="ov-dim">${reviewed ? 'The objectives come from this reading.' : st.why === 'campaign_changed' ? 'Analyse again so relevance and the strategy follow the new campaign, or keep this reading.' : express ? 'This is the reading the plan above is built on: confirming the plan confirms it. If it is wrong, add material and analyse again.' : 'Confirm it to choose the objectives, or add material and analyse again.'}</span></div>
+        <div class="st-stepbar-acts"><button class="btn sm ghost" disabled=${!!busy} onClick=${onAgain}><${Icon} n="refresh" size=${13} /> ${st.why === 'campaign_changed' ? 'Analyse again' : 'Add material and analyse again'}</button>${!reviewed && !(express && st.why !== 'campaign_changed') ? html`<button class="btn sm" disabled=${!!busy} onClick=${onConfirm}>${st.why === 'campaign_changed' ? 'Keep this reading' : 'Confirm and continue to Objectives'} <${Icon} n="arrow" size=${14} /></button>` : null}</div>
       </div>` : null}
     </div>`;
+  }
+  /* ------------------------------------------------------------ the Express build: the plan, confirmed once */
+  /** In an express project the reading, the objective with its key message, the response strategy and the campaign are one
+      decision on one page. Axiom's recommendation is selected already and says so; each part can be changed here; one button
+      confirms them all (one request, nothing spent) and asks for the creative directions (one model call, stated on the button).
+      Not responding stays a decision with its reason, and the campaign is asked for when the kit leaves it open. */
+  function ExpressPlan({ p, kit, client, busy, wf, prov, onConfirm, onNoResponse, onRespond, onGoMake }) {
+    const it = p.intel || {}; const i0 = (p.brief || {}).intel || {}; const sel = i0.selected || {}; const rec = it.recommendation || {}; const ro = !canWrite() || p.readOnly;
+    const objs = it.objectives || []; const strats = (it.strategies || []).filter(s => s.kind !== 'none'); const noneS = (it.strategies || []).find(s => s.kind === 'none');
+    const recStrat = (strats.find(s => s.id === rec.strategy) || strats.find(s => s.recommended) || strats[0] || {}).id || '';
+    const [obj, setObj] = useState(sel.objective ? sel.objective.id : rec.objective || (objs[0] || {}).id || '');
+    const O = objs.find(o => o.id === obj) || null; const msgs = (O && O.messages) || [];
+    const [msg, setMsg] = useState(sel.message ? sel.message.id : '');
+    const M = msgs.find(m => m.id === msg) || msgs.find(m => m.id === rec.message) || msgs[0] || null;
+    const [strat, setStrat] = useState(sel.strategy ? sel.strategy.id : recStrat);
+    const S0 = strats.find(s => s.id === strat) || null;
+    const c = it.campaign || {}; const kitCamps = ((kit && kit.campaigns) || []).filter(x => x && x.active !== false);
+    const undecided = !p.campaign && !(p.brief || {}).campaignConfirmed && (!!c.ambiguous || kitCamps.length > 1);
+    const offer = !!(c.id && c.id !== (p.campaign || ''));
+    const [campPick, setCampPick] = useState(null);
+    const steps = (wf && wf.steps) || {}; const done = (steps.strategy || {}).state === 'complete' && !(steps.strategy || {}).noResponse;
+    const [edit, setEdit] = useState(false);
+    const conf = i0.confirmed || {}; const same = done && (conf.objectives || {}).objective === obj && (conf.objectives || {}).message === (M || {}).id && (conf.strategy || {}).strategy === strat && campPick == null;
+    const recNo = (it.situation || {}).respond === 'no' || !!(noneS && noneS.recommended);
+    const noClaude = !!(prov && prov.claude === false); const sit = it.situation || {};
+    const body = () => Object.assign({ objective: obj, message: (M || {}).id, strategy: strat }, campPick != null ? { campaign: campPick } : {});
+    const tag = on => on ? html`<${Chip} kind="ok">Axiom's pick</${Chip}>` : html`<${Chip}>your choice</${Chip}>`;
+    if (i0.noResponse) return html`<section class="st-xplan decided" aria-label="The plan"><div class="st-decided" role="status"><${Icon} n="archive" size=${18} /><div><b>The team decided not to respond.</b> <span class="ov-dim">${i0.noResponse.reason}</span></div>${!ro ? html`<button class="btn sm ghost" disabled=${!!busy} onClick=${onRespond}>Respond after all</button>` : null}</div></section>`;
+    if (done && !edit) return html`<section class="st-xplan confirmed" aria-label="The plan" data-plan="confirmed"><div class="st-xplan-done" role="status"><${Icon} n="check" size=${18} /><div><b>Plan confirmed.</b> <span class="ov-dim">${(sel.objective || {}).title || ''}${sel.strategy ? ' - ' + (STRAT_WORD[sel.strategy.kind] || sel.strategy.kind) : ''}</span></div>${!ro ? html`<button class="ov-link" onClick=${() => setEdit(true)}>Change the plan</button>` : null}${!ro && (steps.directions || {}).state === 'not_started' ? html`<button class="btn sm st-xplan-go" disabled=${!!busy || noClaude} title=${noClaude ? 'Claude is not configured on the worker' : 'One model call proposes the creative directions built on this plan'} onClick=${() => onConfirm(null, true)}><${Icon} n="sparkle" size=${14} /> Propose directions <span class="st-cost">1 model call</span></button>` : (steps.directions || {}).state && (steps.directions || {}).state !== 'locked' && onGoMake ? html`<button class="btn sm ghost" onClick=${onGoMake}>Go to Make <${Icon} n="arrow" size=${14} /></button>` : null}</div></section>`;
+    return html`<section class="st-xplan" aria-label="The plan" data-plan=${done ? 'editing' : 'open'}>
+      <div class="st-xplan-h"><div><span class="st-eyebrow-n">The plan</span><h3>${done ? 'Change the plan' : 'Confirm the plan once'}</h3></div><span class="ov-dim">Axiom's recommendation is selected. Change any part, then confirm them together: nothing is spent by confirming.</span></div>
+      <p class="st-xplan-sit"><b>${sit.respond === 'no' ? 'Axiom recommends not responding.' : sit.respond === 'monitor' ? 'Axiom would watch this, not answer yet.' : 'Axiom recommends responding.'}</b> ${sit.why || it.summary || ''}</p>
+      ${recNo && !ro ? html`<div class="st-warnbar" role="note"><${Icon} n="alert" size=${16} /> <span>Not responding is a decision with its reason, recorded for the client's memory. Or choose a strategy below and respond.</span><button class="btn sm ghost" disabled=${!!busy || !O || !M} onClick=${() => onNoResponse({ objective: obj, message: (M || {}).id })}>Record: no response</button></div>` : null}
+      <div class="st-xplan-grid">
+        <label class="st-xplan-row"><span class="st-lbl">Objective ${tag(obj === (rec.objective || (objs[0] || {}).id))}</span>
+          <select class="st-in" value=${obj} disabled=${ro || !!busy} aria-label="Objective" onChange=${e => { setObj(e.target.value); setMsg(''); }}>${objs.map(o => html`<option key=${o.id} value=${o.id}>${o.rank}. ${o.title}${rec.objective === o.id ? ' (recommended)' : ''}</option>`)}</select>
+          <span class="ov-dim">${O ? O.why : 'The analysis proposed no objective: add material and analyse again.'}</span></label>
+        <label class="st-xplan-row"><span class="st-lbl">Key message ${tag(!!M && (M.id === rec.message || (!msgs.some(m => m.id === rec.message) && M === msgs[0])))}</span>
+          <select class="st-in" value=${(M || {}).id || ''} disabled=${ro || !!busy || !O} aria-label="Key message" onChange=${e => setMsg(e.target.value)}>${msgs.map(m => html`<option key=${m.id} value=${m.id}>${m.primary}${rec.message === m.id ? ' (recommended)' : ''}</option>`)}</select>
+          <span class="ov-dim">${M ? [M.supporting, M.cta ? 'Call to action: ' + M.cta : ''].filter(Boolean).join(' ') : ''}${M && M.banned ? html` <${Chip} kind="bad">uses "${M.banned}"</${Chip}>` : null}</span></label>
+        <label class="st-xplan-row"><span class="st-lbl">How to respond ${tag(strat === recStrat)}</span>
+          <select class="st-in" value=${strat} disabled=${ro || !!busy} aria-label="Response strategy" onChange=${e => setStrat(e.target.value)}>${strats.map(s => html`<option key=${s.id} value=${s.id}>${STRAT_WORD[s.kind] || s.kind}${s.id === recStrat ? ' (recommended)' : ''}</option>`)}</select>
+          <span class="ov-dim">${S0 ? [S0.message, S0.audience ? 'For ' + S0.audience + '.' : '', S0.risk ? 'Risk: ' + S0.risk : ''].filter(Boolean).join(' ') : 'The analysis proposed no response strategy.'}</span></label>
+        ${undecided || offer || p.campaign ? html`<label class="st-xplan-row"><span class="st-lbl">Campaign ${undecided && campPick == null ? html`<${Chip} kind="warn">your decision</${Chip}>` : null}</span>
+          <select class="st-in" value=${campPick != null ? (campPick || '__none') : (p.campaign || (undecided ? '' : '__none'))} disabled=${ro || !!busy} aria-label="Campaign" onChange=${e => setCampPick(e.target.value === '__none' ? '' : e.target.value)}>${undecided && campPick == null ? html`<option value="">Choose the campaign...</option>` : null}${kitCamps.map(k => html`<option key=${k.id} value=${k.id}>${k.name || k.id}${c.id === k.id ? ' (Axiom\'s match, ' + Math.round((c.confidence || 0) * 100) + '%)' : ''}</option>`)}<option value="__none">Standalone (the client's own identity and facts only)</option></select>
+          <span class="ov-dim">${undecided && campPick == null ? (c.question || 'The kit has ' + kitCamps.length + ' campaigns and none is chosen: the marks, facts and tone follow this choice, so it is yours.') : offer && campPick == null ? 'Axiom matched ' + c.name + '; the project keeps ' + (p.campaign ? 'its campaign' : 'standalone') + ' unless you change it.' : 'The campaign\'s marks, facts and tone apply.'}</span></label>` : null}
+      </div>
+      ${!ro ? html`<div class="st-stepbar"><div><b>${same ? 'This is the confirmed plan.' : !O || !M || !S0 ? 'The plan is not complete' : undecided && campPick == null ? 'Choose the campaign, or keep it standalone' : 'One confirmation covers the reading, the objective, the message and the strategy'}</b><span class="ov-dim">${done ? 'A change asks what to do with work already built on the earlier plan; nothing is deleted.' : 'Then Axiom proposes creative directions built on it: one model call. Choosing one writes the copy.'}</span></div>
+        <div class="st-stepbar-acts">${done ? html`<button class="ov-link" onClick=${() => setEdit(false)}>Cancel</button>` : null}<button class="btn sm ghost" disabled=${!!busy || !O || !M || !S0 || same || (undecided && campPick == null)} onClick=${() => onConfirm(body(), false).then(ok => { if (ok) setEdit(false); })}>Confirm only</button><button class="btn sm st-xplan-go" disabled=${!!busy || noClaude || !O || !M || !S0 || (undecided && campPick == null)} title=${noClaude ? 'Claude is not configured on the worker: confirm the plan now and ask for directions once it is' : undecided && campPick == null ? 'Choose the campaign, or keep it standalone, first' : 'Confirms the plan (nothing spent), then one model call proposes the creative directions'} onClick=${() => onConfirm(same ? null : body(), true).then(ok => { if (ok) setEdit(false); })}><${Icon} n="sparkle" size=${14} /> ${same ? 'Propose directions' : 'Confirm and propose directions'} <span class="st-cost">1 model call</span></button></div></div>` : null}
+    </section>`;
   }
   /* P51 (Phase 3): what blocks the work, stated before anything is spent - the brief check's blocking and mandatory gaps and the
      brand workspace's blocking items, each with the one action it needs. Preferred gaps are left to the brief form below. */
@@ -333,7 +402,7 @@
     return html`<section class="st-gaps" aria-label="Before anything is spent" data-gaps=${rows.length}><div class="st-lbl">Before anything is spent: ${rows.length} thing${rows.length === 1 ? '' : 's'} to settle</div>
       <ul class="st-ul">${rows.map(r => html`<li key=${r.code + r.text} data-gap=${r.code}><span class=${'st-pf-chip ' + (r.level === 'blocking' ? 'bad' : 'warn')}>${r.level === 'blocking' ? 'blocks' : r.level === 'mandatory' ? 'needed' : 'check'}</span> ${r.text}${act(r)}${!GAP_ACT[r.code] && r.fix ? html` <span class="ov-dim">(${r.fix})</span>` : null}</li>`)}</ul></section>`;
   }
-  function BriefWorkspace({ p, client, kit, busy, wf, job, now, durations, onAnalyse, onConfirm, onCampaign, onRetry, onCancel, onGo, onSaveBrief, prov }) {
+  function BriefWorkspace({ p, client, kit, busy, wf, job, now, durations, onAnalyse, onConfirm, onCampaign, onRetry, onCancel, onGo, onSaveBrief, prov, express, onPlan, onNoResponse, onRespond }) {
     const noClaude = !!(prov && prov.claude === false);
     const ro = !canWrite() || p.readOnly; const it = p.intel && ((p.brief || {}).analysis || {}).intel === p.intel.id ? p.intel : null;
     const [again, setAgain] = useState(false);
@@ -355,7 +424,8 @@
         <div class="st-stepbar"><div><b>Analyse the brief</b><span class="ov-dim">One model call reads ${n || 'the'} piece${n === 1 ? '' : 's'} of material: what happened, why it matters, what to keep, the objectives and the strategy Axiom recommends. Nothing else is spent.</span></div>
           <div class="st-stepbar-acts"><button class="btn sm" disabled=${!!busy || !n || noClaude} title=${noClaude ? 'Claude is not configured on the worker (ANTHROPIC_API_KEY): the brief is kept and is analysed once it is. Nothing is spent.' : !n ? 'Write, paste, link or upload the brief first' : 'One model call reads the material against the client (up to ' + (K.costCeil ? K.costCeil('analyse') : 3) + ' requests with retries; more for each file it must read first)'} onClick=${go}><${Icon} n="sparkle" size=${14} /> Analyse brief <span class="st-cost">1 model call</span></button></div></div>
       </section>` : null}
-      ${it && !(live && again) ? html`<${UnderstandingReview} p=${p} it=${it} client=${client} kit=${kit} ro=${ro} busy=${busy} wf=${wf} onConfirm=${onConfirm} onCampaign=${onCampaign} onAgain=${() => setAgain(true)} />` : null}
+      ${express && it && !(live && again) ? html`<${ExpressPlan} key=${'xp:' + it.id} p=${p} kit=${kit} client=${client} busy=${busy} wf=${wf} prov=${prov} onConfirm=${onPlan} onNoResponse=${onNoResponse} onRespond=${onRespond} onGoMake=${() => onGo(((wf && wf.steps && wf.steps.directions) || {}).state === 'complete' && (p.assets || []).length ? 'design' : 'directions')} />` : null}
+      ${it && !(live && again) ? html`<${UnderstandingReview} p=${p} it=${it} client=${client} kit=${kit} ro=${ro} busy=${busy} wf=${wf} express=${express} onConfirm=${onConfirm} onCampaign=${onCampaign} onAgain=${() => setAgain(true)} />` : null}
       ${!it && !showCompose && !live && ro ? html`<div class="st-empty-state"><b>No brief has been analysed yet.</b><span>A full key adds the material and analyses it.</span></div>` : null}
       <span id="st-brief-details" class="st-anchor"></span>
       ${K.BriefFields ? html`<${K.BriefFields} p=${p} busy=${busy} onSave=${onSaveBrief} />` : null}
@@ -454,7 +524,7 @@
     return { v: 5, stage: { w: 1080, h: 1350 }, bg: ground, palette: pal, fonts: (kit && kit.fonts) || {}, layers, sketch: true };
   }
   const SKETCH_WORD = { full: 'full-bleed image', split: 'split with an image', inset: 'inset image', chart: 'a chart', none: 'type only' };
-  function DirCard({ d, i, p, kit, ro, busy, picked, earlier, onPick, onChoose, onRefine, onUpdate, onDuplicate, onArchive, onKeep }) {
+  function DirCard({ d, i, p, kit, ro, busy, picked, earlier, onPick, onChoose, onRefine, onUpdate, onDuplicate, onArchive, onKeep, express, noClaude }) {
     const [open, setOpen] = useState(false); const [ref, setRef] = useState(null);
     const layout = useMemo(() => dirPreview(d, kit, i), [d.id, d.headline, d.hook, d.title, d.medium, JSON.stringify(d.sketch || null), kit]);
     const v = { id: 'preview-' + d.id, layout, copy: {}, mode: 'composition' };
@@ -481,7 +551,7 @@
         ${open ? html`<dl class="st-vis">${d.visual ? html`<div><dt>Visual</dt><dd>${d.visual}</dd></div>` : null}${Object.keys(VIS_WORD).filter(k => vn[k]).map(k => html`<div key=${k}><dt>${VIS_WORD[k]}</dt><dd>${vn[k]}</dd></div>`)}${d.typography ? html`<div><dt>Typography</dt><dd>${d.typography}</dd></div>` : null}${d.colour ? html`<div><dt>Colour</dt><dd>${d.colour}</dd></div>` : null}</dl>` : null}
         ${ref != null ? html`<div class="st-dcard-refine"><input class="st-in" value=${ref} autoFocus placeholder="What should change? e.g. more defiant, lead with the farmer" aria-label=${'Refine ' + d.title} onInput=${e => setRef(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && ref.trim()) { onRefine(d, ref.trim()); setRef(null); } if (e.key === 'Escape') setRef(null); }} /><button class="btn sm" disabled=${!ref.trim() || !!busy} onClick=${() => { onRefine(d, ref.trim()); setRef(null); }}>Refine (1 call)</button><button class="ov-link" onClick=${() => setRef(null)}>cancel</button></div>` : null}
         ${!ro ? html`<div class="st-dcard-acts">
-          ${!d.chosen && !earlier ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onChoose(d)}>Select</button>` : null}
+          ${!d.chosen && !earlier ? (express ? html`<button class="btn sm st-dcard-use" disabled=${!!busy || noClaude} title=${noClaude ? 'Claude is not configured on the worker' : 'Selects this direction and writes each channel\'s words and layout from it: one model call, no image'} onClick=${() => onChoose(d)}>Use this and write the copy <span class="st-cost">1 model call</span></button>` : html`<button class="btn sm" disabled=${!!busy} onClick=${() => onChoose(d)}>Select</button>`) : null}
           ${earlier && onKeep ? html`<button class="btn sm ghost" disabled=${!!busy} title="Keep this direction under the current objective, message and strategy; nothing is regenerated" onClick=${() => onKeep(d)}>Keep under the current choice</button>` : null}
           <button class="btn sm ghost" disabled=${!!busy} title="Refine this direction with an instruction (1 model call)" onClick=${() => setRef('')}><${Icon} n="pen" size=${13} /> Refine</button>
           <button class="st-iconbtn" disabled=${!!busy} title="Duplicate" aria-label=${'Duplicate ' + d.title} onClick=${() => onDuplicate(d)}><${Icon} n="copy" size=${15} /></button>
@@ -493,7 +563,7 @@
     </article>`;
   }
   const PARTS = [['idea', 'idea'], ['hook', 'hook'], ['headline', 'headline'], ['visual', 'visual'], ['tone', 'tone'], ['layout', 'layout']];
-  function DirectionsBoard({ p, kit, busy, wf, job, now, durations, onDirect, onChoose, onUpdate, onDuplicate, onDecision, onRetry, onGo, onKeep }) {
+  function DirectionsBoard({ p, kit, busy, wf, job, now, durations, onDirect, onChoose, onUpdate, onDuplicate, onDecision, onRetry, onGo, onKeep, express, prov, copyJob }) {
     const ro = !canWrite() || p.readOnly; const [pick, setPick] = useState([]); const [parts, setParts] = useState({}); const [showOld, setShowOld] = useState(false); const [showAside, setShowAside] = useState(false);
     const earlierIds = new Set(((wf || {}).earlier || {}).directions || []);
     const all = (p.directions || []).filter(d => !d.archived);
@@ -503,10 +573,12 @@
     const st = (wf && wf.steps && wf.steps.directions) || {};
     const togg = d => setPick(pick.indexOf(d.id) >= 0 ? pick.filter(x => x !== d.id) : pick.concat([d.id]));
     const archive = async d => { const why = await K.ask({ reason: true, min: 4, title: 'Set "' + d.title + '" aside?', text: 'Why? Recorded with the decision; the engine learns from it. The direction is kept and can be brought back.', ok: 'Set it aside' }); if (why == null || why.trim().length < 4) return; onUpdate(d, { archived: true }, why.trim()); };
-    const card = (d, i, earlier) => html`<${DirCard} key=${d.id} d=${d} i=${i} p=${p} kit=${kit} ro=${ro} busy=${busy} earlier=${earlier} picked=${pick.indexOf(d.id) >= 0} onPick=${togg} onChoose=${onChoose} onRefine=${(x, ins) => onDirect({ mode: 'refine', ids: [x.id], instruction: ins })} onUpdate=${onUpdate} onDuplicate=${onDuplicate} onArchive=${archive} onKeep=${onKeep} />`;
+    const card = (d, i, earlier) => html`<${DirCard} key=${d.id} d=${d} i=${i} p=${p} kit=${kit} ro=${ro} busy=${busy} earlier=${earlier} picked=${pick.indexOf(d.id) >= 0} onPick=${togg} onChoose=${onChoose} onRefine=${(x, ins) => onDirect({ mode: 'refine', ids: [x.id], instruction: ins })} onUpdate=${onUpdate} onDuplicate=${onDuplicate} onArchive=${archive} onKeep=${onKeep} express=${express} noClaude=${!!(prov && prov.claude === false)} />`;
+    const copyLive = !!(express && copyJob && (copyJob.state === 'queued' || copyJob.state === 'running'));
     const partList = Object.keys(parts).filter(k => parts[k]).map(k => ({ id: k.split(':')[0], part: k.split(':')[1] }));
     return html`<div class="st-dboard">
       ${live || (job && job.state === 'failed') ? html`<${ProcessingCard} job=${job} kind="direct" now=${now} durations=${durations} onRetry=${onRetry} />` : null}
+      ${copyLive || (express && copyJob && copyJob.state === 'failed' && !(p.assets || []).length) ? html`<${ProcessingCard} job=${copyJob} kind="copy" now=${now} durations=${durations} onRetry=${() => onGo('copy')} onManual=${() => onGo('copy')} />` : null}
       ${!all.length && !live ? html`<div class="st-empty-state st-dboard-empty"><span class="st-locked-ic" aria-hidden="true"><${Icon} n="compass" size=${26} /></span><b>No creative directions yet.</b><span>${st.state === 'error' ? 'The last attempt did not complete; nothing was lost.' : 'Directions are built on the objective, the message and the strategy you confirmed: genuinely different arguments and media, measured for how different they are.'}</span>${!ro ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onDirect({ n: 3 })}><${Icon} n="sparkle" size=${14} /> Generate creative directions <span class="ov-dim">(1 model call)</span></button>` : null}</div>` : null}
       ${(() => { const ev = (p.thread || []).filter(e => e.kind === 'directions' && (e.composition != null || e.diversity != null)).pop(); if (!ev || !cur.length) return null;
         return html`<div class="st-divline" role="note"><span><span class="st-lbl">Argument diversity</span> ${ev.argument != null ? ev.argument : ev.diversity}</span>${ev.composition != null ? html`<span><span class="st-lbl">Composition diversity</span> ${ev.composition}</span>` : html`<span class="ov-dim">composition not measured for this set (made before S20)</span>`}<span class="ov-dim">1 = nothing in common. Composition is read from what each direction says it would draw, not from rendered images.</span>${(ev.lookalikes || []).length ? html`<span class="st-divwarn">Would look alike on the page: ${ev.lookalikes.map(x => '"' + x.a + '" and "' + x.b + '" (' + (x.same || []).join(', ') + ')').join('; ')}</span>` : null}</div>`; })()}
@@ -519,7 +591,7 @@
         <div class="st-copydeck-scroll"><table class="ov-table"><thead><tr><th></th>${picked.map(d => html`<th key=${d.id}>${d.title}</th>`)}</tr></thead><tbody>${PARTS.map(([k, l]) => html`<tr key=${k}><th scope="row">${l}</th>${picked.map(d => html`<td key=${d.id}><label class="st-check"><input type="checkbox" checked=${!!parts[d.id + ':' + k]} onChange=${e => setParts(Object.assign({}, parts, { [d.id + ':' + k]: e.target.checked }))} aria-label=${'Take the ' + l + ' of ' + d.title} /> ${d[k] || html`<span class="ov-dim">-</span>`}</label></td>`)}</tr>`)}</tbody></table></div>
         ${!ro ? html`<div class="st-nd-row"><button class="btn sm" disabled=${!!busy} onClick=${() => { onDirect({ mode: 'merge', ids: picked.map(d => d.id), parts: partList }); setPick([]); setParts({}); }}><${Icon} n="merge" size=${14} /> ${partList.length ? 'Combine the ticked parts' : 'Merge into one'} <span class="ov-dim">(1 model call)</span></button><button class="ov-link" onClick=${() => { setPick([]); setParts({}); }}>clear</button></div>` : null}</section>` : null}
       ${!ro && all.length ? html`<div class="st-stepbar"><div><b>${st.state === 'complete' ? 'Direction selected: ' + ((all.find(d => d.chosen) || {}).title || '') : st.why === 'chosen_earlier' ? 'The selected direction was built on an earlier choice' : 'Select the direction the copy follows'}</b><span class="ov-dim">${st.state === 'complete' ? 'Copy is open: the words and the visual narrative are written from it.' : 'Refine, merge or ask for alternatives until one is right; nothing is produced until you select.'}</span></div>
-        <div class="st-stepbar-acts"><button class="btn sm ghost" disabled=${!!busy || live} onClick=${() => onDirect({ mode: 'alternatives', n: 2 })}><${Icon} n="sparkle" size=${14} /> Ask Axiom for alternatives <span class="ov-dim">(1 call)</span></button>${st.state === 'complete' ? html`<button class="btn sm" onClick=${() => onGo('copy')}>Continue to Copy <${Icon} n="arrow" size=${14} /></button>` : null}</div></div>` : null}
+        <div class="st-stepbar-acts"><button class="btn sm ghost" disabled=${!!busy || live} onClick=${() => onDirect({ mode: 'alternatives', n: 2 })}><${Icon} n="sparkle" size=${14} /> Ask Axiom for alternatives <span class="ov-dim">(1 call)</span></button>${st.state === 'complete' ? html`<button class="btn sm" onClick=${() => onGo(express && (p.assets || []).length ? 'design' : 'copy')}>${express && (p.assets || []).length ? 'Open the canvas' : 'Continue to Copy'} <${Icon} n="arrow" size=${14} /></button>` : null}</div></div>` : null}
     </div>`;
   }
 
@@ -561,16 +633,18 @@
   }
 
   /* ------------------------------------------------------------ production mode: chosen once the words are ready */
-  function ProductionModes({ p, busy, prov, onProduce }) {
+  function ProductionModes({ p, busy, prov, onProduce, express }) {
     const ro = !canWrite() || p.readOnly; const visual = p.assets.filter(a => { const v = K.current(a); return v && v.mode !== 'copy'; });
-    const ready = visual.filter(a => K.standing(a, 'copy')); const notReady = visual.filter(a => !K.standing(a, 'copy'));
+    // express: no ready tick stands between the words and the imagery; every piece can go, and the words are approved in Ship
+    const okCopy = a => !!express || !!K.standing(a, 'copy');
+    const ready = visual.filter(okCopy); const notReady = visual.filter(a => !okCopy(a));
     const [mode, setMode] = useState(''); const [size, setSize] = useState((p.brief || {}).size || '2K'); const [sel, setSel] = useState(() => ready.map(a => a.id));
     useEffect(() => { setSel(ready.map(a => a.id)); }, [ready.map(a => a.id).join(',')]);
     const n = sel.filter(id => ready.some(a => a.id === id)).length; const noGem = prov && prov.gemini === false;
     return html`<section class="st-pmodes" aria-label="Production mode">
       <div class="st-pmodes-h"><h3>Choose the production mode</h3><span class="ov-dim">The words are settled; now decide how the creative is made. Nothing is generated until you press.</span></div>
       <div class="st-pmode-cards" role="radiogroup" aria-label="Production mode">${[['editable', 'Editable creative', 'Gemini makes only the imagery for the planned regions. The Studio sets the exact words, the mark from its file, the URL and the shapes as live layers: every element stays editable, is measured, and exports exactly as approved.', 'layers', 'one render per planned image'], ['finished', 'Full AI creative', 'Gemini paints the whole piece as one flat image, words and URL included. The mark file goes with the request, but the model redraws what it is shown: it can misspell or alter it, so each painting is read back against the approved words and the mark before it can be approved. Its words and mark are not editable as layers: a change paints another image. When the reading cannot show the identity is right, make an editable copy (free).', 'sparkle', 'one painting per piece, then a reading']].map(([k, l, t, ic, cost], i) => html`<button key=${k} role="radio" aria-checked=${mode === k} class=${'st-pmode' + (mode === k ? ' on' : '')} style=${{ '--i': i }} onClick=${() => setMode(k)}><span class="st-type-ic"><${Icon} n=${ic} size=${22} /></span><b>${l}</b><span>${t}</span><span class="st-mini-chip">${cost}</span></button>`)}</div>
-      ${visual.length ? html`<div class="st-pm-pieces"><span class="st-lbl">Pieces</span>${visual.map(a => { const ok = !!K.standing(a, 'copy'); return html`<label key=${a.id} class=${'st-pm-piece' + (ok ? '' : ' off')}><input type="checkbox" checked=${sel.indexOf(a.id) >= 0 && ok} disabled=${!ok || ro} onChange=${e => setSel(e.target.checked ? sel.concat([a.id]) : sel.filter(x => x !== a.id))} /><span class="st-pm-thumb"><${Composition} v=${K.current(a)} a=${a} ns=${p.ns} size="mini" /></span><span>${a.title}<span class="ov-dim">${ok ? ' copy ready' : ' copy not marked ready yet'}</span></span></label>`; })}</div>` : null}
+      ${visual.length ? html`<div class="st-pm-pieces"><span class="st-lbl">Pieces</span>${visual.map(a => { const ok = okCopy(a); return html`<label key=${a.id} class=${'st-pm-piece' + (ok ? '' : ' off')}><input type="checkbox" checked=${sel.indexOf(a.id) >= 0 && ok} disabled=${!ok || ro} onChange=${e => setSel(e.target.checked ? sel.concat([a.id]) : sel.filter(x => x !== a.id))} /><span class="st-pm-thumb"><${Composition} v=${K.current(a)} a=${a} ns=${p.ns} size="mini" /></span><span>${a.title}<span class="ov-dim">${express ? (K.standing(a, 'copy') ? ' words approved' : ' words approved later, in Ship') : ok ? ' copy ready' : ' copy not marked ready yet'}</span></span></label>`; })}</div>` : null}
       ${!ro ? html`<div class="st-stepbar"><div><b>${mode ? (mode === 'finished' ? 'Full AI creative' : 'Editable creative') + ' for ' + n + ' piece' + (n === 1 ? '' : 's') : 'Choose a mode'}</b><span class="ov-dim">${notReady.length ? notReady.length + ' piece' + (notReady.length === 1 ? '' : 's') + ' wait for their copy to be marked ready (Copy step). ' : ''}${noGem ? 'Image generation is not configured on the worker.' : 'Each image is a job you can watch, retry or cancel.'}</span></div>
         <div class="st-stepbar-acts"><label class="ov-dim">Resolution <select class="st-sel" value=${size} onChange=${e => setSize(e.target.value)} aria-label="Resolution"><option value="1K">1K draft</option><option value="2K">2K</option><option value="4K">4K final</option></select></label><button class="btn sm" disabled=${!mode || !n || !!busy || noGem} onClick=${() => onProduce(mode, sel.filter(id => ready.some(a => a.id === id)), size)}><${Icon} n="image" size=${14} /> Generate ${n} piece${n === 1 ? '' : 's'}</button></div></div>` : null}
     </section>`;
@@ -591,8 +665,8 @@
       ${row('Strategy', sel.strategy && (STRAT_WORD[sel.strategy.kind] || sel.strategy.kind))}
       ${row('Direction', chosen && chosen.title)}
       ${row('Channels', (b.channels || []).map(chanLabel).join(', '))}
-      ${wf && wf.steps ? html`<ol class="st-ctx-steps" aria-label="Where the project stands">${PHASE_STEPS.map(([ph, ids]) => ids.length === 1 ? html`<li key=${ph} class=${(wfStep(wf, ids[0]) || {}).state}><span>${ph}</span><span class="ov-dim">${STEP_WORD[(wfStep(wf, ids[0]) || {}).state] || (wfStep(wf, ids[0]) || {}).state || ''}</span></li>`
-        : html`<li key=${ph} class="st-ctx-phase"><span>${ph}</span><ol class="st-ctx-sub">${ids.map(k => html`<li key=${k} class=${(wf.steps[k] || {}).state}><span>${SUB_LABEL[k]}</span><span class="ov-dim">${STEP_WORD[(wf.steps[k] || {}).state] || (wf.steps[k] || {}).state || ''}</span></li>`)}</ol></li>`)}</ol>` : null}
+      ${wf && wf.steps ? html`<ol class="st-ctx-steps" aria-label="Where the project stands">${(wf.build === 'express' ? PHASE_STEPS_X : PHASE_STEPS).map(([ph, ids]) => ids.length === 1 ? html`<li key=${ph} class=${(wfStep(wf, ids[0]) || {}).state}><span>${ph}</span><span class="ov-dim">${STEP_WORD[(wfStep(wf, ids[0]) || {}).state] || (wfStep(wf, ids[0]) || {}).state || ''}</span></li>`
+        : html`<li key=${ph} class="st-ctx-phase"><span>${ph}</span><ol class="st-ctx-sub">${ids.map(k => { const sk = wfStep(wf, k) || wf.steps[k] || {}; return html`<li key=${k} class=${sk.state}><span>${SUB_LABEL[k]}</span><span class="ov-dim">${STEP_WORD[sk.state] || sk.state || ''}</span></li>`; })}</ol></li>`)}</ol>` : null}
     </aside>`;
   }
 
