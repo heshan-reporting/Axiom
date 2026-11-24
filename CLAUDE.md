@@ -3766,9 +3766,22 @@ canvas (`chooseExpress`), with **no "ready for design" tick** (`stWfExpress(p)`:
 piece that passes its checks and **one approval** covers the words and the design of exactly that version (`approveBoth`: copy
 first with the short reason `with design`, then design with the person's reason). Not relaxed in express: approval is a
 person's, the campaign is asked for when open, not responding needs a reason, a paid render states its cost, validation and the
-campaign walls. An express page moves on only where the pressed button said it would. `PAGE_NEEDS_BUILD` is 74. The harnesses
+campaign walls. An express page moves on only where the pressed button said it would. `PAGE_NEEDS_BUILD` was 74 (75 since s.63). The harnesses
 written for the seven steps start as a person who chose Detailed last time (the fixtures seed `ax_studio_build`;
 `wizardCreate(page, {build})`). Harnesses: `tests/studio-express-worker.mjs` (8), `tests/studio-express-browser.mjs` (6).
+
+**Typesetting the Studio measures and repairs (build `2026-11-24.studio-p75`, page `?v=r47`; `CREATIVE-STUDIO.md` s.63).** From the
+owner's screenshot (a headline whose letters collided, a mixed-case label tracked so wide it overflowed its box, a headline off
+the column's left edge, handles on the words). The shared RULES block judges tracking (`tracking_tight`: under -50/1000 em
+blocking, under -25 a warning; `tracking_loose`: lower case over +200 blocking, over +100 a warning, capitals twice the room) and
+near-miss left edges (`edges_ragged`, warning: stacked left-set blocks within 3% but more than 0.6% off the edge most share,
+judged at the ink); `measure()` reports `ls`, `caps`, `inkL` and `report()` carries `inkL`; the worker's judge reads tracking,
+case and alignment from the layout and believes a reported ink edge only within a side bearing of the box. Fix layout sets
+tracking back (-15, +30, capitals +120) and moves a near-miss edge onto the column's, never a word or a locked layer.
+`stTracking()` holds planned text to -25..+100 (+200 in capitals); `ST_LAYER_OPS` bounds a model's edits to -25..+200. The
+editor grows a text box to its words when the words or their setting change (`growToWords`, same undo step, never shrinks);
+a selected layer's frame and handles sit 5 px outside its ink, and subject tags hide while a layer is selected. Harnesses:
+`tests/studio-typeset-browser.mjs` (27), `tests/studio-typeset-worker.mjs` (3), `tests/studio-typeset-editor-browser.mjs` (3).
 
 Phase 1, the ground:
 

@@ -4065,7 +4065,7 @@ friction); the owner chose **three stages, with the seven steps kept, and the ch
 - The express page moves the person forward only where the button they pressed said it would (to Direction after "Confirm and
   propose directions"; to the canvas after "Use this and write the copy"), and not when they have moved elsewhere meanwhile. The
   detailed flow's rule (the page never moves on its own) is unchanged.
-- `PAGE_NEEDS_BUILD` is 74: on an older worker an express project would be shown as detailed, and the banner says the worker
+- `PAGE_NEEDS_BUILD` was 74 (75 since s.63): on an older worker an express project would be shown as detailed, and the banner says the worker
   is older than the page.
 
 ### 62.2 Evidence
@@ -4091,3 +4091,61 @@ friction); the owner chose **three stages, with the seven steps kept, and the ch
 - The production-mode chooser (Editable or Full AI) stays on the Board for an express project; the canvas is where express lands.
 - The legacy Intake (`createProject`, projects without `workflow: 2`) is not asked the question: it is not reachable from the
   wizard.
+
+## 63. Typesetting the Studio measures and repairs (build `2026-11-24.studio-p75`, page `?v=r47`; 24 November 2026)
+
+The owner's screenshot of a HOOF tile on the canvas showed four separate faults, all in how words were set, not in the words:
+a headline tracked so tight its letters collided and its word spaces closed; a mixed-case label tracked so wide (about +300
+thousandths of an em) it ran to two lines in a box sized for one, which the canvas reported as "text overflow (label)"; a
+headline that started about 20 px right of the label, the support and the sign-off; and the selection frame drawn exactly on
+the words, so its left handle hid the T of "Tractors" and the layer tags stacked on the subject estimates' tags. The tile itself
+was not readable from the sandbox; the cases below are reconstructed from the screenshot, labelled synthetic in the harnesses.
+
+### 63.1 What changed
+
+- **Tracking is judged** (the shared RULES block, byte-identical in `docs/studio-render.js` and the worker). `measure()` reports
+  each text box's tracking (`ls`, from the layer), whether its words are all capitals (`caps`, after the layer's case) and where
+  its ink starts (`inkL`, the first glyph's side bearing included); `report()` carries `inkL`. `tracking_tight`: under -50
+  thousandths blocking ("its letters collide and the words run together"), under -25 a warning. `tracking_loose`: lower case over
+  +200 blocking, over +100 a warning; capitals get twice the room (over +400 blocking, over +200 a warning), since spaced capitals
+  are a convention. The house values (-10 on display type, +80 to +200 on capitals) pass.
+- **Near-miss left edges** (`edges_ragged`, warning): left-set, unturned text blocks stacked in one column (within 8% of the stage
+  of each other vertically) whose ink starts within 3% of the stage but not on one edge; the edge most of them share is the
+  column's, and a block more than 0.6% off it is named with the distance and the edge it misses (`to` on the finding). A
+  deliberate indent (wider than 3%), a centred or right-set block, and a block well below the column are not judged.
+- **Fix layout** (`repair()`): tracking out of range is set back (a tight block to -15, spaced lower case to +30, spaced
+  capitals to +120) - blocking findings always, warnings when the person pressed Fix; a near-miss edge is moved onto the
+  column's edge at the ink (when asked). Never a word, a size or a locked layer; each change is a named step.
+- **The worker judges the same**: `stValidationJudge` reads tracking, case and alignment from the version's own layout (a report
+  that claims no tracking hides nothing) and believes a reported ink edge only within a side bearing of the layer's box.
+- **Planners cannot crush or space type**: `stTracking()` holds a planned text element to -25..+100 thousandths (+200 for words
+  in capitals) in `stPlanNormalise`, and a model's layer edits are bounded to -25..+200 (`ST_LAYER_OPS`). A person can still set
+  more in the editor (its field runs -50..+300); the rules then say so.
+- **A text box grows to its words** in the editor: a change to the words or their setting (tracking, size, weight, face, case,
+  width, line height, paragraph spacing, plate) through the Style panel, the toolbar or typing on the canvas grows the box's
+  height to the lines the renderer measures (`growToWords` in `docs/studio.js`), in the same undo step; it never shrinks a box
+  drawn taller and leaves locked, hidden and turned layers alone. An edit no longer ends in "text overflow" by itself; a box that
+  grows into the block below is a collision the measurement names, and Fix layout restacks.
+- **The frame stays off the words**: a selected layer's frame is an outline 5 px outside its ink, with the eight handles, the
+  corner handle, the name tag and the rotation handle moved out with it (`studio-editor.css`); the box the rules measure is
+  unchanged. While a layer is selected the photograph's subject estimates keep their outline and drop their "subject?" tags
+  (`.st-le.has-sel`).
+
+### 63.2 Evidence
+
+- `tests/studio-typeset-browser.mjs` (27, Chromium with the renderer): 16 of the first 26 failed before the change; the 27th, a button on the column edge judged by its plate, was added when the gate caught that case. The reported tile
+  reconstructed (a -90 headline, a +300 mixed-case label in a one-line box, the headline 1.7% right of the column) validates as
+  `tracking_tight` blocking, `tracking_loose` blocking, `text_overflow` blocking and `edges_ragged`; Fix layout ends `complete` with
+  four named steps and nothing left.
+- `tests/studio-typeset-worker.mjs` (3): the planner's bound, the worker's own judgement whatever the report says, and an ink edge
+  reported outside the layer not believed.
+- `tests/studio-typeset-editor-browser.mjs` (3, the Studio in Chromium, providers mocked): all three failed on the code before the
+  change (the handles over the words, the overflow after widening the tracking, the subject tags shown over a selection).
+
+### 63.3 Not done, and why
+
+- Existing compositions keep the tracking they were saved with; the rules now name it and Fix layout sets it back.
+- The MCA logo appears on the reported tile beside "Hands Off Our Fuel." HOOF carries its own wordmark and never the MCA logo:
+  if that tile belongs to the HOOF campaign, its mark policy is the thing to check. The sandbox could not read the project.
+- Word spacing itself is not measured from the font: the rules judge the tracking value, which is what a person or a model set.
+

@@ -39,7 +39,7 @@
   const buildN = b => { const m = /studio-p(\d+)/.exec(String(b || '')); return m ? +m[1] : 0; };
   /* RC (R1): the worker build this page was written against. A worker answering an older build is named in a banner, so a stale
      deployment is seen, not guessed from refusals. Raise it with every page release that needs a new worker. */
-  const PAGE_NEEDS_BUILD = 74;
+  const PAGE_NEEDS_BUILD = 75;
   const STUDIO_RELEASE = (() => { try { const s = Array.from(document.scripts).map(x => x.src).find(u => /studio\.js\?v=/.test(u)); return s ? s.replace(/^.*\?v=/, '') : ''; } catch (e) { return ''; } })();
   const testClientsOf = s => {
     if (!s || !s.build) return null;
@@ -3458,6 +3458,18 @@
     const exactImg = l => !!(l && l.type === 'img' && (l.exact || l.role === 'logo' || l.role === 'wordmark'));
     const movable = l => l && !l.locked && !heldMark(l);
     const patchMany = (L, patches) => Object.assign({}, L, { layers: L.layers.map(l => { if (!patches[l.id]) return l; const n = Object.assign({}, l, patches[l.id]); Object.keys(n).forEach(k => { if (n[k] === undefined) delete n[k]; }); return n; }) });
+    /* a text box grows to the height its words need when the words or their setting change (tracking, size, face, width...), so
+       an edit never leaves words spilling out of their box; it never shrinks a box drawn taller, and a locked, hidden or turned
+       layer is left alone. Measured with the renderer's own layout at the output size: the same lines the export draws. */
+    const TEXT_FIT_KEYS = ['text', 'size', 'weight', 'family', 'font', 'letterSpacing', 'lineHeight', 'w', 'italic', 'case', 'paraSpacing', 'bg'];
+    const growToWords = (L, ids) => {
+      if (!R.layoutText || !L || !L.stage || typeof document === 'undefined') return L;
+      const ctx = document.createElement('canvas').getContext('2d'); const W = L.stage.w, H = L.stage.h; const cp = Object.assign({}, v.copy || {}, L._copy || {}); const patches = {};
+      ids.forEach(id => { const l = L.layers.find(x => x.id === id); if (!l || l.type !== 'text' || l.locked || l.hidden || l.rotate) return;
+        const t = R.layoutText(ctx, L, l, cp, W, H); if (!t) return; const need = Math.round((t.contentH / H * 100 + 0.3) * 10) / 10; if (need > (l.h || 0) + 0.05) patches[id] = { h: need }; });
+      return Object.keys(patches).length ? patchMany(L, patches) : L;
+    };
+    const fitsWords = patch => Object.keys(patch || {}).some(k => TEXT_FIT_KEYS.indexOf(k) >= 0);
     const r1 = x => Math.round(x * 10) / 10;
     const pick = (e, l) => { setFocus(l.id); setSelIds(s => e.shiftKey ? (s.indexOf(l.id) >= 0 ? s.filter(x => x !== l.id) : s.concat([l.id])) : (s.indexOf(l.id) >= 0 && s.length > 1 ? s : [l.id])); };
     /* every gesture goes through one pointer path, throttled to the display's frames: move, resize from eight handles, rotate */
@@ -3550,8 +3562,8 @@
     const group = () => { const s = selected().filter(movable); if (s.length < 2) return; const g = 'g' + Date.now().toString(36); const patches = {}; s.forEach(l => { patches[l.id] = { group: g }; }); commit(patchMany(layout, patches)); };
     const ungroup = () => { const patches = {}; selected().filter(movable).forEach(l => { patches[l.id] = { group: undefined }; }); commit(patchMany(layout, patches)); };
     // the lock contract on the canvas: a locked layer takes a new name or an unlock, nothing it draws (the worker refuses the rest too)
-    const setOne = (id, patch, hint) => { const l = byId(id); const bad = window.STMerge && STMerge.lockedChanges ? STMerge.lockedChanges(l, patch) : (l && l.locked && !('locked' in patch || 'name' in patch) ? Object.keys(patch) : []); if (bad.length) { toastMsg('The ' + ((l && (l.name || l.role || l.type)) || 'layer') + ' is locked: unlock it to change its ' + bad.join(', ') + '.', true); return false; } commit(patchMany(layout, { [id]: patch }), hint); return true; };
-    const setEach = fn => { const patches = {}; selected().filter(movable).forEach(l => { patches[l.id] = fn(l); }); if (Object.keys(patches).length) commit(patchMany(layout, patches)); };
+    const setOne = (id, patch, hint) => { const l = byId(id); const bad = window.STMerge && STMerge.lockedChanges ? STMerge.lockedChanges(l, patch) : (l && l.locked && !('locked' in patch || 'name' in patch) ? Object.keys(patch) : []); if (bad.length) { toastMsg('The ' + ((l && (l.name || l.role || l.type)) || 'layer') + ' is locked: unlock it to change its ' + bad.join(', ') + '.', true); return false; } let next = patchMany(layout, { [id]: patch }); if (fitsWords(patch)) next = growToWords(next, [id]); commit(next, hint); return true; };
+    const setEach = fn => { const patches = {}; selected().filter(movable).forEach(l => { patches[l.id] = fn(l); }); if (!Object.keys(patches).length) return; let next = patchMany(layout, patches); const grow = Object.keys(patches).filter(id => fitsWords(patches[id])); if (grow.length) next = growToWords(next, grow); commit(next); };
     /* add, duplicate, delete, copy and paste. The approved words are hidden rather than deleted (they stay in the copy), and a
        mark is never duplicated or deleted here: it is placed from its file by the campaign policy */
     /* S23: an element is added at the centre of what the stage shows (a zoomed stage scrolls) or where it was dropped, and it is
@@ -3646,6 +3658,7 @@
       if (!copyRole) { const bad = window.STMerge && STMerge.lockedChanges ? STMerge.lockedChanges(l, { text: t }) : (l.locked ? ['text'] : []); if (bad.length) { toastMsg('The ' + (l.name || l.role) + ' is locked: unlock it to change its words', true); return; } next = patchMany(layout, { [l.id]: { text: t } }); }
       // S23: a layer that keeps its words fitted is refitted to the new words, in the same step (bounded: never under 2.4% of the width)
       if (l.autofit && CV.fitText && layout.stage) { const nl = next.layers.find(x => x.id === l.id); const r = CV.fitText(next, nl, Object.assign({}, v.copy || {}, next._copy || {}), layout.stage.w, layout.stage.h); if (r.ok) next = patchMany(next, { [l.id]: { size: r.size } }); else toastMsg('Auto-fit: ' + r.why, true); }
+      next = growToWords(next, [l.id]);
       commit(next, 'Edit the words of ' + (l.name || l.role)); };
     const keyAll = e => { const mod = e.metaKey || e.ctrlKey;
       // a key typed into a field edits the field: the canvas shortcuts (nudge, undo, redo, escape) never take it
@@ -4009,7 +4022,7 @@
     const menuEl = menu && CV.ContextMenu ? ReactDOM.createPortal(html`<${CV.ContextMenu} x=${menu.x} y=${menu.y} items=${menuItems()} label=${menu.kind === 'stage' || !sel.length ? 'Canvas actions' : 'Actions for the selection'} onClose=${() => setMenu(null)} />`, document.querySelector('#studio-root .st') || document.body) : null;
     return html`<div class="st-le-wrap" ref=${wrapRef} onKeyDown=${keyAll}>${menuEl}
       ${toolsSlot ? ReactDOM.createPortal(toolsEl, toolsSlot) : toolsEl}${noticeSlot ? ReactDOM.createPortal(restoreEl, noticeSlot) : restoreEl}${sheetEl}
-      <div class=${'st-le' + (preview ? ' preview' : '') + (marquee && marquee.on ? ' marqueeing' : '') + (pickColour ? ' picking' : '') + (ghost ? ' dropping' : '')} ref=${box} tabIndex="-1" onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onPointerDown=${marqueeDown} onPointerDownCapture=${pickColour ? pickDown : undefined} onContextMenu=${onCtx} onDragOver=${onDragOver} onDragLeave=${onDragLeave} onDrop=${onDrop} onDoubleClick=${dbl}>
+      <div class=${'st-le' + (preview ? ' preview' : '') + (sel.length ? ' has-sel' : '') + (marquee && marquee.on ? ' marqueeing' : '') + (pickColour ? ' picking' : '') + (ghost ? ' dropping' : '')} ref=${box} tabIndex="-1" onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onPointerDown=${marqueeDown} onPointerDownCapture=${pickColour ? pickDown : undefined} onContextMenu=${onCtx} onDragOver=${onDragOver} onDragLeave=${onDragLeave} onDrop=${onDrop} onDoubleClick=${dbl}>
         <${Composition} v=${Object.assign({}, v, { layout: drawn, copy: wcopy })} a=${a} ns=${ns} tagOut=${true} highlight=${!preview && highlight ? highlight : []} />
         ${guides && !preview ? html`<div class="st-le-guide" style=${{ left: (story ? sa.side * 100 : 3) + '%', top: (story ? sa.top * 100 : 3) + '%', right: (story ? sa.side * 100 : 3) + '%', bottom: (story ? sa.bottom * 100 : 3) + '%' }} title=${story ? 'safe area inside the story interface' : '3% margin'}></div>${story ? html`<div class="st-le-zone" style=${{ left: 0, right: 0, top: 0, height: (sa.top * 100) + '%' }} title=${'Instagram story interface (top ' + Math.round(sa.top * 100) + '%)'}></div><div class="st-le-zone" style=${{ left: 0, right: 0, bottom: 0, height: (sa.bottom * 100) + '%' }} title=${'Instagram story interface (bottom ' + Math.round(sa.bottom * 100) + '%)'}></div>` : null}` : null}
         ${grid && !preview ? html`<div class="st-le-grid" aria-hidden="true"></div>` : null}
