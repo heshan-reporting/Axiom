@@ -107,9 +107,10 @@
     const tx = align === 'center' ? x + w / 2 : align === 'right' ? x + w - padX : x + padX;
     const bw = l.bg ? (align === 'center' || lines.length > 1 ? w : Math.min(w, maxLineW + padX * 2)) : 0;
     const bx = l.bg ? (align === 'center' ? x + (w - bw) / 2 : align === 'right' ? x + w - bw : x) : 0;
-    let minX = Infinity, maxX = -Infinity, bottom = y + contentH;
+    let minX = Infinity, maxX = -Infinity, bottom = y + contentH, inkL = Infinity;
     widths.forEach((lw, i) => { const lx = align === 'center' ? tx - lw / 2 : align === 'right' ? tx - lw : tx; const m = mets[i];
       const il = m && isFinite(m.actualBoundingBoxLeft) ? lx - m.actualBoundingBoxLeft : lx, ir = m && isFinite(m.actualBoundingBoxRight) ? lx + m.actualBoundingBoxRight : lx + lw;
+      if (lines[i]) inkL = Math.min(inkL, il);
       minX = Math.min(minX, lx, il); maxX = Math.max(maxX, lx + lw, ir); });
     let inkTop = Infinity, inkBottom = -Infinity;
     mets.forEach((m, i) => { if (!m || !isFinite(m.actualBoundingBoxAscent)) return; const by0 = y + padY + lineY[i]; inkTop = Math.min(inkTop, by0 - m.actualBoundingBoxAscent); inkBottom = Math.max(inkBottom, by0 + m.actualBoundingBoxDescent); });
@@ -130,7 +131,11 @@
       const pts = [[occ.x, occ.y], [occ.x + occ.w, occ.y], [occ.x, occ.y + occ.h], [occ.x + occ.w, occ.y + occ.h]].map(([px0, py0]) => [cx + (px0 - cx) * cs - (py0 - cy) * sn, cy + (px0 - cx) * sn + (py0 - cy) * cs]);
       const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); occ = { x: Math.min.apply(null, xs), y: Math.min.apply(null, ys), w: Math.max.apply(null, xs) - Math.min.apply(null, xs), h: Math.max.apply(null, ys) - Math.min.apply(null, ys) };
     }
-    return { text, dir, lines, widths, lineY, px, lh, padX, padY, contentH, font, tx, bx, bw, align, occupied: occ, overflowH: !!(h && contentH > h + 0.5), overflowW: maxLineW > avail + 0.5, broken: wr.broken };
+    // where the ink of the words starts (the first glyph's side bearing included): what a reader sees as the block's left edge
+    // a plate, a highlight or a box outline is what the eye lines up, not the letters inside it
+    if (l.bg) inkL = Math.min(inkL, bx); else if (l.emphasis === 'highlight' && isFinite(inkL)) inkL -= px * 0.15; else if (l.emphasis === 'box') inkL = Math.min(inkL, x - Math.max(1.5, px * 0.08) / 2);
+    const caps = /\p{L}/u.test(text) && text === text.toUpperCase();
+    return { text, dir, lines, widths, lineY, px, lh, padX, padY, contentH, font, tx, bx, bw, align, inkL: isFinite(inkL) ? inkL : null, caps, occupied: occ, overflowH: !!(h && contentH > h + 0.5), overflowW: maxLineW > avail + 0.5, broken: wr.broken };
   }
   function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); ctx.closePath(); }
   /** Cover the box with the image. focus {x, y} (per cent of the image) is the point kept in view as the crop moves toward it,
@@ -495,7 +500,8 @@
       if (l.type === 'text') {
         const t = layoutText(ctx, layout, l, copy, W, H);
         if (!t) { b.empty = true; boxes.push(b); return; }
-        Object.assign(b, { x: t.occupied.x, y: t.occupied.y, w: t.occupied.w, h: t.occupied.h, lines: t.lines.length, chars: t.text.length, text: t.text.slice(0, 160), px: t.px, contentH: t.contentH, overflowH: t.overflowH, overflowW: t.overflowW, broken: t.broken, color: l.color || '#fff', bg: l.bg || '', emphasis: l.emphasis || '' });
+        Object.assign(b, { x: t.occupied.x, y: t.occupied.y, w: t.occupied.w, h: t.occupied.h, lines: t.lines.length, chars: t.text.length, text: t.text.slice(0, 160), px: t.px, contentH: t.contentH, overflowH: t.overflowH, overflowW: t.overflowW, broken: t.broken, color: l.color || '#fff', bg: l.bg || '', emphasis: l.emphasis || '', align: t.align, ls: +l.letterSpacing || 0, caps: t.caps });
+        if (t.inkL != null && !l.rotate) b.inkL = t.inkL;
       } else if (l.type === 'img') {
         const img = isMark(l) ? markImage(images, l) : images[l.id];
         b.mark = isMark(l); b.asset = img ? 'loaded' : (isMark(l) ? 'missing' : 'sketch'); b.src = l.src || '';
@@ -564,6 +570,17 @@
         var pct = b.px / W * 100;
         if (pct < 1.8) add('unreadable_type', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width: under 6 px when a feed shows the tile at about 360 px');
         else if (pct < 2.4) add('small_type', 'warning', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width, under the 2.4% feed minimum');
+        /* tracking, judged against the type: display words tighten a little (-10 to -20 thousandths of an em), capitals open
+           up (+80 to +200); past that the letters of a heavy headline collide and the word spaces close, and spaced lower case
+           reads letter by letter. Capitals are allowed twice the room, since spaced capitals are a convention. */
+        if (typeof b.ls === 'number' && b.ls) {
+          var lsT = Math.round(b.ls * 1000), who = 'the ' + (b.role || 'text') + ' is tracked at ' + (lsT > 0 ? '+' : '') + lsT + '/1000 em';
+          if (b.ls < -0.05) add('tracking_tight', 'blocking', [b.id], who + ': its letters collide and the words run together');
+          else if (b.ls < -0.025) add('tracking_tight', 'warning', [b.id], who + ': tight enough that letters touch; display type usually sits at -10 to -20');
+          var lim = b.caps ? [0.2, 0.4] : [0.1, 0.2];
+          if (b.ls > lim[1]) add('tracking_loose', 'blocking', [b.id], who + ': the letters stand apart and the words fall to pieces' + (b.caps ? '' : ' (spaced lower case reads letter by letter)'));
+          else if (b.ls > lim[0]) add('tracking_loose', 'warning', [b.id], who + ': wider than ' + (b.caps ? 'capitals' : 'lower case') + ' usually take (up to +' + Math.round(lim[0] * 1000) + ')');
+        }
         if (typeof b.contrast === 'number') { var large = pct >= 4; var want = large ? 3 : 4.5; if (b.contrast < 1.6) add('unreadable_contrast', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < want) add('low_contrast', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + want + ':1 wanted)');
           // the mean can hide a bright or dark patch under part of the words: the worst tenth of the ground is judged too
           if (typeof b.contrastMin === 'number' && b.contrast >= 1.6) { if (b.contrastMin < 1.6) add('patchy_contrast', 'blocking', [b.id], 'part of the ' + (b.role || 'text') + ' sits on a patch of the ground where its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 (the average is ' + b.contrast.toFixed(2) + ':1): those words vanish'); else if (b.contrastMin < want * 0.75) add('patchy_contrast', 'warning', [b.id], 'the ground under the ' + (b.role || 'text') + ' is uneven: its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 on the worst patch (average ' + b.contrast.toFixed(2) + ':1)'); } }
@@ -634,6 +651,25 @@
         }
       }
     }
+    /* left edges that nearly line up: left-set blocks stacked in one column whose ink starts within 3% of the stage of each
+       other but not on one edge. The edge most of them share is the column's; a block off it by more than 0.6% reads as a
+       mistake, not a decision (a deliberate indent is wider than 3%). Judged at the ink, so a big headline's side bearing counts. */
+    var lefts = [], g, k;
+    for (i = 0; i < live.length; i++) { var lb = live[i]; if (lb.type === 'text' && (!lb.align || lb.align === 'left') && !lb.rotate) lefts.push({ b: lb, e: typeof lb.inkL === 'number' ? lb.inkL : lb.x, grp: -1 }); }
+    var near = function (p, q) { var gapV = Math.max(p.b.y, q.b.y) - Math.min(p.b.y + p.b.h, q.b.y + q.b.h); return Math.abs(p.e - q.e) <= W * 0.03 && gapV <= H * 0.08; };
+    var groups = [];
+    for (i = 0; i < lefts.length; i++) { if (lefts[i].grp >= 0) continue; g = [lefts[i]]; lefts[i].grp = groups.length;
+      for (k = 0; k < g.length; k++) for (j = 0; j < lefts.length; j++) if (lefts[j].grp < 0 && near(g[k], lefts[j])) { lefts[j].grp = groups.length; g.push(lefts[j]); }
+      groups.push(g); }
+    var tolE = W * 0.006;
+    groups.forEach(function (gr) {
+      if (gr.length < 2) return;
+      var best = null, bestN = 0;
+      gr.forEach(function (p) { var n = gr.filter(function (q) { return Math.abs(q.e - p.e) <= tolE; }).length; if (n > bestN || (n === bestN && p.e < best.e)) { best = p; bestN = n; } });
+      var on = gr.filter(function (q) { return Math.abs(q.e - best.e) <= tolE; });
+      gr.forEach(function (q) { if (Math.abs(q.e - best.e) <= tolE) return; var d = Math.round(q.e - best.e);
+        add('edges_ragged', 'warning', [q.b.id], 'the ' + (q.b.role || 'text') + ' starts ' + Math.abs(d) + ' px ' + (d > 0 ? 'right' : 'left') + ' of the edge the ' + on.map(function (x) { return x.b.role || x.b.id; }).join(' and ') + ' share' + (on.length > 1 ? '' : 's') + ': a near miss reads as a mistake'); out[out.length - 1].to = Math.round(best.e * 10) / 10; });
+    });
     if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
     // a likely subject of the photograph under the words or a panel: a warning that carries its confidence (saliency, not detection)
     (o.subjects || []).forEach(function (s) { if (s && typeof s.covered === 'number' && s.covered >= 0.35 && s.by && s.by.length) add('subject_covered', 'warning', s.by.slice(0, 4), Math.round(s.covered * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%: a colour-and-edge estimate, not detection) is under ' + s.by.join(', ') + '; reframe the photograph or move the words'); else if (s && typeof s.cropped === 'number' && s.cropped >= 0.5) add('subject_cropped', 'warning', [], Math.round(s.cropped * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%) falls outside the crop'); });
@@ -1024,7 +1060,10 @@
     const markIssues = r => r.issues.filter(i => (markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region' || i.code === 'mark_small') && (i.severity === 'blocking' || opts.fixContrast));
     const dupIssues = r => r.issues.filter(i => i.code === 'duplicate_text');
     const smallIssues = r => r.issues.filter(i => i.code === 'unreadable_type');
-    if (!layoutIssues(before).length && !contrastIssues(before).length && !markIssues(before).length && !dupIssues(before).length && !smallIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
+    // tracking out of range (blocking always; a warning when the person asked) and left edges that nearly line up (when asked)
+    const typeIssues = r => r.issues.filter(i => (i.code === 'tracking_tight' || i.code === 'tracking_loose') && (i.severity === 'blocking' || opts.fixContrast));
+    const edgeIssues = r => opts.fixContrast ? r.issues.filter(i => i.code === 'edges_ragged' && typeof i.to === 'number') : [];
+    if (!layoutIssues(before).length && !contrastIssues(before).length && !markIssues(before).length && !dupIssues(before).length && !smallIssues(before).length && !typeIssues(before).length && !edgeIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
     const layers = L.layers || []; const byId = {}; layers.forEach((l, i) => { byId[String(l.id || ('layer' + i))] = l; });
     const movable = l => l && !l.locked && !l.hidden;
     const sa0 = safeAreaOf(opts.format || L.format, opts.channel); const story = sa0.hard; const sp = { top: sa0.top * 100 + (story ? 0 : 0.2), bottom: sa0.bottom * 100 + (story ? 0 : 0.2), side: sa0.side * 100 + (story ? 0 : 0.2) };
@@ -1039,6 +1078,16 @@
       const kept = pair.find(l => l !== victim) || {};
       victim.hidden = true; steps.push('hid the ' + (victim.role || 'text') + ' ' + victim.id + ': it repeated the ' + (kept.role || 'other text') + ' word for word, so the words were shown twice (shown once now)');
     });
+    // tracking back into the range the type takes: a crushed headline opens to a tight display setting, spaced lower case
+    // closes to an open one, capitals keep a convention's spacing; the words, the size and the box are left alone
+    { const v0 = validate(L, copy, images, vopts); const caps = {}; v0.boxes.forEach(x => { caps[x.id] = !!x.caps; });
+      typeIssues(v0).forEach(i => i.layers.forEach(id => { const l = byId[id]; if (!l || l.type !== 'text' || !movable(l)) return; const was = +l.letterSpacing || 0;
+        const now = i.code === 'tracking_tight' ? -0.015 : caps[id] ? 0.12 : 0.03; if (Math.abs(now - was) < 0.001) return; l.letterSpacing = now;
+        steps.push('set the tracking of the ' + (l.role || 'text') + ' from ' + Math.round(was * 1000) + ' to ' + Math.round(now * 1000) + ' thousandths of an em (' + (i.code === 'tracking_tight' ? 'its letters collided' : 'its letters stood apart') + '); no word changed'); })); }
+    // left edges that nearly lined up are put on the edge the others share, measured at the ink
+    { const v1 = validate(L, copy, images, vopts); const ink = {}; v1.boxes.forEach(x => { ink[x.id] = typeof x.inkL === 'number' ? x.inkL : x.x; }); let n = 0;
+      edgeIssues(v1).forEach(i => { const id = i.layers[0]; const l = byId[id]; if (!l || !movable(l) || typeof ink[id] !== 'number') return; const nx = Math.round((l.x + (i.to - ink[id]) / W * 100) * 10) / 10; if (Math.abs(nx - l.x) < 0.05) return; l.x = nx; n++; });
+      if (n) steps.push('lined up the left edge' + (n === 1 ? '' : 's') + ' of ' + n + ' text block' + (n === 1 ? '' : 's') + ' with the column the others share, at the ink'); }
     // 1. a box takes the height its words need
     const grow = () => { const g = geo(); let n = 0; layers.forEach(l => { const b = g[String(l.id)]; if (l.type === 'text' && movable(l) && b && b.contentH && Math.abs(pY(b.contentH) + 0.3 - (l.h || 0)) > 0.35 && (b.overflowH || pY(b.contentH) + 0.3 < (l.h || 0) - 0.35)) { l.h = Math.round((pY(b.contentH) + 0.3) * 10) / 10; n++; } }); return n; };
     // 2. related blocks stack in reading order with an explicit gap (a column: text and the small devices between them)
@@ -1511,7 +1560,7 @@
   }
   /** The report a browser hands the worker: the measured boxes and the attested measurements, not a verdict (the worker derives that). */
   function report(v, val) {
-    return { renderer: val.renderer, contract: val.contract || CONTRACT, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, subjects: val.subjects ? val.subjects.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, covered: s.covered, cropped: s.cropped, by: s.by, confidence: s.confidence })) : undefined, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill', 'multicolour', 'inkN', 'inkLost', 'inkWeak', 'inkCovered', 'inkLocal', 'inkMean', 'inkRun', 'inkWhere', 'inkBoundary', 'inkGround', 'inkUnresolved', 'bg', 'emphasis'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
+    return { renderer: val.renderer, contract: val.contract || CONTRACT, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, subjects: val.subjects ? val.subjects.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, covered: s.covered, cropped: s.cropped, by: s.by, confidence: s.confidence })) : undefined, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill', 'multicolour', 'inkL', 'inkN', 'inkLost', 'inkWeak', 'inkCovered', 'inkLocal', 'inkMean', 'inkRun', 'inkWhere', 'inkBoundary', 'inkGround', 'inkUnresolved', 'bg', 'emphasis'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
   window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, designScore, repair, markVariants, variants, styles, variantsAsync, stylesAsync, styleLayout, STYLES, preloadStyles, FONT_CATALOGUE, fontEntry, fontWeight, loadFace, ICONS, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
 })();

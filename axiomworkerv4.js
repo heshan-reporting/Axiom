@@ -14233,7 +14233,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-23.studio-p74';
+const AXIOM_BUILD = '2026-11-24.studio-p75';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -15907,6 +15907,17 @@ function stWrapLines(text, charsPerLine) {
         var pct = b.px / W * 100;
         if (pct < 1.8) add('unreadable_type', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width: under 6 px when a feed shows the tile at about 360 px');
         else if (pct < 2.4) add('small_type', 'warning', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width, under the 2.4% feed minimum');
+        /* tracking, judged against the type: display words tighten a little (-10 to -20 thousandths of an em), capitals open
+           up (+80 to +200); past that the letters of a heavy headline collide and the word spaces close, and spaced lower case
+           reads letter by letter. Capitals are allowed twice the room, since spaced capitals are a convention. */
+        if (typeof b.ls === 'number' && b.ls) {
+          var lsT = Math.round(b.ls * 1000), who = 'the ' + (b.role || 'text') + ' is tracked at ' + (lsT > 0 ? '+' : '') + lsT + '/1000 em';
+          if (b.ls < -0.05) add('tracking_tight', 'blocking', [b.id], who + ': its letters collide and the words run together');
+          else if (b.ls < -0.025) add('tracking_tight', 'warning', [b.id], who + ': tight enough that letters touch; display type usually sits at -10 to -20');
+          var lim = b.caps ? [0.2, 0.4] : [0.1, 0.2];
+          if (b.ls > lim[1]) add('tracking_loose', 'blocking', [b.id], who + ': the letters stand apart and the words fall to pieces' + (b.caps ? '' : ' (spaced lower case reads letter by letter)'));
+          else if (b.ls > lim[0]) add('tracking_loose', 'warning', [b.id], who + ': wider than ' + (b.caps ? 'capitals' : 'lower case') + ' usually take (up to +' + Math.round(lim[0] * 1000) + ')');
+        }
         if (typeof b.contrast === 'number') { var large = pct >= 4; var want = large ? 3 : 4.5; if (b.contrast < 1.6) add('unreadable_contrast', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < want) add('low_contrast', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + want + ':1 wanted)');
           // the mean can hide a bright or dark patch under part of the words: the worst tenth of the ground is judged too
           if (typeof b.contrastMin === 'number' && b.contrast >= 1.6) { if (b.contrastMin < 1.6) add('patchy_contrast', 'blocking', [b.id], 'part of the ' + (b.role || 'text') + ' sits on a patch of the ground where its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 (the average is ' + b.contrast.toFixed(2) + ':1): those words vanish'); else if (b.contrastMin < want * 0.75) add('patchy_contrast', 'warning', [b.id], 'the ground under the ' + (b.role || 'text') + ' is uneven: its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 on the worst patch (average ' + b.contrast.toFixed(2) + ':1)'); } }
@@ -15977,6 +15988,25 @@ function stWrapLines(text, charsPerLine) {
         }
       }
     }
+    /* left edges that nearly line up: left-set blocks stacked in one column whose ink starts within 3% of the stage of each
+       other but not on one edge. The edge most of them share is the column's; a block off it by more than 0.6% reads as a
+       mistake, not a decision (a deliberate indent is wider than 3%). Judged at the ink, so a big headline's side bearing counts. */
+    var lefts = [], g, k;
+    for (i = 0; i < live.length; i++) { var lb = live[i]; if (lb.type === 'text' && (!lb.align || lb.align === 'left') && !lb.rotate) lefts.push({ b: lb, e: typeof lb.inkL === 'number' ? lb.inkL : lb.x, grp: -1 }); }
+    var near = function (p, q) { var gapV = Math.max(p.b.y, q.b.y) - Math.min(p.b.y + p.b.h, q.b.y + q.b.h); return Math.abs(p.e - q.e) <= W * 0.03 && gapV <= H * 0.08; };
+    var groups = [];
+    for (i = 0; i < lefts.length; i++) { if (lefts[i].grp >= 0) continue; g = [lefts[i]]; lefts[i].grp = groups.length;
+      for (k = 0; k < g.length; k++) for (j = 0; j < lefts.length; j++) if (lefts[j].grp < 0 && near(g[k], lefts[j])) { lefts[j].grp = groups.length; g.push(lefts[j]); }
+      groups.push(g); }
+    var tolE = W * 0.006;
+    groups.forEach(function (gr) {
+      if (gr.length < 2) return;
+      var best = null, bestN = 0;
+      gr.forEach(function (p) { var n = gr.filter(function (q) { return Math.abs(q.e - p.e) <= tolE; }).length; if (n > bestN || (n === bestN && p.e < best.e)) { best = p; bestN = n; } });
+      var on = gr.filter(function (q) { return Math.abs(q.e - best.e) <= tolE; });
+      gr.forEach(function (q) { if (Math.abs(q.e - best.e) <= tolE) return; var d = Math.round(q.e - best.e);
+        add('edges_ragged', 'warning', [q.b.id], 'the ' + (q.b.role || 'text') + ' starts ' + Math.abs(d) + ' px ' + (d > 0 ? 'right' : 'left') + ' of the edge the ' + on.map(function (x) { return x.b.role || x.b.id; }).join(' and ') + ' share' + (on.length > 1 ? '' : 's') + ': a near miss reads as a mistake'); out[out.length - 1].to = Math.round(best.e * 10) / 10; });
+    });
     if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
     // a likely subject of the photograph under the words or a panel: a warning that carries its confidence (saliency, not detection)
     (o.subjects || []).forEach(function (s) { if (s && typeof s.covered === 'number' && s.covered >= 0.35 && s.by && s.by.length) add('subject_covered', 'warning', s.by.slice(0, 4), Math.round(s.covered * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%: a colour-and-edge estimate, not detection) is under ' + s.by.join(', ') + '; reframe the photograph or move the words'); else if (s && typeof s.cropped === 'number' && s.cropped >= 0.5) add('subject_cropped', 'warning', [], Math.round(s.cropped * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%) falls outside the crop'); });
@@ -18991,7 +19021,15 @@ function stLayerList(L, copy) {
     + (l.type === 'text' ? ', size ' + l.size + (l.align ? ', ' + l.align : '') + ', "' + String((l.part != null ? l.text : l.role && l.role !== 'free' && copy && copy[l.role] != null ? copy[l.role] : l.text) || '').slice(0, 50) + '"' : '')
     + (l.type === 'shape' ? ', ' + (l.shape || 'rect') + ' ' + (l.fill || '') + (l.opacity != null && l.opacity !== 1 ? ' at ' + l.opacity : '') : '') + (l.locked ? ' LOCKED' : '') + (l.hidden ? ' hidden' : '')).join('');
 }
-const ST_LAYER_OPS = { x: [-10, 110], y: [-10, 110], w: [1, 120], h: [0.5, 120], size: [1.5, 18], lineHeight: [0.8, 2], letterSpacing: [-0.1, 0.6], opacity: [0, 1], rotate: [-20, 20], weight: [300, 900], radius: [0, 50] };
+const ST_LAYER_OPS = { x: [-10, 110], y: [-10, 110], w: [1, 120], h: [0.5, 120], size: [1.5, 18], lineHeight: [0.8, 2], letterSpacing: [-0.025, 0.2], opacity: [0, 1], rotate: [-20, 20], weight: [300, 900], radius: [0, 50] };
+/* The tracking a planner may give a text element: inside what the shared rules pass without a warning (-25 to +100 thousandths
+   of an em for words in lower case, up to +200 for words set in capitals), so a model's taste for "tight" or "spaced" never
+   lands as letters that collide or words that fall apart. A person can still set more in the editor; the rules then say so. */
+function stTracking(e) {
+  const v = Number(e && e.letterSpacing); if (!isFinite(v) || !v) return undefined;
+  const t = String((e && e.text) || ''); const caps = (e && (e.case === 'upper' || e.emphasis === 'caps')) || (/\p{L}/u.test(t) && t === t.toUpperCase());
+  const r = Math.max(-0.025, Math.min(caps ? 0.2 : 0.1, v)); return Math.round(r * 1000) / 1000 || undefined;
+}
 /** Focused edits by layer id: only the named layers change, only in the named properties; a locked layer and the words of a
  *  copy role are refused and named (words change through a text edit); a mark moves or resizes as its exact file, never redrawn. */
 function stApplyLayerOps(L, ops, opts) {
@@ -19051,7 +19089,7 @@ function stPlanNormalise(plan, format, opts) {
       const role = ST_ROLES.indexOf(e.role) >= 0 ? e.role : 'free';
       const part = (role === 'headline' || role === 'support' || role === 'cta') && e.part != null && isFinite(Number(e.part)) ? Math.max(0, Math.min(9, parseInt(e.part, 10))) : null;
       if (part != null) base.part = part; if (e.lineHeight != null) base.lineHeight = stNum(e.lineHeight, 0.8, 2, 1.12);
-      layers.push(Object.assign(base, stStyleKeys(e, 'text'), { role, text: (role === 'headline' || role === 'support' || role === 'cta') && part == null ? '' : stStr(e.text, 400), size: stNum(e.size, 1.5, 18, role === 'headline' ? 6.2 : role === 'support' ? 3 : 2.5), weight: stNum(e.weight, 300, 900, role === 'headline' ? 750 : role === 'cta' ? 650 : 500), color: stColour(e.color, '#FFFFFF'), bg: stColour(e.bg, null) || undefined, align: ['left', 'center', 'right'].indexOf(String(e.align).replace('centre', 'center')) >= 0 ? String(e.align).replace('centre', 'center') : 'left', font: ['display', 'body', 'mono'].indexOf(e.font) >= 0 ? e.font : (role === 'headline' || role === 'myth' || role === 'fact' ? 'display' : 'body'), emphasis: ST_EMPHASIS.indexOf(e.emphasis) >= 0 && e.emphasis !== 'none' ? e.emphasis : undefined, emphasisColor: stColour(e.emphasisColor, null) || undefined, letterSpacing: stNum(e.letterSpacing, -0.1, 0.6, 0) || undefined }));
+      layers.push(Object.assign(base, stStyleKeys(e, 'text'), { role, text: (role === 'headline' || role === 'support' || role === 'cta') && part == null ? '' : stStr(e.text, 400), size: stNum(e.size, 1.5, 18, role === 'headline' ? 6.2 : role === 'support' ? 3 : 2.5), weight: stNum(e.weight, 300, 900, role === 'headline' ? 750 : role === 'cta' ? 650 : 500), color: stColour(e.color, '#FFFFFF'), bg: stColour(e.bg, null) || undefined, align: ['left', 'center', 'right'].indexOf(String(e.align).replace('centre', 'center')) >= 0 ? String(e.align).replace('centre', 'center') : 'left', font: ['display', 'body', 'mono'].indexOf(e.font) >= 0 ? e.font : (role === 'headline' || role === 'myth' || role === 'fact' ? 'display' : 'body'), emphasis: ST_EMPHASIS.indexOf(e.emphasis) >= 0 && e.emphasis !== 'none' ? e.emphasis : undefined, emphasisColor: stColour(e.emphasisColor, null) || undefined, letterSpacing: stTracking(e) }));
     } else {
       const shape = ['rect', 'pill', 'circle', 'rule', 'triangle', 'icon'].indexOf(e.shape) >= 0 ? e.shape : (e.type === 'rule' ? 'rule' : 'rect');
       layers.push(Object.assign(base, stStyleKeys(e, 'shape'), { role: ['panel', 'overlay', 'device'].indexOf(e.role) >= 0 ? e.role : 'device', shape, fill: stColour(e.fill, 'rgba(0,0,0,0.5)'), gradient: !!e.gradient, dir: ['up', 'down', 'left', 'right'].indexOf(e.dir) >= 0 ? e.dir : undefined, radius: e.radius != null ? stNum(e.radius, 0, 50, 0) : undefined }));
@@ -20837,6 +20875,10 @@ function stValidationJudge(a, v, rep, server) {
       Object.assign(b, { x: ox, y: oy, w: ow, h: oh, lines, chars: text.length, text: text.slice(0, 160), px, contentH, overflowH: !!(b.ah && contentH > b.ah + 0.5), overflowW: !!rb.overflowW, broken: !!rb.broken, bg: l.bg || '', emphasis: l.emphasis || '' });
       if (num(rb.contrast)) b.contrast = rb.contrast;
       if (num(rb.contrastMin)) b.contrastMin = rb.contrastMin;
+      // tracking and case come from the layer itself, never from the report; where the ink starts comes from the report,
+      // believed only inside the layer's own reach (a side bearing, not another layout)
+      const shown = stApplyCase(text, l); b.ls = +l.letterSpacing || 0; b.caps = /\p{L}/u.test(shown) && shown === shown.toUpperCase(); b.align = l.align || 'left';
+      if (num(rb.inkL) && !l.rotate && rb.inkL >= b.ax - px * 0.4 && rb.inkL <= b.ax + (l.bg ? px * 0.8 : 0) + px * 0.4) b.inkL = rb.inkL;
       const sv = server && server.img ? stServerText(server.img, b, l) : null;
       if (sv) {
         const r2 = x => Math.round(x * 100) / 100;
@@ -22338,7 +22380,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve, narrCleanTitle, narrAutoLabel, narrTemplate, narrPersonish, narrNamed, narrRow, narrLabelQueue, narrClaim, narrativesCron, narrativesRun, narrAutoTick, narrAutoMode, narrMergeScan, narrMergeApply, narrMergeUndo, narrMergePass, narrAlias, narrAliasMany, narrHeadCover, narrLeaseTake, narrMergeMode, narrNearMode, narrOpposite: narrOppositeOf, narrRefresh, arcNewsSnap, arcCoreRow, coreNewsTick, arcTagFill, buildAllNews, bskySearch, bskyCronQueries, deskIssueIds, socialSummary, tickClock, tickSave, denPipeline, lexIssueQueries };
+export const __test = { stTracking, sourceSweep, SOURCE_RETRY_BUDGET, CF_LIMIT_PUBLIC_MAX_S, srcOfficial, OFFICIAL_SETS, metaOrganicSweep, linkedinSweep, metaInsights, metaComments, bskySweep, cfetch, cfRead, cfLimits, cfLimit, cfRetryAfter, cfReset, CF_RATE, CF_SEEN, metaGet, metaPaged, liVersion, sigEngFile, redditGet, srcFetch, socialJson, safeFetch, archiveIndexEnsure, communityEnrich, communitySweep, sourcesPerTick, WP_COMMENT_SOURCES, LEX_PER_RUN, AU_QUERY_RX, MASTO_TAGS, REDDIT_POLITICS, pubFetch, robotsAllows, claimOf, processParse, processNotices, hansardSweep, petitionCountersSweep, bskyActorSweep, denBoard, denMissed, denClean, denCleanText, denUpcoming, denWindow, denBriefCron, denBriefDoc, denEvidence, deskGet, issueTag, issueQueries, deskLexiconLoad, denDiscover, denDiscoverCron, discGrams, denPreview, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, bridgeExpire, jobRoute, xSyndSweep, gatedCron, gatedTexts, gatedExcerpt, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve, narrCleanTitle, narrAutoLabel, narrTemplate, narrPersonish, narrNamed, narrRow, narrLabelQueue, narrClaim, narrativesCron, narrativesRun, narrAutoTick, narrAutoMode, narrMergeScan, narrMergeApply, narrMergeUndo, narrMergePass, narrAlias, narrAliasMany, narrHeadCover, narrLeaseTake, narrMergeMode, narrNearMode, narrOpposite: narrOppositeOf, narrRefresh, arcNewsSnap, arcCoreRow, coreNewsTick, arcTagFill, buildAllNews, bskySearch, bskyCronQueries, deskIssueIds, socialSummary, tickClock, tickSave, denPipeline, lexIssueQueries };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 // p71 (DEN.md s.10.13): the Den's helpers and stages a harness reads directly. Each lane of the p71 build adds any further

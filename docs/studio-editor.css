@@ -387,6 +387,22 @@
 #studio-root .st .st-le-layer.sel{border:2px solid var(--sk-accent)!important}
 #studio-root .st .st-le-layer.sel .st-le-lbl{opacity:1;top:auto;bottom:100%;left:-2px;margin-bottom:3px;padding:5px 9px;border-radius:var(--st-r-xs) var(--st-r-xs) 0 0;background:var(--sk-accent);color:var(--sk-accent-ink);font:500 12px/1 var(--sk-font);letter-spacing:0;text-transform:none}
 #studio-root .st .st-le-layer .st-le-h, #studio-root .st .st-le-hh{width:10px;height:10px;border-radius:var(--st-r-hair);background:var(--st-handle);border:2px solid var(--sk-accent)}
+/* the frame of a selected layer sits a few pixels outside its words, so neither the frame nor its handles cover a letter (the
+   24 November report: the left handle hid the T of "Tractors"); the box the rules measure is unchanged */
+#studio-root .st .st-le-layer.sel{border-color:transparent!important;outline:2px solid var(--sk-accent);outline-offset:5px}
+#studio-root .st .st-le-hh.h-nw{left:-13px;top:-13px}
+#studio-root .st .st-le-hh.h-ne{right:-13px;top:-13px}
+#studio-root .st .st-le-hh.h-sw{left:-13px;bottom:-13px}
+#studio-root .st .st-le-layer.sel .st-le-h{right:-13px;bottom:-13px}
+#studio-root .st .st-le-hh.h-n{top:-13px}
+#studio-root .st .st-le-hh.h-s{bottom:-13px}
+#studio-root .st .st-le-hh.h-e{right:-13px}
+#studio-root .st .st-le-hh.h-w{left:-13px}
+#studio-root .st .st-le-layer.sel .st-le-lbl{margin-bottom:9px;left:-7px}
+#studio-root .st .st-le-layer.sel .st-le-rot{top:-38px}
+/* while a layer is selected the photograph's subject estimates keep their outline and drop their tags, which otherwise sit
+   on top of the selected layer's name and words */
+#studio-root .st .st-le.has-sel .st-le-subject span{display:none}
 /* the Add item panel: sections that fold over three-up tiles */
 #studio-root .st .st-elements{display:flex;flex-direction:column;gap:0}
 #studio-root .st .st-el-search{margin:0 18px 12px}
