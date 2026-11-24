@@ -14233,7 +14233,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-24.studio-p75';
+const AXIOM_BUILD = '2026-11-25.studio-p76';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -21062,12 +21062,21 @@ async function stInspectStage(env, job, p, log) {
   const baked = v.mode === 'artwork' || finished ? stBakedWords(v) : [];
   // the whole text inventory: the copy fields on the tile, every free text layer (kicker, label, myth, fact, caption, free) and, for a frame, its siblings
   const textLayers = (L.layers || []).filter(l => l.type === 'text' && !l.hidden);
-  const inventory = ['headline', 'support', 'cta'].filter(k => v.copy[k] && (v.mode === 'artwork' || finished || textLayers.some(l => l.role === k))).map(k => k + ' "' + v.copy[k] + '"').concat(textLayers.filter(l => l.text && ['headline', 'support', 'cta'].indexOf(l.role) < 0).map(l => (l.role || 'text') + ' "' + l.text + '"')).concat(finished ? (L.bakedText || []).map(t => (t.role || 'text') + ' "' + t.text + '"') : []);
+  /* p76: what is ON the tile, layer by layer with each layer's id, so an issue names the layer it is about. A text layer whose
+     role is caption is drawn on the tile and is listed as such; the post caption (the copy field posted beside the tile) is
+     listed apart. Listing a caption layer as "caption" and then saying the caption is posted beside the tile made the reviewer
+     read the team's own words on the tile as unapproved (the 25 November report). */
+  const COPYR = ['headline', 'support', 'cta'];
+  const inventory = (v.mode === 'artwork' || finished ? COPYR.filter(k => v.copy[k]).map(k => k + ' (painted): "' + v.copy[k] + '"') : [])
+    .concat(textLayers.map(l => { const words = COPYR.indexOf(l.role) >= 0 && !l.part ? (v.copy[l.role] || l.text) : l.text; return words ? (l.role || 'text') + ' (layer ' + l.id + '): "' + words + '"' : null; }).filter(Boolean))
+    .concat(finished ? (L.bakedText || []).map(t => (t.role || 'text') + ' (painted): "' + t.text + '"') : []);
   const marksOn = finished ? markRoles.map(r => r === 'wordmark' ? 'the campaign wordmark, painted from its file (attached after the artwork for comparison)' : 'the client logo, painted from its file (attached after the artwork for comparison)') : (L.layers || []).filter(l => l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark') && !l.hidden).map(l => l.role === 'wordmark' ? 'the campaign wordmark (exact file)' : 'the client logo (exact file)');
   let siblings = [];
   if (L.frame && L.frame.of > 1) { try { const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND family=? AND COALESCE(archived,0)=0 ORDER BY created').bind(p.id, a.family).all()).results || []; for (const r of rows) { if (r.id === a.id) continue; const sv = r.current ? await stVersion(env, r.current) : null; if (sv) siblings.push((sv.layout && sv.layout.frame ? 'frame ' + (sv.layout.frame.index + 1) : r.title) + ': "' + (sv.copy.headline || '') + '"' + (sv.layout && sv.layout.bg ? ', ground ' + (typeof sv.layout.bg === 'string' ? sv.layout.bg : sv.layout.bg.from + ' to ' + sv.layout.bg.to) : '') + (sv.image ? ', imagery on file' : ', no imagery')); } } catch (e) {} }
   const user = 'THE TILE: ' + a.title + ', ' + a.format + '. ' + (finished ? 'This is a FINISHED CREATIVE: the image model painted the whole piece - words, mark and URL - as one bitmap, and nothing is composed over it. You see exactly what would be exported. Read back every word and every mark; compare each mark with its attached file.' : composed ? 'You see the COMPOSED TILE exactly as it will be exported: imagery, words, shapes and marks drawn by the renderer. Judge the whole: hierarchy, legibility, spacing, the mark, every word.' : v.mode === 'artwork' ? 'This is a full artwork: the words are painted into the image. Baked: ' + ((L.baked || []).join(', ') || 'all') + '.' : 'This is the IMAGERY ONLY (no composed export saved yet); the words and marks will be composed over it as live layers' + (L.v === 5 ? ' at: ' + textLayers.map(l => (l.role || 'text') + ' ' + l.x + ',' + l.y + ' ' + l.w + 'x' + l.h).join('; ') : L.design ? ' (' + stDescribeSpec(L.design) + ')' : '') + '. Judge the imagery and the room it leaves; do not score words you cannot see.')
-    + '\nAPPROVED WORDS (the complete inventory; anything else legible is unapproved): ' + (inventory.join('; ') || '(none)') + (v.copy.caption ? '. The caption is posted beside the tile, not on it.' : '')
+    + '\nON THE TILE (the complete inventory of the words drawn on it, by layer: these are the team\'s words for this version; anything else legible is unapproved): ' + (inventory.join('; ') || '(none)')
+    + (v.copy.caption ? '\nPOST CAPTION (posted beside the tile in the feed, not on the tile; it is not judged here): "' + stStr(v.copy.caption, 300) + '"' : '')
+    + '\nWhen an issue or the fix is about one layer, put its layer id in element exactly as listed above (image for the photograph).'
     + (baked.length ? '\nPAINTED WORDS TO READ BACK (they are part of the bitmap; list in words.missing any you cannot read exactly): ' + baked.map(b => b.role + ' "' + b.text + '"').join('; ') : '')
     + (finished && markRoles.length ? '\nMARKS TO READ BACK (painted into the bitmap; answer under marks which you can see faithfully, which are missing and which are wrong): ' + markRoles.map(r => r + (markImgs.some(m => m.role === r) ? ' (its file is attached as image ' + (2 + markImgs.findIndex(m => m.role === r)) + ')' : ' (its file could not be attached; judge from the description)')).join('; ') : '')
     + '\nDETERMINISTIC CHECKS OF THIS TILE (' + (rdy.technical === 'passed' || rdy.technical === 'failed' ? 'measured with the renderer at ' + ((L.stage || {}).w || '') + 'x' + ((L.stage || {}).h || '') + ', technical validation ' + rdy.technical : 'not measured yet: ' + rdy.technical.replace('_', ' ')) + '): ' + (tech.length ? tech.map(i => i.severity + ' ' + i.code + (i.layers && i.layers.length ? ' [' + i.layers.join(', ') + ']' : '') + ': ' + i.detail).join(' | ') : rdy.technical === 'passed' ? 'none' : '(none recorded)')
@@ -24497,13 +24506,14 @@ const AXIOM_WORKER = {
           const pair = await stAsset(env, ins.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
           if (ins.version && pair.asset.current && ins.version !== pair.asset.current && !sb.force) return jsonResp({ error: 'stale', detail: 'This inspection judged version ' + ins.version + '; the asset is now at ' + pair.asset.current + '. Inspect the current version instead, or send force:true to apply the correction anyway.', version: ins.version, current: pair.asset.current }, 409);
           const instruction = stStr(sb.instruction, 600).trim() || ins.fix.instruction; const kind = ins.fix.kind; let job = null;
-          if (kind === 'design' || kind === 'copy') { const r = await stJobCreate(env, { pid: auth.pid, project: p.id, stage: 'revise', input: { target: 'asset', asset: pair.asset.id, instruction }, idem: 'fix:' + ins.eid }, who); job = r.job ? r.job.id : null; }
+          // p76: a correction that names a layer is scoped to it, as an edit made with that layer selected is
+          if (kind === 'design' || kind === 'copy') { const r = await stJobCreate(env, { pid: auth.pid, project: p.id, stage: 'revise', input: Object.assign({ target: 'asset', asset: pair.asset.id, instruction }, (ins.fix.layers || []).length ? { layers: ins.fix.layers.slice(0, 12) } : {}), idem: 'fix:' + ins.eid }, who); job = r.job ? r.job.id : null; }
           else { const cur = await stCurrent(env, pair.asset); const ctx = await stContext(env, p, { channels: [] }); const L = (cur && cur.layout) || {}; const rg = (L.regions || []).find(x => x.role === 'background');
             const prompt = kind === 'edit' ? 'Edit the current image: ' + instruction + '. Keep everything else exactly as it is.' : (L.v === 5 && rg ? stRegionPrompt(L, rg, cur.copy, ctx, pair.asset.format) : stArtPrompt({ visual: (cur.context || {}).visual, headline: cur.copy.headline, support: cur.copy.support }, null, ctx, pair.asset.format, L.template || 'plain', L.design)) + '\nCORRECTION FROM THE ART DIRECTOR: ' + instruction;
             const r = await stJobCreate(env, { pid: auth.pid, project: p.id, asset: pair.asset.id, stage: 'render', input: { prompt, edit: kind === 'edit', approach: cur && cur.mode === 'artwork' ? 'artwork' : undefined, baked: L.baked, referenceIds: rg ? rg.refs : [], aspect: pair.asset.format, size: (cur && cur.image && cur.image.size) || env.IMAGE_SIZE || '2K', note: (kind === 'edit' ? 'edit: ' : 're-brief: ') + instruction.slice(0, 60) }, idem: 'fix:' + ins.eid }, who); job = r.job ? r.job.id : null; }
           await stEvent(env, p.id, 'inspection_applied', { eid: ins.eid, asset: pair.asset.id, fixKind: kind, instruction, job, round: ins.round, text: 'Correction applied (' + kind + ', round ' + ins.round + ' of 2): ' + instruction + (job ? ' - running as job ' + job : '') }, who);
           await stBump(env, p.id);
-          return jsonResp({ ok: true, job, kind, round: ins.round });
+          return jsonResp({ ok: true, job, kind, round: ins.round, asset: pair.asset.id, from: pair.asset.current });
         }
         // S23: a reference's record - paid or organic, format, channel, approval with its date, likes and dislikes with evidence,
         // and the campaign it belongs to - and the team's actions on its observations

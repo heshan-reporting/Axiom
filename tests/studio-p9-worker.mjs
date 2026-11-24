@@ -117,7 +117,7 @@ await t('a ship verdict over a failing measurement is an inconsistent assessment
   const j = await req('POST', '/studio/job', { project: P, asset: A, stage: 'inspect', input: {}, idem: 'ins-1' }); const done = await run(j.d.job); eq(done.state, 'done', done.error);
   const call = anth.calls[anth.calls.length - 1]; const user = call.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
   ok(/COMPOSED TILE/.test(user) && /DETERMINISTIC CHECKS OF THIS TILE \(measured with the renderer at 1080x1350, technical validation failed\): blocking text_overflow \[headline\]/.test(user), user.slice(0, 600));
-  ok(/kicker "ACTIVISTS ARE TARGETING FUEL TAX CREDITS"/.test(user), 'the free kicker text is in the inventory');
+  ok(/kicker \(layer [^)]+\): "ACTIVISTS ARE TARGETING FUEL TAX CREDITS"/.test(user), 'the free kicker text is in the inventory');
   const ev = (await get(P)).thread.filter(e => e.kind === 'inspection').pop(); eq(ev.assessment, 'inconsistent'); eq(ev.composed, true);
   const rd = await readiness(A); eq(rd.inspection.state, 'inconsistent'); eq(rd.technical, 'failed', 'the verdict did not change the measurement');
   eq((await req('POST', '/studio/approve', { asset: A, part: 'design', decision: 'approve', reason: 'the AD said ship', acknowledgeInspection: true })).d.error, 'validation_failed', 'acknowledging an inspection never overrides a technical blocker');

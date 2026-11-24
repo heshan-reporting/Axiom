@@ -39,7 +39,7 @@
   const buildN = b => { const m = /studio-p(\d+)/.exec(String(b || '')); return m ? +m[1] : 0; };
   /* RC (R1): the worker build this page was written against. A worker answering an older build is named in a banner, so a stale
      deployment is seen, not guessed from refusals. Raise it with every page release that needs a new worker. */
-  const PAGE_NEEDS_BUILD = 75;
+  const PAGE_NEEDS_BUILD = 76;
   const STUDIO_RELEASE = (() => { try { const s = Array.from(document.scripts).map(x => x.src).find(u => /studio\.js\?v=/.test(u)); return s ? s.replace(/^.*\?v=/, '') : ''; } catch (e) { return ''; } })();
   const testClientsOf = s => {
     if (!s || !s.build) return null;
@@ -3210,23 +3210,79 @@
       approval. The conversation below never repeats this card's controls. */
   const FIX_CHANGES = { design: 'the layout: positions, sizes, type', copy: 'the words of the named fields', render: 'the photograph, from a re-brief', edit: 'part of the photograph, edited in place' };
   const FIX_KEEPS = { design: 'the words, the photograph and the marks', copy: 'the layout, the imagery and the marks', render: 'the words, the layout and the marks (live layers)', edit: 'the rest of the photograph, the words and the marks' };
-  function CDReview({ p, a, ro, busy, onReview, onApplyInspection, onRestore, canSelect }) {
-    const [applying, setApplying] = useState(false);
+  // p76: the layers a review may hide in one press: anything but the approved words' own layers (headline, support, CTA), a mark,
+  // a locked or already hidden layer; hiding is a layout version, no render, and it can be undone like any other
+  const cdHideable = l => !!l && !l.locked && !l.hidden && !(l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')) && ['headline', 'support', 'cta'].indexOf(l.role) < 0 && l.role !== 'background';
+  const cdSev = list => { const n = { blocking: 0, material: 0, cosmetic: 0 }; (list || []).forEach(x => { const k = typeof x === 'string' ? 'material' : x.severity; if (n[k] != null) n[k]++; else n.material++; }); const parts = ['blocking', 'material', 'cosmetic'].filter(k => n[k]).map(k => n[k] + ' ' + k); return { n, text: parts.length ? parts.join(', ') : 'no issue named' }; };
+  /** p76 (the 25 November report: "these reviews do not do the work"): the review is a worklist, not a report. One sentence says
+      where the piece stands; every finding is a row that shows its layer on the tile and, where nothing is lost, hides it for free;
+      the one correction is applied in one press and the result is reviewed again by itself (one more call, stated); a second review
+      is read against the first, before and after. The scores, the words it read and the record stay, below the work. */
+  function CDReview({ p, a, ro, busy, onReview, onApplyInspection, onRestore, canSelect, onHide, onCompare, fixRun, onConversation }) {
+    const [applying, setApplying] = useState(false); const [again, setAgain] = useState(true);
     if (!a) return html`<div class="st-cd-empty ov-dim">Open a composition in Create to review it. The review reads the tile exactly as it exports.</div>`;
     const v = current(a); if (!v || v.mode === 'copy') return html`<div class="st-cd-empty ov-dim">${a.title} is copy only: there is no tile to review. Its words are checked in the Copy step.</div>`;
-    const last = (p.thread || []).filter(e => e.kind === 'inspection' && e.asset === a.id).pop();
+    const mine = (p.thread || []).filter(e => e.kind === 'inspection' && e.asset === a.id);
+    const last = mine[mine.length - 1] || null;
     const reviewing = (p.jobs || []).some(j => j.asset === a.id && j.stage === 'inspect' && (j.state === 'queued' || j.state === 'running'));
-    const vn = last ? (a.versions.findIndex(x => x.id === last.version) + 1 || last.versionNumber || 0) : 0; const old = !!(last && last.version && last.version !== a.current);
+    const vnOf = e => e ? (a.versions.findIndex(x => x.id === e.version) + 1 || e.versionNumber || 0) : 0;
+    const vn = vnOf(last); const old = !!(last && last.version && last.version !== a.current);
     const done = last ? (p.thread || []).find(e => e.kind === 'inspection_applied' && e.eid === last.eid) : null;
     const issues = last ? (last.issues || []).map(x => typeof x === 'string' ? { text: x, severity: '' } : x) : [];
     const order = { blocking: 0, material: 1 }; const sorted = issues.slice().sort((x, y) => (order[x.severity] == null ? 2 : order[x.severity]) - (order[y.severity] == null ? 2 : order[y.severity]));
     const KEYS = ['fidelity', 'hierarchy', 'readability', 'relevance', 'identity'];
-    // an issue that names an element of this version: the element, and in Create a button that selects it on the canvas
-    const elBtn = x => x && x.element ? html` <span class="st-cd-el">on <b>${x.element}</b></span>${(x.layers || []).length && canSelect && !old ? html` <button class="ov-link" onClick=${() => stSelectLayers(a.id, x.layers)}>select it</button>` : null}` : null;
-    const apply = async () => { if (applying) return; if (old && !(await askStudio({ title: 'Apply a correction made for v' + vn + '?', text: 'This review judged v' + vn + '; the current version is v' + vtotal(a) + '. Apply its correction to the current version anyway?', ok: 'Apply anyway' }))) return; const ta = document.getElementById('fix-' + last.eid); setApplying(true); try { await onApplyInspection(last.eid, ta ? ta.value.trim() || last.fix.instruction : last.fix.instruction, old); } finally { setApplying(false); } };
+    const layersOf = x => ((v.layout || {}).layers || []).filter(l => (x.layers || []).indexOf(l.id) >= 0);
+    const lname = l => l.name || (l.role && l.role !== 'free' ? l.role : '') || (l.type === 'text' ? '"' + String(l.text || '').slice(0, 24) + '"' : l.shape || l.type) || l.id;
+    const fixing = fixRun && fixRun.asset === a.id ? fixRun : null;
+    const sev = cdSev(issues); const prev = mine.length > 1 ? mine.slice(0, -1).reverse().find(e => e.scores && e.version !== (last || {}).version) : null;
+    // the one sentence that says where the piece stands, in the order a person needs it
+    const status = (() => {
+      if (fixing && fixing.phase === 'correcting') return { tone: 'busy', text: 'Applying the correction to v' + (fixing.from || vtotal(a)) + '. The tile changes as a new version; the review of the result follows.' };
+      if (reviewing || (fixing && fixing.phase === 'reviewing')) return { tone: 'busy', text: 'Reviewing v' + vtotal(a) + ': the tile is composed as it exports, then read. Usually under a minute.' };
+      if (fixing && fixing.phase === 'nochange') return { tone: 'warn', text: 'The correction did not change the tile: the Creative Partner answered with a question or options instead.', conv: true };
+      if (!last) return { tone: '', text: 'Not reviewed yet. A review reads the tile exactly as it exports and names what to fix.' };
+      if (last.verdict === 'stop') return { tone: 'warn', text: 'Two corrections have run on this line: the next step is a designer\'s eye, not another pass.' };
+      if (old) return { tone: 'warn', text: 'This review judged v' + (vn || '?') + '; you are on v' + vtotal(a) + '. Review again to judge your changes.' };
+      const rd0 = a.readiness || {}; const measFail = rd0.technical === 'failed' ? ' The measurements also fail' + ((rd0.blocking || []).length ? ' (' + rd0.blocking.length + ' blocking)' : '') + ': Fix layout in Checks clears what geometry can.' : '';
+      if (last.verdict === 'ship' && last.assessment !== 'inconsistent') return { tone: 'ok', text: 'Ready in the reviewer\'s opinion: nothing blocking or material named. Approval is still a person\'s, in Review.' + measFail };
+      if (last.verdict === 'ship') return { tone: 'warn', text: 'The reviewer says ship, but ' + (rd0.technical === 'failed' ? 'the measurements fail' + ((rd0.blocking || []).length ? ' (' + rd0.blocking.length + ' blocking)' : '') + ': Fix layout in Checks clears what geometry can, then review again.' : 'it names problems it did not weigh: read the rows below before you approve.') };
+      return { tone: sev.n.blocking ? 'bad' : 'warn', text: (last.verdict === 'redo' ? 'Start again, in the reviewer\'s opinion: ' : 'Needs work: ') + sev.text + '. ' + (last.fix && !done ? 'Fix what you can below; the reviewer offers one correction.' : done ? 'The correction was applied; review again to judge it.' : sorted.length ? 'No correction offered: fix the rows below by hand.' : '') + measFail };
+    })();
+    const apply = async () => { if (applying) return; if (old && !(await askStudio({ title: 'Apply a correction made for v' + vn + '?', text: 'This review judged v' + vn + '; the current version is v' + vtotal(a) + '. Apply its correction to the current version anyway?', ok: 'Apply anyway' }))) return; const ta = document.getElementById('fix-' + last.eid); setApplying(true); try { await onApplyInspection(last.eid, ta ? ta.value.trim() || last.fix.instruction : last.fix.instruction, old, again); } finally { setApplying(false); } };
+    const row = (x, i) => { const ls = layersOf(x); const hide = !ro && !old && onHide && ls.length && ls.every(cdHideable);
+      return html`<li key=${i} class=${'st-cd-issue ' + (x.severity || 'material') + (i === 0 ? ' st-adreview-top' : '')}>
+        <span class=${'st-cd-sevdot ' + (x.severity || 'material')} aria-hidden="true"></span>
+        <div class="st-cd-issue-b"><div class="st-cd-issue-t">${x.severity ? html`<${Chip} kind=${x.severity === 'blocking' ? 'bad' : x.severity === 'material' ? 'warn' : ''}>${x.severity}</${Chip}> ` : null}${x.text}</div>
+          ${x.element || hide ? html`<div class="st-cd-issue-acts">${x.element ? html`<span class="st-cd-el">${x.element === 'image' ? 'the photograph' : html`layer <b>${ls.length ? ls.map(lname).join(', ') : x.element}</b>`}</span>` : null}
+            ${ls.length && canSelect && !old ? html`<button class="btn sm ghost" onClick=${() => stSelectLayers(a.id, x.layers)} title="Select it on the canvas, outlined, to see it or move it">Select it on the canvas</button>` : null}
+            ${hide ? html`<button class="btn sm ghost st-cd-hide" disabled=${!!busy} title="Hide it on the tile: a layout version, no render, no model call; History undoes it" onClick=${() => onHide(a, x.layers, x.text)}>Hide it (free)</button>` : null}</div>` : null}</div></li>`; };
+    const delta = prev && last && last.scores && !old ? (() => { const pv = vnOf(prev); const ps = cdSev(prev.issues); const afterFix = (p.thread || []).some(e => e.kind === 'inspection_applied' && e.eid === prev.eid);
+      const both = a.versions.some(x => x.id === prev.version) && a.versions.some(x => x.id === last.version);
+      const better = ps.n.blocking + ps.n.material > sev.n.blocking + sev.n.material || (prev.verdict !== 'ship' && last.verdict === 'ship');
+      return html`<div class=${'st-cd-delta' + (better ? ' better' : '')} aria-label="Before and after">
+        <span class="st-lbl">${afterFix ? 'After the correction' : 'Since the last review'}</span>
+        <span>v${pv || '?'}: ${prev.verdict}, ${ps.text}</span><span class="st-cd-to">now</span><span><b>v${vn}: ${last.verdict}, ${sev.text}</b></span>
+        ${both && onCompare ? html`<button class="ov-link" onClick=${() => onCompare(prev.version, last.version)}>Compare v${pv} and v${vn}</button>` : null}</div>`; })() : null;
     return html`<div class="st-adreview st-cd-review" aria-label="Current review">
       <div class="st-adreview-head"><div><b>${a.title}</b> <span class="ov-dim">current v${vtotal(a)}</span></div>
-        ${!ro ? html`<button class="btn sm" disabled=${reviewing || !!busy} onClick=${() => onReview(a)} title="The tile is composed exactly as it exports, then the Creative Partner reads it: scores with reasons, the words it can read, a verdict and one bounded correction. One model call; it approves nothing.">${reviewing ? 'Reviewing...' : 'Review v' + vtotal(a) + ' (1 model call)'}</button>` : null}</div>
+        ${!ro ? html`<button class=${'btn sm' + (last && !old && last.verdict !== 'stop' ? ' ghost' : '')} disabled=${reviewing || !!busy || !!fixing} onClick=${() => onReview(a)} title="The tile is composed exactly as it exports, then the Creative Partner reads it: what to fix, scores with reasons, the words it can read, a verdict and one bounded correction. One model call; it approves nothing.">${reviewing ? 'Reviewing...' : 'Review v' + vtotal(a) + (last && !old ? ' again' : '') + ' (1 model call)'}</button>` : null}</div>
+      <div class=${'st-cd-status ' + status.tone} role="status">${status.tone === 'busy' ? html`<span class="st-cd-spin" aria-hidden="true"></span>` : null}<span>${status.text}</span>${status.conv && onConversation ? html` <button class="ov-link" onClick=${onConversation}>Open the conversation</button>` : null}</div>
+      ${delta}
+      ${last && last.scores ? html`<div class="st-cd-todo">
+        ${sorted.length ? html`<div class="st-cd-work"><div class="st-cd-workh"><span class="st-lbl">What to fix</span> <span class="ov-dim">${sorted.length} finding${sorted.length === 1 ? '' : 's'}, most serious first</span></div><ol class="st-cd-issues">${sorted.map(row)}</ol></div>` : last.verdict === 'ship' || delta ? null : html`<div class="ov-dim">No issue named.</div>`}
+        ${last.fix ? done ? html`<div class="st-cd-fixdone"><${Chip} kind="ok">correction applied (${done.fixKind})</${Chip}> <span class="ov-dim">${aest(done.at)}${fixing ? '' : '; review again to judge the result.'}</span>${!ro && onRestore && last.version && a.current !== last.version && a.versions.some(x => x.id === last.version) ? html` <button class="btn sm ghost" disabled=${!!busy} title="Restore the version this review judged, as a new version; nothing is deleted" onClick=${async () => { if (await askStudio({ title: 'Undo the correction?', text: 'v' + vn + ' (the version this review judged) is restored as a new version; the corrected version stays in History.', cost: 'free, no model call', ok: 'Restore v' + vn })) onRestore(a, last.version); }}>Undo: back to v${vn}</button>` : null}</div>` : !ro ? html`<div class="st-offer-box st-cd-fix">
+          <div class="st-cd-fixh"><span class="st-lbl">The correction it offers</span>${last.fix.kind === 'render' || last.fix.kind === 'edit' ? html` <${Chip} kind="warn">one render</${Chip}>` : html` <${Chip} kind="ok">no render</${Chip}>`}</div>
+          <textarea class="st-ta" rows="2" id=${'fix-' + last.eid} defaultValue=${last.fix.instruction} aria-label="The correction to apply"></textarea>
+          <dl class="st-cd-fixfacts">
+            <dt>Changes</dt><dd>${FIX_CHANGES[last.fix.kind] || last.fix.kind}${last.fix.element ? html` - <b>${last.fix.element}</b>${(last.fix.layers || []).length && canSelect ? html` <button class="ov-link" onClick=${() => stSelectLayers(a.id, last.fix.layers)}>select it</button>` : null}` : null}</dd>
+            <dt>Keeps</dt><dd>${last.fix.keeps || FIX_KEEPS[last.fix.kind] || 'everything it does not name'}</dd>
+            <dt>Needs</dt><dd>${last.fix.kind === 'render' || last.fix.kind === 'edit' ? html`<${Chip} kind="warn">one render</${Chip}> ${last.fix.kind === 'edit' ? 'an edit of this image' : 'a new photograph from a re-brief'}` : html`<${Chip} kind="ok">no render</${Chip}> one model call`}${again ? ', then one more call to review the result' : ''}</dd>
+            <dt>Lands as</dt><dd>a new version; Undo restores v${vn || vtotal(a)} afterwards</dd>
+          </dl>
+          <label class="st-cd-again"><input type="checkbox" checked=${again} onChange=${e => setAgain(e.target.checked)} /> Review the result when it lands (1 more model call)</label>
+          <div class="st-cd-fixgo"><button class=${'btn' + (old ? ' sm ghost' : '')} disabled=${!!busy || applying || !!fixing} onClick=${apply}>${applying || fixing ? 'Applying...' : old ? 'Apply the correction to the current version anyway' : again ? 'Apply the correction and review the result' : 'Apply the correction'}</button><span class="ov-dim">Edit the wording first if it is not quite right.</span></div></div>` : null : null}
+        ${last.verdict === 'stop' ? html`<div class="ov-dim">Bounded: two corrections have run on this line; the next step is a designer's eye.</div>` : null}
+      </div>` : null}
       ${(() => { const rd = a.readiness || {}; const fin = v.mode === 'finished';
         // three different judgements, said apart (3 November 2026): what was measured, what one model advised, what a person decided
         const meas = fin ? (rd.production ? 'words and mark read back' : 'words and mark not yet read back') : rd.technical === 'passed' ? 'passes' : rd.technical === 'failed' ? 'fails' + ((rd.blocking || []).length ? ': ' + rd.blocking.length + ' blocking' : '') : rd.technical === 'stale' ? 'out of date: measure again' : 'not measured yet';
@@ -3236,28 +3292,18 @@
           <div data-k="measured"><dt>Measured</dt><dd>${meas}</dd></div>
           <div data-k="ai"><dt>AI advice</dt><dd>${last ? 'verdict ' + last.verdict + (old ? ' on v' + (vn || '?') + ', an earlier version' : '') : reviewing ? 'reviewing...' : 'not reviewed yet'}</dd></div>
           <div data-k="person"><dt>Person</dt><dd>${person}</dd></div>
-        </dl><div class="ov-dim st-cd-sources-note">A score or a ship verdict is one model's advice, not a measurement and never an approval: only a person approves, in Review.</div>`; })()}
+        </dl>${last && rd.technical === 'passed' && !old && sev.n.blocking ? html`<div class="ov-dim st-cd-why">The measurements pass because they judge geometry, contrast and marks; the reviewer reads the whole tile as a person would and names what they do not measure.</div>` : null}<div class="ov-dim st-cd-sources-note">A score or a ship verdict is one model's advice, never an approval: only a person approves, in Review.</div>`; })()}
       ${last && last.scores ? html`<div class="st-adreview-body">
         <div class="st-cd-verdict"><${Chip} kind=${last.verdict === 'ship' ? 'ok' : last.verdict === 'redo' ? 'bad' : 'warn'}>verdict: ${last.verdict}</${Chip}>
           ${old ? html`<${Chip} kind="warn" title="the asset has moved on since this review">outdated: judged v${vn || '?'}</${Chip}>` : html`<${Chip} kind="ok">judged v${vn || vtotal(a)}, the current version</${Chip}>`}
           ${old ? html`<div class="st-cd-stale">This review judged v${vn || '?'}, an earlier version; review again for this one.</div>` : null}
           <${Chip} kind=${last.composed ? 'ok' : 'warn'} title=${last.composed ? 'it saw the tile exactly as it exports: imagery, words, shapes and marks' : 'no composed export was saved; the words and marks were described to it, not seen'}>${last.composed ? 'composed tile' : 'imagery only'}</${Chip}>
           <span class="ov-dim">round ${last.round || 1} of ${last.of || 2}, ${aest(last.at)}</span></div>
-        ${sorted.length ? html`<div class="st-adreview-top"><span class="st-lbl">Top issue</span> ${sorted[0].severity ? html`<${Chip} kind=${sorted[0].severity === 'blocking' ? 'bad' : sorted[0].severity === 'material' ? 'warn' : ''}>${sorted[0].severity}</${Chip}> ` : null}${sorted[0].text}${elBtn(sorted[0])}</div>` : html`<div class="ov-dim">No issue named.</div>`}
-        <ul class="st-cd-scores">${KEYS.map(k => html`<li key=${k} class=${'s' + (last.scores[k] == null ? 'n' : last.scores[k])}><span class="st-cd-sk">${k} </span><b>${last.scores[k] == null ? 'not scored' : last.scores[k] + ' / 5'} </b><span class="st-cd-sr">${(last.reasons || {})[k] || 'no reason given'}</span></li>`)}</ul>
+        <div class="st-cd-scoresbox"><div class="st-cd-scoresh"><span class="st-lbl">Scores</span> <span class="ov-dim">one model's opinion, 1 to 5</span></div>
+        <ul class="st-cd-scores">${KEYS.map(k => html`<li key=${k} class=${'s' + (last.scores[k] == null ? 'n' : last.scores[k])}><span class="st-cd-sk">${k} </span><b>${last.scores[k] == null ? 'not scored' : last.scores[k] + ' / 5'} </b><span class="st-cd-sr">${(last.reasons || {})[k] || 'no reason given'}</span></li>`)}</ul></div>
         ${last.unscored && last.unscored.length ? html`<div class="ov-dim">Not scored: ${last.unscored.join(', ')} (the model gave no score; nothing was assumed).</div>` : null}
-        ${sorted.length > 1 ? html`<details class="st-cd-more"><summary>${sorted.length - 1} more issue${sorted.length === 2 ? '' : 's'}</summary><ul class="st-ul">${sorted.slice(1).map((x, i) => html`<li key=${i}>${x.severity ? html`<${Chip} kind=${x.severity === 'blocking' ? 'bad' : x.severity === 'material' ? 'warn' : ''}>${x.severity}</${Chip}> ` : null}${x.text}${elBtn(x)}</li>`)}</ul></details>` : null}
         ${last.words ? html`<div class="ov-dim st-adreview-words">Words it read: ${(last.words.present || []).length ? (last.words.present || []).map(w => '"' + w + '"').join(', ') : 'none'}${(last.words.wrong || []).length ? html`; <span class="st-bad">not in the approved copy: ${last.words.wrong.map(w => '"' + w + '"').join(', ')}</span>` : null}${(last.words.missing || []).length ? html`; <span class="st-bad">approved words it could not find: ${last.words.missing.map(w => '"' + w + '"').join(', ')}</span>` : null}.</div>` : null}
         ${last.assessment === 'inconsistent' ? html`<div class="st-insp-incons"><${Chip} kind="bad">inconsistent</${Chip}> <span class="ov-dim">the verdict is ship, but ${last.technical === 'failed' ? 'the measured validation fails' : 'it names unresolved problems'}.</span></div>` : null}
-        ${last.fix ? done ? html`<div class="st-cd-fixdone"><${Chip} kind="ok">correction applied (${done.fixKind})</${Chip}> <span class="ov-dim">${aest(done.at)}; review again to judge the result.</span>${!ro && onRestore && last.version && a.current !== last.version && a.versions.some(x => x.id === last.version) ? html` <button class="btn sm ghost" disabled=${!!busy} title="Restore the version this review judged, as a new version; nothing is deleted" onClick=${async () => { if (await askStudio({ title: 'Undo the correction?', text: 'v' + vn + ' (the version this review judged) is restored as a new version; the corrected version stays in History.', cost: 'free, no model call', ok: 'Restore v' + vn })) onRestore(a, last.version); }}>Undo: back to v${vn}</button>` : null}</div>` : !ro ? html`<div class="st-offer-box st-cd-fix">
-          <dl class="st-cd-fixfacts">
-            <dt>Changes</dt><dd>${FIX_CHANGES[last.fix.kind] || last.fix.kind}${last.fix.element ? html` - <b>${last.fix.element}</b>${(last.fix.layers || []).length && canSelect ? html` <button class="ov-link" onClick=${() => stSelectLayers(a.id, last.fix.layers)}>select it</button>` : null}` : null}</dd>
-            <dt>Keeps</dt><dd>${last.fix.keeps || FIX_KEEPS[last.fix.kind] || 'everything it does not name'}</dd>
-            <dt>Needs</dt><dd>${last.fix.kind === 'render' || last.fix.kind === 'edit' ? html`<${Chip} kind="warn">one render</${Chip}> ${last.fix.kind === 'edit' ? 'an edit of this image' : 'a new photograph from a re-brief'}` : html`<${Chip} kind="ok">no render</${Chip}> one model call`}</dd>
-            <dt>Lands as</dt><dd>a new version; Undo restores v${vn || vtotal(a)} afterwards</dd>
-          </dl>
-          <textarea class="st-ta" rows="2" id=${'fix-' + last.eid} defaultValue=${last.fix.instruction} aria-label="The correction to apply"></textarea><div class="ov-dim">Edit the wording before applying if it is not quite right.</div><div><button class=${'btn sm' + (old ? ' ghost' : '')} disabled=${!!busy || applying} onClick=${apply}>${applying ? 'Applying...' : old ? 'Apply the correction to the current version anyway' : 'Apply the correction'}</button>${last.fix.kind === 'render' || last.fix.kind === 'edit' ? html` <span class="ov-dim">spends one render</span>` : null}</div></div>` : null : null}
-        ${last.verdict === 'stop' ? html`<div class="ov-dim">Bounded: two corrections have run on this line; the next step is a designer's eye.</div>` : null}
         <div class="ov-dim st-cd-note">${last.composed ? 'It saw the composed tile as it exports.' : 'It saw the imagery only: the words and marks were not in the picture it judged.'} One read by one model; the scores are its opinion, not a measurement (Checks holds the measurements). Advice, not approval: a person approves in Review.</div>
         <details class="st-cd-diag"><summary>Diagnostics</summary><dl class="st-cd-diagdl"><div><dt>Model</dt><dd>${last.model || 'not recorded'}</dd></div><div><dt>Review event</dt><dd><code>${last.eid || last.id || '-'}</code></dd></div><div><dt>Version judged</dt><dd><code>${last.version || '-'}</code>${vn ? ' (v' + vn + ')' : ''}</dd></div>${last.sig ? html`<div><dt>Composition signature</dt><dd><code>${String(last.sig).slice(0, 24)}</code></dd></div>` : null}${last.job ? html`<div><dt>Job</dt><dd><code>${last.job}</code></dd></div>` : null}<div><dt>Reviewed at</dt><dd>${aest(last.at)}</dd></div></dl></details>
       </div>` : last && last.verdict === 'stop' ? html`<div class="ov-dim">${last.text}</div>` : html`<div class="st-cd-empty ov-dim">Not reviewed yet: ${a.title} has no review. One runs after each render, or now on request; it reads the tile exactly as it exports.</div>`}
@@ -3271,7 +3317,7 @@
       or the whole project; the Studio's log kept apart) - over one composer anchored at the foot, whose scope is stated. An
       instruction stays in the composer until the worker has accepted it: a refused request gives it back with Retry and Edit. Enter
       and Send go through one check: nothing empty, nothing while a request is out, nothing mid-composition, never twice. */
-  function CreativeDirector({ p, a, kit, target, setTarget, onDirect, onNote, onPick, onDecide, onRemember, onApplyInspection, onReview, busy, sugg, onSuggRefresh, prefill, selLayers, onTool, sub, setSub, onPickAsset, design, onRestore, allowNone, onOpenDesign, onCompare }) {
+  function CreativeDirector({ p, a, kit, target, setTarget, onDirect, onNote, onPick, onDecide, onRemember, onApplyInspection, onReview, busy, sugg, onSuggRefresh, prefill, selLayers, onTool, sub, setSub, onPickAsset, design, onRestore, allowNone, onOpenDesign, onCompare, onHide, fixRun }) {
     const [text, setText] = useState(''); const [offerOpen, setOfferOpen] = useState(null); const [sk, setSk] = useState('design');
     const [sending, setSending] = useState(false); const [failed, setFailed] = useState(null); const [scope, setScope] = useState('asset'); const [showLog, setShowLog] = useState(false);
     // S20: a suggestion applied here is followed until its version lands, so it can be undone from where it was applied
@@ -3358,7 +3404,7 @@
       <div class="st-cd-scope" aria-label="Scope"><span class="st-lbl">Working on</span> <span>${p.ns.toUpperCase()}${camp ? ' / ' + camp.name : p.campaign ? ' / ' + p.campaign : ''}</span>${onPickAsset && p.assets.length ? html`<span class="st-dotsep" aria-hidden="true"></span><select class="st-sel st-cd-asset" value=${a ? a.id : ''} onChange=${e => onPickAsset(e.target.value || null)} aria-label="The asset the Creative Partner works on">${allowNone ? html`<option value="">${p.title} (no asset)</option>` : null}${p.assets.map(x => html`<option key=${x.id} value=${x.id}>${x.title} v${vtotal(x)}</option>`)}</select>` : a ? html`<span class="st-dotsep" aria-hidden="true"></span><span>${a.title} v${vtotal(a)}</span>` : html`<span class="st-dotsep" aria-hidden="true"></span><span>${p.title}</span>`}${a ? html`<span class="st-dotsep" aria-hidden="true"></span><span class="st-cd-sel" data-n=${sc.length}>${sc.length ? sc.length + ' layer' + (sc.length === 1 ? '' : 's') + ' selected: ' + sc.map(layerName).join(', ') : design ? 'no layer selected (the whole tile)' : 'the whole piece'}</span>` : null}</div>
       ${tabs.length > 1 ? html`<nav class="st-cd-tabs" aria-label="Creative Partner sections">${tabs.map(([k, l]) => html`<button key=${k} aria-current=${cur === k ? 'true' : undefined} class=${'st-cd-tab' + (cur === k ? ' on' : '')} onClick=${() => { if (cur === k) { const el = box.current; if (el) { if (k === 'conversation') el.scrollTop = el.scrollHeight; else el.scrollTop = secTop(k); } } setSub(k); }}>${l}</button>`)}</nav>` : null}
       <div class="st-cd-body" ref=${box} onScroll=${onScroll} aria-label="Creative Partner">
-        ${a ? html`<section class="st-cd-sec" data-sec="review" aria-labelledby="st-cd-h-review"><h3 class="st-cd-h" id="st-cd-h-review">Latest review</h3><${CDReview} p=${p} a=${a} ro=${ro} busy=${busy} onReview=${onReview} onApplyInspection=${onApplyInspection} onRestore=${onRestore} canSelect=${!!design} /></section>` : null}
+        ${a ? html`<section class="st-cd-sec" data-sec="review" aria-labelledby="st-cd-h-review"><h3 class="st-cd-h" id="st-cd-h-review">Latest review</h3><${CDReview} p=${p} a=${a} ro=${ro} busy=${busy} onReview=${onReview} onApplyInspection=${onApplyInspection} onRestore=${onRestore} canSelect=${!!design} onHide=${onHide} onCompare=${onCompare} fixRun=${fixRun} onConversation=${() => setSub('conversation')} /></section>` : null}
         ${a && !design ? html`<section class="st-cd-sec" data-sec="ideas" aria-labelledby="st-cd-h-ideas"><h3 class="st-cd-h" id="st-cd-h-ideas">Suggestions</h3><div class="st-cd-ideas st-cd-elsewhere"><div class="ov-dim">${a && (current(a) || {}).mode === 'copy' ? a.title + ' is copy only: alternatives for its words are asked for in the Copy step (Shorter headline, Three headline options, Adapt for another channel).' : 'Explore works on the composition: suggestions read the artwork itself, and new directions and layout variations are drawn on the canvas. Open ' + (a ? a.title : 'the asset') + ' in Create to explore it.'}</div>${a && onOpenDesign && (current(a) || {}).mode !== 'copy' ? html`<button class="btn sm ghost" onClick=${() => onOpenDesign(a.id)}>Open ${a.title} in Create</button>` : null}</div></section>` : null}
         ${a && design ? html`<section class="st-cd-sec" data-sec="ideas" aria-labelledby="st-cd-h-ideas"><h3 class="st-cd-h" id="st-cd-h-ideas">Suggestions</h3><div class="st-cd-ideas">
           <div class="ov-dim">Suggestions for v${vtotal(a)}, asked for only when you want them. Each states what it changes and keeps, its scope, whether it needs a render, why, and what it rests on. Use suggestion puts it in the composer to read and edit first; Apply sends it as it stands and can be undone once it lands.</div>
@@ -4186,7 +4232,7 @@
     const [tab, setTab] = useState('properties');
     // S18: the right panel's Creative Partner part (review, ideas, conversation), the Design tool open beside the canvas, and,
     // on a narrow screen, whether the inspector drawer is out
-    const [cdSub, setCdSub] = useState('review'); const [tool, setTool0] = useState(saved0.tool || ''); const [inspOpen, setInspOpen] = useState(false);
+    const [cdSub, setCdSub] = useState('review'); const [fixRun, setFixRun] = useState(null); const [tool, setTool0] = useState(saved0.tool || ''); const [inspOpen, setInspOpen] = useState(false);
     const setTool = v => { setTool0(v); store.set({ tool: v }); };
     const [slot, setSlot] = useState(null);
     // S11: preview (the artwork alone) is a page state, so the header can switch it; the left panel's width and whether it is open are this browser's
@@ -4766,7 +4812,33 @@
     useEffect(() => { const h = e => { /* S19: canvas edits survive a reload (the working store and the recovery draft); only a write in flight or a failed save needs a question */ if (typingSet.current.size || saveSt.pending || saveSt.err || layoutDirtyRef.current === 'saving' || layoutDirtyRef.current === 'failed') { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }, [saveSt.pending, saveSt.err]);   // S29 (PM3): a copy save that failed asks too
 
     const propose = (as, feedback, refine, opts) => guard('concepts:' + as.id, async () => { opts = opts || {}; try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined, mode: opts.mode || 'explore', refs: opts.refs || undefined, refMode: opts.refMode || undefined, keep: opts.keep || undefined, size: opts.size || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), (opts.mode === 'new' ? 'The Creative Partner designs afresh from the brief for ' : opts.mode === 'refine' ? 'The Creative Partner refines ' : 'The Creative Partner explores variations of ') + as.title); await reload(); } catch (e) { fail(e, 'The Creative Partner did not start', () => propose(as, feedback, refine, opts)); } });
-    const applyInspection = (eid, instruction, force) => guard('inspection:' + eid, async () => { try { const r = await call('/studio/inspection/apply', { project: pRef.current.id, eid, instruction, force: force || undefined }); const d = await reload(); if (r.job) { await runJob(r.job, 'Applying the Creative Partner\'s correction (' + r.kind + ')'); pump(await reload()); } else pump(d); } catch (e) { fail(e, 'The correction was not applied'); } });
+    /* p76: a correction is applied, followed until it lands, and the result reviewed by itself when the person asked for it (one more
+       call, stated on the button). A correction the Creative Partner answered with a question or options changes nothing, and that is
+       said, never shown as done. A render's own review, queued by the worker when the image lands, is not run twice. */
+    const applyInspection = (eid, instruction, force, again) => guard('inspection:' + eid, async () => {
+      const ev = (pRef.current.thread || []).find(e => e.kind === 'inspection' && e.eid === eid); const as0 = ev ? (pRef.current.assets || []).find(x => x.id === ev.asset) : null;
+      setFixRun({ eid, asset: as0 ? as0.id : null, phase: 'correcting', from: as0 ? vtotal(as0) : 0 });
+      try {
+        const r = await call('/studio/inspection/apply', { project: pRef.current.id, eid, instruction, force: force || undefined });
+        let d = await reload();
+        if (r.job) { await runJob(r.job, 'Applying the Creative Partner\'s correction (' + r.kind + ')'); d = await reload(); pump(d); }
+        const aid = r.asset || (as0 && as0.id); const as1 = ((d || pRef.current).assets || []).find(x => x.id === aid);
+        if (as1 && r.from && as1.current === r.from) { setFixRun({ eid, asset: aid, phase: 'nochange' }); toastMsg('The correction did not change ' + as1.title + ': the Creative Partner answered in the conversation.'); return; }
+        if (again && as1) {
+          const cur1 = pRef.current; const reviewed = (cur1.thread || []).some(e => e.kind === 'inspection' && e.asset === aid && e.version === as1.current);
+          const queued = (cur1.jobs || []).some(j => j.asset === aid && j.stage === 'inspect' && (j.state === 'queued' || j.state === 'running'));
+          if (!reviewed && !queued) { setFixRun({ eid, asset: aid, phase: 'reviewing' }); await reviewNow(as1); }
+        }
+        setFixRun(null); if (as1) toastMsg('Correction applied to ' + as1.title + ' as v' + vtotal(as1) + (again ? '; the review of the result is in the Creative Partner.' : '. Review again to judge it.'));
+      } catch (e) { setFixRun(null); fail(e, 'The correction was not applied'); } });
+    /* p76: a layer a review names, hidden on the tile in one press: a layout version, no render, no model call */
+    const hideLayers = (as, ids, why) => guard('hide:' + as.id, async () => {
+      try { const v = current(as); const L = JSON.parse(JSON.stringify(v.layout || {})); const names = [];
+        (L.layers || []).forEach(l => { if ((ids || []).indexOf(l.id) >= 0 && cdHideable(l)) { l.hidden = true; names.push(l.name || (l.role && l.role !== 'free' ? l.role : '') || l.id); } });
+        if (!names.length) { toastMsg('Nothing to hide: the layer is locked, already hidden, or carries the approved words.'); return; }
+        const okd = await putLayout(as, L, v.id, 'hid the ' + names.join(', ') + ' on the review\'s advice' + (why ? ' (' + String(why).slice(0, 80) + ')' : ''));
+        if (okd) toastMsg('Hidden: ' + names.join(', ') + '. A new layout version, no render; History undoes it. Review again to judge the tile.');
+      } catch (e) { fail(e, 'The layer was not hidden'); } });
     const applyConcept = (eid, index, render, imageFrom, size) => guard('apply:' + eid + ':' + index, async () => { try { const r = await call('/studio/concept/apply', { project: pRef.current.id, eid, index, render, imageFrom: imageFrom == null ? undefined : imageFrom, size: render ? size : undefined }); const d = await reload(); if (r.asset && r.fresh) setNotice({ kind: 'success', title: 'New design made', text: 'It is a new asset in the family "New designs".', actions: [{ label: 'Open it', fn: () => setSelAsset(r.asset) }] }); else if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e, 'The concept was not applied'); } });
     /* a measurement of one version at its output size, with the composed PNG: the worker re-judges it with the shared rules */
     const fileValidation = async (as, v, val, comp) => { if (!canWrite()) return false;   // S29 (FS1): a read-only key measures for itself and files nothing
@@ -5184,7 +5256,7 @@
     const showRail = !!p && !early && !inRefine && railOpen && !copyOwnList;
     // S19: the Creative Partner works on the asset on screen: in Copy that is the piece being written (the first one until another is chosen)
     const cdAsset = p && view === 'copywrite' && !a ? (p.assets[0] || null) : a;
-    const partnerEl = p ? html`<${CreativeDirector} p=${p} a=${cdAsset} design=${inRefine} allowNone=${view !== 'copywrite'} onRestore=${restore} onPickAsset=${inRefine ? null : id => { setSelAsset(id); setSelField(null); }} kit=${kit} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} onReview=${reviewNow} busy=${busy} sugg=${inRefine ? sugg : null} onSuggRefresh=${r => fetchSugg(r !== false)} selLayers=${inRefine ? selLayers : []} onTool=${inRefine ? k => setTool(k) : null} sub=${cdSub} setSub=${setCdSub} onOpenDesign=${id => openAsset(id)} onCompare=${(x, y) => setCmp({ a: x, b: y })} />` : null;
+    const partnerEl = p ? html`<${CreativeDirector} p=${p} a=${cdAsset} design=${inRefine} allowNone=${view !== 'copywrite'} onRestore=${restore} onPickAsset=${inRefine ? null : id => { setSelAsset(id); setSelField(null); }} kit=${kit} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} onHide=${hideLayers} fixRun=${fixRun} onReview=${reviewNow} busy=${busy} sugg=${inRefine ? sugg : null} onSuggRefresh=${r => fetchSugg(r !== false)} selLayers=${inRefine ? selLayers : []} onTool=${inRefine ? k => setTool(k) : null} sub=${cdSub} setSub=${setCdSub} onOpenDesign=${id => openAsset(id)} onCompare=${(x, y) => setCmp({ a: x, b: y })} />` : null;
     /* S18: the theme contract. The interface takes one accent: the campaign's own colour when the kit names one, else the client's
        palette primary, else the Studio's neutral; it is lightened until it reads at 4.5:1 on the panel, and its ink (the text on an
        accent fill) is black or white, whichever reads, at 4.5:1. Only the interface reads these: the renderer draws the creative

@@ -349,6 +349,36 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-cd-scores li.s3 b{color:var(--sk-warn)}
 #studio-root .st .st-cd-scores li.s4 b, #studio-root .st .st-cd-scores li.s5 b{color:var(--sk-good)}
 #studio-root .st .st-cd-scores li.sn b{color:var(--sk-quiet);font-weight:500}
+/* p76: the review as a worklist - where the piece stands in one line, what to fix row by row, the correction in one press */
+#studio-root .st .st-cd-status{display:flex;align-items:flex-start;gap:8px;padding:9px 11px;border:1px solid var(--sk-line);border-left-width:3px;border-radius:var(--st-r-m);background:var(--sk-raised);font-size:12.5px;line-height:1.45;color:var(--sk-ink)}
+#studio-root .st .st-cd-status.ok{border-left-color:var(--sk-good)}
+#studio-root .st .st-cd-status.warn{border-left-color:var(--sk-warn)}
+#studio-root .st .st-cd-status.bad{border-left-color:var(--sk-bad)}
+#studio-root .st .st-cd-status.busy{border-left-color:var(--sk-accent)}
+#studio-root .st .st-cd-spin{flex:none;width:12px;height:12px;margin-top:2px;border:2px solid var(--sk-line-2);border-top-color:var(--sk-accent);border-radius:var(--st-r-pill);animation:st-cd-spin .9s linear infinite}
+@keyframes st-cd-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){#studio-root .st .st-cd-spin{animation:none}}
+#studio-root .st .st-cd-delta{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;padding:7px 10px;border:1px dashed var(--sk-line-2);border-radius:var(--st-r-m);font-size:12px}
+#studio-root .st .st-cd-delta.better b{color:var(--sk-good)}
+#studio-root .st .st-cd-to{color:var(--sk-quiet);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+#studio-root .st .st-cd-why{font-size:11.5px}
+#studio-root .st .st-cd-todo{display:flex;flex-direction:column;gap:10px}
+#studio-root .st .st-cd-work{display:flex;flex-direction:column;gap:6px}
+#studio-root .st .st-cd-workh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+#studio-root .st .st-cd-issues{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+#studio-root .st .st-cd-issue{display:flex;gap:9px;padding:8px 10px;border:1px solid var(--sk-line);border-radius:var(--st-r-m);background:var(--sk-panel)}
+#studio-root .st .st-cd-sevdot{flex:none;width:8px;height:8px;margin-top:5px;border-radius:var(--st-r-pill);background:var(--sk-quiet)}
+#studio-root .st .st-cd-sevdot.blocking{background:var(--sk-bad)}
+#studio-root .st .st-cd-sevdot.material{background:var(--sk-warn)}
+#studio-root .st .st-cd-issue-b{min-width:0;display:flex;flex-direction:column;gap:6px}
+#studio-root .st .st-cd-issue-t{font-size:12.5px;line-height:1.45;overflow-wrap:anywhere}
+#studio-root .st .st-cd-issue-acts{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+#studio-root .st .st-cd-issue-acts .st-cd-el{font-size:11.5px;color:var(--sk-sub)}
+#studio-root .st .st-cd-fixh{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+#studio-root .st .st-cd-fix .st-ta{margin-bottom:8px}
+#studio-root .st .st-cd-again{display:flex;align-items:center;gap:7px;margin:2px 0 8px;font-size:12px;color:var(--sk-ink-2)}
+#studio-root .st .st-cd-fixgo{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+#studio-root .st .st-cd-scoresh{display:flex;align-items:baseline;gap:8px}
 #studio-root .st .st-cd-note{font-size:11.5px}
 /* S23: raw ids, model names and measurements sit behind a disclosure; the design scores stay in view */
 #studio-root .st .st-cd-diag{margin-top:8px;font-size:11.5px;color:var(--sk-sub)}

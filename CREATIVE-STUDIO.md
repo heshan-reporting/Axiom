@@ -4149,3 +4149,50 @@ was not readable from the sandbox; the cases below are reconstructed from the sc
   if that tile belongs to the HOOF campaign, its mark policy is the thing to check. The sandbox could not read the project.
 - Word spacing itself is not measured from the font: the rules judge the tracking value, which is what a person or a model set.
 
+
+## 64. A review that does the work (build `2026-11-25.studio-p76`, page `?v=r48`; 25 November 2026)
+
+From the owner's screenshot of the Creative Partner on an AEP Instagram portrait: "Measured: passes", "AI advice: verdict fix",
+a blocking top issue "Three unapproved caption paragraphs are rendered on the tile in the lower band on band", scores cut off
+under the composer, and a correction the team had to read, edit and carry out. "These reviews do not do the work."
+
+### 64.1 What was wrong
+
+- **The reviewer was misled by its own prompt.** The inventory listed a caption layer drawn on the tile as `caption "..."` and
+  the next line said "The caption is posted beside the tile, not on it", so the team's own words on the tile read as
+  unapproved. Reproduced in `tests/studio-review-worker.mjs` RV1 before the fix.
+- **A correction was a sentence, not an action.** Applying it ran a revise with no scope (the layer the review named was not
+  passed), then the page stopped; nothing reviewed the result, so nobody knew whether it worked.
+- **The card was a report.** The status was spread across chips, the work sat under three judgement boxes and the scores, the
+  element was appended to the text ("in the lower band on band"), and a "ship" over a failing measurement fell through to
+  "Needs work: no issue named".
+
+### 64.2 What changed
+
+- **Worker.** `stInspectStage` lists what is ON THE TILE layer by layer with each layer's id (`headline (layer hl): "..."`), the
+  post caption apart (`POST CAPTION ... not on the tile`), and asks for the layer id in `element`. `/studio/inspection/apply`
+  scopes a design or copy correction to the layers it names (`input.layers`, the same scope as an edit made with the layer
+  selected) and answers `asset` and `from` (the version it started from).
+- **Page (`CDReview` in `docs/studio.js`, styles in `docs/studio-shell.css`).** One status line (`.st-cd-status`, `role=status`)
+  says where the piece stands, including a failing measurement and a ship verdict over one. Under it, **What to fix**: every
+  finding a row, most serious first, naming its layer once, with **Select it on the canvas** and, for a layer that carries none
+  of the approved words (not headline, support, CTA, a mark, locked or hidden), **Hide it (free)**: a layout version, no render,
+  no model call. Then **the correction it offers**: editable, its changes, keeps and cost, and **Apply the correction and review
+  the result** (on by default, one more call, stated): the correction lands as a new version, the composed tile is reviewed by
+  itself, and a correction answered with a question or options is said to have changed nothing (with a link to the
+  conversation). A second review reads against the first (`.st-cd-delta`: before, now, Compare). The three judgements, the
+  verdict chips, scores (in view), the words it read, the note and the diagnostics follow. A render's own review, queued by the
+  worker, is not run twice.
+
+### 64.3 Evidence
+
+`tests/studio-review-worker.mjs` (3) and `tests/studio-cdreview-browser.mjs` (4) fail on `1d05835` (0 of 3, 1 of 4) and pass
+now. The suites that read the card pass: `studio-browser` (26), `studio-journey-browser` (9), `studio-s9`, `-s10`, `-s18` (14),
+`-s19` (16, the element now reads "layer support"), `-s23g` (8), `-s25` (6).
+
+### 64.4 Not done, and why
+
+- Not seen against the live worker or a real model: whether the reviewer now names layer ids reliably is a model behaviour the
+  mocks cannot prove. An element it names that the version does not have is still dropped (S19).
+- A finding about the approved words' own layers offers no free fix: hiding them would hide approved copy. The correction, Fix
+  layout or the canvas are the routes.

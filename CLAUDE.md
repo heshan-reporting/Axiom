@@ -3757,7 +3757,7 @@ canvas (`chooseExpress`), with **no "ready for design" tick** (`stWfExpress(p)`:
 piece that passes its checks and **one approval** covers the words and the design of exactly that version (`approveBoth`: copy
 first with the short reason `with design`, then design with the person's reason). Not relaxed in express: approval is a
 person's, the campaign is asked for when open, not responding needs a reason, a paid render states its cost, validation and the
-campaign walls. An express page moves on only where the pressed button said it would. `PAGE_NEEDS_BUILD` was 74 (75 since s.63). The harnesses
+campaign walls. An express page moves on only where the pressed button said it would. `PAGE_NEEDS_BUILD` was 74 (75 since s.63, 76 since s.64). The harnesses
 written for the seven steps start as a person who chose Detailed last time (the fixtures seed `ax_studio_build`;
 `wizardCreate(page, {build})`). Harnesses: `tests/studio-express-worker.mjs` (8), `tests/studio-express-browser.mjs` (6).
 
@@ -3773,6 +3773,16 @@ tracking back (-15, +30, capitals +120) and moves a near-miss edge onto the colu
 editor grows a text box to its words when the words or their setting change (`growToWords`, same undo step, never shrinks);
 a selected layer's frame and handles sit 5 px outside its ink, and subject tags hide while a layer is selected. Harnesses:
 `tests/studio-typeset-browser.mjs` (27), `tests/studio-typeset-worker.mjs` (3), `tests/studio-typeset-editor-browser.mjs` (3).
+
+**A review that does the work (build `2026-11-25.studio-p76`, page `?v=r48`; `CREATIVE-STUDIO.md` s.64).** The inspection lists
+what is ON THE TILE layer by layer with each layer's id, the post caption apart (a caption layer on the tile read as unapproved
+words), and asks for the layer id in `element`; `/studio/inspection/apply` scopes a design or copy correction to the layers it
+names (`input.layers`) and answers `asset` and `from`. The Creative Partner's review (`CDReview`) is a worklist: one status line
+(`.st-cd-status`), What to fix row by row with Select it on the canvas and Hide it (free) for a layer that carries none of the
+approved words (a layout version, no render, no model call), then the correction with **Apply the correction and review the
+result** (one more call, stated; a correction answered with a question changes nothing and says so), and a second review read
+against the first (`.st-cd-delta`, Compare). `PAGE_NEEDS_BUILD` is 76. Harnesses: `tests/studio-review-worker.mjs` (3),
+`tests/studio-cdreview-browser.mjs` (4).
 
 Phase 1, the ground:
 

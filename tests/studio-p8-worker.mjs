@@ -253,7 +253,7 @@ await t('the inspection reads the composed export when one is saved - with the w
   inspectVerdict = 'fix';
   const j = await jobRun(P, 'inspect', { version: vv.id }, IG); eq(j.state, 'done', j.error); eq(j.result.composed, true);
   const body = anth.calls.filter(b => /inspecting a rendered social tile/.test(String(b.system))).pop(); const user = textOf(body);
-  ok(/You see the COMPOSED TILE exactly as it will be exported/.test(user), 'composed'); ok(/kicker "MYTH BUSTED"/.test(user) && /headline "Fuel tax credits are not a subsidy"/.test(user), 'the whole inventory: ' + user.slice(0, 500));
+  ok(/You see the COMPOSED TILE exactly as it will be exported/.test(user), 'composed'); ok(/kicker \(layer [^)]+\): "MYTH BUSTED"/.test(user) && /headline \(layer [^)]+\): "Fuel tax credits are not a subsidy"/.test(user), 'the whole inventory: ' + user.slice(0, 500));
   ok(/MARKS THAT SHOULD APPEAR: the campaign wordmark \(exact file\)/.test(user) && /The client logo must not appear on this campaign/.test(user), 'the marks it should see');
   const ins = (await events(P, 'inspection')).pop(); eq([ins.composed, ins.imageryOnly], [true, false]); ok(/the composed export/.test(ins.text));
   // the asset moves on: the correction is now stale
