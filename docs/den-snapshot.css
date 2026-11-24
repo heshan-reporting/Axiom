@@ -1,0 +1,29 @@
+/* Anne's Den: the coverage report's dialog (docs/den-snapshot.js). The frame of the dialog is the Den's (its --dn-*
+ * tokens, its radii); the report inside it is its own white document, so it prints and downloads as it is seen. */
+#den-snap{position:fixed;inset:0;z-index:var(--dn-z-dialog,60);background:var(--dn-scrim);display:flex;align-items:stretch;justify-content:center;padding:var(--dn-sp-5,20px);font-family:var(--dn-text);color:var(--dn-ink-0)}
+#den-snap *{box-sizing:border-box}
+#den-snap .dsn-panel{display:flex;flex-direction:column;width:min(1180px,100%);background:var(--dn-bg-1);border:1px solid var(--dn-line);border-radius:var(--dn-r-lg);box-shadow:var(--dn-e3);overflow:hidden}
+#den-snap .dsn-bar{display:flex;align-items:center;gap:var(--dn-sp-2);padding:var(--dn-sp-3) var(--dn-sp-4);border-bottom:1px solid var(--dn-line);flex-wrap:wrap}
+#den-snap .dsn-title{display:flex;align-items:baseline;gap:var(--dn-sp-3);min-width:0}
+#den-snap h2{margin:0;font:600 var(--dn-fs-lg)/var(--dn-lh-tight) var(--dn-display);color:var(--dn-ink-0)}
+#den-snap h2:focus{outline:none}
+#den-snap h2:focus-visible{outline:2px solid var(--dn-focus);outline-offset:2px}
+#den-snap .dsn-sub{color:var(--dn-ink-2);font-size:var(--dn-fs-md);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#den-snap .dsn-sp{flex:1}
+#den-snap .dsn-btn{min-height:var(--dn-hit);padding:0 var(--dn-sp-3);border:1px solid var(--dn-line-2);border-radius:var(--dn-r-md);background:var(--dn-s2);color:var(--dn-ink-0);font:500 var(--dn-fs-md)/1 var(--dn-text);cursor:pointer}
+#den-snap .dsn-btn:hover:not([disabled]){background:var(--dn-s3)}
+#den-snap .dsn-btn[disabled]{opacity:.5;cursor:default}
+#den-snap .dsn-btn.primary{background:var(--dn-accent);border-color:var(--dn-accent);color:var(--dn-accent-ink)}
+#den-snap .dsn-btn:focus-visible{outline:2px solid var(--dn-focus);outline-offset:2px}
+#den-snap .dsn-body{flex:1;min-height:0;position:relative;background:var(--dn-bg-0)}
+#den-snap .dsn-frame{display:block;width:100%;height:100%;border:0;background:var(--dn-ink-0)}
+#den-snap .dsn-state{padding:var(--dn-sp-7) var(--dn-sp-6);color:var(--dn-ink-1);font-size:var(--dn-fs-base)}
+#den-snap .dsn-wait{display:flex;align-items:center;gap:var(--dn-sp-3);margin:0}
+#den-snap .dsn-spin{width:16px;height:16px;border:2px solid var(--dn-line-2);border-top-color:var(--dn-accent);border-radius:var(--dn-r-pill);animation:dsn-spin .8s linear infinite}
+@keyframes dsn-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){#den-snap .dsn-spin{animation:none}}
+#den-snap .dsn-err{max-width:560px}
+#den-snap .dsn-err p{margin:0 0 var(--dn-sp-2)}
+#den-snap .dsn-why{color:var(--dn-ink-2)}
+html.dsn-open,html.dsn-open body{overflow:hidden}
+@media (max-width:720px){#den-snap{padding:0}#den-snap .dsn-panel{border-radius:0;border:0}#den-snap .dsn-sub{display:none}}

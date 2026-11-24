@@ -439,6 +439,14 @@ verifies each, and what was asked for and not built.
     `review_rev`), flags with FNV keys (denwords on, compare/unread/mark/rating off behind `options.flags`), H: added
     sources, nosource, filing's `left`, hash `U:` ids, and no names for guest readers. The tour is no longer offered on
     open. Page `den.js` r63, `den-brief.js` r11, `den-desk.js` r3, `den-tour.js` r2, `den-flags.js` r3, `den-today.js` r2.
+  - **The coverage report (24 November 2026; page `den-snapshot.js?v=r1`, `den-snapshot.css?v=r1`, `den-today.js` r3, `den.js`
+    r64; no worker change; `DEN.md` s.12).** A monitoring-service style page of figures beside her report: **Coverage report** in
+    Today's top bar, More tools and the workbench's bar opens a dialog with six headline figures and their change against the
+    window before, mentions by hour and channel, share of voice by issue, the channel mix (delivering channels only), top
+    outlets, tone where rated, top stories, most engaged posts, public voices, narratives, dates coming up; Print or save as PDF
+    and Download .html. Counted in the browser from `GET /den/board` (twice: the window and the one before it), one
+    self-contained document in a sandboxed frame, every text escaped, nobody named but registered actors and MPs, no model
+    call. `tests/den-snapshot-browser.mjs` (10).
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
