@@ -1306,11 +1306,49 @@
       // a plate adds padding around the same words: the box grows to hold it, the words, their size and their place unchanged
       if (best && best.c > was + 0.3) { Object.assign(l, best.patch); if (best.patch.bg && best.ovf && best.ch) l.h = Math.round((best.ch / H * 100 + 0.2) * 10) / 10; steps.push((best.patch.bg ? 'put a backing plate behind' : 'changed the colour of') + ' the ' + (l.role || 'text') + ' ' + id + ' so it reads (contrast ' + was.toFixed(2) + ' to ' + best.c.toFixed(2) + ':1)'); }
     });
+    /* p77: a block that still runs into another, when nothing above could restack them, moves whole and unchanged to the nearest
+       free place on the stage: the smaller of the pair (a button leaves a crowded band for the room under the support line),
+       inside the safe area, clear of every other word and mark by a margin, at its own x; kept only when the complete validation
+       then has less blocking and nothing new. Never a locked or hidden layer, never a mark, never a word changed. */
+    for (let pass = 0; pass < 3; pass++) {
+      const v0 = validate(L, copy, images, opts); const b0 = blockingOf(v0);
+      const col = b0.filter(i => i.code === 'collision' && i.layers.length === 2); if (!col.length) break;
+      const key0 = {}; b0.forEach(i => { key0[i.code + ':' + i.layers.join(',')] = 1; });
+      let movedOne = false;
+      for (const iss of col) {
+        const g = geo(); const pair = iss.layers.map(id => byId[id]).filter(l => movable(l) && l.type === 'text' && !isMark(l) && g[l.id]);
+        pair.sort((p, q) => g[p.id].w * g[p.id].h - g[q.id].w * g[q.id].h);
+        for (const m of pair) {
+          const gm = g[m.id]; const gap = H * 0.012;
+          const others = Object.keys(g).map(k => g[k]).filter(b => b.id !== m.id && !b.hidden && (b.type === 'text' || b.mark));
+          const top = H * sa0.top + gap, bot = H * (1 - sa0.bottom) - gap - gm.h; if (bot <= top) continue;
+          // its own column first (the same x), then anywhere inside the safe area, nearest first
+          const left = W * sa0.side + gap, right = W * (1 - sa0.side) - gap - gm.w;
+          const xs = [gm.x]; if (right > left) for (let x = left; x <= right; x += W * 0.01) xs.push(x);
+          const free = [];
+          xs.forEach((x, xi) => { for (let y = top; y <= bot; y += H * 0.005) { const clear = others.every(b => x + gm.w + gap <= b.x || b.x + b.w + gap <= x || y + gm.h + gap <= b.y || b.y + b.h + gap <= y); if (clear) free.push({ x, y, d: Math.hypot((x - gm.x) * (xi ? 1.5 : 1), y - gm.y) }); } });
+          free.sort((p, q) => p.d - q.d);
+          let taken = false;
+          for (const f of free.slice(0, 8)) {
+            const wx = m.x, wy = m.y; m.x = Math.round((m.x + pX(f.x - gm.x)) * 10) / 10; m.y = Math.round((m.y + pY(f.y - gm.y)) * 10) / 10;
+            const v1 = validate(L, copy, images, opts); const b1 = blockingOf(v1);
+            if (b1.length < b0.length && b1.every(i => key0[i.code + ':' + i.layers.join(',')])) { steps.push('moved the ' + (m.role || 'text') + (m.role && m.role !== m.id ? ' ' + m.id : '') + ' out of the way of the ' + ((byId[iss.layers.find(id => id !== m.id)] || {}).role || 'text') + ', to the nearest free place on the tile (' + (m.x !== wx ? wx + '% to ' + m.x + '% across, ' : '') + wy + '% to ' + m.y + '% down); its words, size and width unchanged'); taken = true; break; }
+            m.x = wx; m.y = wy;
+          }
+          if (taken) { movedOne = true; break; }
+        }
+        if (movedOne) break;
+      }
+      if (!movedOne) break;
+    }
     const fin = validate(L, copy, images, opts); const leftAll = blockingOf(fin).filter(i => !PENDING_CODES[i.code]);
     if (leftAll.length) {
       const locked = leftAll.reduce((a, i) => a.concat(i.layers.filter(id => byId[id] && byId[id].locked)), []);
       const heldMark = leftAll.filter(i => i.code === 'collision' || markBad(i) || i.code === 'mark_clear_space').map(i => i.layers.map(id => byId[id]).find(mk => isMark(mk) && markHeld(mk))).find(Boolean);
-      const g = geo(); const longest = Object.keys(g).map(k => g[k]).filter(b => b.type === 'text' && b.chars).sort((a, b) => b.contentH - a.contentH)[0];
+      const g = geo(); const inLeft = {}; leftAll.forEach(i => i.layers.forEach(id => { inLeft[id] = 1; }));
+      // p77: the copy to shorten is one of the layers that still block, never the longest text elsewhere on the tile (the
+      // 24 November report blamed the headline for a CTA running into the source line)
+      const longest = Object.keys(g).filter(k => inLeft[k]).map(k => g[k]).filter(b => b.type === 'text' && b.chars).sort((a, b) => b.contentH - a.contentH)[0];
       const textLeft = leftAll.some(i => i.layers.some(id => byId[id] && byId[id].type === 'text' && (i.code === 'text_overflow' || i.code === 'text_too_wide' || i.code === 'collision')));
       const markLeft = leftAll.filter(i => markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region');
       const readLeft = leftAll.filter(i => /contrast/.test(i.code) && !markBad(i));
@@ -1323,6 +1361,27 @@
         : 'The layout still has ' + what + ' and no move within the rules clears it; decide what may move.');
     }
     return result('');
+  }
+  /** p77: the passing arrangement nearest to a layout, for Fix layout to fall back on when no move inside the current arrangement
+      clears what blocks. Distance is the sum, over the layers both share, of how far each moved and resized (per cent of the
+      stage), plus a large step for a layer shown or hidden differently or missing. Only arrangements that pass; the type-only one
+      only when the tile already has no photograph. A locked layer that would move rules the arrangement out. Null when none. */
+  function nearestVariant(layout, list) {
+    const cur = {}; ((layout && layout.layers) || []).forEach(l => { if (l && l.id) cur[l.id] = l; });
+    const n = v => (typeof v === 'number' && isFinite(v) ? v : 0);
+    let best = null;
+    (list || []).forEach(x => {
+      if (!x || !x.ok || !x.layout || !Array.isArray(x.layout.layers)) return;
+      if (x.typeOnly && !(layout && layout.noImagery)) return;
+      let d = 0, moved = 0, lockedMoved = false; const seen = {};
+      x.layout.layers.forEach(l => { if (!l || !l.id) return; seen[l.id] = 1; const c = cur[l.id]; if (!c) { d += 50; return; }
+        const dd = Math.abs(n(l.x) - n(c.x)) + Math.abs(n(l.y) - n(c.y)) + Math.abs(n(l.w) - n(c.w)) + Math.abs(n(l.h) - n(c.h)) + (!!l.hidden !== !!c.hidden ? 50 : 0);
+        if (dd > 0.3) { moved++; if (c.locked) lockedMoved = true; } d += dd; });
+      Object.keys(cur).forEach(id => { if (!seen[id]) d += 50; });
+      if (lockedMoved) return;
+      if (!best || d < best.distance) best = { variant: x, distance: Math.round(d * 10) / 10, moved };
+    });
+    return best;
   }
   /* ---------------------------------------------------------------- variations: the same words, marks and imagery arranged other ways, measured before they are offered */
   const ROLE_ORDER = ['kicker', 'label', 'myth', 'fact', 'headline', 'support', 'free', 'caption', 'cta'];
@@ -1562,5 +1621,5 @@
   function report(v, val) {
     return { renderer: val.renderer, contract: val.contract || CONTRACT, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, subjects: val.subjects ? val.subjects.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, covered: s.covered, cropped: s.cropped, by: s.by, confidence: s.confidence })) : undefined, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill', 'multicolour', 'inkL', 'inkN', 'inkLost', 'inkWeak', 'inkCovered', 'inkLocal', 'inkMean', 'inkRun', 'inkWhere', 'inkBoundary', 'inkGround', 'inkUnresolved', 'bg', 'emphasis'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, designScore, repair, markVariants, variants, styles, variantsAsync, stylesAsync, styleLayout, STYLES, preloadStyles, FONT_CATALOGUE, fontEntry, fontWeight, loadFace, ICONS, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
+  window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, designScore, repair, markVariants, variants, nearestVariant, styles, variantsAsync, stylesAsync, styleLayout, STYLES, preloadStyles, FONT_CATALOGUE, fontEntry, fontWeight, loadFace, ICONS, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
 })();

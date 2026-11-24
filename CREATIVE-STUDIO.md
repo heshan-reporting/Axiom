@@ -4196,3 +4196,51 @@ now. The suites that read the card pass: `studio-browser` (26), `studio-journey-
   mocks cannot prove. An element it names that the version does not have is still dropped (S19).
 - A finding about the approved words' own layers offers no free fix: hiding them would hide approved copy. The correction, Fix
   layout or the canvas are the routes.
+
+## 65. Fix layout that does the work (page `?v=r49`, worker unchanged at p76; 25 November 2026)
+
+From the owner's screenshot of an AEP Instagram portrait: the call to action and the source line collided in the lower band;
+Fix layout (and Fix automatically in Checks, the same function) answered "Geometry alone cannot fit the words without going
+under the readable minimum (collision (cta, source)). Shorter copy for the headline (about 27 characters instead of 36) would
+fit ... Nothing was saved", while the same strip said Layout variations, 9 of 9 pass.
+
+### 65.1 What was wrong
+
+- **The advice named the wrong words.** The copy to shorten was the longest text anywhere on the tile, not one of the layers that
+  still blocked, so a collision in the band was blamed on the headline.
+- **The repair had no move for a block that cannot be restacked where it is.** Its steps fit boxes, restack a column, lift
+  blocks off the safe area and refit panels; a small block (a button) in a full band had nowhere to go inside that column.
+- **The island stopped at the repair's verdict** although passing arrangements of the same words were already computed.
+  Reproduced in `tests/studio-fixlayout-browser.mjs` (a band holding the source paragraphs, a large headline, a button in the
+  band) and `tests/studio-fixlayout-island-browser.mjs` before the fix.
+
+### 65.2 What changed
+
+- **`repair()`** (`docs/studio-render.js`): the copy it suggests shortening is one of the layers that still block. A new last
+  step moves the smaller block of a remaining collision, whole (words, size and width unchanged), to the nearest free place on
+  the stage - its own column first, then anywhere inside the safe area, clear of every other word and mark by a margin - and
+  keeps the move only when the complete validation then has less blocking and nothing new; never a locked or hidden layer, never
+  a mark. The step is named on the version ("moved the cta out of the way of the caption, to the nearest free place ...").
+- **`STRender.nearestVariant(layout, list)`**: the passing arrangement nearest to a layout (how far each shared layer moved and
+  resized, a large step for a layer shown or hidden differently or missing); never the type-only arrangement on a tile with a
+  photograph, never one that moves a locked layer; null when none passes.
+- **Fix layout in the Studio** (`repairLayout` in `docs/studio.js`): when the repair still leaves a layout blocker (not imagery
+  still to come or a mark that did not load) and the layout is not locked, it uses the nearest passing arrangement - validated
+  again on the page's images and fonts - saved as a layout version "layout variation: <name>, chosen by Fix layout: no move inside
+  the arrangement cleared <what>", no render, the words unchanged, with Undo fix and the measured check that follows every fix.
+  With nothing passing, nothing is saved and the panel says so.
+
+### 65.3 Evidence
+
+`tests/studio-fixlayout-browser.mjs` (17) and `tests/studio-fixlayout-island-browser.mjs` (3) fail on `371abfd` and pass now. The
+suites that exercise the repair pass: `studio-layout-browser` (211), `studio-marks-browser` (50), `studio-typeset-browser` (27),
+`studio-scene-browser` (20), `studio-framing-browser` (17), `studio-s24-browser` (15), `studio-compose-test` (14),
+`studio-s21-browser` (12), `studio-s11-browser` (11), `studio-editor-browser` (6).
+
+### 65.4 Not done, and why
+
+- The live tile's own layout was not read from this sandbox; the reconstruction reproduces the same verdict and the same 9 of 9.
+- When a block outgrows the band it sits on, the older restack still lifts it above the band with a backing plate rather than
+  growing the band; a designer may prefer the band grown. Not changed here.
+- The nearest arrangement can still be a large change to a tile (every variation draws its own panel); it is used only when no
+  move inside the current arrangement clears what blocks, and Undo fix and Compare are one press away.

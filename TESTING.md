@@ -2,7 +2,7 @@
 
 This page is for the people running the team's test round of the AXIOM Creative Studio, and for the testers themselves. It
 says how the release goes live, who can do what, where to test, what to try, what costs money, what is known not to work yet,
-and how to report a problem. Release candidate: worker build `2026-11-25.studio-p76`, page release `?v=r48`. Anne's Den has its own releases: release 8 on `claude/den-release` is worker `2026-11-16.studio-p67`, `den.js?v=r52`, `den.css?v=r48` and the five Den part files at `?v=r1`; its harnesses and the owner's steps are in `DEN.md` s.10 and `tests/README.md`. The findings and
+and how to report a problem. Release candidate: worker build `2026-11-25.studio-p76`, page release `?v=r49`. Anne's Den has its own releases: release 8 on `claude/den-release` is worker `2026-11-16.studio-p67`, `den.js?v=r52`, `den.css?v=r48` and the five Den part files at `?v=r1`; its harnesses and the owner's steps are in `DEN.md` s.10 and `tests/README.md`. The findings and
 the evidence behind it are in `CREATIVE-STUDIO.md` s.54 to s.58 (s.56 the p46 audit fixed, s.57 the p47 audit fixed, s.58 the UI
 debt closed); the round's
 cases for people are Part B of `prompts/studio-rc-team-test.md`. Build ids carry the date the build was made; p46 and p47 were

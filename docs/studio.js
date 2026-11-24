@@ -2967,7 +2967,7 @@
        never the outcome. */
     const repair = async () => {
       if (!comp.ready) { setRepairNote({ state: 'waiting', text: 'The images and fonts of this composition are still loading; Fix layout measures the real thing, so it waits. Nothing was changed.', conflict: true }); return; }
-      setRepairing(true); try { const r = await onRepair(a, v, comp); setRepairNote(r && r.undo && (r.state === 'complete' || r.state === 'partial') ? Object.assign({}, r, { claimed: r.state, state: 'verifying', verify: { from: v.id }, did: r.text, text: 'Saved as a new version (no render); measuring it again with its images and fonts loaded before calling it fixed. ' + r.text }) : (r && !r.undo && repairNote && repairNote.undo && (r.state === 'nothing' || r.state === 'blocked')) ? Object.assign({}, r, { undo: repairNote.undo }) : r); } finally { setRepairing(false); }   // S29: a press that changed nothing keeps the Undo of the fix before it
+      setRepairing(true); try { const r = await onRepair(a, v, comp, vars); setRepairNote(r && r.undo && (r.state === 'complete' || r.state === 'partial') ? Object.assign({}, r, { claimed: r.state, state: 'verifying', verify: { from: v.id }, did: r.text, text: 'Saved as a new version (no render); measuring it again with its images and fonts loaded before calling it fixed. ' + r.text }) : (r && !r.undo && repairNote && repairNote.undo && (r.state === 'nothing' || r.state === 'blocked')) ? Object.assign({}, r, { undo: repairNote.undo }) : r); } finally { setRepairing(false); }   // S29: a press that changed nothing keeps the Undo of the fix before it
     };
     useEffect(() => {
       const n = repairNote; if (!n || n.state !== 'verifying' || !n.verify || !v || v.id === n.verify.from) return;
@@ -4908,11 +4908,30 @@
        and why, and an undo; the fix is bounded (three per asset in a session) and stops when it would return to an arrangement a
        previous fix already left (oscillation), instead of trading one defect for another for ever */
     const repairHist = useRef({});
-    const repairLayout = async (as, v, comp) => {
+    const repairLayout = async (as, v, comp, vars0) => {
       try {
         const hist = repairHist.current[as.id] || (repairHist.current[as.id] = { sigs: [], n: 0 });
         const variants = {}; for (const l of (v.layout.layers || [])) { if (Array.isArray(l.variants) && l.variants.length) variants[l.id] = await Promise.all(l.variants.map(async x => Object.assign({}, x, { img: await keyedImage(x.src) }))); }
-        const r = R.repair(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, fixContrast: true, variants: Object.keys(variants).length ? variants : undefined });
+        let r = R.repair(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, fixContrast: true, variants: Object.keys(variants).length ? variants : undefined });
+        /* p77 (the 24 November report: "Fix automatically does not work"): when no move inside this arrangement clears what blocks,
+           and an arrangement of the same words, marks and imagery passes, Fix layout uses the one nearest to this layout - saved as a
+           layout version with its name and how much moved, no render, Undo and Compare as for any fix. Never on a locked layout, never
+           the type-only arrangement on a tile with a photograph, never one that moves a locked layer, never for what is not a layout
+           matter (imagery still to come, a mark that did not load). */
+        const blockLeft = (r.remaining ? r.remaining.blocking : []).filter(i => !/^(imagery_missing|mark_unloaded|imagery_sketch|pixels_unmeasured|mark_unmeasured)$/.test(i.code));
+        if (!r.ok && blockLeft.length && !(as.locks || {}).layout && R.nearestVariant) {
+          let list = Array.isArray(vars0) ? vars0 : null;
+          if (!list) { try { const o = { fonts: comp.fonts, format: as.format, channel: as.channel, locks: as.locks }; list = await (R.variantsAsync ? R.variantsAsync(v.layout, v.copy, comp.imgs, o) : R.variants(v.layout, v.copy, comp.imgs, o)); } catch (e) { list = []; } }
+          const near = R.nearestVariant(v.layout, list || []);
+          if (near) {
+            const after = R.validate(near.variant.layout, v.copy, comp.imgs, { fonts: comp.fonts, channel: as.channel, format: as.format });
+            if (after.ok) {
+              const why = Array.from(new Set(blockLeft.map(i => i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + layerLabels(v.layout, i.layers) + ')' : '')))).join('; ');
+              r = Object.assign({}, r, { layout: near.variant.layout, changed: true, ok: true, outcome: 'complete', conflict: '', fallback: { name: near.variant.name, moved: near.moved, why },
+                steps: ['no move inside the current arrangement cleared ' + why + ', so the nearest arrangement of the same words that passes was used: ' + near.variant.name + ' (' + near.moved + ' block' + (near.moved === 1 ? '' : 's') + ' moved)'] });
+            }
+          }
+        }
         /* the outcome is the renderer's own, judged on the COMPLETE validation of the result (geometry, readability of words and
            marks, brand constraints, pending imagery, unmeasured pixels) - never on the geometry alone: "Fixed" is said only when
            nothing blocks; a defect the fix could not clear is named by kind and layer */
@@ -4930,7 +4949,7 @@
         const sig = JSON.stringify(r.layout);
         if (hist.sigs.indexOf(sig) >= 0) return { state: 'blocked', counts, kinds, left: left.map(i => i.code), text: 'This fix would return the layout to an arrangement an earlier fix already left (the repair is oscillating between two states).' + leftText + ' Nothing was saved.', conflict: true };
         if (hist.n >= 3) return { state: 'blocked', counts, kinds, text: 'Three fixes have been saved on this asset already; the next step is a designer\'s hand, not another pass. Nothing was saved.', conflict: true };
-        const saved = await putLayout(as, r.layout, v.id, 'layout repaired: ' + r.steps.join('; ').slice(0, 170));
+        const saved = await putLayout(as, r.layout, v.id, r.fallback ? 'layout variation: ' + r.fallback.name + ', chosen by Fix layout: no move inside the arrangement cleared ' + r.fallback.why.slice(0, 110) : 'layout repaired: ' + r.steps.join('; ').slice(0, 170));
         if (!saved) return { state: 'blocked', counts, kinds, text: 'Not saved: the layout changed elsewhere first.', conflict: true };
         hist.sigs.push(JSON.stringify(v.layout)); hist.sigs.push(sig); hist.n++;
         const state = r.outcome === 'complete' && r.ok ? 'complete' : 'partial';

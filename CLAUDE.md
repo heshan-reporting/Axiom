@@ -3784,6 +3784,15 @@ result** (one more call, stated; a correction answered with a question changes n
 against the first (`.st-cd-delta`, Compare). `PAGE_NEEDS_BUILD` is 76. Harnesses: `tests/studio-review-worker.mjs` (3),
 `tests/studio-cdreview-browser.mjs` (4).
 
+**Fix layout that does the work (page `?v=r49`, worker unchanged at p76; `CREATIVE-STUDIO.md` s.65).** `repair()` names copy to
+shorten only among the layers that still block, and its last step moves the smaller block of a remaining collision, whole, to
+the nearest free place inside the safe area (its own column first), kept only when the complete validation then has less
+blocking and nothing new; never a locked or hidden layer or a mark. `STRender.nearestVariant(layout, list)` picks the passing
+arrangement nearest to a layout (never type-only on a tile with a photograph, never one that moves a locked layer). When the
+repair still leaves a layout blocker, Fix layout in the Studio (`repairLayout`) saves that arrangement as a layout version
+"layout variation: <name>, chosen by Fix layout", no render, with Undo; with nothing passing, nothing is saved. Harnesses:
+`tests/studio-fixlayout-browser.mjs` (17), `tests/studio-fixlayout-island-browser.mjs` (3).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
