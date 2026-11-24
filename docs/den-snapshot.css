@@ -27,3 +27,5 @@
 #den-snap .dsn-why{color:var(--dn-ink-2)}
 html.dsn-open,html.dsn-open body{overflow:hidden}
 @media (max-width:720px){#den-snap{padding:0}#den-snap .dsn-panel{border-radius:0;border:0}#den-snap .dsn-sub{display:none}}
+#den-snap .dsn-note{color:var(--dn-ink-2);font-size:var(--dn-fs-sm);margin-right:var(--dn-sp-2)}
+#den-snap .dsn-note:empty{display:none}

@@ -446,7 +446,8 @@ verifies each, and what was asked for and not built.
     outlets, tone where rated, top stories, most engaged posts, public voices, narratives, dates coming up; Print or save as PDF
     and Download .html. Counted in the browser from `GET /den/board` (twice: the window and the one before it), one
     self-contained document in a sandboxed frame, every text escaped, nobody named but registered actors and MPs, no model
-    call. `tests/den-snapshot-browser.mjs` (10).
+    call. `tests/den-snapshot-browser.mjs` (12; after review: the focus trap, keys behind the modal, Sydney buckets,
+    cut lists as "150+", the worker's pick of dates).
 - **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
   Keyless public routes only; no signed-in route added, no decision changed, no model call.
   - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -

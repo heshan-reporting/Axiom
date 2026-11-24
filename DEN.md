@@ -2123,7 +2123,21 @@ scripts), so the preview, the download and the PDF are the same bytes; every tex
 a link. Nobody is named but a registered public actor or an MP on their own post (`who` on the board's actor rows, already
 blanked for a guest). No model call, no write, no new route: it works on any worker since p71.
 
-**Tests.** `tests/den-snapshot-browser.mjs` (10). `node tests/run.mjs check` parses `den-snapshot.js`.
+**Tests.** `tests/den-snapshot-browser.mjs` (12). `node tests/run.mjs check` parses `den-snapshot.js`.
+
+**After review (the same day).** An independent read of the first version found no security or privacy fault and these,
+all fixed, each with a case that fails on the first version (CR7, CR11, CR12): the dialog's focus trap leaked behind the
+modal and the report's second and later links could not be reached by keyboard; keys (`?`, Alt+1 to 5) and Back reached the
+Den behind it (the dialog now listens in the window's capture phase, stops every key there, and closes when `#v-den` loses
+`on`); a row with an unreadable date left the spinner turning (drawing is inside the error state, and dates that cannot be
+read print nothing); the chart's buckets started at the window's first millisecond, so a past day's stories sat an hour
+early (buckets open on Sydney hours, or Sydney midnights past 48 hours); "Coming up" re-cut the worker's pick by date and could
+drop a recorded vote behind weekly vigils (it cuts as `denUpPick` does); a figure counted over a list the board cuts (150
+stories, 90 posts, 60 actors' posts) is shown as "150+" with no change drawn; the file is named by the window's Sydney day;
+the stand-in for an unnamed Google News outlet is no masthead; Interactions draws no change against a window that read no
+counts; a print refusal is said where it can be seen. Left as it is: share of voice counts a story once for each issue it
+carries (the card says so), and the second board read is one more read of the database per press (a count-only route would
+make it cheaper; none is exposed today).
 
 **Not verified here.** Real windows (the busiest day's chart and the outlet names as the registry gives them); printing from
 Safari and Firefox (Chromium's print path only); a week-long desk on live data. The second read is one more board read of the

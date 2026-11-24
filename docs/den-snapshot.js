@@ -24,8 +24,19 @@
   const fTime = fmt({ hour: 'numeric', minute: '2-digit', hour12: true }), fHour = fmt({ hour: 'numeric', hour12: true });
   const fDay = fmt({ weekday: 'short', day: 'numeric', month: 'short' }), fLong = fmt({ weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const fStamp = fmt({ day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
-  const tm = ts => (ts ? fTime.format(new Date(+ts)).replace(/\s/g, ' ').toLowerCase() : '');
-  const stamp = ts => (ts ? fStamp.format(new Date(+ts)).replace(/ (am|pm)$/i, (m, x) => ' ' + x.toLowerCase()) : '');
+  const okTs = ts => { const n = Number(ts); return ts != null && ts !== '' && isFinite(n) && n > 0 && n < 8.64e15; };   // a bad date prints nothing, never throws
+  const tm = ts => (okTs(ts) ? fTime.format(new Date(+ts)).replace(/\s/g, '\u00a0').toLowerCase() : '');
+  const stamp = ts => (okTs(ts) ? fStamp.format(new Date(+ts)).replace(/ (am|pm)$/i, (m, x) => '\u00a0' + x.toLowerCase()) : '');
+  const long = ts => (okTs(ts) ? fLong.format(new Date(+ts)) : '');
+  const own = (o, k) => (Object.prototype.hasOwnProperty.call(o, k) ? o[k] : '');
+  // the Sydney day (YYYY-MM-DD) and the Sydney midnight that opens it, for day buckets and the file's name
+  const fYmd = fmt({ year: 'numeric', month: '2-digit', day: '2-digit' });
+  const sydDay = ts => { const p = {}; fYmd.formatToParts(new Date(+ts)).forEach(x => { p[x.type] = x.value; }); return p.year + '-' + p.month + '-' + p.day; };
+  const fOff = fmt({ year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', hourCycle: 'h23' });
+  const offsetAt = ts => { const p = {}; fOff.formatToParts(new Date(+ts)).forEach(x => { p[x.type] = +x.value; }); return Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second) - Math.floor(ts / 1000) * 1000; };
+  const sydMidnight = ts => { const d = sydDay(ts).split('-').map(Number); const g = Date.UTC(d[0], d[1] - 1, d[2]) - offsetAt(ts); return Date.UTC(d[0], d[1] - 1, d[2]) - offsetAt(g); };
+  // the board cuts its lists (150 stories, 90 posts, 60 public actors' posts): a figure counted over a cut list is "at least"
+  const CUT = { media: 150, social: 90, actors: 60 };
 
   /* channels in a fixed order, so a colour always means the same channel (the dataviz palette, validated for contrast) */
   const CH = [['news', 'News'], ['x', 'X'], ['facebook', 'Facebook'], ['instagram', 'Instagram'], ['youtube', 'YouTube'], ['reddit', 'Reddit'], ['bluesky', 'Bluesky']];
@@ -46,19 +57,24 @@
     b = b || {}; const desk = b.desk || {}; const win = b.window || {}; const media = b.media || [], social = b.social || [], actors = b.actors || [];
     const posts = social.concat(actors); const from = Number(win.from) || 0, to = Number(win.to) || Date.now(); const hours = Number(win.hours) || Math.round((to - from) / H) || 24;
     const figures = bb => { bb = bb || {}; const m = bb.media || [], p = (bb.social || []).concat(bb.actors || []); const outs = new Set();
-      m.forEach(x => (x.outlets && x.outlets.length ? x.outlets : [x.outlet]).forEach(o => { if (o) outs.add(String(o).toLowerCase()); }));
-      const withEng = p.filter(engOf);
+      m.forEach(x => (x.outlets && x.outlets.length ? x.outlets : [x.outlet]).forEach(o => { if (o && !/^an outlet found/i.test(String(o))) outs.add(String(o).toLowerCase()); }));
+      const withEng = p.filter(engOf); const cutM = m.length >= CUT.media, cutP = (bb.social || []).length >= CUT.social || (bb.actors || []).length >= CUT.actors;
       return { mentions: (bb.counts && bb.counts.rows) || m.reduce((a, x) => a + ((x.copies && x.copies.length) || 1), 0) + p.length, stories: m.length, outlets: outs.size,
         posts: p.length, interactions: withEng.reduce((a, x) => a + (Number(x.total) || 0), 0), engRead: withEng.length, fb: m.reduce((a, x) => a + fbTotal(x.fb), 0),
-        voices: new Set((bb.actors || []).map(a => String(a.who || '').toLowerCase()).filter(Boolean)).size }; };
+        voices: new Set((bb.actors || []).map(a => String(a.who || '').toLowerCase()).filter(Boolean)).size,
+        cut: { stories: cutM, outlets: cutM, posts: cutP, interactions: cutP, voices: (bb.actors || []).length >= CUT.actors, mentions: !!bb.capped } }; };
     const now = figures(b), before = prev ? figures(prev) : null;
     // mentions over the window: hourly for a day or two, daily beyond; each story once at its first sight, each post once
-    const size = hours <= 48 ? H : 24 * H; const nb = Math.max(1, Math.min(60, Math.ceil((to - from) / size)));
+    // buckets open on Sydney hours (Sydney midnights past 48 hours); a past day's window opens at the last millisecond of the
+    // day before, so the first boundary is found from the millisecond after it
+    const size = hours <= 48 ? H : 24 * H; const start = size === H ? Math.floor((from + 1) / H) * H : sydMidnight(from + 1);
+    const nb = Math.max(1, Math.min(60, Math.ceil((to - start) / size)));
     const chans = []; const add = c => { if (chans.indexOf(c) < 0) chans.push(c); };
     const items = media.map(x => ({ ch: 'news', ts: x.ts, issues: x.issues || [] })).concat(posts.map(x => ({ ch: x.platform || 'other', ts: x.ts, issues: x.issues || [] })));
     items.forEach(i => add(i.ch)); chans.sort((a, c) => ((chIdx(a) < 0 ? 99 : chIdx(a)) - (chIdx(c) < 0 ? 99 : chIdx(c))) || a.localeCompare(c));
-    const buckets = Array.from({ length: nb }, (_, i) => ({ at: from + i * size, n: {} }));
-    items.forEach(i => { const k = Math.min(nb - 1, Math.max(0, Math.floor(((Number(i.ts) || to) - from) / size))); buckets[k].n[i.ch] = (buckets[k].n[i.ch] || 0) + 1; });
+    const buckets = Array.from({ length: nb }, (_, i) => ({ at: size === H ? start + i * size : sydMidnight(start + i * size + 12 * H), n: {} }));
+    const slot = ts => { const t = okTs(ts) ? Number(ts) : to; let k = 0; while (k < nb - 1 && t >= buckets[k + 1].at) k++; return k; };
+    items.forEach(i => { const k = slot(i.ts); buckets[k].n[i.ch] = (buckets[k].n[i.ch] || 0) + 1; });
     // share of voice by the desk's own issues: a story or post counts for each issue it carries
     const total = items.length; const issues = (desk.issues || []).map(is => { const n = items.filter(i => i.issues.indexOf(is.id) >= 0).length; return { id: is.id, label: is.label || is.id, n, share: total ? n / total : 0 }; });
     const sov = issues.filter(i => i.n > 0).sort((a, c) => c.n - a.n), quiet = issues.filter(i => !i.n).map(i => i.label);
@@ -77,8 +93,13 @@
     const vm = new Map(); actors.forEach(a => { const k = String(a.who || '').toLowerCase(); if (!k) return; const e = vm.get(k) || { who: a.who, role: a.role, party: a.party, posts: 0, interactions: 0, platforms: new Set() }; e.posts++; e.interactions += engOf(a) ? Number(a.total) || 0 : 0; e.platforms.add(a.platform); vm.set(k, e); });
     const voices = Array.from(vm.values()).sort((a, c) => c.posts - a.posts || c.interactions - a.interactions).slice(0, 10);
     const narratives = (b.narratives || []).slice().sort((a, c) => (c.n24 || 0) - (a.n24 || 0) || (c.n || 0) - (a.n || 0)).slice(0, 8);
-    const upcoming = (b.upcoming || []).slice().sort((a, c) => String(a.date).localeCompare(String(c.date))).slice(0, 8);
-    return { desk, win: { from, to, hours, label: win.label || '' }, now, before, buckets, size, chans, sov, quiet, mix, outlets, tone, top, engaged, voices, narratives, upcoming, capped: !!b.capped, total };
+    // coming up: cut to eight the way the worker cuts (dated and recorded dates first, up to three standing schedules), then
+    // shown in date order, so nine weekly vigils never push a recorded vote out
+    const up = (b.upcoming || []).slice(); const rec = up.filter(u => u.recurring), dated = up.filter(u => !u.recurring); const UPN = 8;
+    const kr = Math.min(rec.length, Math.max(UPN - dated.length, Math.min(3, UPN)));
+    const upcoming = dated.slice(0, Math.max(0, UPN - kr)).concat(rec.slice(0, kr)).sort((a, c) => String(a.date).localeCompare(String(c.date)));
+    const any = total > 0 || Object.keys(by).some(k => by[k] > 0);
+    return { desk, win: { from, to, hours, label: win.label || '', day: /^\d{4}-\d\d-\d\d$/.test(String(win.day || '')) ? win.day : sydDay(to) }, now, before, buckets, size, chans, sov, quiet, mix, outlets, tone, top, engaged, voices, narratives, upcoming, capped: !!b.capped, total, any, past: to < Date.now() - H };
   };
 
   /* ---- the document ---- */
@@ -151,22 +172,25 @@
     opt = opt || {}; const d = m.desk || {}; const client = d.client || d.name || 'Coverage'; const N = m.now, P = m.before;
     const period = m.win.hours % 24 === 0 && m.win.hours > 24 ? 'the last ' + (m.win.hours / 24) + ' days' : 'the last ' + m.win.hours + ' hours';
     const kpi = (k, v, dl, note) => '<div class="kpi"><p class="k">' + esc(k) + '</p><p class="v">' + v + '</p><p class="d">' + (dl || esc(note || ' ')) + '</p></div>';
+    // a figure counted over a list the board cut is "at least" (150+), and no change is drawn when either window was cut
+    const fig = k => num(N[k]) + (N.cut[k] ? '+' : ''); const chg = k => (P && !N.cut[k] && !P.cut[k] ? delta(N[k], P[k]) : '');
+    const cutNote = k => (N.cut[k] ? 'at least: the desk reads the newest ' + (k === 'stories' || k === 'outlets' ? CUT.media + ' stories' : k === 'mentions' ? 'rows only' : CUT.social + ' posts and ' + CUT.actors + ' actors’ posts') : '');
     const prevNote = P ? '' : (opt.prevFailed ? 'the window before could not be read' : '');
     const parts = [];
-    parts.push('<header class="hd"><div><p class="eyebrow">Media and social coverage report</p><h1>' + esc(client) + '</h1><p class="sub">' + esc(d.name || '') + ' · ' + esc(period) + ' to ' + esc(tm(m.win.to)) + ', ' + esc(fLong.format(new Date(m.win.to))) + '</p></div>' +
+    parts.push('<header class="hd"><div><p class="eyebrow">Media and social coverage report</p><h1>' + esc(client) + '</h1><p class="sub">' + esc(d.name || '') + ' · ' + esc(period) + ' to ' + esc(tm(m.win.to)) + ', ' + esc(long(m.win.to)) + '</p></div>' +
       '<div class="meta">Window <b>' + esc(stamp(m.win.from)) + ' – ' + esc(stamp(m.win.to)) + '</b><br>Australian Eastern time<br>Prepared ' + esc(stamp(opt.at || Date.now())) + '</div></header>');
     parts.push('<section class="kpis" aria-label="Headline figures">' +
-      kpi('Mentions', num(N.mentions), P && delta(N.mentions, P.mentions), prevNote || 'every story copy and post') +
-      kpi('Stories', num(N.stories), P && delta(N.stories, P.stories), prevNote || 'syndicated copies counted once') +
-      kpi('Outlets', num(N.outlets), P && delta(N.outlets, P.outlets), prevNote || 'mastheads that carried a story') +
-      kpi('Social posts', num(N.posts), P && delta(N.posts, P.posts), prevNote || 'posts on the desk’s issues') +
-      kpi('Interactions', N.engRead ? num(N.interactions) : '–', P && N.engRead ? delta(N.interactions, P.interactions) : '', N.engRead ? 'on ' + N.engRead + ' post' + (N.engRead === 1 ? '' : 's') + ' with counts' : 'no counts were read') +
-      kpi('Public voices', num(N.voices), P && delta(N.voices, P.voices), prevNote || 'organisations, officials and MPs') +
+      kpi('Mentions', fig('mentions'), chg('mentions'), cutNote('mentions') || prevNote || 'every story copy and post') +
+      kpi('Stories', fig('stories'), chg('stories'), cutNote('stories') || prevNote || 'syndicated copies counted once') +
+      kpi('Outlets', fig('outlets'), chg('outlets'), cutNote('outlets') || prevNote || 'mastheads that carried a story') +
+      kpi('Social posts', fig('posts'), chg('posts'), cutNote('posts') || prevNote || 'posts on the desk’s issues') +
+      kpi('Interactions', N.engRead ? fig('interactions') : '–', N.engRead && P && P.engRead ? chg('interactions') : '', N.engRead ? (cutNote('interactions') || 'on ' + N.engRead + ' post' + (N.engRead === 1 ? '' : 's') + ' with counts') : 'no counts were read') +
+      kpi('Public voices', fig('voices'), chg('voices'), cutNote('voices') || prevNote || 'organisations, officials and MPs') +
       (P ? '<p class="note">Changes compare with the ' + esc(m.win.hours) + ' hours before, ' + esc(stamp(m.win.from - m.win.hours * H)) + ' \u2013 ' + esc(stamp(m.win.from)) + '.</p>' : '') + '</section>');
     if (m.total) parts.push('<section class="card"><h2>Mentions over the window</h2><p class="lede">Stories and posts by ' + (m.size === H ? 'hour' : 'day') + ', each story counted once when first seen.</p>' + volume(m) + '</section>');
     const sov = m.sov.length ? bars(m.sov.map((r, i) => ({ label: r.label, n: r.n, sub: Math.round(r.share * 100) + '%', col: COL[i % COL.length] }))) + (m.quiet.length ? '<p class="quiet">Nothing in this window on ' + esc(m.quiet.join(', ')) + '.</p>' : '') : '<p class="quiet">No story or post in this window carried one of the desk’s issues.</p>';
     const mix = m.mix.length ? bars(m.mix.map(r => ({ label: chName(r.ch), n: r.n, col: chCol(r.ch) }))) : '<p class="quiet">Nothing was collected in this window.</p>';
-    parts.push('<div class="two"><section class="card"><h2>Share of voice by issue</h2><p class="lede">Stories and posts that carry each of the desk’s issues.</p>' + sov + '</section>' +
+    parts.push('<div class="two"><section class="card"><h2>Share of voice by issue</h2><p class="lede">Stories and posts that carry each of the desk’s issues; one can carry several.</p>' + sov + '</section>' +
       '<section class="card"><h2>Channel mix</h2><p class="lede">Every story copy and post collected, by channel.</p>' + mix + '</section></div>');
     const outl = m.outlets.length ? bars(m.outlets.map(o => ({ label: o.name, n: o.n })), '#2A78D6') : '<p class="quiet">No outlet carried a story in this window.</p>';
     const tn = toneBar(m.tone.stories, 'Stories') + toneBar(m.tone.posts, 'Comments under posts');
@@ -177,19 +201,19 @@
         '<td>' + esc(s.outlet || '') + '</td><td class="num hm">' + (s.n > 1 ? num(s.n) + ' outlets' : '1 outlet') + '</td><td class="num hm">' + (s.fb ? num(fbTotal(s.fb)) : '–') + '</td><td class="when">' + esc(stamp(s.ts)) + '</td></tr>').join('') + '</tbody></table></div></section>');
     if (m.engaged.length) parts.push('<section class="card"><h2>Most engaged posts</h2><p class="lede">Interactions as the platform gave them when the post was read.</p><div class=\"tw\"><table><thead><tr><th class="rk">#</th><th>Post</th><th>Channel</th><th class="num">Interactions</th><th class="hm">Since yesterday</th><th>Posted</th></tr></thead><tbody>' +
       m.engaged.map((p, i) => { const e = p.eng || {}; const det = [['likes', 'likes'], ['replies', 'replies'], ['reposts', 'reposts'], ['comments', 'comments'], ['shares', 'shares']].filter(k => e[k[0]] != null).map(k => num(e[k[0]]) + ' ' + k[1]).join(', ');
-        return '<tr><td class="rk">' + (i + 1) + '</td><td><span class="ttl">' + link(p.url, esc(cut(p.text, 170) || chName(p.platform) + ' post')) + '</span>' + (p.who ? '<p class="sum">' + esc(p.who) + (ROLE[p.role] ? ' · ' + ROLE[p.role] : '') + (p.party ? ' · ' + esc(p.party) : '') + '</p>' : '') + (det ? '<p class="sum">' + esc(det) + '</p>' : '') + '</td>' +
+        return '<tr><td class="rk">' + (i + 1) + '</td><td><span class="ttl">' + link(p.url, esc(cut(p.text, 170) || chName(p.platform) + ' post')) + '</span>' + (p.who ? '<p class="sum">' + esc(p.who) + (own(ROLE, p.role) ? ' · ' + esc(own(ROLE, p.role)) : '') + (p.party ? ' · ' + esc(p.party) : '') + '</p>' : '') + (det ? '<p class="sum">' + esc(det) + '</p>' : '') + '</td>' +
           '<td><span class="pf"><i style="background:' + chCol(p.platform) + '"></i>' + esc(chName(p.platform)) + '</span></td><td class="num"><b>' + num(p.total) + '</b></td><td class="num hm">' + (p.growth == null ? '–' : (p.growth > 0 ? '+' : '') + num(p.growth)) + '</td><td class="when">' + esc(stamp(p.ts)) + '</td></tr>'; }).join('') + '</tbody></table></div></section>');
     if (m.voices.length) parts.push('<section class="card"><h2>Public voices</h2><p class="lede">Registered organisations, officials and MPs posting on their own channels.</p><div class=\"tw\"><table><thead><tr><th>Who</th><th>Kind</th><th class="num">Posts</th><th class="num">Interactions</th><th class="hm">Channels</th></tr></thead><tbody>' +
-      m.voices.map(v => '<tr><td><span class="ttl">' + esc(v.who) + '</span></td><td>' + esc((ROLE[v.role] || 'Public actor') + (v.party ? ' · ' + v.party : '')) + '</td><td class="num">' + num(v.posts) + '</td><td class="num">' + (v.interactions ? num(v.interactions) : '–') + '</td><td class="hm">' + esc(Array.from(v.platforms).map(chName).join(', ')) + '</td></tr>').join('') + '</tbody></table></div></section>');
-    if (m.narratives.length) parts.push('<section class="card"><h2>Narratives in play</h2><p class="lede">Stories the conversation keeps telling on the desk’s issues, counted across channels.</p><div class=\"tw\"><table><thead><tr><th>Narrative</th><th class="num">Last 24h</th><th class="num hm">In all</th><th>Status</th><th class="hm">Stance</th></tr></thead><tbody>' +
-      m.narratives.map(n => '<tr><td><span class="ttl">' + esc(cut(n.label, 140)) + '</span>' + (n.claim ? '<p class="sum">' + esc(cut(n.claim, 180)) + '</p>' : '') + '</td><td class="num">' + num(n.n24) + '</td><td class="num hm">' + num(n.n) + '</td><td><span class="st ' + esc(n.status) + '">' + esc(STATUS[n.status] || n.status || '–') + '</span></td><td class="hm">' + (n.side ? '<span class="st ' + esc(n.side) + '">' + esc(SIDE[n.side] || n.side) + '</span>' : '–') + '</td></tr>').join('') + '</tbody></table></div></section>');
-    if (m.upcoming.length) parts.push('<section class="card"><h2>Coming up</h2><p class="lede">Dates written in the window’s stories and posts, and dates recorded from a parliament’s own pages.</p><div class=\"tw\"><table><thead><tr><th>Date</th><th>What</th></tr></thead><tbody>' +
+      m.voices.map(v => '<tr><td><span class="ttl">' + esc(v.who) + '</span></td><td>' + esc((own(ROLE, v.role) || 'Public actor') + (v.party ? ' · ' + v.party : '')) + '</td><td class="num">' + num(v.posts) + '</td><td class="num">' + (v.interactions ? num(v.interactions) : '–') + '</td><td class="hm">' + esc(Array.from(v.platforms).map(chName).join(', ')) + '</td></tr>').join('') + '</tbody></table></div></section>');
+    if (m.narratives.length) parts.push('<section class="card"><h2>Narratives in play</h2><p class="lede">Stories the conversation keeps telling on the desk’s issues, counted across channels' + (m.past ? '; counted as they stand now, not as they stood that day' : '') + '.</p><div class=\"tw\"><table><thead><tr><th>Narrative</th><th class="num">Last 24h</th><th class="num hm">In all</th><th>Status</th><th class="hm">Stance</th></tr></thead><tbody>' +
+      m.narratives.map(n => '<tr><td><span class="ttl">' + esc(cut(n.label, 140)) + '</span>' + (n.claim ? '<p class="sum">' + esc(cut(n.claim, 180)) + '</p>' : '') + '</td><td class="num">' + num(n.n24) + '</td><td class="num hm">' + num(n.n) + '</td><td><span class="st ' + esc(n.status) + '">' + esc(own(STATUS, n.status) || n.status || '–') + '</span></td><td class="hm">' + (n.side ? '<span class="st ' + esc(n.side) + '">' + esc(own(SIDE, n.side) || n.side) + '</span>' : '–') + '</td></tr>').join('') + '</tbody></table></div></section>');
+    if (m.upcoming.length) parts.push('<section class="card"><h2>Coming up</h2><p class="lede">Dates written in the window’s stories and posts, and dates recorded from a parliament’s own pages' + (m.past ? '; as they stand now' : '') + '.</p><div class=\"tw\"><table><thead><tr><th>Date</th><th>What</th></tr></thead><tbody>' +
       m.upcoming.map(u => { const dt = /^\d{4}-\d\d-\d\d$/.test(String(u.date)) ? fDay.format(new Date(u.date + 'T12:00:00+10:00')) : String(u.date || ''); return '<tr><td class="when"><b>' + esc(dt) + '</b>' + (u.recurring ? '<p class="sum">recurring</p>' : '') + '</td><td>' + link(u.url, esc(cut(u.what || u.event || '', 220))) + '</td></tr>'; }).join('') + '</tbody></table></div></section>');
-    if (!m.total) parts.push('<section class="card"><h2>Nothing in this window yet</h2><p class="lede">No story or post on the desk’s issues was collected between ' + esc(stamp(m.win.from)) + ' and ' + esc(stamp(m.win.to)) + '.</p></section>');
+    if (!m.any) parts.push('<section class="card"><h2>Nothing in this window yet</h2><p class="lede">No story or post on the desk’s issues was collected between ' + esc(stamp(m.win.from)) + ' and ' + esc(stamp(m.win.to)) + '.</p></section>');
     const read = m.mix.map(r => chName(r.ch) + ' (' + num(r.n) + ')').join(', ');
     parts.push('<footer class="ft"><p><b>How this was counted.</b> Every figure is a count of the stories and posts collected for ' + esc(d.name || client) + ' in this window, on the desk’s issues and its watched accounts, after anything set aside or muted. Syndicated copies of one story count as one story; Mentions counts every copy. Interactions are the counts each platform gave when the post was read. No AI was used to make this page.</p>' +
       (read ? '<p>Channels in this report: ' + esc(read) + '.</p>' : '') + (m.capped ? '<p>The window held more than the desk reads at once, so these figures are for its newest rows.</p>' : '') + '<p>Prepared with AXIOM.</p></footer>');
-    return '<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + esc(client + ' - coverage report - ' + fLong.format(new Date(m.win.to))) + '</title><style>' + CSS + '</style></head><body><main class="pg">' + parts.join('') + '</main></body></html>';
+    return '<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + esc(client + ' - coverage report - ' + long(m.win.to)) + '</title><style>' + CSS + '</style></head><body><main class="pg">' + parts.join('') + '</main></body></html>';
   };
 
   /* ---- the dialog in the Den: loading, error with Try again, the report in a sandboxed frame, Download and Print ---- */
@@ -203,39 +227,73 @@
     const root = document.getElementById('den-root') || document.body; const back = o.opener || document.activeElement;
     const box = document.createElement('div'); box.id = 'den-snap'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-labelledby', 'den-snap-h');
     box.innerHTML = '<div class="dsn-panel"><div class="dsn-bar"><div class="dsn-title"><h2 id="den-snap-h" tabindex="-1">Coverage report</h2><span class="dsn-sub"></span></div><span class="dsn-sp"></span>' +
+      '<span class="dsn-note" role="status" aria-live="polite"></span>' +
       '<button type="button" class="dsn-btn" data-a="print" disabled>Print or save as PDF</button><button type="button" class="dsn-btn" data-a="download" disabled>Download .html</button><button type="button" class="dsn-btn dsn-x" data-a="close" aria-label="Close the coverage report">Close</button></div>' +
       '<div class="dsn-body"><div class="dsn-state" role="status" aria-live="polite"></div></div></div>';
     root.appendChild(box); document.documentElement.classList.add('dsn-open');
-    const $ = s => box.querySelector(s); const state = $('.dsn-state'); const body = $('.dsn-body'); $('.dsn-sub').textContent = desk.name || '';
-    let doc = '', closed = false, frame = null;
-    const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); close(); } else if (e.key === 'Tab') { const f = Array.from(box.querySelectorAll('button:not([disabled]), iframe, [tabindex="-1"]')).filter(x => x.offsetParent !== null || x.tagName === 'IFRAME'); if (!f.length) return; const i = f.indexOf(document.activeElement);
-      if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); } } };
-    function close() { if (closed) return; closed = true; document.removeEventListener('keydown', onKey, true); box.remove(); document.documentElement.classList.remove('dsn-open'); live = null; try { if (back && back.isConnected) back.focus(); } catch (e) {} }
-    live = { close };
-    document.addEventListener('keydown', onKey, true);
+    const $ = s => box.querySelector(s); const state = $('.dsn-state'); const body = $('.dsn-body'); const note = $('.dsn-note'); const head = $('#den-snap-h');
+    $('.dsn-sub').textContent = desk.name || '';
+    let doc = '', closed = false, frame = null, day = '';
+    // what Tab moves between: the bar's live buttons and a Try again, then the report's links (inside the frame)
+    const btns = () => Array.from(box.querySelectorAll('.dsn-bar button:not([disabled]), .dsn-state button')).filter(b => !b.closest('[hidden]'));
+    const links = () => { try { return frame ? Array.from(frame.contentDocument.querySelectorAll('a[href]')) : []; } catch (e) { return []; } };
+    const intoFrame = last => { const L = links(); if (!L.length) return false; L[last ? L.length - 1 : 0].focus(); return true; };
+    // the page's keys while the dialog is open: Escape closes it, Tab stays inside it, and no key reaches the Den or the app
+    // behind it (a capture listener on window runs before every listener they have)
+    const onKey = e => {
+      if (closed) return; e.stopPropagation();
+      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if (e.key !== 'Tab') return;
+      const b = btns(), act = document.activeElement, i = b.indexOf(act);
+      if (!box.contains(act) || act === head) { e.preventDefault(); if (e.shiftKey) { if (!intoFrame(true)) (b[b.length - 1] || head).focus(); } else (b[0] || head).focus(); return; }
+      if (act === frame) return;   // the frame itself: the browser moves into or out of it
+      if (e.shiftKey && i === 0) { e.preventDefault(); if (!intoFrame(true)) (b[b.length - 1] || head).focus(); return; }
+      if (!e.shiftKey && i === b.length - 1) { e.preventDefault(); if (!intoFrame(false)) b[0].focus(); } };
+    // inside the report (no script runs there): Escape closes; Tab past its last link, or Shift+Tab before its first, comes back to the bar
+    const onFrameKey = e => {
+      if (closed) return;
+      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if (e.key !== 'Tab') return; const L = links(); const i = L.indexOf(frame.contentDocument.activeElement); const b = btns();
+      if (!e.shiftKey && (i === L.length - 1 || i < 0)) { e.preventDefault(); (b[0] || head).focus(); }
+      else if (e.shiftKey && i <= 0) { e.preventDefault(); (b[b.length - 1] || head).focus(); } };
+    // the Den's view going away (Back, another view, the Den closed) takes the dialog with it
+    const view = document.getElementById('v-den'); const mo = view && window.MutationObserver ? new MutationObserver(() => { if (!view.classList.contains('on')) close(); }) : null;
+    if (mo) mo.observe(view, { attributes: true, attributeFilter: ['class'] });
+    const gone = () => { if (!document.getElementById('den-root') || (view && !view.classList.contains('on'))) close(); };
+    function close() { if (closed) return; closed = true; window.removeEventListener('keydown', onKey, true); window.removeEventListener('popstate', gone); window.removeEventListener('hashchange', gone); if (mo) mo.disconnect();
+      box.remove(); document.documentElement.classList.remove('dsn-open'); if (live && live.box === box) live = null; try { if (back && back.isConnected) back.focus(); } catch (e) {} }
+    live = { close, box };
+    window.addEventListener('keydown', onKey, true); window.addEventListener('popstate', gone); window.addEventListener('hashchange', gone);
     box.addEventListener('mousedown', e => { if (e.target === box) close(); });
     $('[data-a="close"]').addEventListener('click', close);
-    $('[data-a="download"]').addEventListener('click', () => { if (!doc) return; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([doc], { type: 'text/html' })); a.download = 'coverage-' + desk.id + '-' + new Date(o.at || Date.now()).toISOString().slice(0, 10) + '.html'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); });
-    $('[data-a="print"]').addEventListener('click', () => { try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) { state.textContent = 'This browser would not print the frame. Download the .html and print it from there.'; } });
-    const load = async () => {
+    // the file is named for the window's own Sydney day, never the click's date in UTC
+    $('[data-a="download"]').addEventListener('click', () => { if (!doc) return; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([doc], { type: 'text/html' })); a.download = 'coverage-' + desk.id + '-' + (day || sydDay(Date.now())) + '.html'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); note.textContent = 'Downloaded.'; });
+    $('[data-a="print"]').addEventListener('click', () => { try { frame.contentWindow.focus(); frame.contentWindow.print(); note.textContent = ''; } catch (e) { note.textContent = 'This browser would not print the report here. Download the .html and print it from there.'; } });
+    const fail = e => { if (closed) return; if (frame) { frame.remove(); frame = null; } doc = ''; $('[data-a="print"]').disabled = true; $('[data-a="download"]').disabled = true; state.hidden = false;
+      state.innerHTML = '<div class="dsn-err"><p><b>The coverage report could not be made.</b></p><p class="dsn-why"></p><button type="button" class="dsn-btn primary" data-a="retry">Try again</button></div>';
+      state.querySelector('.dsn-why').textContent = say(e); const r = state.querySelector('[data-a="retry"]'); r.addEventListener('click', () => load(true)); r.focus(); };
+    const load = async retried => {
       state.innerHTML = '<p class="dsn-wait"><span class="dsn-spin" aria-hidden="true"></span>Counting this window’s stories and posts…</p>'; state.hidden = false; if (frame) { frame.remove(); frame = null; }
-      $('[data-a="print"]').disabled = true; $('[data-a="download"]').disabled = true;
+      $('[data-a="print"]').disabled = true; $('[data-a="download"]').disabled = true; note.textContent = ''; if (retried) head.focus();
       let b; try { b = await call('/den/board?' + qs({ desk: desk.id, to: o.to || '' })); if (!b || b.ok !== true || !Array.isArray(b.media) || !b.window) { const e = new Error('AXIOM sent something this page can’t read. Nothing was changed.'); throw e; } }
-      catch (e) { if (closed) return; state.innerHTML = '<div class="dsn-err"><p><b>The coverage report could not be made.</b></p><p class="dsn-why"></p><button type="button" class="dsn-btn primary" data-a="retry">Try again</button></div>'; state.querySelector('.dsn-why').textContent = say(e); state.querySelector('[data-a="retry"]').addEventListener('click', load); state.querySelector('[data-a="retry"]').focus(); return; }
+      catch (e) { fail(e); return; }
       if (closed) return;
       // the window before, of the same length, for the changes; its failure costs the comparison only, and says so
       let prev = null, prevFailed = false; const h = Number(b.window.hours) || 24;
       try { const p = await call('/den/board?' + qs({ desk: desk.id, to: b.window.from, hours: h })); if (p && p.ok === true && Array.isArray(p.media)) prev = p; else prevFailed = true; } catch (e) { prevFailed = true; }
       if (closed) return;
-      doc = S.build(S.model(b, prev), { prevFailed, at: Date.now() });
+      // a row this page cannot draw is a failure said in words, with Try again, never a spinner left turning
+      try { const m = S.model(b, prev); day = m.win.day; doc = S.build(m, { prevFailed, at: Date.now() }); }
+      catch (e) { fail(new Error('The window holds something this page could not draw (' + String((e && e.message) || e).slice(0, 120) + '). Nothing was changed.')); return; }
       frame = document.createElement('iframe'); frame.className = 'dsn-frame'; frame.title = 'Coverage report for ' + (desk.name || 'this desk');
       frame.setAttribute('sandbox', 'allow-same-origin allow-modals allow-popups allow-popups-to-escape-sandbox'); frame.srcdoc = doc;
-      frame.addEventListener('load', () => { try { frame.contentDocument.addEventListener('keydown', onKey, true); } catch (e) {} });
+      frame.addEventListener('load', () => { try { frame.contentDocument.addEventListener('keydown', onFrameKey, true); } catch (e) {} });
       state.hidden = true; body.appendChild(frame);
       $('[data-a="print"]').disabled = false; $('[data-a="download"]').disabled = false;
+      if (retried && !box.contains(document.activeElement)) head.focus();
       const live2 = document.querySelector('[data-dt-live="polite"]'); if (live2) live2.textContent = 'The coverage report is ready.';
     };
-    setTimeout(() => { const h = $('#den-snap-h'); if (h) h.focus(); }, 0);
+    setTimeout(() => { if (!closed) head.focus(); }, 0);
     load();
   };
 })();
