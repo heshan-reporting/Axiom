@@ -149,21 +149,25 @@ await t('CR10 axe on the dialog at 1366 and 1440; no sideways scroll of the Den 
   }
   const p = await go({ width: 1024, height: 768 }); eq(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scroll at 1024');
   await p.click('#dt-btn-cov'); await ready(p); const h = await doc(p); await p.context().close();
-  const q = await browser.newContext({ viewport: { width: 390, height: 844 } }); const pg = await q.newPage(); await pg.setContent(h);
-  eq(await pg.evaluate(() => document.documentElement.scrollWidth <= 390), true, 'the report at 390 has no sideways scroll');
-  await pg.addScriptTag({ content: AXE }).catch(() => {});
-  const r3 = await pg.evaluate(async () => window.axe ? (await window.axe.run(document, { runOnly: ['wcag2a', 'wcag2aa'] })).violations.map(v => v.id + ': ' + v.nodes.map(n => n.target.join(' ')).slice(0, 2).join(', ')) : ['axe not loaded']);
-  eq(r3, [], 'axe on the report document itself'); await q.close();
+  // at 320 and 340 as well as 390: CI's fonts made a table scroll at 390 where this machine's did not (scrollable-region-focusable)
+  for (const wd of [390, 340, 320]) { const q = await browser.newContext({ viewport: { width: wd, height: 844 } }); const pg = await q.newPage(); await pg.setContent(h);
+    eq(await pg.evaluate(w0 => document.documentElement.scrollWidth <= w0, wd), true, 'the report at ' + wd + ' has no sideways scroll');
+    await pg.addScriptTag({ content: AXE }).catch(() => {});
+    const r3 = await pg.evaluate(async () => window.axe ? (await window.axe.run(document, { runOnly: ['wcag2a', 'wcag2aa'] })).violations.map(v => v.id + ': ' + v.nodes.map(n => n.target.join(' ')).slice(0, 2).join(', ')) : ['axe not loaded']);
+    eq(r3, [], 'axe on the report document itself at ' + wd);
+    ok(await pg.evaluate(() => Array.from(document.querySelectorAll('.tw')).every(x => x.tabIndex === 0 && x.getAttribute('role') === 'region' && /, table$/.test(x.getAttribute('aria-label') || ''))), 'every table box takes the keyboard and is named');
+    await q.close(); }
 });
 
 await t('CR11 Tab keeps to the dialog and reaches every link; Escape inside the report closes it; no key reaches the Den; leaving the view closes it', async () => {
   const p = await go(); await p.click('#dt-btn-cov'); await ready(p); await p.waitForTimeout(300);
-  const where = () => p.evaluate(() => { const a = document.activeElement; const box = document.getElementById('den-snap'); if (!box) return 'no dialog'; if (a && a.tagName === 'IFRAME') { const d = a.contentDocument.activeElement; return 'frame:' + (d && d.tagName === 'A' ? Array.from(a.contentDocument.querySelectorAll('a[href]')).indexOf(d) : (d && d.tagName)); } return box.contains(a) ? 'bar:' + (a.getAttribute('data-a') || a.id) : 'OUTSIDE:' + (a && (a.id || a.tagName)); });
-  const nLinks = await inFrame(p, d => d.querySelectorAll('a[href]').length); ok(nLinks >= 3, 'the report has links: ' + nLinks);
+  const STOPS = 'a[href], [tabindex="0"]';   // the report's Tab stops: its links and its table boxes
+  const where = () => p.evaluate(sel => { const a = document.activeElement; const box = document.getElementById('den-snap'); if (!box) return 'no dialog'; if (a && a.tagName === 'IFRAME') { const d = a.contentDocument.activeElement; const i = Array.from(a.contentDocument.querySelectorAll(sel)).indexOf(d); return 'frame:' + (i >= 0 ? i : (d && d.tagName)); } return box.contains(a) ? 'bar:' + (a.getAttribute('data-a') || a.id) : 'OUTSIDE:' + (a && (a.id || a.tagName)); }, STOPS);
+  const nLinks = await inFrame(p, (d, sel) => d.querySelectorAll(sel).length, STOPS); ok(nLinks >= 3, 'the report has Tab stops: ' + nLinks);
   await p.focus('[data-a="close"]'); const seen = [];
   for (let i = 0; i < nLinks + 6; i++) { await p.keyboard.press('Tab'); seen.push(await where()); }
   ok(!seen.some(x => /^OUTSIDE|no dialog/.test(x)), 'Tab never leaves the dialog: ' + seen.join(' '));
-  for (let k = 0; k < nLinks; k++) ok(seen.indexOf('frame:' + k) >= 0, 'link ' + k + ' is reached by Tab: ' + seen.join(' '));
+  for (let k = 0; k < nLinks; k++) ok(seen.indexOf('frame:' + k) >= 0, 'Tab stop ' + k + ' is reached by Tab: ' + seen.join(' '));
   ok(seen.indexOf('bar:print') > seen.indexOf('frame:' + (nLinks - 1)), 'after the last link Tab comes back to the bar: ' + seen.join(' '));
   await p.focus('[data-a="print"]'); await p.keyboard.press('Shift+Tab'); eq(await where(), 'frame:' + (nLinks - 1), 'Shift+Tab from the first button goes to the report\'s last link');
   const back = []; for (let i = 0; i < 4; i++) { await p.keyboard.press('Shift+Tab'); back.push(await where()); } ok(!back.some(x => /^OUTSIDE/.test(x)), 'Shift+Tab stays inside: ' + back.join(' '));

@@ -127,7 +127,7 @@
     '.tone{display:flex;height:14px;border-radius:7px;overflow:hidden;background:#EEF1F5;margin:6px 0 4px}.tone i{display:block;height:100%}',
     '.tk{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#344054;margin:0 0 12px}.tk b{font-variant-numeric:tabular-nums}',
     'table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#667085;font-weight:600;padding:8px 10px;border-bottom:1px solid #E3E8EF;white-space:nowrap}',
-    'th.num{text-align:right}.tw{overflow-x:auto;-webkit-overflow-scrolling:touch}',
+    'th.num{text-align:right}.tw{overflow-x:auto;-webkit-overflow-scrolling:touch}.tw:focus-visible,a:focus-visible{outline:2px solid #1D4ED8;outline-offset:2px}',
     'td{padding:10px;border-bottom:1px solid #EEF1F5;vertical-align:top}tr:last-child td{border-bottom:0}td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}td.when{white-space:nowrap;color:#475467}',
     '.ttl{font-weight:600;color:#101828;display:block}.ttl a{color:#101828}.ttl a:hover{color:#1D4ED8}.sum{color:#475467;font-size:12.5px;margin:2px 0 0}',
     '.rk{width:28px;color:#98A2B3;font-variant-numeric:tabular-nums;font-weight:600}',
@@ -213,7 +213,9 @@
     const read = m.mix.map(r => chName(r.ch) + ' (' + num(r.n) + ')').join(', ');
     parts.push('<footer class="ft"><p><b>How this was counted.</b> Every figure is a count of the stories and posts collected for ' + esc(d.name || client) + ' in this window, on the desk’s issues and its watched accounts, after anything set aside or muted. Syndicated copies of one story count as one story; Mentions counts every copy. Interactions are the counts each platform gave when the post was read. No AI was used to make this page.</p>' +
       (read ? '<p>Channels in this report: ' + esc(read) + '.</p>' : '') + (m.capped ? '<p>The window held more than the desk reads at once, so these figures are for its newest rows.</p>' : '') + '<p>Prepared with AXIOM.</p></footer>');
-    return '<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + esc(client + ' - coverage report - ' + long(m.win.to)) + '</title><style>' + CSS + '</style></head><body><main class="pg">' + parts.join('') + '</main></body></html>';
+    // a table that is wider than a phone scrolls inside its box: the box takes the keyboard and is named by its card's heading
+    const named = parts.map(x => { const h = (/<h2>([^<]*)<\/h2>/.exec(x) || [])[1]; return h ? x.replace('<div class="tw">', '<div class="tw" tabindex="0" role="region" aria-label="' + h + ', table">') : x; });
+    return '<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + esc(client + ' - coverage report - ' + long(m.win.to)) + '</title><style>' + CSS + '</style></head><body><main class="pg">' + named.join('') + '</main></body></html>';
   };
 
   /* ---- the dialog in the Den: loading, error with Try again, the report in a sandboxed frame, Download and Print ---- */
@@ -236,7 +238,7 @@
     let doc = '', closed = false, frame = null, day = '';
     // what Tab moves between: the bar's live buttons and a Try again, then the report's links (inside the frame)
     const btns = () => Array.from(box.querySelectorAll('.dsn-bar button:not([disabled]), .dsn-state button')).filter(b => !b.closest('[hidden]'));
-    const links = () => { try { return frame ? Array.from(frame.contentDocument.querySelectorAll('a[href]')) : []; } catch (e) { return []; } };
+    const links = () => { try { return frame ? Array.from(frame.contentDocument.querySelectorAll('a[href], [tabindex="0"]')) : []; } catch (e) { return []; } };
     const intoFrame = last => { const L = links(); if (!L.length) return false; L[last ? L.length - 1 : 0].focus(); return true; };
     // the page's keys while the dialog is open: Escape closes it, Tab stays inside it, and no key reaches the Den or the app
     // behind it (a capture listener on window runs before every listener they have)
