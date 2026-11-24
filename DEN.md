@@ -2139,6 +2139,12 @@ counts; a print refusal is said where it can be seen. Left as it is: share of vo
 carries (the card says so), and the second board read is one more read of the database per press (a count-only route would
 make it cheaper; none is exposed today).
 
+**Found on the way (`den-today.css?v=r3`).** CI's browser job showed `den-today-browser` T5 failing on `main` since p72, before
+the coverage report: at 1366 x 650, with the introduction's second or third card in the right-hand column, the column held the
+card, the list's 200 px floor and the send block, more than it had room for, so Mark as sent was cut off below it (9 px here;
+fully out of view on CI's text metrics). While a card shows in the column, the send block keeps its size, the list's floor is
+120 px and the card scrolls in itself before anything is cut; with it Mark as sent sits 57 px inside the column.
+
 **Not verified here.** Real windows (the busiest day's chart and the outlet names as the registry gives them); printing from
 Safari and Firefox (Chromium's print path only); a week-long desk on live data. The second read is one more board read of the
 database per open of the report, on a press, never on opening the Den.

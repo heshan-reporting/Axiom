@@ -439,7 +439,7 @@ verifies each, and what was asked for and not built.
     `review_rev`), flags with FNV keys (denwords on, compare/unread/mark/rating off behind `options.flags`), H: added
     sources, nosource, filing's `left`, hash `U:` ids, and no names for guest readers. The tour is no longer offered on
     open. Page `den.js` r63, `den-brief.js` r11, `den-desk.js` r3, `den-tour.js` r2, `den-flags.js` r3, `den-today.js` r2.
-  - **The coverage report (24 November 2026; page `den-snapshot.js?v=r2`, `den-snapshot.css?v=r2`, `den-today.js` r3, `den.js`
+  - **The coverage report (24 November 2026; page `den-snapshot.js?v=r2`, `den-snapshot.css?v=r2`, `den-today.js` r3, `den-today.css` r3, `den.js`
     r64; no worker change; `DEN.md` s.12).** A monitoring-service style page of figures beside her report: **Coverage report** in
     Today's top bar, More tools and the workbench's bar opens a dialog with six headline figures and their change against the
     window before, mentions by hour and channel, share of voice by issue, the channel mix (delivering channels only), top
