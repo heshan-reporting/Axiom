@@ -29,3 +29,5 @@ html.dsn-open,html.dsn-open body{overflow:hidden}
 @media (max-width:720px){#den-snap{padding:0}#den-snap .dsn-panel{border-radius:0;border:0}#den-snap .dsn-sub{display:none}}
 #den-snap .dsn-note{color:var(--dn-ink-2);font-size:var(--dn-fs-sm);margin-right:var(--dn-sp-2)}
 #den-snap .dsn-note:empty{display:none}
+/* under 400 px the top bar has no room for it: More tools > Coverage report stays (den-today-browser T5, 320 px) */
+@media (max-width:399px){#den-root #dt-btn-cov{display:none}}

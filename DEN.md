@@ -2096,7 +2096,7 @@ in the lane commits (words, the tour, the release prompt that no longer appears)
    text.
 5. D7: read the first post-p71 AEP drafts for Den words; if the draft still writes them, the prompt is the next fix.
 
-## 12. The coverage report (24 November 2026; page `den-snapshot.js?v=r1`, `den-snapshot.css?v=r1`, `den-today.js?v=r3`, `den.js?v=r64`; no worker change)
+## 12. The coverage report (24 November 2026; page `den-snapshot.js?v=r1`, `den-snapshot.css?v=r2`, `den-today.js?v=r3`, `den.js?v=r64`; no worker change)
 
 The owner, ahead of a meeting with the analyst: "high quality production grade and meltwater type output". Her report (the
 brief) is her document and keeps its format; what a monitoring service adds beside it is the figures, so this release adds
