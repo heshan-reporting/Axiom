@@ -3802,6 +3802,14 @@ repair still leaves a layout blocker, Fix layout in the Studio (`repairLayout`) 
 "layout variation: <name>, chosen by Fix layout", no render, with Undo; with nothing passing, nothing is saved. Harnesses:
 `tests/studio-fixlayout-browser.mjs` (17), `tests/studio-fixlayout-island-browser.mjs` (3).
 
+**The testing feedback of 18 November (page `?v=r50`, worker unchanged at p76; `CREATIVE-STUDIO.md` s.66).** Laura's eight
+ClickUp tasks: client cards clip long campaign names; five starting points (Paste or type, Add a link, Upload a file or
+screenshot, From a campaign, From Axiom's monitoring); Add from monitoring reads Added and brings the tray item into view; the
+production modes in plain words with no model named; every Board card names its next step and a sticky bar at the Board's foot
+carries the action (`boardNext`, `.st-board-next`); Review's lock goes to Create whenever Create is open and explains a Full AI
+creative's read-back and the free editable copy (`LockedStage`); the Creative Partner says it is optional. Harness:
+`tests/studio-laura-browser.mjs` (8).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

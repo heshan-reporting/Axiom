@@ -28,35 +28,35 @@
   "sha": "2267fae92750fd0a"
  },
  "studio-progress.css": {
-  "v": "r49",
+  "v": "r50",
   "sha": "2233de4911ce0476"
  },
  "studio-flow.css": {
-  "v": "r49",
+  "v": "r50",
   "sha": "7a136471f27d13ff"
  },
  "studio-skin.css": {
-  "v": "r49",
-  "sha": "f9a3e3f7fb2c1a2a"
+  "v": "r50",
+  "sha": "f2b2f8c4d09c5dd0"
  },
  "studio-guided.css": {
-  "v": "r49",
-  "sha": "42649ac18e3088fb"
+  "v": "r50",
+  "sha": "8c4faac1dbd9c21a"
  },
  "studio-editor.css": {
-  "v": "r49",
+  "v": "r50",
   "sha": "166b14da769a65e7"
  },
  "studio-shell.css": {
-  "v": "r49",
+  "v": "r50",
   "sha": "e4b059d266598500"
  },
  "studio-polish.css": {
-  "v": "r49",
+  "v": "r50",
   "sha": "37ba84a9f394526b"
  },
  "den.css": {
-  "v": "r49",
+  "v": "r50",
   "sha": "b737430e5193ded2"
  },
  "den-brief.css": {
@@ -84,39 +84,39 @@
   "sha": "33d8c2039649c576"
  },
  "studio-render.js": {
-  "v": "r49",
+  "v": "r50",
   "sha": "b170c30a0e86114f"
  },
  "studio-progress.js": {
-  "v": "r49",
+  "v": "r50",
   "sha": "8a53708d07bf2da4"
  },
  "studio-merge.js": {
-  "v": "r49",
+  "v": "r50",
   "sha": "09ca57ede41b3e5b"
  },
  "studio.js": {
-  "v": "r49",
-  "sha": "cafadbe8fbdef1bc"
+  "v": "r50",
+  "sha": "3115b54a9d02d827"
  },
  "studio-guided.js": {
-  "v": "r49",
-  "sha": "09ae6511f5fa893b"
+  "v": "r50",
+  "sha": "f92e4ca8effc1cc1"
  },
  "studio-editor.js": {
-  "v": "r49",
+  "v": "r50",
   "sha": "93a243db73e894dd"
  },
  "studio-canvas.js": {
-  "v": "r49",
+  "v": "r50",
   "sha": "5e533c406797a094"
  },
  "studio-style.js": {
-  "v": "r49",
+  "v": "r50",
   "sha": "0941cfccf9bc119f"
  },
  "studio-brandmem.js": {
-  "v": "r49",
+  "v": "r50",
   "sha": "c2fdd7cec9c075a4"
  },
  "sources.js": {

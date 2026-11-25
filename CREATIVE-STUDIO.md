@@ -4244,3 +4244,23 @@ suites that exercise the repair pass: `studio-layout-browser` (211), `studio-mar
   growing the band; a designer may prefer the band grown. Not changed here.
 - The nearest arrangement can still be a large change to a tile (every variation draws its own panel); it is used only when no
   move inside the current arrangement clears what blocks, and Undo fix and Compare are one press away.
+
+## 66. The testing feedback of 18 November (page `?v=r50`, worker unchanged at p76; 25 November 2026)
+
+Laura tested the Studio on 18 November and filed eight tasks in ClickUp ("Axiom Bug and Change Request Tracking"). On
+25 November she asked for an ETA in the testers' Slack group. Each item, what it was, and what was done. Every fix is in the page
+only; `tests/studio-laura-browser.mjs` (8) failed on `a4d053b` (seven of eight) and passes now.
+
+| Task | What she saw | Cause | Done |
+|---|---|---|---|
+| New Project - correct the formatting | campaign names ran out of the client card into the next | the chips are `nowrap` and the card did not clip | the card clips, each campaign chip is cut short with an ellipsis, the full name on hover (LF1) |
+| (same task) clients should not see other clients | every client listed | an agency key sees every client by design | not a code change: give a client a scoped guest link (`tools/guest-link.py add NAME --ns <client>`, S31); it lists only that client |
+| New Project > Brief types | "Start With Axiom" unclear; too many fields | eight starting points, three of them (brief, situation, article) were the same text box | five: Paste or type, Add a link, Upload a file or screenshot, From a campaign, From Axiom's monitoring (LF2); the Express build (s.62) is the shorter path |
+| New project > Scrolling | Add on a monitoring row did nothing visible | the tray it filled is below the list | the row reads Added (disabled), the new tray item scrolls into view, the status line says "Added to the brief: ..." (LF3) |
+| Production | the language, and "Gemini" named | the cards described the mechanism | plain words, no model named, half the length; the intake and direction chips say "Full AI creative" (LF4) |
+| Create > Navigation | after the image landed, the next action was at the top | the Board carried no action | every Board card names its next step ("Next: ..."); a sticky bar at the foot of the Board carries the action (Continue to Review, or open the piece that blocks); a Full AI piece reads "words not read back", never "not validated" (LF5) |
+| Creative Partner | "do we have to review all of these to make one tile?" | - | it is optional: its introduction now says so (LF7); a piece is approved without it unless it is a Full AI creative, whose painted words must be read back |
+| Can't move on to finalise the tile | after Regenerate, Review sent her to Copy, where nothing was left to do | Review's lock pointed at the first earlier step not complete (Copy, while other pieces were not ready), not at what blocks (the read-back, in Create) | the lock goes to Create whenever Create is open, and for a Full AI creative says how: Review in the Creative Partner, or regenerate, or make an editable copy (free) to fix the words (LF6). A Full AI creative's words stay not editable as layers by design; the editable copy is the way |
+| Need a quicker function | too many steps for one tile | - | the Express build (p74, s.62): Brief, Make, Ship |
+
+Not verified: the live worker and real rows; the wording was not shown to Laura before it shipped.

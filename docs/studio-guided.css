@@ -80,6 +80,11 @@
 #studio-root .st .st-client-main{display:flex;flex-direction:column;gap:6px;min-width:0}
 #studio-root .st .st-client-main b{font:700 14.5px/1.25 var(--sk-display)}
 #studio-root .st .st-client-camps{display:flex;gap:5px;flex-wrap:wrap}
+/* a long campaign name is cut short inside its card (the full name on hover), never drawn past it (Laura, 18 November 2026) */
+#studio-root .st .st-client-card{min-width:0;overflow:hidden}
+#studio-root .st .st-client-main{flex:1 1 auto}
+#studio-root .st .st-client-camps{min-width:0;max-width:100%}
+#studio-root .st .st-client-camps .st-mini-chip{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 #studio-root .st .st-client-act{font-size:11.5px}
 #studio-root .st .st-clogo{flex-shrink:0;border-radius:var(--st-r-xl);object-fit:contain;background:var(--st-logo-plate);padding:4px;border:1px solid var(--sk-line)}
 #studio-root .st .st-clogo.ph{display:inline-grid;place-items:center;padding:0;background:color-mix(in srgb,var(--c) 22%,var(--sk-bg));color:var(--c);font:800 13px/1 var(--sk-display);letter-spacing:.02em}
@@ -105,7 +110,8 @@
 
 /* ---------------------------------------------------------------------------------------------- the material composer */
 #studio-root .st .st-compose{display:flex;flex-direction:column;gap:10px}
-#studio-root .st .st-starts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+#studio-root .st .st-starts{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+@media(max-width:1180px){#studio-root .st .st-starts{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:860px){#studio-root .st .st-starts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 #studio-root .st .st-start{display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid var(--sk-line);border-radius:var(--sk-r);background:var(--sk-panel);color:var(--sk-ink-2);font:600 12px/1.2 var(--sk-font);cursor:pointer;text-align:left;transition:border-color .15s,background-color .15s,color .15s,transform .2s var(--sk-ease-out);animation:sk-pop .35s var(--sk-ease-out) both;animation-delay:calc(var(--i,0) * 25ms)}
 #studio-root .st .st-start .st-ic{color:var(--sk-accent)}
