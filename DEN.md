@@ -2095,3 +2095,57 @@ in the lane commits (words, the tour, the release prompt that no longer appears)
    once. Ask her D4: her Source List's form, the sub-headings, Recommended Posture's place, source numbers in the pasted
    text.
 5. D7: read the first post-p71 AEP drafts for Den words; if the draft still writes them, the prompt is the next fix.
+
+## 12. The coverage report (24 November 2026; page `den-snapshot.js?v=r2`, `den-snapshot.css?v=r2`, `den-today.js?v=r3`, `den.js?v=r64`; no worker change)
+
+The owner, ahead of a meeting with the analyst: "high quality production grade and meltwater type output". Her report (the
+brief) is her document and keeps its format; what a monitoring service adds beside it is the figures, so this release adds
+those, as a page of its own that any key that can read the desk can open.
+
+**What she sees.** A **Coverage report** button in Today's report's top bar (and More tools > This report > Coverage report;
+the workbench's top bar has the same button). It opens a dialog holding a one-page report: the client and the window in
+Australian Eastern time; six headline figures (Mentions: every story copy and post; Stories: syndicated copies once;
+Outlets; Social posts; Interactions, on the posts whose counts were read; Public voices: registered organisations,
+officials and MPs), each with its change against the window of the same length before; mentions over the window by hour
+(by day past 48 hours) and channel; share of voice by the desk's own issues, with the issues nothing touched named once;
+the channel mix (only channels that delivered); the outlets that carried the most; tone where it was rated (a story's own
+tone; a post's comments when three or more carry one), with how many were rated; the top ten stories in the Board's own
+order with outlet, how many outlets carried it, Facebook reach and time; the eight most engaged posts; public voices;
+narratives in play; dates coming up; and a footer saying how it was counted and that no AI made it. **Print or save as
+PDF** and **Download .html** sit in the dialog's bar.
+
+**How.** `docs/den-snapshot.js` (`window.DenSnapshot`: `model(board, prev)` is pure, `build(model)` returns one
+self-contained HTML document with inline styles and SVG, `open({desk, to, opener})` is the dialog). It reads `GET
+/den/board?desk=` (with `to=` on another day, as the Board does) and then the window before (`to=<from>&hours=<h>`); a failure
+of the second read costs the comparison only and the tiles say so; a failure of the first says what failed, with Try again,
+and draws no empty report. The document is shown in a sandboxed frame (`allow-same-origin allow-modals allow-popups`, never
+scripts), so the preview, the download and the PDF are the same bytes; every text is escaped and only an http(s) address is
+a link. Nobody is named but a registered public actor or an MP on their own post (`who` on the board's actor rows, already
+blanked for a guest). No model call, no write, no new route: it works on any worker since p71.
+
+**Tests.** `tests/den-snapshot-browser.mjs` (12). `node tests/run.mjs check` parses `den-snapshot.js`.
+
+**After review (the same day).** An independent read of the first version found no security or privacy fault and these,
+all fixed, each with a case that fails on the first version (CR7, CR11, CR12): the dialog's focus trap leaked behind the
+modal and the report's second and later links could not be reached by keyboard; keys (`?`, Alt+1 to 5) and Back reached the
+Den behind it (the dialog now listens in the window's capture phase, stops every key there, and closes when `#v-den` loses
+`on`); a row with an unreadable date left the spinner turning (drawing is inside the error state, and dates that cannot be
+read print nothing); the chart's buckets started at the window's first millisecond, so a past day's stories sat an hour
+early (buckets open on Sydney hours, or Sydney midnights past 48 hours); "Coming up" re-cut the worker's pick by date and could
+drop a recorded vote behind weekly vigils (it cuts as `denUpPick` does); a figure counted over a list the board cuts (150
+stories, 90 posts, 60 actors' posts) is shown as "150+" with no change drawn; the file is named by the window's Sydney day;
+the stand-in for an unnamed Google News outlet is no masthead; Interactions draws no change against a window that read no
+counts; a print refusal is said where it can be seen. Left as it is: share of voice counts a story once for each issue it
+carries (the card says so), and the second board read is one more read of the database per press (a count-only route would
+make it cheaper; none is exposed today).
+
+**Found on the way (`den-today.css?v=r3`).** CI's browser job showed `den-today-browser` T5 failing on `main` since p72, before
+the coverage report: at 1366 x 650, with the introduction's second or third card in the right-hand column, the column held the
+card, the list's 200 px floor and the send block, more than it had room for, so Mark as sent was cut off below it (9 px here;
+fully out of view on CI's text metrics). While a card shows in the column, the send block keeps its size, the list's floor is
+120 px and the card scrolls in itself before anything is cut; with it Mark as sent sits 57 px inside the column.
+
+**Not verified here.** Real windows (the busiest day's chart and the outlet names as the registry gives them); printing from
+Safari and Firefox (Chromium's print path only); a week-long desk on live data. The second read is one more board read of the
+database per open of the report, on a press, never on opening the Den.
+
