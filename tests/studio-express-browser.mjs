@@ -86,20 +86,26 @@ await T.t('EB2 an express project is Brief, Make, Ship; one press confirms the w
   eq(await page.$$eval(R + '.st-stagehead .st-phasesteps .st-substep', els => els.map(e => e.textContent.replace(/[0-9,]|not started|needs review|complete|locked|processing|in progress/gi, '').trim())), ['Direction', 'Words', 'Canvas'], 'Make holds three steps');
 });
 
-await T.t('EB3 choosing a direction writes the copy from it and opens the canvas: no "ready for design" tick, nothing approved', async () => {
+await T.t('EB3 choosing a direction writes the copy from it, then asks Editable or Full AI before the canvas: no "ready for design" tick, nothing approved', async () => {
   const use = page.locator(R + '.st-dcard-use').first();
   ok(/Use this and write the copy/.test(await use.textContent()) && /1 model call/.test(await use.textContent()), 'the button says what it does and spends');
   const n0 = fx.seen.length;
   await use.click();
-  await page.waitForSelector(R + '.st-refine', { timeout: 60000 });
+  // Laura, 25 November 2026: express never offered the choice between an editable creative and a full AI one
+  await page.waitForSelector(R + '.st-pmodes', { timeout: 60000 });
+  const modes = await page.$$eval(R + '.st-pmode', els => els.map(e => e.querySelector('b').textContent.trim()));
+  eq(modes, ['Editable creative', 'Full AI creative'], 'the two production modes are offered once the words are written');
+  ok(/words approved later, in Ship/.test(await page.textContent(R + '.st-pmodes')), 'every piece can go: the words are approved in Ship');
   eq(posts(n0, '/studio/direction/choose').length, 1); eq(posts(n0, '/studio/job').filter(b => b.stage === 'copy').length, 1, 'one copy job');
   eq(posts(n0, '/studio/approve').length, 0, 'nothing was approved for the person');
   eq(posts(n0, '/studio/job').filter(b => b.stage === 'render').length, 0, 'and no image was asked for');
   const g = await api('GET', '/studio/get?id=' + PID);
   ok(g.assets.length >= 2, 'a piece per channel: ' + g.assets.length); eq(g.workflow.steps.copy.state, 'complete'); ok(g.workflow.steps.design.state !== 'locked', 'the canvas is open: ' + g.workflow.steps.design.state);
   eq(await page.$eval(R + '.st-flow .st-step.on .st-step-l', e => e.textContent.trim()), 'Make');
+  // choosing a mode is the person's: nothing is generated until they press, and the canvas opens on a piece from the Board
+  await page.locator(R + '.st-board-card').first().click();
   await page.waitForSelector(R + '.st-phasesteps-bar .st-substep.on', { timeout: 15000 });
-  ok(/Canvas/.test(await page.textContent(R + '.st-phasesteps-bar .st-substep.on')), 'on the canvas, with the way back to the direction and the words beside it');
+  ok(/Canvas/.test(await page.textContent(R + '.st-phasesteps-bar .st-substep.on')), 'a piece opens on the canvas, with the way back to the direction and the words beside it');
 });
 
 await T.t('EB4 Ship: one approval of the words and the design of exactly this version, by a person with one reason; an unchecked piece says why it waits', async () => {

@@ -4751,7 +4751,11 @@
       const d2 = pRef.current; const A2 = (d2 && d2.assets) || []; if (!A2.length || viewRef.current !== at) return;   // nothing written (the notice says why), or the person moved on
       const vis = A2.filter(x => (current(x) || {}).mode !== 'copy');
       setNotice(null);
-      if (vis.length) { setSelAsset(vis[0].id); setView('asset', true); toastMsg(A2.length + ' piece' + (A2.length === 1 ? '' : 's') + ' written: the canvas is open'); }
+      // the words are written: choose how the creative is made (Editable or Full AI) before the canvas, as the detailed build does
+      // (Laura, 25 November 2026: express never offered the choice); a project that already has a mode or imagery goes to the canvas
+      const modeOpen = !(d2.brief || {}).production && !vis.some(x => { const v = current(x); return v && v.image && v.image.key; });
+      if (vis.length && modeOpen) { setSelAsset(vis[0].id); setView('board', true); toastMsg(A2.length + ' piece' + (A2.length === 1 ? '' : 's') + ' written: choose Editable or Full AI'); }
+      else if (vis.length) { setSelAsset(vis[0].id); setView('asset', true); toastMsg(A2.length + ' piece' + (A2.length === 1 ? '' : 's') + ' written: the canvas is open'); }
       else { setSelAsset(A2[0].id); setView('copywrite', true); toastMsg(A2.length + ' piece' + (A2.length === 1 ? '' : 's') + ' of copy written'); }
     };
     /** One approval in Ship: the words and the design of exactly this version, approved by a person with one reason. The copy
@@ -5167,7 +5171,7 @@
       if (id === 'brief-details') { setView('brief', true); setTimeout(() => { const el = document.getElementById('st-brief-details'); if (el) { el.open = true; el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } }, 60); return; }
       if (id === 'brief' || id === 'objectives' || id === 'strategy' || id === 'directions') setView(id, true);
       else if (id === 'copy') { if (p && p.assets[0] && !a) setSelAsset(p.assets[0].id); setView('copywrite', true); }
-      else if (id === 'design') { const guided = !!(p && p.workflow && p.workflow.v === 2); const needsMode = guided && p.workflow.build !== 'express' && !(p.brief || {}).production && visual.length && !visual.some(x => { const v = current(x); return v && v.image && v.image.key; }); if (!visual.length || needsMode) setView('board', true); else { if (!a || visual.indexOf(a) < 0) setSelAsset(visual[0].id); setView('asset', true); } }
+      else if (id === 'design') { const guided = !!(p && p.workflow && p.workflow.v === 2); const needsMode = guided && !(p.brief || {}).production && visual.length && !visual.some(x => { const v = current(x); return v && v.image && v.image.key; }); if (!visual.length || needsMode) setView('board', true); else { if (!a || visual.indexOf(a) < 0) setSelAsset(visual[0].id); setView('asset', true); } }
       else if (id === 'review') setView('review', true); else if (id === 'export') setView('export', true);
       else if (id === 'brand' || id === 'context') setView(id, true);
     };

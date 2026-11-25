@@ -4264,3 +4264,11 @@ only; `tests/studio-laura-browser.mjs` (8) failed on `a4d053b` (seven of eight) 
 | Need a quicker function | too many steps for one tile | - | the Express build (p74, s.62): Brief, Make, Ship |
 
 Not verified: the live worker and real rows; the wording was not shown to Laura before it shipped.
+
+### 66.1 Express asks Editable or Full AI (page `?v=r53`, worker unchanged at p76; 25 November 2026)
+
+Laura, after r50: an Express project never offered the choice between an editable creative and a full AI one. Choosing a
+direction wrote the copy and opened the canvas directly, and the route to Create skipped the Board where the detailed build asks.
+Now an Express project whose pieces have no mode chosen and no imagery lands on the Board with the two production modes
+(`chooseExpress`, `goStage('design')` in `docs/studio.js`); nothing is generated until the person presses, and a piece still
+opens on the canvas from the Board. `tests/studio-express-browser.mjs` EB3 failed on `4133506` and passes now (6 of 6).

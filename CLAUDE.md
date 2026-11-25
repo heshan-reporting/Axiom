@@ -3809,6 +3809,8 @@ production modes in plain words with no model named; every Board card names its 
 carries the action (`boardNext`, `.st-board-next`); Review's lock goes to Create whenever Create is open and explains a Full AI
 creative's read-back and the free editable copy (`LockedStage`); the Creative Partner says it is optional. Harness:
 `tests/studio-laura-browser.mjs` (8).
+Since page `?v=r53` an Express project also asks Editable or Full AI on the Board once its words are written (s.66.1;
+`tests/studio-express-browser.mjs` EB3).
 
 Phase 1, the ground:
 
