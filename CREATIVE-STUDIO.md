@@ -4245,7 +4245,7 @@ suites that exercise the repair pass: `studio-layout-browser` (211), `studio-mar
 - The nearest arrangement can still be a large change to a tile (every variation draws its own panel); it is used only when no
   move inside the current arrangement clears what blocks, and Undo fix and Compare are one press away.
 
-## 66. The testing feedback of 18 November (page `?v=r50`, worker unchanged at p76; 25 November 2026)
+## 66. The testing feedback of 18 November (page `?v=r51`, worker unchanged at p76; 25 November 2026)
 
 Laura tested the Studio on 18 November and filed eight tasks in ClickUp ("Axiom Bug and Change Request Tracking"). On
 25 November she asked for an ETA in the testers' Slack group. Each item, what it was, and what was done. Every fix is in the page
