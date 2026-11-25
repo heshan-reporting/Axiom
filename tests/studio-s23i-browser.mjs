@@ -196,9 +196,9 @@ await T.t('I-B7 a finished creative whose reading did not find the mark offers t
   const g = await api('GET', '/studio/readiness?asset=' + A.id, null, 'read-key'); eq((g.baked || {}).markProblem, { missing: ['wordmark'], wrong: [] });
   // the choice of production mode, as it is drawn: what the Full AI path cannot promise is said before anything is painted
   const modes = await page.evaluate(async () => { const el = document.createElement('div'); document.body.appendChild(el); const root = ReactDOM.createRoot(el); root.render(React.createElement(window.STFlow.ProductionModes, { p: { id: 'x', ns: 'mca', assets: [], brief: {}, readOnly: false }, busy: '', prov: {}, onProduce: () => {} })); await new Promise(r => setTimeout(r, 200)); const t = el.textContent; root.unmount(); el.remove(); return t; });
-  ok(/redraws what it is shown/.test(modes) && /misspell or alter/.test(modes), 'the Full AI card says the mark may be redrawn: ' + modes.slice(0, 300));
-  ok(/read back against the approved words and the mark/.test(modes) && /editable copy/.test(modes), 'and that each painting is read back, with the editable copy as the way out');
-  ok(/exact words, the mark from its file/.test(modes), 'the Editable card says the words and the mark are exact');
+  ok(/redraw the logo/.test(modes) && /misspell/.test(modes), 'the Full AI card says the mark may be redrawn: ' + modes.slice(0, 300));
+  ok(/read back before it can be approved/.test(modes) && /editable copy/.test(modes), 'and that each painting is read back, with the editable copy as the way out');
+  ok(/exact words, the logo from its file/.test(modes), 'the Editable card says the words and the mark are exact');
 });
 
 T.done(); await fx.close();
