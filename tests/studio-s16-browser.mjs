@@ -58,7 +58,7 @@ await T.t('two directions compared side by side, then produced as variants: each
   ok(/Lighting\s*low gold sun/.test(await page.textContent(R + '.st-an-narr:has-text("The quiet road") .st-vis')));
   await page.check(R + '.st-an-narr:has-text("The quiet road") .st-check input'); await page.check(R + '.st-an-narr:has-text("One striking poster") .st-check input');
   const rows = await page.$$eval(R + '.st-compare tbody tr', trs => trs.map(t => Array.from(t.children).map(c => c.innerText.trim()).join(' ')));
-  ok(rows.some(r => /^Route editable layout Gemini finished/i.test(r.trim())), rows.join(' | ')); ok(rows.some(r => /^Approach data campaign continuation/i.test(r.trim())), rows.join(' | '));
+  ok(rows.some(r => /^Route editable layout Full AI creative/i.test(r.trim())), rows.join(' | ')); ok(rows.some(r => /^Approach data campaign continuation/i.test(r.trim())), rows.join(' | '));
   await page.click(R + '.st-compare button:has-text("Produce 2 as variants")');
   // the page stays on the Brief while the variants are made (the assets rail belongs to the later steps)
   let g = null; for (let i = 0; i < 240; i++) { g = await api('GET', '/studio/get?id=' + P); if (g.assets.length >= 4 && !(g.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) break; await new Promise(r => setTimeout(r, 250)); }

@@ -70,7 +70,7 @@ await T.t('a pasted daily brief is analysed (a project made before the guided wo
   ok(/Not a subsidy\. A tax that never applied\./.test(angles[0]) && !/uses "subsidy"/.test(angles[0]), angles[0]);
   ok(/uses "subsidy"/.test(angles[1]), 'the plain use of a banned term is flagged: ' + angles[1]);
   const narrs = await page.$$eval(R + '.st-an-narr', ns => ns.map(n => n.textContent.replace(/\s+/g, ' ')));
-  eq(narrs.length, 2); ok(/editable layout/.test(narrs[0]) && /Produce as an editable layout/.test(narrs[0]), narrs[0]); ok(/Gemini finished/.test(narrs[1]) && /Produce as a finished creative/.test(narrs[1]), narrs[1]);
+  eq(narrs.length, 2); ok(/editable layout/.test(narrs[0]) && /Produce as an editable layout/.test(narrs[0]), narrs[0]); ok(/Full AI creative/.test(narrs[1]) && /Produce as a finished creative/.test(narrs[1]), narrs[1]);
   await page.click(R + '.st-an-sec .st-tools-toggle'); await page.waitForSelector(R + '.st-an-paras');
   const rows = await page.$$eval(R + '.st-an-paras tbody tr', trs => trs.map(t => t.textContent.replace(/\s+/g, ' ')));
   ok(rows.some(r => /east-coast reserve/.test(r) && /set aside/.test(r)), 'the gas paragraph is set aside: ' + rows.join(' | '));
@@ -92,7 +92,7 @@ await T.t('producing the finished narrative sets the project to Finished creativ
   await page.evaluate(() => { const b = Array.from(document.querySelectorAll('#studio-root .st-step')).find(x => /Direction|Explore/.test(x.textContent)); if (b) b.click(); });
   await page.waitForSelector(R + '.st-dir-route', { timeout: 15000 });
   const routes = await page.$$eval(R + '.st-dir-route', ds => ds.map(d => d.textContent.replace(/\s+/g, ' ')));
-  ok(routes.some(r => /Gemini finished creative/.test(r) && /from the brief analysis/.test(r)), routes.join(' | '));
+  ok(routes.some(r => /Full AI creative/.test(r) && /from the brief analysis/.test(r)), routes.join(' | '));
   ok(routes.some(r => /editable composition/.test(r)), routes.join(' | '));
   eq(page.errors.length, 0, 'no page errors: ' + page.errors.join(' | '));
 });
