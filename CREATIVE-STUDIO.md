@@ -4245,7 +4245,7 @@ suites that exercise the repair pass: `studio-layout-browser` (211), `studio-mar
 - The nearest arrangement can still be a large change to a tile (every variation draws its own panel); it is used only when no
   move inside the current arrangement clears what blocks, and Undo fix and Compare are one press away.
 
-## 66. The testing feedback of 18 November (page `?v=r52`, worker unchanged at p76; 25 November 2026)
+## 66. The testing feedback of 18 November (page `?v=r53`, worker unchanged at p76; 25 November 2026)
 
 Laura tested the Studio on 18 November and filed eight tasks in ClickUp ("Axiom Bug and Change Request Tracking"). On
 25 November she asked for an ETA in the testers' Slack group. Each item, what it was, and what was done. Every fix is in the page
@@ -4262,5 +4262,10 @@ only; `tests/studio-laura-browser.mjs` (8) failed on `a4d053b` (seven of eight) 
 | Creative Partner | "do we have to review all of these to make one tile?" | - | it is optional: its introduction now says so (LF7); a piece is approved without it unless it is a Full AI creative, whose painted words must be read back |
 | Can't move on to finalise the tile | after Regenerate, Review sent her to Copy, where nothing was left to do | Review's lock pointed at the first earlier step not complete (Copy, while other pieces were not ready), not at what blocks (the read-back, in Create) | the lock goes to Create whenever Create is open, and for a Full AI creative says how: Review in the Creative Partner, or regenerate, or make an editable copy (free) to fix the words (LF6). A Full AI creative's words stay not editable as layers by design; the editable copy is the way |
 | Need a quicker function | too many steps for one tile | - | the Express build (p74, s.62): Brief, Make, Ship |
+
+The full gate on this work: 242 of 245 harnesses passed (Firefox and WebKit parts skipped where not installed); the three that
+failed (`studio-modes-browser`, `studio-s15-browser`, `studio-s23i-browser`) asserted the old wording - "editable", "Gemini
+finished", "redraws what it is shown" - and were brought to the plain wording in r51 to r53 (the Editable card keeps "the exact
+words, the logo from its file"), each passing when run again. r50 went live before the gate finished, at the owner's word.
 
 Not verified: the live worker and real rows; the wording was not shown to Laura before it shipped.
