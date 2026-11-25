@@ -106,6 +106,8 @@ await T.t('EB3 choosing a direction writes the copy from it, then asks Editable 
   await page.locator(R + '.st-board-card').first().click();
   await page.waitForSelector(R + '.st-phasesteps-bar .st-substep.on', { timeout: 15000 });
   ok(/Canvas/.test(await page.textContent(R + '.st-phasesteps-bar .st-substep.on')), 'a piece opens on the canvas, with the way back to the direction and the words beside it');
+  // reached any way at all, the canvas asks the mode while none is chosen and no image exists (Laura, 25 November 2026)
+  ok(await page.$(R + '.st-refine .st-modeask .st-pmode'), 'the canvas itself offers Editable or Full AI until one is chosen');
 });
 
 await T.t('EB4 Ship: one approval of the words and the design of exactly this version, by a person with one reason; an unchecked piece says why it waits', async () => {

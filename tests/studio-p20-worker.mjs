@@ -64,7 +64,7 @@ let EV;
 await t('Explore layouts binds the photograph and the approved words even when asked otherwise; every option is layout only, no render', async () => {
   Q.concepts.push({ critique: 'the words fight the subject', options: [opt('Right column', right, { copy: { headline: 'Different words' } }), opt('Bottom band', band), opt('As it was', same)] }, { options: [opt('Centred', middle)] });
   const n = seen.length; const j = await run(P, 'concepts', { asset: A, mode: 'layouts', keep: { imagery: false, copy: false }, feedback: 'other arrangements' }, A); eq(j.state, 'done', j.error);
-  ok(/EXPLORE DIFFERENT LAYOUTS/.test(seen[n].user) && /Keep the current photograph exactly/.test(seen[n].user) && /Give three distinct layouts/.test(seen[n].user), 'the layouts brief');
+  ok(/EXPLORE DIFFERENT LAYOUTS/.test(seen[n].user) && /Keep the current photograph exactly/.test(seen[n].user) && /Give five distinct layouts/.test(seen[n].user), 'the layouts brief');
   EV = (await get(P)).thread.filter(e => e.kind === 'concepts').pop();
   eq([EV.mode, EV.keep.imagery, EV.keep.copy, EV.keep.composition, EV.keep.explicit], ['layouts', true, true, false, true]);
   EV.options.forEach(o => { eq([o.renders, o.needsImage], [0, false], o.name); eq(o.layout.regions.map(r => [r.role, r.prompt]), [['background', 'keep the current image']], o.name); ok(!o.copy || !o.copy.headline, 'no new headline on ' + o.name); eq(o.cost, 'layout only, no render'); });

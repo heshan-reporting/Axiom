@@ -4277,3 +4277,23 @@ direction wrote the copy and opened the canvas directly, and the route to Create
 Now an Express project whose pieces have no mode chosen and no imagery lands on the Board with the two production modes
 (`chooseExpress`, `goStage('design')` in `docs/studio.js`); nothing is generated until the person presses, and a piece still
 opens on the canvas from the Board. `tests/studio-express-browser.mjs` EB3 failed on `4133506` and passes now (6 of 6).
+
+### 66.2 The canvas asks too (page `?v=r55`; 25 November 2026)
+
+After r54 Laura still saw no choice: the canvas can be reached by routes that skip the Board (a direction chosen on a project
+that already had copy, the Make steps, a piece opened from the rail). Now the canvas itself shows the two production modes above
+the artwork while a guided project has no mode chosen, no imagery, and no render running (`modeAsk` in `docs/studio.js`); the
+Board's chooser no longer hides after a failed or cancelled render. `tests/studio-express-browser.mjs` EB3 checks the canvas.
+
+### 66.3 Five options a press (build `2026-11-25.studio-p77`, page `?v=r55`; 25 November 2026)
+
+The team: "we need more than 4 options ... 5". A Full AI creative can be painted five ways in one press (`POST
+/studio/finished/regenerate {variations: 2-5}`, `stFinishedVariations`; each painting told a different visual approach; the first to
+land is current and read back, the others filed beside it as versions, picked in the Finished panel as a free restore). Directions
+default to five (one to eight), the art direction stage and the brief analysis propose five, and the answer budgets scale with the
+count. After a high-effort review of the change: a run whose every painting failed is not handed back on the next press (the next
+attempt gets its own keys); only a change of the image, or a restore, after the run was queued makes the remaining paintings
+branches, so a caption edit no longer hides them all and a restored pick is never painted over; the replanning call and the small
+asks keep the earlier token floors (7,000 for directions, 14,000 for concepts); the Studio's and the action registry's words say
+five. Harnesses: `tests/studio-variations-worker.mjs` (11), `tests/studio-analyse-five-worker.mjs` (2),
+`tests/studio-variations-browser.mjs` (not run in the build sandbox, which refuses local ports).

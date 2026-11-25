@@ -73,7 +73,7 @@ await t('the team edits and confirms the strategy; later stages read the confirm
   ok(/CREATIVE STRATEGY \(confirmed by the team - work within it\)/.test(last.user) && /campaign idea: It is your tractor too, and your truck/.test(last.user), 'the directions read the confirmed strategy');
 });
 
-await t('directions take an exploration budget of one to five (three by default) and carry the idea, copy approach, medium, composition, type, colour, references, plan and the images they would need; the set is measured for diversity', async () => {
+await t('directions take an exploration budget of one to eight (five by default) and carry the idea, copy approach, medium, composition, type, colour, references, plan and the images they would need; the set is measured for diversity', async () => {
   const before = (await get(P)).directions.length;
   const j = await job(P, 'direct', { n: 5 }); eq(j.state, 'done', j.error);
   const g = await get(P); const fresh = g.directions.slice(before); eq(fresh.length, 5, 'five asked, five kept');
@@ -81,7 +81,7 @@ await t('directions take an exploration budget of one to five (three by default)
   eq([d.medium, d.renders, d.plan.length > 0, d.references[0]], ['typographic', 0, true, 'HOOF myth tile']);
   ok(typeof j.result.diversity === 'number' && j.result.diversity > 0.6, 'distinct set scores high: ' + j.result.diversity);
   ok(/genuinely different directions/.test(calls.anth[calls.anth.length - 1].sys) && /never only the photograph behind the same panel/.test(calls.anth[calls.anth.length - 1].sys));
-  const j3 = await job(P, 'direct', {}); eq((await get(P)).directions.length - before - 5, 3, 'three by default');
+  const j3 = await job(P, 'direct', {}); eq((await get(P)).directions.length - before - 5, 5, 'five by default (25 November 2026)');
   dirMode = 'lookalike'; const jl = await job(P, 'direct', { n: 3 });
   ok(jl.result.similar >= 1 && jl.result.diversity < j.result.diversity, 'a look-alike is flagged and the score drops: ' + JSON.stringify(jl.result));
   ok((await get(P)).thread.some(e => e.kind === 'directions' && /^Diversity 0\.\d+/.test(e.text)));
