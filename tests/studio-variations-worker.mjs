@@ -157,8 +157,8 @@ await T.t('VA10: a caption edited before the run starts still lets the first pai
   ok(a0, 'asset read');
 });
 
-await T.t('VA7: the worker names its build p77 so a page that sends variations can tell an older worker', async () => {
-  const s = await call('GET', '/studio/status'); ok(/studio-p77$/.test(s.body.build || ''), s.body.build);
+await T.t('VA7: the worker names its build p77 or later so a page that sends variations can tell an older worker', async () => {
+  const s = await call('GET', '/studio/status'); const m = /studio-p(\d+)$/.exec(s.body.build || ''); ok(m && +m[1] >= 77, s.body.build);
 });
 
 const r = T.done(); w.restore(); process.exit(r.fail ? 1 : 0);

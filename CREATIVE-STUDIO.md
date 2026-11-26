@@ -4336,3 +4336,18 @@ rendered; the decoder also refused anything over six million pixels.
   composed export. A JPEG over the limit is still described, not shown, and says so.
 
 Harness: `tests/studio-bigimage-worker.mjs` (3; BI1 and BI2 failed on p78).
+
+## 69. No LIKE pattern past D1's 50 bytes (build `2026-11-26.studio-p79`, page unchanged; 26 November 2026)
+
+The owner's report, 26 November 2026, pressing Generate 5 variations on a Full AI creative: "The regeneration did not start
+D1_ERROR: LIKE or GLOB pattern too complex: SQLITE_ERROR". D1 refuses a LIKE or GLOB pattern longer than 50 bytes. The run's
+check for earlier attempts matched job keys by prefix (`<project>|vars:<asset>:<version>:<run>:<attempt>:%`, 71 bytes), and the
+same shape was in Generate imagery's attempt check and the withdrawal of a recorded verdict by title. SQLite's own limit is
+50,000 bytes, so no harness saw it.
+
+- Key and text prefixes are compared whole (`substr(col, 1, ?) = ?`), never with LIKE.
+- A search phrase is cut to what fits (`likeFit`, inside `arcLike` and the MP, desk-term and term-preview searches): it finds
+  every row the whole phrase would, and a few more.
+- `tests/d1lite.mjs` refuses a bound or literal LIKE or GLOB pattern over 50 bytes (`likeMax`), as D1 does, so every harness
+  now holds the worker to it. `tests/d1-like-limit-worker.mjs` (2); `studio-variations-worker` failed seven cases on the
+  stricter fixture before the fix.

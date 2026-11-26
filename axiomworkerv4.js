@@ -3227,7 +3227,7 @@ async function mpsList(env, opts) {
   opts = opts || {};
   if (!(await ensureTopics(env))) return [];
   const w = []; const b = [];
-  if (opts.q) { w.push('(LOWER(name) LIKE ? OR LOWER(electorate) LIKE ? OR LOWER(party) LIKE ?)'); const l = '%' + String(opts.q).toLowerCase().slice(0, 60) + '%'; b.push(l, l, l); }
+  if (opts.q) { w.push('(LOWER(name) LIKE ? OR LOWER(electorate) LIKE ? OR LOWER(party) LIKE ?)'); const l = '%' + likeFit(String(opts.q).toLowerCase().slice(0, 60)) + '%'; b.push(l, l, l); }
   if (opts.house) { w.push('house=?'); b.push(String(opts.house)); }
   if (opts.withX) w.push("x<>''");
   return (await env.MIND_DB.prepare('SELECT id, name, party, house, electorate, x, facebook, instagram, updated FROM mps' + (w.length ? ' WHERE ' + w.join(' AND ') : '') + ' ORDER BY name LIMIT ' + (Math.min(parseInt(opts.limit, 10) || 400, 600))).bind(...b).all()).results || [];
@@ -5112,7 +5112,10 @@ async function arcTagFill(env, opts) {
   return out;
 }
 /** Escape LIKE wildcards in user queries. */
-function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) + '%'; }
+// D1 refuses a LIKE pattern over 50 bytes ("LIKE or GLOB pattern too complex"), so a longer search is cut to the words that fit:
+// it finds every row the whole phrase would, and a few more
+function likeFit(inner, room) { let s = String(inner), max = room || 48; const enc = new TextEncoder(); while (s && enc.encode(s).length > max) { s = s.slice(0, -1); if (/\\$/.test(s) && !/\\\\$/.test(s)) s = s.slice(0, -1); } return s; }
+function arcLike(q) { return '%' + likeFit(String(q).replace(/[%_\\]/g, c => '\\' + c)) + '%'; }
 
 // ==============================================================================
 // THE SOURCE REGISTRY - every outlet, office, party, pollster, sector title and
@@ -8369,7 +8372,7 @@ async function deskLexicon(env, ns, o) {
       await ensureArchive(env);
       const due = rows.filter(r => r.status === 'active' && r.decided_at && now - r.decided_at >= DESK_REVIEW_DAYS * 86400000).slice(0, 20);
       for (const r of due) {
-        const like = '%' + likeEsc(r.value) + '%';
+        const like = '%' + likeFit(likeEsc(r.value)) + '%';
         const hit = await env.MIND_DB.prepare("SELECT 1 x FROM arc_items WHERE ts>? AND (title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\') LIMIT 1").bind(now - DESK_REVIEW_DAYS * 86400000, like, like).first();
         review[r.id] = hit ? 0 : 1;
       }
@@ -8390,7 +8393,7 @@ async function denPreview(env, ns, term, days) {
   const v = denValue('term', 'any', term);
   if (!v) return { ok: false, status: 400, error: 'bad_value', detail: 'Give a word or a phrase of two to eighty characters.' };
   days = Math.max(1, Math.min(30, parseInt(days, 10) || 7)); await ensureArchive(env); await deskLexiconLoad(env);
-  const rx = denTermRx(v); const like = '%' + likeEsc(v) + '%'; const mine = denNsIssues(ns);
+  const rx = denTermRx(v); const like = '%' + likeFit(likeEsc(v)) + '%'; const mine = denNsIssues(ns);
   const rows = ((await env.MIND_DB.prepare("SELECT id, kind, src, url, title, substr(body,1,900) body, ts, meta FROM arc_items WHERE ts>? AND kind IN (" + SENT_KINDS.map(() => '?').join(',') + ") AND (title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\') ORDER BY ts DESC LIMIT 600")
     .bind(Date.now() - days * 86400000, ...SENT_KINDS, like, like).all()).results) || [];
   const out = { ok: true, ns, term: v, days, matched: 0, already: 0, new: 0, australian: 0, byChannel: {}, sample: [], generic: deskGeneric(v), scanned: rows.length, capped: rows.length >= 600 };
@@ -20471,7 +20474,7 @@ async function stImageryQueue(env, p, a, body, who) {
   let attempt = Math.max(0, Math.min(99, parseInt(body.attempt, 10) || 0));
   // S30 (QA3): nothing is in flight and the version has no image, so every earlier imagery job for it ended without one (failed,
   // cancelled, or out of attempts); asking again is a new attempt, never the old key answering with the old failed job
-  if (!body.attempt) { const base = 'imagery:' + v.id; const rows = (await env.MIND_DB.prepare("SELECT idem FROM studio_jobs WHERE project=? AND asset=? AND (idem LIKE ? OR idem LIKE ?)").bind(p.id, a.id, p.id + '|' + base + '%', base + '%').all()).results || [];
+  if (!body.attempt) { const base = 'imagery:' + v.id; const pre = p.id + '|' + base; const rows = (await env.MIND_DB.prepare("SELECT idem FROM studio_jobs WHERE project=? AND asset=? AND (substr(idem, 1, ?)=? OR substr(idem, 1, ?)=?)").bind(p.id, a.id, pre.length, pre, base.length, base).all()).results || [];
     rows.forEach(r => { const m = String(r.idem || '').replace(p.id + '|', '').slice(base.length).match(/^(?::(\d+))?(?::|$)/); if (m) attempt = Math.max(attempt, (m[1] ? Number(m[1]) : 0) + 1); }); attempt = Math.min(99, attempt); }
   const idem = 'imagery:' + v.id + (attempt ? ':' + attempt : '');
   const ctx = await stContext(env, p, { channels: [a.channel] });
@@ -20621,7 +20624,9 @@ async function stFinishedVariations(env, p, a, cur, body, who, n, changed, want,
   const keyOf = (att, i) => 'vars:' + a.id + ':' + cur.id + ':' + run0 + ':' + att + ':' + i;
   let att = 0;
   for (; att < 20; att++) {
-    const rows = (await env.MIND_DB.prepare('SELECT state FROM studio_jobs WHERE project=? AND idem LIKE ?').bind(p.id, p.id + '|' + keyOf(att, '') + '%').all()).results || [];
+    // D1 refuses a LIKE pattern over 50 bytes (26 November 2026: "LIKE or GLOB pattern too complex"), so a key prefix is compared whole
+    const pre = p.id + '|' + keyOf(att, '');
+    const rows = (await env.MIND_DB.prepare('SELECT state FROM studio_jobs WHERE project=? AND substr(idem, 1, ?)=?').bind(p.id, pre.length, pre).all()).results || [];
     if (!rows.length || rows.some(r => r.state !== 'failed' && r.state !== 'cancelled')) break;
   }
   const run = att ? run0 + '.' + att : run0;
@@ -24547,7 +24552,7 @@ const AXIOM_WORKER = {
           }
           // P51 (Phase 4): a withdrawal takes the decision back out of the learning record too - the earlier approve or reject entry
           // for this asset and part is marked withdrawn (kept, never read as an earlier choice again); also a new decision supersedes
-          if (!handoff) { try { await env.MIND_DB.prepare("UPDATE studio_intel_log SET kind='withdrawn:' || kind WHERE project=? AND kind IN ('approved','rejected') AND (ref=? OR (ref=? AND text LIKE ?))").bind(pair.project.id, part + ':' + pair.asset.id, part, part + ' of "' + stStr(pair.asset.title, 60).replace(/[%_]/g, '') + '"%').run(); } catch (e) {} }
+          if (!handoff) { try { await env.MIND_DB.prepare("UPDATE studio_intel_log SET kind='withdrawn:' || kind WHERE project=? AND kind IN ('approved','rejected') AND (ref=? OR (ref=? AND substr(text, 1, ?)=?))").bind(pair.project.id, part + ':' + pair.asset.id, part, ...(t => [t.length, t])(part + ' of "' + stStr(pair.asset.title, 60).replace(/[%_]/g, '') + '"')).run(); } catch (e) {} }
           if (!isTest && !handoff && decision !== 'withdraw' && String(sb.reason || '').trim().length >= 4) { const cv = (pair.asset.versions || []).find(x => x.id === pair.asset.current) || {}; await stIntelLog(env, pair.project.ns, pair.project.id, decision === 'approve' ? 'approved' : 'rejected', part + ':' + pair.asset.id, part + ' of "' + stStr(pair.asset.title, 60) + '" ' + (decision === 'approve' ? 'approved' : 'rejected') + ((cv.copy || {}).headline ? ' ("' + stStr(cv.copy.headline, 100) + '")' : '') + ': ' + stStr(sb.reason, 240), who); }
           await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance' + (outcome ? '; filed in the Mind as a ' + (decision === 'approve' ? 'WIN' : 'LOSS') + ' exemplar for future briefs' : learned === 'retracted' ? '; the WIN it had filed was taken out of the Mind' : learned === 'test' ? '; a test project, so nothing was filed in the client\'s memory' : handoff ? '; a hand-off to Design, so nothing was filed in the client\'s memory' : '') + '.', asset: pair.asset.id, version: cur.id, part, decision, outcome, learned: learned || undefined, handoff: handoff || undefined }, who);
           // the reason becomes a proposed memory update for the Brand Workspace - nothing standing until a person keeps it, with a scope

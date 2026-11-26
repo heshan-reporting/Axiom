@@ -3819,6 +3819,9 @@ and a refusal fails at once. Capabilities list no fallbacks. Harness: `tests/stu
 A Pro PNG over 4.5 MB (or six million pixels) was dropped by the review as `no_image`. `stModelImage` box-averages it while
 decoding (`stPngDecode(buf, {box, maxPx})`, row by row) to at most 1024 px and writes an RGB PNG for the model only; the file on
 record is unchanged. Used by `stVersionImage` and the composed-export read. Harness: `tests/studio-bigimage-worker.mjs` (3).
+**No LIKE pattern past D1's 50 bytes (same build; s.69).** D1 refuses a LIKE or GLOB pattern over 50 bytes ("pattern too complex";
+Generate 5 variations failed on it). Compare a key or text prefix with `substr(col, 1, ?) = ?`; cut a search with `likeFit`
+(`arcLike` does). `tests/d1lite.mjs` enforces the limit (`likeMax`). Harness: `tests/d1-like-limit-worker.mjs` (2).
 Since page `?v=r54` an Express project also asks Editable or Full AI on the Board once its words are written (s.66.1;
 `tests/studio-express-browser.mjs` EB3).
 
