@@ -167,7 +167,7 @@ await t('retries are bounded and tell transient from invalid: 503 requeues (each
   const j = await req('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { prompt: 'x' }, idem: 'flaky' });
   let s = await req('POST', '/studio/job/step', { id: j.d.job.id }); eq(s.d.job.state, 'queued', 'after a 503: ' + s.d.job.error); eq(s.d.job.attempts, 1); ok(/will retry/.test(s.d.job.error), s.d.job.error);
   // since 26 November 2026 the chain is Pro alone: two requests an attempt, the job's four are spent on the second attempt
-  s = await req('POST', '/studio/job/step', { id: j.d.job.id }); eq(s.d.job.state, 'failed', s.d.job.error); eq(s.d.job.attempts, 2); ok(/tried as often as the policy allows/.test(s.d.job.error) && /no other model/.test(s.d.job.error), s.d.job.error);
+  s = await req('POST', '/studio/job/step', { id: j.d.job.id }); eq(s.d.job.state, 'failed', s.d.job.error); eq(s.d.job.attempts, 2); ok(/^image_attempts_exhausted/.test(s.d.job.error) && /busy every time/.test(s.d.job.error) && !/refus/.test(s.d.job.error) && /no other model/.test(s.d.job.error), 'a busy Pro asked as often as allowed ends as attempts used up, never in words of a refusal: ' + s.d.job.error);
   eq((await req('POST', '/studio/job/step', { id: j.d.job.id })).d.job.state, 'failed', 'no fourth attempt');
   gemini = '400';
   const b = await req('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { prompt: 'bad' }, idem: 'invalid' });

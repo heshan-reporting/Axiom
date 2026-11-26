@@ -3822,6 +3822,9 @@ record is unchanged. Used by `stVersionImage` and the composed-export read. Harn
 **No LIKE pattern past D1's 50 bytes (same build; s.69).** D1 refuses a LIKE or GLOB pattern over 50 bytes ("pattern too complex";
 Generate 5 variations failed on it). Compare a key or text prefix with `substr(col, 1, ?) = ?`; cut a search with `likeFit`
 (`arcLike` does). `tests/d1lite.mjs` enforces the limit (`likeMax`). Harness: `tests/d1-like-limit-worker.mjs` (2).
+**A busy Pro is said as busy (same build, page `studio.js?v=r56`; s.70).** A render that spent every request on a busy Pro ends as
+`image_attempts_exhausted` ("busy every time"), never in words of a refusal; `explain()` never reads 5xx, 429 or used-up attempts as
+"the model declined". Harness: `tests/studio-explain-test.mjs` (16).
 Since page `?v=r54` an Express project also asks Editable or Full AI on the Board once its words are written (s.66.1;
 `tests/studio-express-browser.mjs` EB3).
 

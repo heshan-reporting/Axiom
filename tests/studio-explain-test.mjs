@@ -37,6 +37,9 @@ ok(/person/.test(explain({ code: 'human_only', status: 403, message: 'Approval i
 ok(/can read but not change/.test(explain({ code: 'read_only', status: 403, message: 'read_only' }).title), 'read_only is still the read-only key');
 ok(/That asset was not found/.test(explain({ code: 'unknown_asset', status: 404, message: 'unknown_asset' }).title), 'unknown_asset is said in words');
 const lk = explain({ code: 'locked', status: 409, message: 'The headline is locked.' }); ok(/element is locked/.test(lk.title), 'an element lock is still an element lock');
+{ const pro = explain({ code: 'render', status: 0, message: 'gemini_503: The model is overloaded. Please try again later. (4 requests sent to gemini-3-pro-image; it has refused or been tried as often as the policy allows (not retried); images come from Nano Banana Pro (gemini-3-pro-image) only, so no other model was used)' });
+  ok(/provider is busy/.test(pro.title) && !/declined/.test(pro.title), 'a busy Pro is the provider being busy, never "the model declined" (26 November 2026): ' + pro.title); }
+ok(/declined/.test(explain({ code: 'render', status: 0, message: 'gemini_400: the request was refused by the safety filter' }).title), 'a real refusal still reads as one');
 ok(/Something failed on the worker/.test(explain({ code: 'internal_error', status: 500, message: 'internal_error', requestId: 'abc' }).title), 'an internal error keeps its request id path');
 // S30 (QA9): the wrong-key lockout is named as what it is, never "the worker asked to slow down"
 { const x = explain({ code: 'too_many_attempts', status: 429, message: 'Too many failed access-key attempts from this address. Wait ten minutes and try again.' }, 'The project library did not load');

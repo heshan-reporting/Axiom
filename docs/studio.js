@@ -140,7 +140,10 @@
     if (has(/answer_truncated|unparseable/)) return out('The model\'s answer could not be read', 'Nothing was saved from it; your work is as it was. Retry: it is a new call and may be billed.');
     // S29 (FS7): a refusal by the worker's open access is not the model declining
     if (has(/public_write_refused/)) return out('Open access cannot change anything', 'This browser has no sign-in link, so the Studio is read-only here. Open your own sign-in link to make or change work. Nothing was changed.');
-    if (has(/refus/i) && !has(/reddit_blocked/)) return out('The model declined this request', 'Nothing was saved. Reword the instruction or brief and try again.');
+    // 26 November 2026: a busy image model is not a refusal, though the worker's account of the attempts says "refused or been
+    // tried as often as the policy allows"; it read as "The model declined this request. Reword the instruction" when Pro was busy
+    const busy = has(/gemini_5\d\d|gemini_429|overloaded|\b529\b|\b503\b/i);
+    if (has(/refus/i) && !has(/reddit_blocked/) && !busy && !has(/image_attempts_exhausted/)) return out('The model declined this request', 'Nothing was saved. Reword the instruction or brief and try again.');
     // S24: a render that used every request its attempt policy allows; the worker sends nothing more for that job, and a new one
     // is a person's choice (a new paid attempt with its own cap), offered with that said
     if (has(/image_attempts_exhausted/)) return out('The image provider kept failing', 'This render sent every request its policy allows (retries, fallbacks and job attempts included) and none returned an image, so nothing more is sent for it. Your work is kept. Retry render starts a new render job: a new paid attempt with its own cap.', 'provider');

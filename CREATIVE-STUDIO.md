@@ -4351,3 +4351,18 @@ same shape was in Generate imagery's attempt check and the withdrawal of a recor
 - `tests/d1lite.mjs` refuses a bound or literal LIKE or GLOB pattern over 50 bytes (`likeMax`), as D1 does, so every harness
   now holds the worker to it. `tests/d1-like-limit-worker.mjs` (2); `studio-variations-worker` failed seven cases on the
   stricter fixture before the fix.
+
+## 70. A busy Pro is said as busy (build `2026-11-26.studio-p79`, page `studio.js?v=r56`; 26 November 2026)
+
+Found by the full gate after s.67: with Pro alone, a render whose every request met a busy Pro ended as `gemini_503` with "it has
+refused or been tried as often as the policy allows", and the page read the word "refused" first: "The model declined this
+request. Reword the instruction". Nothing about the instruction was wrong.
+
+- `nanoRender`: when the job has sent every request it may and none was refused (400, 403, 404), the render ends as
+  `image_attempts_exhausted` ("the last answer was HTTP 503 ... it was busy every time"), so the page says the image provider
+  kept failing and offers Retry render. A real refusal still says "it refused the request".
+- `explain()` in `docs/studio.js` never reads a busy answer (5xx, 429, overloaded) or used-up attempts as a refusal.
+
+Harnesses: `tests/studio-explain-test.mjs` (16; the busy case failed on r55), `studio-worker` (the bounded-retries case),
+`studio-journey-browser` (9; journey 6 waits for the attempts the policy allows, and journeys 7 and 8 start with the providers
+answering, so one failure no longer cascades).

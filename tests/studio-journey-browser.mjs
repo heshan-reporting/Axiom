@@ -260,7 +260,7 @@ await T.t('6. a provider outage: the set is kept, the failure is explained with 
   await page.waitForFunction(() => /provider is busy|image provider kept failing/.test((document.querySelector('#studio-root .st-notice') || {}).textContent || ''), null, { timeout: 60000 });
   let d = await settle(pr.id);
   eq(env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_events WHERE kind='production'").get().n - prod0, 1, 'one production');
-  eq(d.assets.length, 1, 'the composition was made and kept'); const rj = d.jobs.find(j => j.stage === 'render'); eq([rj.state, rj.attempts], ['failed', 3], 'three attempts, then failed');
+  eq(d.assets.length, 1, 'the composition was made and kept'); const rj = d.jobs.find(j => j.stage === 'render'); eq(rj.state, 'failed', 'the render failed'); ok(rj.attempts >= 2 && rj.attempts <= 3, 'it took the attempts its image requests allowed (Pro only since p78: four requests, two an attempt), then stopped: ' + rj.attempts);
   { const nt = await page.textContent(R + '.st-notice').catch(() => '(no notice)'); ok(/Your work is kept/.test(nt) && await page.$(R + '.st-notice button:has-text("Retry render")'), 'the notice explains and offers Retry: ' + String(nt).replace(/\s+/g, ' ').slice(0, 300)); }
   ok(/failed/.test(await page.textContent(R + '.st-workspace-activity')), 'the failed job is visible beside the work (the activity panel)');
   await shot(page, 'provider-down');
@@ -289,6 +289,7 @@ await T.t('6. a provider outage: the set is kept, the failure is explained with 
 
 /* ---------------------------------------------------------------------------------------------------- 7 */
 await T.t('7. a second edit while the first save is still in flight waits its turn: two versions in order, no conflict, nothing lost', async () => {
+  fx.setProvider('gemini', 'ok'); fx.setProvider('claude', 'ok');   // an earlier journey that failed part-way may have left a provider down
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 }); await tool(page, 'Text'); await page.waitForSelector(R + '#st-f-headline', { timeout: 15000 });
   const d0 = await api('GET', '/studio/get?id=' + J1); const a = d0.assets[0];
@@ -329,6 +330,7 @@ await T.t('7. a second edit while the first save is still in flight waits its tu
 
 /* ---------------------------------------------------------------------------------------------------- 8 */
 await T.t('8. the essential workflow by keyboard: start a project in the wizard, move between stages, use the inspector tabs, approve with a reason; focus is always visible', async () => {
+  fx.setProvider('gemini', 'ok'); fx.setProvider('claude', 'ok');   // an earlier journey that failed part-way may have left a provider down
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await page.waitForSelector(R + '.st-lib-head .btn');
   const focused = () => page.evaluate(() => { const e = document.activeElement; return { tag: e.tagName, text: (e.textContent || '').trim().slice(0, 60), label: e.getAttribute('aria-label') || '', outline: getComputedStyle(e).outlineStyle, role: e.getAttribute('role') || '' }; });
