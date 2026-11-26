@@ -106,10 +106,10 @@ await T.t('A1 reproduced: a finished render with six references and the required
 });
 await T.t('A2 two required marks and the current image to edit go first, in that order, and the text says the first image is the one to edit', async () => {
   const { P, A } = await fresh('national'); gem.calls = [];
-  // give the version an image (a first render answered by a fallback model), then edit it: the history belongs to that model and
-  // is not replayed to the default one, so the current image must be attached as an image input
-  gem.fail = new Set(['gemini-3-pro-image']);
-  const first = await run(await renderJob(P, A, { prompt: 'a road at dusk', region: 'bg', aspect: '1:1' }, 'a2-first')); gem.fail = new Set(); eq(first.state, 'done', first.error);
+  // give the version an image that another model made (one filed before 26 November 2026, when a fallback model could answer),
+  // then edit it: the history belongs to that model and is not replayed to Pro, so the current image is attached as an image input
+  const first = await run(await renderJob(P, A, { prompt: 'a road at dusk', region: 'bg', aspect: '1:1' }, 'a2-first')); eq(first.state, 'done', first.error);
+  { const cv = curOf((await get(P)).assets.find(x => x.id === A)); const ck = cv.image.conv; const o = JSON.parse(await (await w.env.MIND_DOCS.get(ck)).text()); o.model = 'gemini-3.1-flash-image'; await w.env.MIND_DOCS.put(ck, JSON.stringify(o)); }
   gem.calls = [];
   const refs = Array.from({ length: 5 }, (_, i) => ({ data: REF(i), mime: 'image/png', role: 'mood reference', name: 'mood' + i }));
   const j = await run(await renderJob(P, A, { prompt: 'Make the sky warmer; keep everything else.', edit: true, finished: true, approach: 'artwork', marks: [{ role: 'logo', key: logoKey, name: 'MCA logo' }, { role: 'wordmark', key: wmNatKey, name: 'Australian mining wordmark' }], references: refs, aspect: '1:1' }, 'a2'));
@@ -119,16 +119,16 @@ await T.t('A2 two required marks and the current image to edit go first, in that
   ok(/first attached image is the current image/i.test(sentText(gem.calls[0])), 'the text names the first image as the one to edit');
   const v = curOf((await get(P)).assets.find(x => x.id === A)); eq(v.image.meta.marksSent.slice().sort(), ['logo', 'wordmark']);
 });
-await T.t('A3 provider fallback: the fallback model gets the required marks too, within its own limit, and the record names the model that answered', async () => {
+await T.t('A3 Pro refusing a finished creative is not handed to another model (always Pro, 26 November 2026): every request carried the wordmark, and nothing was filed', async () => {
   const { P, A } = await fresh('hoof'); gem.calls = []; gem.fail = new Set(['gemini-3-pro-image']);
   const refs = Array.from({ length: 12 }, (_, i) => ({ data: REF(i), mime: 'image/png', role: 'inspiration', name: 'r' + i }));
+  const n0 = (await get(P)).assets.find(x => x.id === A).versions.length;
   const j = await run(await renderJob(P, A, { prompt: 'Paint it.', finished: true, approach: 'artwork', marks: [{ role: 'wordmark', key: wmKey, name: 'HOOF wordmark' }], references: refs, aspect: '1:1' }, 'a3'));
   gem.fail = new Set();
-  eq(j.state, 'done', j.error);
-  const answered = gem.calls[gem.calls.length - 1];
-  ok(answered.model !== 'gemini-3-pro-image', 'a fallback model answered: ' + answered.model);
-  ok(sentImages(answered).indexOf(PNG_MARK) >= 0, 'the fallback request carries the wordmark');
-  const v = curOf((await get(P)).assets.find(x => x.id === A)); eq(v.image.model, answered.model); eq(v.image.meta.marksSent, ['wordmark']);
+  eq(j.state, 'failed', 'Pro refused and nothing else was asked');
+  ok(gem.calls.length >= 1 && gem.calls.every(c => c.model === 'gemini-3-pro-image'), 'only Pro was asked: ' + gem.calls.map(c => c.model).join(', '));
+  ok(gem.calls.every(c => sentImages(c).indexOf(PNG_MARK) >= 0), 'every request carried the wordmark');
+  eq((await get(P)).assets.find(x => x.id === A).versions.length, n0, 'no version was filed');
 });
 await T.t('A4 required assets that cannot fit fail before any image call, with the reason (not retried)', async () => {
   const { P, A } = await fresh('national'); gem.calls = []; w.env.STUDIO_IMAGE_INPUTS_MAX = '1';

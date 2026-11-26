@@ -237,12 +237,12 @@ await t('the final image is never a thought image; the record keeps usage and ti
   const j = await jobRun(P, 'render', { prompt: 'A full background', aspect: '4:5', size: '2K' }, A); eq(j.state, 'done', j.error);
   const v = cur(await get(P), A); eq(Buffer.from(r2.get(v.image.key).v).equals(Buffer.from(final, 'base64')), true, 'the final image, not the thought image'); eq(v.image.meta.usage, { prompt: 100, output: 1290, total: 1390 }); ok(v.image.meta.ms >= 0); eq(v.image.meta.model, 'gemini-3-pro-image');
   ok(/-conv\.json$/.test(v.image.conv)); eq(JSON.parse(r2.get(v.image.conv).v).model, 'gemini-3-pro-image');
-  // the edit: the primary model refuses, the fallback answers - it must not receive the other model's turns and signatures
-  gem.fail404Once = true; const g0 = gem.calls.length;
+  // the edit goes back to Pro, the model that made it, with the conversation; no other model is asked (always Pro, 26 November 2026)
+  const g0 = gem.calls.length;
   const e = await jobRun(P, 'render', { prompt: 'Darken the sky', edit: true, aspect: '4:5', size: '2K' }, A); eq(e.state, 'done', e.error);
-  const fbCall = gem.calls.slice(g0).find(c => c.model === 'gemini-3.1-flash-image'); eq(fbCall.body.contents.length, 1, 'no history to another model'); ok(fbCall.body.contents[0].parts.some(p => p.inline_data), 'the current image is attached'); ok(/first attached image is the current image to edit/.test(fbCall.body.contents[0].parts[0].text));
-  const first = gem.calls.slice(g0).find(c => c.model === 'gemini-3-pro-image'); eq(first.body.contents.length, 3, 'the model that made it would have had the conversation');
-  const v2 = cur(await get(P), A); eq([v2.image.fallback, v2.image.meta.historyReplayed], [true, false]); ok(/the edit history belonged to gemini-3-pro-image and was not replayed/.test(v2.note), v2.note);
+  eq(gem.calls.slice(g0).map(c => c.model), ['gemini-3-pro-image'], 'one request, to Pro');
+  eq(gem.calls[gem.calls.length - 1].body.contents.length, 3, 'Pro is given the conversation it made');
+  const v2 = cur(await get(P), A); eq([!!v2.image.fallback, v2.image.meta.historyReplayed], [false, true]);
 });
 
 await t('the inspection reads the composed export when one is saved - with the whole text inventory, free text included - and says so; without one it is imagery only; a ship verdict never approves; a correction aimed at an earlier version is refused unless forced', async () => {

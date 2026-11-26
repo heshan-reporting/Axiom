@@ -166,14 +166,14 @@ await T.t('02b a request whose answer never came is recorded as unknown, not as 
   const b1 = await budget(); eq((b1.image.unknown || 0) - ((b0.image || {}).unknown || 0), 1, 'the ledger keeps the unknown outcome: ' + JSON.stringify(b1.image));
   eq((b1.image.confirmed || 0) - ((b0.image || {}).confirmed || 0), 1, 'one image confirmed');
 });
-await T.t('02c progress names the request in flight and the model: "request 2 of N", the fallback when it is one', async () => {
-  const { P, A } = await fresh('national'); resetGem(); gem.script = [{ status: 404 }, { hold: true, then: { ok: true } }];
+await T.t('02c progress names the request in flight and the model: "request 2 of N", a retry of Pro (there is no fallback model)', async () => {
+  const { P, A } = await fresh('national'); resetGem(); gem.script = [{ status: 503 }, { hold: true, then: { ok: true } }];
   const job = await renderJob(P, A);
   const stepP = call('POST', '/studio/job/step', { id: job.id });
   await until(() => gem.calls.length === 2, 6000, 'the second request');
   await sleep(80);
   const act = ((await getJob(job.id)).progress || {}).activity || {};
-  eq([act.request, act.model, !!act.fallback], [2, gem.calls[1].model, true], 'the activity names request 2, its model, and that it is a fallback: ' + JSON.stringify(act));
+  eq([act.request, act.model, !!act.fallback, gem.calls[1].model], [2, gem.calls[1].model, false, 'gemini-3-pro-image'], 'the activity names request 2 and its model, Pro again, not a fallback: ' + JSON.stringify(act));
   ok(/request 2 of \d/.test(act.label || ''), 'the label says it: ' + act.label);
   gem.release(); const r = await stepP; eq(r.body.job.state, 'done');
 });

@@ -14233,7 +14233,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-25.studio-p77';
+const AXIOM_BUILD = '2026-11-26.studio-p78';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -14823,12 +14823,17 @@ function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortEr
  * HTTP status, malformed, no_image, unknown (sent, no answer: it may have been processed and billed) or abandoned (sent, then
  * the job was cancelled: it cannot be recalled). The policy is published in /studio/budget so a capped live test reserves
  * exactly what can run. */
-const ST_IMAGE_CHAIN = ['gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image'];
+// Images always from Nano Banana Pro (the owner, 26 November 2026: "let's always use pro"). There is no fallback model: a busy
+// Pro is asked again within the policy below, and a render that still has no image says so, never painted by a weaker model.
+const ST_IMAGE_CHAIN = ['gemini-3-pro-image'];
 const ST_STAGE_CALLS = { copy: 2, direct: 2, concepts: 2, sequence: 2 };   // logical model calls a stage makes at most: one answer and one REPLAN (analyse: one, plus one per uploaded file it must read first)
 function stIntEnv(v, lo, hi, dflt) { const n = parseInt(v, 10); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt; }
 function stImagePolicy(env) {
-  const tries = stIntEnv(env.STUDIO_IMAGE_TRIES_PER_MODEL, 1, 3, 2);
-  return { requestsPerJob: stIntEnv(env.STUDIO_IMAGE_REQUESTS, 1, 9, 4), triesPerModel: tries, perAttempt: stIntEnv(env.STUDIO_IMAGE_PER_ATTEMPT, 1, 9, tries), backoffMs: stIntEnv(env.STUDIO_IMAGE_BACKOFF_MS, 0, 20000, 1500), timeoutMs: stIntEnv(env.STUDIO_IMAGE_TIMEOUT_MS, 5000, 300000, 90000), chain: ST_IMAGE_CHAIN.slice(), dailyImages: stIntEnv(env.STUDIO_DAILY_IMAGES, 0, 100000, 60) };
+  // with one model in the chain it may use every request the job has (two now, two more on the job's next attempt, which gives a
+  // busy spell time to pass); with several, each model keeps its own share
+  const requests = stIntEnv(env.STUDIO_IMAGE_REQUESTS, 1, 9, 4);
+  const tries = stIntEnv(env.STUDIO_IMAGE_TRIES_PER_MODEL, 1, 9, ST_IMAGE_CHAIN.length === 1 ? requests : 2);
+  return { requestsPerJob: requests, triesPerModel: tries, perAttempt: stIntEnv(env.STUDIO_IMAGE_PER_ATTEMPT, 1, 9, Math.min(tries, 2)), backoffMs: stIntEnv(env.STUDIO_IMAGE_BACKOFF_MS, 0, 20000, 1500), timeoutMs: stIntEnv(env.STUDIO_IMAGE_TIMEOUT_MS, 5000, 300000, 90000), chain: ST_IMAGE_CHAIN.slice(), dailyImages: stIntEnv(env.STUDIO_DAILY_IMAGES, 0, 100000, 60) };
 }
 function stTextCalls(stage, input) { return ST_STAGE_CALLS[stage] || 1; }
 /** The most requests of a kind one job may send, retries, fallbacks and job attempts included. */
@@ -21303,13 +21308,13 @@ function stCapabilities(env) {
     { op: 'extract', what: 'claim ledger, reference analysis, suggestions, brief suggestions', provider: 'anthropic', model: stModel(env, 'extract'), configured: !!env.ANTHROPIC_API_KEY, accepts: { images: 'one reference image per analysis' }, cannot: [], verified: stub },
     { op: 'inspect', what: 'the Creative Director reads a rendered tile: scores, wording read back, verdict, one bounded correction', provider: 'anthropic', model: stModel(env, 'creative'), configured: !!env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0',
       accepts: { images: 'the composed export when the browser saved one, else the imagery alone (said on the card)' }, cannot: ['approve anything: a ship verdict is an opinion, approval is a person\'s'], verified: stub },
-    { op: 'render', what: 'imagery for a region or a whole artwork', provider: 'google', model: 'gemini-3-pro-image', fallbacks: ['gemini-3.1-flash-image', 'gemini-2.5-flash-image'], configured: !!env.GEMINI_KEY,
+    { op: 'render', what: 'imagery for a region or a whole artwork', provider: 'google', model: 'gemini-3-pro-image', fallbacks: [], configured: !!env.GEMINI_KEY,
       accepts: { sizes, defaultSize: SIZES.indexOf(env.IMAGE_SIZE) !== -1 ? env.IMAGE_SIZE : '2K', capped: cap || null, aspects: ['1:1', '4:5', '9:16', '16:9', '3:4', '4:3'], references: 'up to 6 images, each with its role stated in the prompt', history: 'multi-turn edits replay the earlier turns only to the model that made them; another model gets the current image instead' },
       cannot: ['pixel masks: there is no mask input. "Edit an area" describes the area in words (semantic masking) and measures afterwards what changed outside it; nothing outside is guaranteed', 'guaranteed transparency: a cutout is asked for with alpha and the PNG is checked; an opaque answer is marked', 'exact lettering as live type: words painted in artwork mode are a bitmap, read back by the inspection, not editable', 'the gemini-2.5 fallback ignores the size setting'],
       fallback: 'disclosed on the version note, the thread and the asset view (model asked for and model that answered)', verified: stub },
     { op: 'compose', what: 'the words, shapes and marks drawn over the imagery, measured and validated', provider: 'browser (docs/studio-render.js)', model: '', configured: true,
       accepts: { fonts: 'the kit fonts when the browser can load them, else the app fallbacks (reported per role)', framing: 'focal point and zoom per image', layers: 'text, shapes, rules, gradients, image regions, marks as exact files' }, cannot: ['effects the plan names but the renderer cannot draw (recorded as unsupported, never replaced in silence)'], verified: 'measured in real Chromium by tests/studio-layout-browser.mjs; preview and export are the same drawing' },
-    { op: 'finished', what: 'a Gemini Finished Creative: the image model paints the whole piece - words, the campaign mark and the URL - from the approved copy, with the mark files attached as image inputs; one flattened bitmap, nothing composed over it', provider: 'google', model: 'gemini-3-pro-image', fallbacks: ['gemini-3.1-flash-image', 'gemini-2.5-flash-image'], configured: !!env.GEMINI_KEY,
+    { op: 'finished', what: 'a Gemini Finished Creative: the image model paints the whole piece - words, the campaign mark and the URL - from the approved copy, with the mark files attached as image inputs; one flattened bitmap, nothing composed over it', provider: 'google', model: 'gemini-3-pro-image', fallbacks: [], configured: !!env.GEMINI_KEY,
       accepts: { sizes, marks: 'the campaign policy\'s logo and/or wordmark, read from R2 and attached with the role "exact: reproduce as attached"', words: 'headline, support, CTA, URL and the plan\'s free text, set exactly in the prompt', revisions: 'a regeneration (new bitmap); a direction-only revision continues the image conversation' },
       cannot: ['guarantee spelling or lettering: the words are pixels the model painted, read back by the Creative Director, never measured as type', 'guarantee the mark: the logo or wordmark is reproduced by the model from the file, compared by the inspection, never placed from the file', 'edit a word, a layer or the layout afterwards: there are no layers (caption and alt text are separate)', 'technical validation of type size, contrast, safe areas or collisions: not applicable to a bitmap'],
       fallback: 'Switch to Editable (POST /studio/derive) makes a derived asset in the editable mode with the words as live type and the mark placed from its file exactly; the finished original is kept', verified: stub }],
@@ -22038,7 +22043,7 @@ async function nanoRender(env, opts) {
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
     for (let attempt = triedOn(model); attempt < pol.triesPerModel; attempt++) {
       if (signal && signal.aborted) return cancelled();
-      if (sentN >= perAttempt) return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: (lastDetail || 'the image model did not answer with an image') + ' (' + sentN + ' request' + (sentN === 1 ? '' : 's') + ' this attempt; the next attempt continues with ' + model + ')', model: lastModel, sent: lastSent, requests, attemptSpent: true };
+      if (sentN >= perAttempt) return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: (lastDetail || 'the image model did not answer with an image') + ' (' + sentN + ' request' + (sentN === 1 ? '' : 's') + ' this attempt; the next attempt asks ' + model + ' again' + (chain.length === 1 ? ': no other model is used' : '') + ')', model: lastModel, sent: lastSent, requests, attemptSpent: true };
       if (attempt && pol.backoffMs) { await stSleep(pol.backoffMs * attempt, signal); if (signal && signal.aborted) return cancelled(); }
       if (!gate && sentN >= pol.requestsPerJob) return { ok: false, error: 'image_attempts_exhausted', detail: sentN + ' image requests sent, the most one render may send (not retried)', model, sent: lastSent, requests };
       let ticket = null;
@@ -22089,7 +22094,8 @@ async function nanoRender(env, opts) {
   // a chain with no model left to ask is final, whatever the last status was
   const all = prior.concat(requests); const usedUp = m => all.some(x => x.model === m && /^http_(400|403|404)$/.test(x.outcome)) || all.filter(x => x.model === m && /^(http_(429|5\d\d)|unknown|malformed|no_image|abandoned)$/.test(x.outcome)).length >= pol.triesPerModel;
   const left = chain.some(m => !usedUp(m));
-  return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: (lastDetail || 'all image models failed') + ' (' + all.length + ' request' + (all.length === 1 ? '' : 's') + ' sent across the chain' + (left ? '' : '; every model has refused or been tried as often as the policy allows (not retried)') + ')', model: lastModel, sent: lastSent, skipped: skipped.length ? skipped : undefined, requests };
+  const only = chain.length === 1 ? '; images come from Nano Banana Pro (' + chain[0] + ') only, so no other model was used' : '';
+  return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: (lastDetail || 'all image models failed') + ' (' + all.length + ' request' + (all.length === 1 ? '' : 's') + ' sent' + (chain.length === 1 ? ' to ' + chain[0] : ' across the chain') + (left ? '' : chain.length === 1 ? '; it has refused or been tried as often as the policy allows (not retried)' : '; every model has refused or been tried as often as the policy allows (not retried)') + only + ')', model: lastModel, sent: lastSent, skipped: skipped.length ? skipped : undefined, requests };
 }
 /* Every model call carries this rule: material that arrives from documents, uploads, retrieved memory, the web or
  * social posts is data to work from, never instructions. The deterministic guards (namespaces, campaign marks,
@@ -23002,10 +23008,10 @@ const AXIOM_WORKER = {
     // -- Nano Banana: generate/edit a visual from a brief + reference art ----
     // POST /nano  body: { prompt, references?[{data,mime}], referenceB64?, mime?,
     //                     model?, aspect?, size? }
-    // Default model: gemini-3-pro-image (Nano Banana Pro - professional asset
-    // production, strongest text rendering, multi-turn image editing). Falls
-    // back through gemini-3.1-flash-image then gemini-2.5-flash-image if a
-    // model is unavailable to this key. Uses the current imageConfig schema
+    // The one model: gemini-3-pro-image (Nano Banana Pro - professional asset
+    // production, strongest text rendering, multi-turn image editing). No
+    // fallback since 26 November 2026: a busy Pro is asked again within the
+    // policy, never replaced by another model. Uses the current imageConfig schema
     // (aspectRatio/imageSize). Key stays server-side as GEMINI_KEY.
     // Returns { imageB64, mime, model }.
     if (path === '/nano') {

@@ -4297,3 +4297,26 @@ branches, so a caption edit no longer hides them all and a restored pick is neve
 asks keep the earlier token floors (7,000 for directions, 14,000 for concepts); the Studio's and the action registry's words say
 five. Harnesses: `tests/studio-variations-worker.mjs` (11), `tests/studio-analyse-five-worker.mjs` (2),
 `tests/studio-variations-browser.mjs` (not run in the build sandbox, which refuses local ports).
+
+## 67. Images always from Nano Banana Pro (build `2026-11-26.studio-p78`, page unchanged; 26 November 2026)
+
+The owner's instruction, 26 November 2026: "let's always use pro". Every image the Studio and Ad Lab ask for comes from
+`gemini-3-pro-image` (Nano Banana Pro), the model Google positions for professional assets and exact text. Until p77 a busy
+or refusing Pro was quietly replaced by `gemini-3.1-flash-image`, then `gemini-2.5-flash-image`, and a tile could be painted by
+a weaker model (the version's History named it, but nothing stopped it).
+
+- `ST_IMAGE_CHAIN` is `['gemini-3-pro-image']`. With one model in the chain it may use every request the job has
+  (`stImagePolicy`: `triesPerModel` defaults to `requestsPerJob`, 4; `perAttempt` 2): two at once, two more on the job's next
+  attempt, which gives a busy spell time to pass. The vars `STUDIO_IMAGE_REQUESTS`, `STUDIO_IMAGE_TRIES_PER_MODEL` and
+  `STUDIO_IMAGE_PER_ATTEMPT` still bound it.
+- A render that still has no image fails with the reason and says that images come from Pro only and no other model was used;
+  a refusal (400, 403, 404) fails at once. A job or a request body naming another model gets Pro (`modelRefused`, as before).
+- `GET /studio/capabilities` lists `fallbacks: []` for `render` and `finished`; `/studio/budget` publishes `chain: [Pro]`.
+- An edit of an image another model made before p78 still attaches the current image instead of replaying that model's
+  conversation to Pro.
+- Considered and not taken: Nano Banana 2.1 (`gemini-nano-banana-2.1`, October 2026) as the fallback. It is faster and cheaper,
+  but Pro remains the stronger model for dense text and brand marks, and the owner chose Pro every time.
+
+Cost: Pro is the dearest image model; with no fallback, a busy Pro now costs time (and a failed render to retry), never a
+cheaper image. Harness: `tests/studio-pro-only-worker.mjs` (5; four failed on `bd6703b`). The tests that assumed a fallback
+(`studio-p7`, `-p8`, `-s23`, `-s24`, `-rc-security`, `studio-worker`) now hold the new rule.

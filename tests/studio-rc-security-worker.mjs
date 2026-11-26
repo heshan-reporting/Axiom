@@ -154,8 +154,9 @@ await S.t('S6: a render job naming a model outside the chain is sent to the chai
     ok(x.gem.calls.length >= 1, 'a request went');
     ok(!x.gem.calls.some(m => /someone-elses/.test(m)), 'the named model was never asked: ' + x.gem.calls.join(', '));
     eq(x.gem.calls[0], 'gemini-3-pro-image', 'the chain\'s head was asked first');
+    // since 26 November 2026 the chain is Pro alone: naming an older Gemini model is outside it too
     await x.render({ model: 'gemini-2.5-flash-image' });
-    eq(x.gem.calls[x.gem.calls.length - 1], 'gemini-2.5-flash-image', 'a model of the chain may still be put first');
+    eq(x.gem.calls[x.gem.calls.length - 1], 'gemini-3-pro-image', 'an older model named in the job is not asked: Pro is');
   } finally { x.w.restore(); }
 });
 

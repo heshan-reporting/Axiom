@@ -3809,6 +3809,12 @@ production modes in plain words with no model named; every Board card names its 
 carries the action (`boardNext`, `.st-board-next`); Review's lock goes to Create whenever Create is open and explains a Full AI
 creative's read-back and the free editable copy (`LockedStage`); the Creative Partner says it is optional. Harness:
 `tests/studio-laura-browser.mjs` (8).
+
+**Images always from Nano Banana Pro (build `2026-11-26.studio-p78`, page unchanged; `CREATIVE-STUDIO.md` s.67).** The
+owner's instruction of 26 November 2026. `ST_IMAGE_CHAIN` is `gemini-3-pro-image` alone: no fallback to
+`gemini-3.1-flash-image` or `gemini-2.5-flash-image` in the Studio or Ad Lab's `/nano`. Pro may use every image request a job has
+(`triesPerModel` = `requestsPerJob`, 4; two an attempt); a render that still has no image fails saying no other model was used,
+and a refusal fails at once. Capabilities list no fallbacks. Harness: `tests/studio-pro-only-worker.mjs` (5).
 Since page `?v=r54` an Express project also asks Editable or Full AI on the Board once its words are written (s.66.1;
 `tests/studio-express-browser.mjs` EB3).
 

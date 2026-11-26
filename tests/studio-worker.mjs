@@ -166,12 +166,12 @@ await t('retries are bounded and tell transient from invalid: 503 requeues (each
   gemini = '503';
   const j = await req('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { prompt: 'x' }, idem: 'flaky' });
   let s = await req('POST', '/studio/job/step', { id: j.d.job.id }); eq(s.d.job.state, 'queued', 'after a 503: ' + s.d.job.error); eq(s.d.job.attempts, 1); ok(/will retry/.test(s.d.job.error), s.d.job.error);
-  s = await req('POST', '/studio/job/step', { id: j.d.job.id }); eq(s.d.job.state, 'queued'); eq(s.d.job.attempts, 2);
-  s = await req('POST', '/studio/job/step', { id: j.d.job.id }); eq(s.d.job.state, 'failed'); eq(s.d.job.attempts, 3); ok(/attempts exhausted/.test(s.d.job.error));
+  // since 26 November 2026 the chain is Pro alone: two requests an attempt, the job's four are spent on the second attempt
+  s = await req('POST', '/studio/job/step', { id: j.d.job.id }); eq(s.d.job.state, 'failed', s.d.job.error); eq(s.d.job.attempts, 2); ok(/tried as often as the policy allows/.test(s.d.job.error) && /no other model/.test(s.d.job.error), s.d.job.error);
   eq((await req('POST', '/studio/job/step', { id: j.d.job.id })).d.job.state, 'failed', 'no fourth attempt');
   gemini = '400';
   const b = await req('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { prompt: 'bad' }, idem: 'invalid' });
-  s = await req('POST', '/studio/job/step', { id: b.d.job.id }); eq(s.d.job.state, 'failed'); eq(s.d.job.attempts, 1); ok(/not a transient failure/.test(s.d.job.error), s.d.job.error);
+  s = await req('POST', '/studio/job/step', { id: b.d.job.id }); eq(s.d.job.state, 'failed'); eq(s.d.job.attempts, 1); ok(/not a transient failure|not retried/.test(s.d.job.error), s.d.job.error);
   gemini = 'ok';
   const c = await req('POST', '/studio/job', { project: P, stage: 'echo', idem: 'cancel-me' }); const cc = await req('POST', '/studio/job/cancel', { id: c.d.job.id }); eq(cc.d.job.state, 'cancelled'); ok(/before it ran/.test(cc.d.job.error));
   const d = await req('POST', '/studio/job', { project: P, stage: 'echo', idem: 'cancel-running' }); db.prepare("UPDATE studio_jobs SET state='running', attempts=1, lease_until=? WHERE id=?").run(Date.now() + 60000, d.d.job.id);

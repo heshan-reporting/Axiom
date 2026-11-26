@@ -153,10 +153,11 @@ await t('full artwork: the image model paints the whole piece from the exact wor
   const ej = await jobRun(P, 'render', { prompt: 'Make the sky darker and keep every word as it is', edit: true, approach: 'artwork', baked: v.layout.baked, aspect: a.format, size: '4K' }, A); eq(ej.state, 'done', ej.error); eq(gem.calls.length, g0 + 1);
   const gb = gem.calls[gem.calls.length - 1]; eq(gb.body.contents.length, 3, 'user, model, user'); eq(gb.body.contents[1].role, 'model'); ok(gb.body.contents[1].parts.some(x => x.thoughtSignature), 'the model\'s thought signatures are replayed'); eq(gb.body.contents[2].parts[0].text.slice(0, 20), 'Make the sky darker '); eq(gb.body.generationConfig.imageConfig.imageSize, '4K');
   a = (await get(P)).assets.find(x => x.id === A); v = a.versions[a.versions.length - 1]; eq(v.image.size, '4K'); eq(v.image.editOf, a.versions[a.versions.length - 2].id); eq(v.mode, 'artwork');
-  // a fallback is not hidden
-  gem.fail404Once = true;
-  const fj = await jobRun(P, 'render', { prompt: 'Again', edit: false, aspect: a.format, size: '2K' }, A); eq(fj.state, 'done', fj.error); eq(fj.result.fallback, true); eq(fj.result.model, 'gemini-3.1-flash-image');
-  a = (await get(P)).assets.find(x => x.id === A); v = a.versions[a.versions.length - 1]; eq([v.image.fallback, v.image.requested, v.image.model], [true, 'gemini-3-pro-image', 'gemini-3.1-flash-image']); ok(/fell back from gemini-3-pro-image/.test((await events(P, 'job')).filter(e => e.render).pop().text)); ok(/fell back to gemini-3.1-flash-image/.test(v.note));
+  // Pro refusing is never handed to another model (always Pro, 26 November 2026): the render fails and says so
+  gem.fail404Once = true; const f0 = gem.calls.length; const n0 = (await get(P)).assets.find(x => x.id === A).versions.length;
+  const fj = await jobRun(P, 'render', { prompt: 'Again', edit: false, aspect: a.format, size: '2K' }, A); eq(fj.state, 'failed', 'Pro refused, nothing else was asked');
+  ok(gem.calls.slice(f0).length >= 1 && gem.calls.slice(f0).every(c => c.model === 'gemini-3-pro-image'), 'only Pro was asked: ' + gem.calls.slice(f0).map(c => c.model).join(', ')); ok(/no other model/.test(fj.error || ''), fj.error);
+  eq((await get(P)).assets.find(x => x.id === A).versions.length, n0, 'no version was filed');
 });
 await t('"Create a new design" starts from the brief with the chosen references and what the team said to retain, and lands as a new asset that inherits neither the panel nor the layout', async () => {
   const n = (await get(P)).assets.length;
