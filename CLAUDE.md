@@ -3815,6 +3815,10 @@ owner's instruction of 26 November 2026. `ST_IMAGE_CHAIN` is `gemini-3-pro-image
 `gemini-3.1-flash-image` or `gemini-2.5-flash-image` in the Studio or Ad Lab's `/nano`. Pro may use every image request a job has
 (`triesPerModel` = `requestsPerJob`, 4; two an attempt); a render that still has no image fails saying no other model was used,
 and a refusal fails at once. Capabilities list no fallbacks. Harness: `tests/studio-pro-only-worker.mjs` (5).
+**A large render is reviewed from a smaller copy (build `2026-11-26.studio-p79`, page unchanged; `CREATIVE-STUDIO.md` s.68).**
+A Pro PNG over 4.5 MB (or six million pixels) was dropped by the review as `no_image`. `stModelImage` box-averages it while
+decoding (`stPngDecode(buf, {box, maxPx})`, row by row) to at most 1024 px and writes an RGB PNG for the model only; the file on
+record is unchanged. Used by `stVersionImage` and the composed-export read. Harness: `tests/studio-bigimage-worker.mjs` (3).
 Since page `?v=r54` an Express project also asks Editable or Full AI on the Board once its words are written (s.66.1;
 `tests/studio-express-browser.mjs` EB3).
 

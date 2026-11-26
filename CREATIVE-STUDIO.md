@@ -4320,3 +4320,19 @@ a weaker model (the version's History named it, but nothing stopped it).
 Cost: Pro is the dearest image model; with no fallback, a busy Pro now costs time (and a failed render to retry), never a
 cheaper image. Harness: `tests/studio-pro-only-worker.mjs` (5; four failed on `bd6703b`). The tests that assumed a fallback
 (`studio-p7`, `-p8`, `-s23`, `-s24`, `-rc-security`, `studio-worker`) now hold the new rule.
+
+## 68. A large render is reviewed from a smaller copy (build `2026-11-26.studio-p79`, page unchanged; 26 November 2026)
+
+The owner's report, 26 November 2026, on a Full AI creative painted by Nano Banana Pro: "The inspect step failed no_image:
+nothing rendered to inspect (not retried)" - "got this error but the image rendered". The image was on file. The review shows a
+model at most 4.5 MB, and Pro's 2K and 4K PNGs are often larger, so `stVersionImage` dropped the file as if nothing had
+rendered; the decoder also refused anything over six million pixels.
+
+- `stModelImage(buf, side)` makes a copy for the model only: box-averaged while it is decoded to at most 1024 px on its long
+  side (`stPngDecode(buf, {box, maxPx})`; a plain PNG is read row by row as it is inflated, so a 4K raster is never held whole,
+  and the bomb guard still stops at the stated size), flattened onto white and written as an RGB PNG (`stPngEncodeRgb`). The
+  file on record is never changed; the job's log says a smaller copy was shown and its size.
+- Used by `stVersionImage` (the review's imagery, and the current image an edit attaches) and by the review's read of the
+  composed export. A JPEG over the limit is still described, not shown, and says so.
+
+Harness: `tests/studio-bigimage-worker.mjs` (3; BI1 and BI2 failed on p78).

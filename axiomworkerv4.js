@@ -3633,7 +3633,10 @@ async function brandKit(env, ns) {
    opaque file's own ground)} or null for anything it cannot read (JPEG, WebP, 16-bit, interlaced, very large). */
 /** A PNG (1, 2, 4, 8 or 16 bits, Adam7 or not; S31) decoded to its pixels: {W, H, at(i) -> [r, g, b, a]} for pixel i (row-major), or null for any
  *  other kind. Used to read a mark file's ink (stPngInk) and, since the release candidate (D3), the measured export itself. */
-async function stPngDecode(buf) {
+async function stPngDecode(buf, opts) {
+  // opts.box (an integer >= 2): average every box x box block into one pixel while decoding, so a large render (a 4K image from
+  // Nano Banana Pro) is read at a fraction of the memory; opts.maxPx raises the pixel limit for that use (26 November 2026)
+  const box = Math.max(1, Math.floor((opts && opts.box) || 1)); const maxPx = (opts && opts.maxPx) || 6e6;
   try {
     const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
     const sig = [137, 80, 78, 71, 13, 10, 26, 10]; if (u.length < 45 || sig.some((b, i) => u[i] !== b)) return null;
@@ -3648,24 +3651,32 @@ async function stPngDecode(buf) {
     // the worker whatever PNG options it was saved with; 16-bit samples keep their high byte, low-depth grey is scaled to 8 bits
     const ch = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ct];
     const legal = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] }[ct];
-    if (!ch || !legal || legal.indexOf(depth) < 0 || inter > 1 || !W || !H || W * H > 6e6 || !idat.length) return null;
+    if (!ch || !legal || legal.indexOf(depth) < 0 || inter > 1 || !W || !H || W * H > maxPx || !idat.length) return null;
     const bitsPP = ch * depth; const fbpp = Math.max(1, bitsPP >> 3); const rowBytes = w => Math.ceil(w * bitsPP / 8);
     const passes = inter ? [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] : [[0, 0, 1, 1]];
     const dims = passes.map(([x0, y0, dx, dy]) => [Math.max(0, Math.ceil((W - x0) / dx)), Math.max(0, Math.ceil((H - y0) / dy))]);
     const want = dims.reduce((a, [w, h]) => a + (w && h ? (rowBytes(w) + 1) * h : 0), 0);
-    const total = idat.reduce((a, c) => a + c.length, 0); const z = new Uint8Array(total); let o = 0; idat.forEach(c => { z.set(c, o); o += c.length; });
-    // S29 (SEC-3): inflate into exactly the size the header states and stop the moment the stream would pass it (a bomb)
-    const raw = new Uint8Array(want); let got = 0;
-    const reader = new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'))).body.getReader();
-    for (;;) { const { done, value } = await reader.read(); if (done) break; if (got + value.length > want) { try { await reader.cancel(); } catch (e) {} return null; } raw.set(value, got); got += value.length; }
-    if (got < want) return null;
+    // S29 (SEC-3): inflate into exactly the size the header states and stop the moment the stream would pass it (a bomb).
+    // A shrinking read of a plain (not interlaced) image takes the rows as they are inflated and never holds the whole raster.
+    const stream = !inter && box > 1;
+    const raw = stream ? null : new Uint8Array(want); let got = 0;
+    const reader = new Response(new Blob(idat).stream().pipeThrough(new DecompressionStream('deflate'))).body.getReader();
     const paeth = (a, b, c) => { const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c); return pa <= pb && pa <= pc ? a : pb <= pc ? b : c; };
-    const rgba = new Uint8Array(W * H * 4); let off = 0;
+    const w2 = Math.ceil(W / box), h2 = Math.ceil(H / box);
+    const rgba = box === 1 ? new Uint8Array(W * H * 4) : null; const acc = box > 1 ? new Uint32Array(w2 * h2 * 4) : null; const cnt = box > 1 ? new Uint32Array(w2 * h2) : null; let off = 0;
     const scale = depth < 8 && ct === 0 ? 255 / ((1 << depth) - 1) : 1;
-    passes.forEach(([x0, y0, dx, dy], pi) => {
-      const [pw, ph] = dims[pi]; if (!pw || !ph) return; const stride = rowBytes(pw); let prev = new Uint8Array(stride);
+    let src = raw;
+    const nextRow = stream ? (() => { const stride = rowBytes(W) + 1; let carry = new Uint8Array(0), cpos = 0, ended = false;
+      return async () => { while (carry.length - cpos < stride) { if (ended) return null; const { done, value } = await reader.read(); if (done) { ended = true; continue; } if (got + value.length > want) { try { await reader.cancel(); } catch (e) {} throw new Error('png_bomb'); } got += value.length; const rest = carry.subarray(cpos); const nc = new Uint8Array(rest.length + value.length); nc.set(rest, 0); nc.set(value, rest.length); carry = nc; cpos = 0; }
+        const r = carry.subarray(cpos, cpos + stride); cpos += stride; return r; }; })() : null;
+    if (!stream) { for (;;) { const { done, value } = await reader.read(); if (done) break; if (got + value.length > want) { try { await reader.cancel(); } catch (e) {} return null; } raw.set(value, got); got += value.length; } if (got < want) return null; }
+    for (let pi = 0; pi < passes.length; pi++) {
+      const [x0, y0, dx, dy] = passes[pi];
+      const [pw, ph] = dims[pi]; if (!pw || !ph) continue; const stride = rowBytes(pw); let prev = new Uint8Array(stride);
       for (let y = 0; y < ph; y++) {
-        const f = raw[off]; const row = raw.subarray(off + 1, off + 1 + stride); const cur = new Uint8Array(stride); off += stride + 1;
+        let f, row;
+        if (stream) { const r = await nextRow(); if (!r) return null; f = r[0]; row = r.subarray(1); } else { f = src[off]; row = src.subarray(off + 1, off + 1 + stride); off += stride + 1; }
+        const cur = new Uint8Array(stride);
         for (let x = 0; x < stride; x++) { const r = row[x], a = x >= fbpp ? cur[x - fbpp] : 0, b = prev[x], c = x >= fbpp ? prev[x - fbpp] : 0;
           cur[x] = (f === 0 ? r : f === 1 ? r + a : f === 2 ? r + b : f === 3 ? r + ((a + b) >> 1) : paeth(a, b, c) + r) & 255; }
         const sample = (px, c) => { if (depth === 8) return cur[px * ch + c]; if (depth === 16) return cur[(px * ch + c) * 2]; const bit = (px * ch + c) * depth; return (cur[bit >> 3] >> (8 - depth - (bit & 7))) & ((1 << depth) - 1); };
@@ -3677,13 +3688,41 @@ async function stPngDecode(buf) {
           else if (ct === 2) { const tr = trns && trns.length >= 6 && raw16(x, 0) === ((trns[0] << 8) | trns[1]) && raw16(x, 1) === ((trns[2] << 8) | trns[3]) && raw16(x, 2) === ((trns[4] << 8) | trns[5]); q = [sample(x, 0), sample(x, 1), sample(x, 2), tr ? 0 : 255]; }
           else if (ct === 0) { const v = sample(x, 0); const g = Math.round(v * scale); const tr = trns && trns.length >= 2 && raw16(x, 0) === ((trns[0] << 8) | trns[1]); q = [g, g, g, tr ? 0 : 255]; }
           else { const ix = sample(x, 0); q = plte ? [plte[ix * 3] || 0, plte[ix * 3 + 1] || 0, plte[ix * 3 + 2] || 0, trns && ix < trns.length ? trns[ix] : 255] : [ix, ix, ix, 255]; }
+          if (acc) { const c = ((Y / box) | 0) * w2 + ((X / box) | 0); acc[c * 4] += q[0]; acc[c * 4 + 1] += q[1]; acc[c * 4 + 2] += q[2]; acc[c * 4 + 3] += q[3]; cnt[c]++; continue; }
           rgba[k] = q[0]; rgba[k + 1] = q[1]; rgba[k + 2] = q[2]; rgba[k + 3] = q[3];
         }
         prev = cur;
       }
-    });
+    }
+    if (stream) { for (;;) { const { done, value } = await reader.read(); if (done) break; got += value.length; if (got > want) { try { await reader.cancel(); } catch (e) {} return null; } } }
+    if (acc) {
+      const out = new Uint8Array(w2 * h2 * 4); for (let c = 0; c < w2 * h2; c++) { const n = cnt[c] || 1; for (let j = 0; j < 4; j++) out[c * 4 + j] = Math.round(acc[c * 4 + j] / n); }
+      return { W: w2, H: h2, srcW: W, srcH: H, ct, at: i => [out[i * 4], out[i * 4 + 1], out[i * 4 + 2], out[i * 4 + 3]] };
+    }
     const at = i => [rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2], rgba[i * 4 + 3]];
     return { W, H, ct, at };
+  } catch (e) { return null; }
+}
+// A copy of a large PNG small enough to show a model (26 November 2026: a Pro render over 4.5 MB was reviewed as if nothing had
+// rendered). The copy is box-averaged to at most `side` px on its long side, flattened onto white, written as an RGB PNG; the file
+// on record is never changed. Answers { mime, b64, w, h, bytes } or null (not a PNG, or past what can be read).
+async function stPngEncodeRgb(w, h, at) {
+  const row = 1 + w * 3; const raw = new Uint8Array(row * h);
+  for (let y = 0; y < h; y++) { raw[y * row] = 0; for (let x = 0; x < w; x++) { const q = at(y * w + x); const a = q[3] / 255; const o = y * row + 1 + x * 3; raw[o] = Math.round(q[0] * a + 255 * (1 - a)); raw[o + 1] = Math.round(q[1] * a + 255 * (1 - a)); raw[o + 2] = Math.round(q[2] * a + 255 * (1 - a)); } }
+  const z = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+  const chunk = (type, data) => { const c = new Uint8Array(12 + data.length); const dv = new DataView(c.buffer); dv.setUint32(0, data.length); for (let i = 0; i < 4; i++) c[4 + i] = type.charCodeAt(i); c.set(data, 8); dv.setUint32(8 + data.length, stCrc32(c, 4, 8 + data.length)); return c; };
+  const ihdr = new Uint8Array(13); const hv = new DataView(ihdr.buffer); hv.setUint32(0, w); hv.setUint32(4, h); ihdr[8] = 8; ihdr[9] = 2;
+  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', z), chunk('IEND', new Uint8Array(0))];
+  const out = new Uint8Array(parts.reduce((a, p) => a + p.length, 0)); let o = 0; parts.forEach(p => { out.set(p, o); o += p.length; }); return out;
+}
+async function stModelImage(buf, side) {
+  try {
+    const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf); if (u.length < 33 || u[0] !== 0x89 || u[1] !== 0x50) return null;
+    const W = (u[16] << 24 | u[17] << 16 | u[18] << 8 | u[19]) >>> 0, H = (u[20] << 24 | u[21] << 16 | u[22] << 8 | u[23]) >>> 0; if (!W || !H) return null;
+    const max = side || 1024; const box = Math.max(2, Math.ceil(Math.max(W, H) / max));
+    const d = await stPngDecode(u, { box, maxPx: 70e6 }); if (!d) return null;
+    const png = await stPngEncodeRgb(d.W, d.H, d.at); if (png.length >= 4500000) return null;
+    return { mime: 'image/png', b64: b64FromBuf(png), w: d.W, h: d.H, bytes: png.length, srcW: W, srcH: H };
   } catch (e) { return null; }
 }
 async function stPngInk(buf) {
@@ -14233,7 +14272,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-26.studio-p78';
+const AXIOM_BUILD = '2026-11-26.studio-p79';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -20221,7 +20260,9 @@ function stDescribeSpec(d) {
 /** The artwork behind a version as an image block, when it is on file and small enough. */
 async function stVersionImage(env, v, log) {
   if (!(v && v.image && v.image.key && env.MIND_DOCS) || /^kv:/.test(v.image.key)) return null;
-  try { const obj = await env.MIND_DOCS.get(v.image.key); if (!obj) return null; const buf = await obj.arrayBuffer(); if (buf.byteLength > 0 && buf.byteLength < 4500000) return { mime: (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png', b64: b64FromBuf(buf) }; if (log) await log('info', 'the background image is ' + Math.round(buf.byteLength / 1024) + ' KB, too large to show the model; it works from the description'); } catch (e) { if (log) await log('info', 'could not read the background image: ' + String(e.message || e).slice(0, 80)); }
+  try { const obj = await env.MIND_DOCS.get(v.image.key); if (!obj) return null; const buf = await obj.arrayBuffer(); if (buf.byteLength > 0 && buf.byteLength < 4500000) return { mime: (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png', b64: b64FromBuf(buf) };
+    if (buf.byteLength) { const sm = await stModelImage(buf); if (sm) { if (log) await log('info', 'the image is ' + Math.round(buf.byteLength / 1024) + ' KB, over what a model can be shown; a smaller copy (' + sm.w + ' x ' + sm.h + ' px of ' + sm.srcW + ' x ' + sm.srcH + ') is shown instead and the file on record is unchanged'); return { mime: sm.mime, b64: sm.b64, smaller: { w: sm.w, h: sm.h, srcW: sm.srcW, srcH: sm.srcH } }; } }
+    if (log) await log('info', 'the background image is ' + Math.round(buf.byteLength / 1024) + ' KB, too large to show the model and no smaller copy could be made; it works from the description'); } catch (e) { if (log) await log('info', 'could not read the background image: ' + String(e.message || e).slice(0, 80)); }
   return null;
 }
 function stTileBrief(a, v, imageSeen) {
@@ -21109,7 +21150,7 @@ async function stInspectStage(env, job, p, log) {
   // the export the current evidence points at: a caption-only version shows the same tile, so its validation (and export) carries
   const rdy0 = await stReadiness(env, p, a, v);
   let im = null, composed = false; const exportKey = rdy0.validation && rdy0.technical !== 'stale' && rdy0.validation.exportKey ? rdy0.validation.exportKey : 'studio/' + p.id + '/' + a.id + '/' + v.id + '-export.png';
-  if (env.MIND_DOCS && inp.composed !== false) { try { const obj = await env.MIND_DOCS.get(exportKey); if (obj) { const buf = await obj.arrayBuffer(); if (buf.byteLength > 64 && buf.byteLength < 4500000) { im = { mime: (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png', b64: b64FromBuf(buf) }; composed = true; } else if (buf.byteLength) await log('info', 'the composed export is ' + Math.round(buf.byteLength / 1024) + ' KB, too large to show the model; the imagery is judged instead'); } } catch (e) {} }
+  if (env.MIND_DOCS && inp.composed !== false) { try { const obj = await env.MIND_DOCS.get(exportKey); if (obj) { const buf = await obj.arrayBuffer(); if (buf.byteLength > 64 && buf.byteLength < 4500000) { im = { mime: (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png', b64: b64FromBuf(buf) }; composed = true; } else if (buf.byteLength > 64) { const sm = await stModelImage(buf); if (sm) { im = { mime: sm.mime, b64: sm.b64 }; composed = true; await log('info', 'the composed export is ' + Math.round(buf.byteLength / 1024) + ' KB, over what a model can be shown; a smaller copy (' + sm.w + ' x ' + sm.h + ' px) is shown instead'); } else await log('info', 'the composed export is ' + Math.round(buf.byteLength / 1024) + ' KB, too large to show the model; the imagery is judged instead'); } } } catch (e) {} }
   // a finished creative is its own composition: the generated bitmap is the whole piece, so it is judged as composed
   const finished = v.mode === 'finished';
   if (finished) { im = await stVersionImage(env, v, log); composed = !!im; }
